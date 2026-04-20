@@ -167,74 +167,81 @@ async def run_agent_loop(base_url_input: str):
             
             endpoints = ["vwap", "bidask"]
             
-            print(f"🤖 [Agent]: Discovered {len(all_instruments)} assets. Executing 10 autonomous loops.\n")
-            
-            # Ensure we have enough unique assets for 10 calls, otherwise allow repeats
-            if len(all_instruments) < 10:
-                chosen_pairs = random.choices(all_instruments, k=10)
+            # Ensure we have enough unique crypto assets for 6 calls
+            if len(all_instruments) < 6:
+                chosen_pairs = random.choices(all_instruments, k=6)
             else:
-                chosen_pairs = random.sample(all_instruments, 10)
+                chosen_pairs = random.sample(all_instruments, 6)
 
-            for i, pair in enumerate(chosen_pairs, start=1):
-                endpoint_type = random.choice(endpoints)
-                target_url = f"{base_url}/v1/{endpoint_type}/{pair}"
+            # Build the batch queries list: 6 crypto + 4 TradFi/Commodity
+            batch_reqs = []
+            for pair in chosen_pairs:
+                batch_reqs.append(f"{random.choice(endpoints)}:{pair}")
                 
-                print(f"[{i}/10] Requesting endpoint: {target_url}")
-                response = await client.get(target_url)
+            batch_reqs.extend([
+                "equity:AAPL",
+                "fx:EURUSD",
+                "metal:XAUUSD",
+                "rate:10Y"
+            ])
+            
+            print(f"🤖 [Agent]: Assembling BATCH payload containing 10 assets across all asset classes...\n")
+            
+            reqs_str = ",".join(batch_reqs)
+            target_url = f"{base_url}/v1/batch?reqs={reqs_str}"
+            
+            print(f"[*] Requesting BATCH endpoint: {target_url}")
+            response = await client.get(target_url)
 
-                if response.status_code == 402:
-                    print(f"   ⛔️ Intercepted 402 Payment Required.")
-                    
-                    data = response.json()
-                    price = float(data.get("price_usdc", 0.002))
-                    
-                    # Extract Destination
-                    pay_to_address = ""
-                    req_header = response.headers.get("PAYMENT-REQUIRED")
-                    if req_header:
-                        decoded = json.loads(base64.b64decode(req_header))
-                        sol_req = next((r for r in decoded if "solana" in str(r.get("network", "")).lower()), None)
-                        if sol_req:
-                            pay_to_address = sol_req.get("payTo")
-                            
-                    # Autonomously pay
-                    tx_hash = await send_usdc(rpc, kp, pay_to_address, price)
-                    
-                    if not tx_hash:
-                        print("   ❌ Agent failed to settle payment. Stopping.")
-                        break
+            if response.status_code == 402:
+                print(f"   ⛔️ Intercepted 402 Payment Required for entire batch.")
+                
+                data = response.json()
+                price = float(data.get("price_usdc", 0.002))
+                print(f"   💰 Total Due dynamically calculated: ${price:.4f} USDC")
+                
+                # Extract Destination
+                pay_to_address = ""
+                req_header = response.headers.get("PAYMENT-REQUIRED")
+                if req_header:
+                    decoded = json.loads(base64.b64decode(req_header))
+                    sol_req = next((r for r in decoded if "solana" in str(r.get("network", "")).lower()), None)
+                    if sol_req:
+                        pay_to_address = sol_req.get("payTo")
                         
-                    # Wrap cryptographic payload
-                    signed_payload = {
-                        "proof": tx_hash,
-                        "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-                        "timestamp": int(time.time()),
-                        "agent_pubkey": wallet_addr,
-                        "signature": "AUTONOMOUS_PYTHON_AGENT_EXECUTION"
-                    }
-                    signature_header = base64.b64encode(json.dumps(signed_payload).encode()).decode()
+                # Autonomously pay
+                tx_hash = await send_usdc(rpc, kp, pay_to_address, price)
+                
+                if not tx_hash:
+                    print("   ❌ Agent failed to settle payment. Stopping.")
+                    return
                     
-                    # Request real data
-                    print("   [*] Resubmitting request with cryptographic signature...")
-                    final_resp = await client.get(target_url, headers={"PAYMENT-SIGNATURE": signature_header})
-                    
-                    if final_resp.status_code == 200:
-                        print(f"   🎉 SUCCESS! Real-time payload retrieved:")
-                        print(json.dumps(final_resp.json(), indent=2))
-                    else:
-                        print(f"   ❌ Verification failed: HTTP {final_resp.status_code} - {final_resp.text}")
-                        break
-                        
-                elif response.status_code == 200:
-                    print("   [+] Endpoint is Free.")
+                # Wrap cryptographic payload
+                signed_payload = {
+                    "proof": tx_hash,
+                    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                    "timestamp": int(time.time()),
+                    "agent_pubkey": wallet_addr,
+                    "signature": "AUTONOMOUS_PYTHON_AGENT_EXECUTION"
+                }
+                signature_header = base64.b64encode(json.dumps(signed_payload).encode()).decode()
+                
+                # Request real data
+                print("   [*] Resubmitting BATCH request with cryptographic signature...")
+                final_resp = await client.get(target_url, headers={"PAYMENT-SIGNATURE": signature_header})
+                
+                if final_resp.status_code == 200:
+                    print(f"   🎉 SUCCESS! Huge Multi-Asset Payload Retrieved:")
+                    print(json.dumps(final_resp.json(), indent=2))
                 else:
-                    print(f"   [-] Failed. HTTP {response.status_code}")
-                
-                if i < 10:
-                    print("\n--- Next request in 2 seconds... ---")
-                    await asyncio.sleep(2)
+                    print(f"   ❌ Verification failed: HTTP {final_resp.status_code} - {final_resp.text}")
                     
-        print("\n✅ Agent run complete.")
+            elif response.status_code == 200:
+                print("   [+] Endpoint is Free.")
+            else:
+                print(f"   [-] Failed. HTTP {response.status_code}")
+                    
+        print("\n✅ Agent batch run complete.")
 
 
 if __name__ == "__main__":

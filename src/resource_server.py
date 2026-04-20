@@ -107,17 +107,44 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 }
 
 
-def _get_price_for_path(path: str) -> Decimal | None:
-    """Determine the price for a given request path."""
+def _get_price_for_request(request: Request) -> Decimal | None:
+    """Determine the price for a given request."""
+    path = request.url.path
+    
+    # Handle Batch endpoint dynamically
+    if path.startswith("/v1/batch"):
+        reqs = request.query_params.get("reqs", "")
+        if not reqs:
+            return None
+        
+        total = Decimal("0.0")
+        queries = reqs.split(",")
+        for q in queries:
+            if ":" not in q: continue
+            svc, pair = q.split(":", 1)
+            # Find the mock path for this service to calculate price
+            mock_path = f"/v1/{svc}/{pair}"
+            
+            # Crypto dynamic pricing
+            if svc in ["vwap", "bidask"]:
+                base = pair.split("-")[0].upper() if "-" in pair else pair[:len(pair)//2].upper()
+                svc_price = settings.pricing.get_crypto_price(base)
+                total += svc_price
+            else:
+                for prefix, price in ROUTE_PRICING.items():
+                    if mock_path.startswith(prefix) and price is not None:
+                        total += price
+                        break
+        return total if total > 0 else None
+
     # Crypto uses dynamic tier pricing
-    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/") or path.startswith("/v1/state/"):
-        # Extract the pair from the path, determine base currency tier
+    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/"):
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:
             pair = parts[3]
             base = pair.split("-")[0].upper() if "-" in pair else pair[:len(pair)//2].upper()
             return settings.pricing.get_crypto_price(base)
-        return settings.pricing.core_crypto  # Default to core
+        return settings.pricing.core_crypto
 
     # Check static route pricing
     for route_prefix, price in ROUTE_PRICING.items():
@@ -224,7 +251,7 @@ async def x402_payment_middleware(request: Request, call_next):
     5. After response → settle payment
     """
     path = request.url.path
-    price = _get_price_for_path(path)
+    price = _get_price_for_request(request)
 
     # Free endpoints pass through
     if price is None:
@@ -313,7 +340,9 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = pair.replace("-", "").replace("/", "").replace("_", "")
         vwap_data = await client.get_vwap_latest(clean)
-        return VWAPResponse(data=vwap_data).model_dump()
+        resp = VWAPResponse(data=vwap_data).model_dump()
+        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Real-Time VWAP", "asset_class": "crypto"}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve VWAP for {pair}", details=str(e),
@@ -327,7 +356,9 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = pair.replace("-", "").replace("/", "").replace("_", "")
         bidask_data = await client.get_bidask_snapshot(clean)
-        return BidAskResponse(data=bidask_data).model_dump()
+        resp = BidAskResponse(data=bidask_data).model_dump()
+        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Bid/Ask Snapshot", "asset_class": "crypto"}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve bid/ask for {pair}", details=str(e),
@@ -344,7 +375,9 @@ async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = ticker.replace("-", "").replace("/", "").replace("_", "")
         data = await client.get_equity_snapshot(clean)
-        return EquityResponse(data=data).model_dump()
+        resp = EquityResponse(data=data).model_dump()
+        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Equity Data", "asset_class": "equity"}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve equity for {ticker}", details=str(e),
@@ -358,12 +391,12 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = pair.replace("-", "").replace("/", "").replace("_", "")
         data = await client.get_fx_rate(clean)
-        return data.model_dump()
+        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "FX Rate", "asset_class": "fx"}}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve FX for {pair}", details=str(e),
         ).model_dump())
-
 
 @app.get("/v1/metal/{ticker}")
 async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
@@ -372,12 +405,12 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = ticker.replace("-", "").replace("/", "").replace("_", "")
         data = await client.get_metal_price(clean)
-        return data.model_dump()
+        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "commodity", "asset_class": "metal"}}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve metal for {ticker}", details=str(e),
         ).model_dump())
-
 
 @app.get("/v1/rate/{maturity}")
 async def get_rate(maturity: str, request: Request) -> dict[str, Any]:
@@ -385,11 +418,72 @@ async def get_rate(maturity: str, request: Request) -> dict[str, Any]:
     try:
         client: BlocksizeClient = request.app.state.blocksize
         data = await client.get_treasury_rate(maturity)
-        return data.model_dump()
+        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "Treasury Yield", "asset_class": "rate"}}
+        return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve rate for {maturity}", details=str(e),
         ).model_dump())
+
+@app.get("/v1/batch")
+async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
+    """
+    Execute a batch of data queries.
+    Pass a comma separated list of svc:pair in the `reqs` query parameter.
+    Example: /v1/batch?reqs=vwap:BTCUSD,bidask:ETHUSD,equity:AAPL
+    """
+    import asyncio
+    
+    queries = reqs.split(",")
+    results = []
+    
+    # We execute requests concurrently for extreme speed
+    tasks = []
+    
+    async def _safe_fetch(svc: str, ticker: str):
+        try:
+            if svc == "vwap":
+                return await get_vwap(ticker, request)
+            elif svc == "bidask":
+                return await get_bidask(ticker, request)
+            elif svc == "equity":
+                return await get_equity(ticker, request)
+            elif svc == "fx":
+                return await get_fx(ticker, request)
+            elif svc == "metal":
+                return await get_metal(ticker, request)
+            elif svc == "rate":
+                return await get_rate(ticker, request)
+            else:
+                return {
+                    "status": "error",
+                    "error_code": "UNSUPPORTED_SERVICE",
+                    "message": f"Service type {svc} is not supported or was deprecated by upstream RPC",
+                    "meta": {"endpoint": "Unsupported", "asset_class": "unknown"}
+                }
+        except HTTPException as he:
+            return he.detail
+        except Exception as e:
+            return {"status": "error", "error_code": "BATCH_EXECUTION_ERROR", "message": str(e)}
+
+    for q in queries:
+        if ":" not in q: continue
+        svc, ticker = q.split(":", 1)
+        tasks.append(_safe_fetch(svc, ticker))
+        
+    gathered_results = await asyncio.gather(*tasks)
+    
+    for q, result in zip(queries, gathered_results):
+        results.append({
+            "request": q,
+            "response": result
+        })
+        
+    return {
+        "status": "ok",
+        "batch_size": len(results),
+        "results": results,
+    }
 
 
 @app.get("/v1/search")
