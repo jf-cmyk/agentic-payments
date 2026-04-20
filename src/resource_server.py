@@ -143,7 +143,7 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
             return {"valid": False, "reason": "Transaction hash has already been used (Replay Attack)"}
             
         if "solana" in network:
-            rpc_url = "https://api.mainnet-beta.solana.com"
+            rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(
                     rpc_url,
