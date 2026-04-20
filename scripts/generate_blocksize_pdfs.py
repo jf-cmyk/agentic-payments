@@ -178,6 +178,10 @@ def generate_pricing():
         pdf.cell(70, 8, examples, 1, 1)
         
     pdf.ln(10)
+    pdf.section_title("GTM: Free Agent Trial")
+    pdf.body_text("To accelerate autonomous integration, every new agent wallet address is automatically provisioned with 50 Free Credits ($0.05 value) upon its first interaction with the Blocksize infrastructure.")
+    
+    pdf.ln(5)
     pdf.section_title("Bulk Credit Drawdown Economy")
     pdf.body_text("For institutional scale and automated agent workflows, pre-purchase credits at a discount to eliminate per-call settlement latency.")
     

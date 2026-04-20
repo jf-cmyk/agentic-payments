@@ -1,0 +1,22 @@
+{
+  "name": "Blocksize Capital Agentic Data Economy",
+  "version": "0.4.0",
+  "description": "Institutional-grade market data with automated x402 payments and high-performance credit drawdowns. Powered by Blocksize Capital.",
+  "author": "Blocksize Capital GmbH",
+  "homepage": "https://agentic-payments-production.up.railway.app/",
+  "repository": "https://github.com/jf-cmyk/agentic-payments",
+  "license": "Proprietary",
+  "category": "Finance",
+  "mcp_manifest": "https://agentic-payments-production.up.railway.app/mcp/manifest.json",
+  "capabilities": {
+    "pricing_models": ["Pay-per-call (x402)", "Credit Drawdown"],
+    "networks": ["Solana", "Base L2"],
+    "onboarding_incentive": "50 Free Credits for new wallets"
+  },
+  "endpoints": {
+    "vwap": "https://agentic-payments-production.up.railway.app/v1/vwap/{pair}",
+    "equity": "https://agentic-payments-production.up.railway.app/v1/equity/{ticker}",
+    "fx": "https://agentic-payments-production.up.railway.app/v1/fx/{pair}",
+    "credits": "https://agentic-payments-production.up.railway.app/v1/credits/purchase"
+  }
+}

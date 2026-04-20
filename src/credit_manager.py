@@ -48,6 +48,39 @@ class CreditManager:
         conn.close()
         return row[0] if row else 0.0
 
+    def ensure_wallet_with_welcome_pack(self, address: str) -> float:
+        """
+        Check if a wallet exists. If not, create it and grant the 50-credit Welcome Pack.
+        Returns the current balance.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (address,))
+            row = cursor.fetchone()
+            
+            if row is None:
+                # First time seeing this agent! Grant Welcome Pack.
+                welcome_credits = 50.0
+                cursor.execute('''
+                    INSERT INTO wallets (address, balance_credits, last_updated)
+                    VALUES (?, ?, ?)
+                ''', (address, welcome_credits, datetime.utcnow()))
+                
+                # Log it as a special internal transaction
+                cursor.execute('''
+                    INSERT INTO credit_purchases (tx_hash, address, amount_usdc, credits_added, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, datetime.utcnow()))
+                
+                conn.commit()
+                logger.info(f"🎁 WELCOME PACK: Granted 50.0 credits to new agent {address}")
+                return welcome_credits
+            
+            return row[0]
+        finally:
+            conn.close()
+
     def add_credits(self, address: str, credits: float, tx_hash: str, amount_usdc: float):
         """Add credits to a wallet and log the transaction."""
         conn = sqlite3.connect(self.db_path)
