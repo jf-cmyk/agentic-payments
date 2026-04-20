@@ -31,17 +31,21 @@ class VWAPData(BaseModel):
 
     pair: str = Field(..., description="Trading pair (e.g., BTC-USD)")
     vwap: float = Field(..., description="Current VWAP price")
+    volume: Optional[float] = Field(None, description="Current trading volume")
+    market_cap: Optional[float] = Field(None, description="Asset Market Cap")
     timestamp: datetime = Field(..., description="Data timestamp (UTC)")
     currency: str = Field("", description="Quote currency")
     source: str = Field("blocksize", description="Data provider identifier")
 
     def to_decision_summary(self) -> str:
         """Format as a concise string for LLM consumption."""
-        return (
-            f"VWAP [{self.pair}]: {self.vwap:.8g} {self.currency} "
-            f"| Source: Blocksize Capital (Institutional) "
-            f"| Time: {self.timestamp.isoformat()}"
-        )
+        parts = [f"VWAP [{self.pair}]: {self.vwap:.8g} {self.currency}"]
+        if self.volume is not None:
+            parts.append(f"Vol: {self.volume:.2f}")
+        if self.market_cap is not None:
+            parts.append(f"MC: {self.market_cap:.2f}")
+        parts.append(f"| Time: {self.timestamp.isoformat()}")
+        return " | ".join(parts)
 
 
 class VWAPResponse(BaseModel):

@@ -331,6 +331,34 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
+@app.get("/v1/state/{pair}")
+async def get_state(pair: str, request: Request) -> dict[str, Any]:
+    """Get state price snapshot for a crypto pair. Cost: $0.001 USDC."""
+    try:
+        client: BlocksizeClient = request.app.state.blocksize
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_state_price(clean)
+        return data.model_dump()
+    except BlocksizeAPIError as e:
+        raise HTTPException(status_code=502, detail=ErrorResponse(
+            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve state price for {pair}", details=str(e),
+        ).model_dump())
+
+
+@app.get("/v1/vwap30m/{pair}")
+async def get_vwap30m(pair: str, request: Request) -> dict[str, Any]:
+    """Get 30m VWAP snapshot for a crypto pair. Cost: $0.001 USDC."""
+    try:
+        client: BlocksizeClient = request.app.state.blocksize
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_vwap_30min(clean)
+        return data.model_dump()
+    except BlocksizeAPIError as e:
+        raise HTTPException(status_code=502, detail=ErrorResponse(
+            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve 30m VWAP for {pair}", details=str(e),
+        ).model_dump())
+
+
 @app.get("/v1/equity/{ticker}")
 async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
     """Get equity snapshot. Cost: $0.008 USDC."""

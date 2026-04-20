@@ -164,6 +164,8 @@ class BlocksizeClient:
             return VWAPData(
                 pair=result.get("ticker", pair),
                 vwap=float(result.get("price", result.get("vwap", 0))),
+                volume=_safe_float(result.get("volume")),
+                market_cap=_safe_float(result.get("market_cap")),
                 timestamp=_parse_timestamp(result.get("timestamp", result.get("ts"))),
                 currency=result.get("currency", _extract_quote(pair)),
                 source="blocksize",

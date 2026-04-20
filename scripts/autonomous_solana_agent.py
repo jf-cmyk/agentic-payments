@@ -110,7 +110,13 @@ async def send_usdc(rpc: AsyncClient, kp: Keypair, destination: str, amount_usdc
 # --------------------------------------------------------------------------------
 # AGENT LOOP
 # --------------------------------------------------------------------------------
-async def run_agent_loop(url: str):
+async def run_agent_loop(base_url_input: str):
+    import urllib.parse
+    import random
+    
+    parsed = urllib.parse.urlparse(base_url_input)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    
     kp = load_or_create_wallet()
     wallet_addr = str(kp.pubkey())
     
@@ -135,12 +141,37 @@ async def run_agent_loop(url: str):
             print("4. Restart this script once funded.\n")
             return
 
-        print("🤖 [Agent]: Budget is secured. Beginning execution for 3 data fetches...\n")
+        print("🤖 [Agent]: Budget secured. Contacting Discovery Node for Master Instrument List...\n")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for i in range(1, 4):
-                print(f"[{i}/3] Requesting endpoint: {url}")
-                response = await client.get(url)
+            # 1. Fetch Instruments (Free Search)
+            discovery_url = f"{base_url}/v1/instruments/vwap"
+            try:
+                resp = await client.get(discovery_url)
+                if resp.status_code == 200:
+                    all_instruments = resp.json().get("instruments", [])
+                else:
+                    all_instruments = ["BTCUSD", "ETHUSD", "SOLUSD", "AVAXUSD", "LINKUSD"]
+            except Exception:
+                all_instruments = ["BTCUSD", "ETHUSD", "SOLUSD", "AVAXUSD", "LINKUSD"]
+                
+            if not all_instruments:
+                all_instruments = ["BTCUSD", "ETHUSD", "SOLUSD"]
+                
+            # 2. Pick 10 random assets
+            sample_size = min(10, len(all_instruments))
+            chosen_pairs = random.sample(all_instruments, sample_size)
+            
+            endpoints = ["vwap", "bidask", "state", "vwap30m"]
+            
+            print(f"🤖 [Agent]: Discovered {len(all_instruments)} assets. Executing 10 autonomous loops.\n")
+            
+            for i, pair in enumerate(chosen_pairs, start=1):
+                endpoint_type = random.choice(endpoints)
+                target_url = f"{base_url}/v1/{endpoint_type}/{pair}"
+                
+                print(f"[{i}/10] Requesting endpoint: {target_url}")
+                response = await client.get(target_url)
 
                 if response.status_code == 402:
                     print(f"   ⛔️ Intercepted 402 Payment Required.")
@@ -164,7 +195,7 @@ async def run_agent_loop(url: str):
                         print("   ❌ Agent failed to settle payment. Stopping.")
                         break
                         
-                    # 5. Wrap the true transaction hash into the standard x402 cryptographic payload
+                    # Wrap cryptographic payload
                     signed_payload = {
                         "proof": tx_hash,
                         "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
@@ -176,7 +207,7 @@ async def run_agent_loop(url: str):
                     
                     # Request real data
                     print("   [*] Resubmitting request with cryptographic signature...")
-                    final_resp = await client.get(url, headers={"PAYMENT-SIGNATURE": signature_header})
+                    final_resp = await client.get(target_url, headers={"PAYMENT-SIGNATURE": signature_header})
                     
                     if final_resp.status_code == 200:
                         print(f"   🎉 SUCCESS! Real-time payload retrieved:")
@@ -187,22 +218,19 @@ async def run_agent_loop(url: str):
                         
                 elif response.status_code == 200:
                     print("   [+] Endpoint is Free.")
-                    break
                 else:
                     print(f"   [-] Failed. HTTP {response.status_code}")
-                    break
                 
-                if i < 3:
-                    print("\n--- Next request in 3 seconds... ---")
-                    await asyncio.sleep(3)
+                if i < 10:
+                    print("\n--- Next request in 2 seconds... ---")
+                    await asyncio.sleep(2)
                     
         print("\n✅ Agent run complete.")
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python scripts/autonomous_solana_agent.py [URL]")
-        print("Example: python scripts/autonomous_solana_agent.py https://agentic-payments-production.up.railway.app/v1/vwap/BTC-USD")
+        print("Usage: python scripts/autonomous_solana_agent.py [BASE_URL or ANY_URL]")
         sys.exit(1)
         
     asyncio.run(run_agent_loop(sys.argv[1]))
