@@ -239,5 +239,12 @@ class Settings:
         }
 
 
-# Singleton instance — import this everywhere
-settings = Settings()
+try:
+    settings = Settings()
+except Exception as e:
+    import builtins
+    import os
+    builtins.print("====== CRASH ENV VARS DEBUG ======")
+    builtins.print(list(os.environ.keys()))
+    builtins.print("==================================")
+    raise e
