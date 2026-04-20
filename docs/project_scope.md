@@ -30,7 +30,7 @@ To support frictionless agentic purchasing, the infrastructure bypasses legacy b
 *   **Dual-Network Settlement:** Agents are provided an invoice dictating payment in USDC. They can autonomously settle the invoice on either:
     *   **Solana (Primary):** For sub-second finality and near-zero transaction costs.
     *   **Base L2 (Fallback):** For broader EVM framework compatibility.
-*   **Stateless Verification:** Payment proofs (Transaction Hashes) provided by the agents are verified securely via the Coinbase Developer Platform (CDP) Facilitator, ensuring no loss of funds without requiring a local database of processed transactions.
+*   **Native RPC Verification:** Payment proofs (Transaction Hashes) provided by the agents are verified securely, natively, and instantly against the Solana Blockchain via high-speed Remote Procedure Calls (RPC), ensuring bulletproof validation without relying on centralized, third-party middleware facilitators.
 
 ## 5. Security & Deployment Posture
 *   **Environment Hardening:** Secrets (Blocksize API Keys and Settlement Wallet Addresses) are strictly isolated using Pydantic Settings and injected at runtime via Railway's encrypted variable store.

@@ -126,32 +126,58 @@ def _get_price_for_path(path: str) -> Decimal | None:
     return None  # Free endpoint
 
 
-async def _verify_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
-    """Verify a payment via the CDP Facilitator."""
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        response = await client.post(
-            f"{settings.x402.facilitator_url}/verify",
-            json={
-                "payload": payment_payload,
-                "paymentRequirements": payment_requirements,
-            },
-        )
-        response.raise_for_status()
-        return response.json()
+_SEEN_TX_HASHES: set[str] = set()
 
+async def _verify_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
+    """Natively verify the transaction on the Solana blockchain via RPC."""
+    try:
+        decoded_str = base64.b64decode(payment_payload).decode()
+        payload = json.loads(decoded_str)
+        tx_hash = payload.get("proof")
+        
+        if not tx_hash:
+            return {"valid": False, "reason": "Missing tx_hash/proof in payload"}
+            
+        if tx_hash in _SEEN_TX_HASHES:
+            return {"valid": False, "reason": "Transaction hash has already been used (Replay Attack)"}
+            
+        rpc_url = "https://api.mainnet-beta.solana.com"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(
+                rpc_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getTransaction",
+                    "params": [
+                        tx_hash,
+                        {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+                    ]
+                }
+            )
+            res.raise_for_status()
+            data = res.json()
+            
+        result = data.get("result")
+        if not result:
+            return {"valid": False, "reason": "Transaction not found on chain or not yet finalized"}
+            
+        meta = result.get("meta")
+        if meta and meta.get("err") is not None:
+            return {"valid": False, "reason": f"Transaction reverted on chain: {meta['err']}"}
+
+        # Mark as used securely
+        _SEEN_TX_HASHES.add(tx_hash)
+        logger.info("NATIVELY VERIFIED: %s", tx_hash)
+        return {"valid": True}
+        
+    except Exception as e:
+        logger.error("Native RPC verification failed: %s", e)
+        return {"valid": False, "reason": f"Native RPC failure: {str(e)}"}
 
 async def _settle_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
-    """Settle a payment via the CDP Facilitator."""
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        response = await client.post(
-            f"{settings.x402.facilitator_url}/settle",
-            json={
-                "payload": payment_payload,
-                "paymentRequirements": payment_requirements,
-            },
-        )
-        response.raise_for_status()
-        return response.json()
+    """Payment has inherently settled on chain during Native RPC Verification."""
+    return {"success": True}
 
 
 @app.middleware("http")

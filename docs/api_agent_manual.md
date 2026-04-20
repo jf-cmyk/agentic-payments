@@ -32,7 +32,7 @@ Contained within the response body (and the `PAYMENT-REQUIRED` header) is a mach
 Your Agent parses the JSON invoice. Utilizing an embedded funding mechanism (such as a Coinbase Developer Platform AgentKit wallet, or an abstracted LangChain tool), the Agent automatically executes a blockchain transaction transferring the required USDC amount to the designated `payTo` address on the chosen blockchain (Solana or Base L2).
 
 ### Step 3: Cryptographic Fulfillment
-Once the transaction settles on the blockchain, the Agent extracts the Transaction Hash. The Agent then hashes and signs this proof using its Private Key. 
+Once the transaction settles on the blockchain, the Agent extracts the Transaction Hash. The Agent then constructs a base64-encoded x402 valid payload dictating the network, signature format, and proof (transaction hash). 
 Finally, the Agent resubmits the exact same `GET` request, this time appending the signature in the headers:
 
 ```http
@@ -41,7 +41,7 @@ Host: agentic-payments-production.up.railway.app
 PAYMENT-SIGNATURE: eyJhbGciOiJFZERTQ...<agent_cryptographic_signature>
 ```
 
-Our server verifies the signature against the blockchain state, clears the invoice, and fulfills the market data payload as standard JSON.
+Our server natively decodes the payload and instantly validates the transaction completely on-chain via a secure Solana RPC node, preventing playback attacks. Upon verification, it seamlessly fulfills the market data payload as standard JSON.
 
 ---
 

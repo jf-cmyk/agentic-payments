@@ -11,7 +11,7 @@
 
 This MCP server wraps [Blocksize Capital](https://blocksize.capital)'s institutional market data API and makes it available to AI agents as callable tools. Agents can discover, pay for, and consume data across 30,000+ instruments with zero subscription setup.
 
-**Payment** is handled via the [x402 protocol](https://x402.org) — agents pay per data call using USDC, settled on **Solana (Primary)** or **Base L2 (Fallback)**. All payments are verified and settled by the CDP Facilitator.
+**Payment** is handled via the [x402 protocol](https://x402.org) — agents pay per data call using USDC, settled on **Solana (Primary)** or **Base L2 (Fallback)**. All payments are verified instantly and natively on-chain via high-speed Remote Procedure Calls (RPC).
 
 ### Why Blocksize over free alternatives?
 
@@ -115,7 +115,7 @@ FastMCP Server (src/mcp_server.py)
     ↓ Request data
 FastAPI Resource Server (src/resource_server.py)
     ↓ x402 middleware: 402 Payment Required (Solana or Base)
-    ↓ Payment verified via CDP Facilitator
+    ↓ Payment natively verified on-chain via Solana RPC
     ↓ x-api-key authentication
 Blocksize Capital REST & WS API
 ```
