@@ -1,0 +1,162 @@
+"""
+Tests for the FastAPI resource server with x402 middleware.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.resource_server import app
+from src.models import VWAPData, BidAskData, EquityData
+
+
+@pytest.fixture
+def test_client():
+    """Create a FastAPI test client."""
+    return TestClient(app)
+
+
+# ---------------------------------------------------------------------------
+# Health Endpoint (Free)
+# ---------------------------------------------------------------------------
+
+class TestHealthEndpoint:
+    def test_health_returns_200(self, test_client):
+        response = test_client.get("/health")
+        assert response.status_code == 200
+
+    def test_health_contains_status(self, test_client):
+        response = test_client.get("/health")
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "pricing" in data
+        assert "networks" in data
+
+
+# ---------------------------------------------------------------------------
+# x402 Payment Gate
+# ---------------------------------------------------------------------------
+
+class TestPaymentGate:
+    def test_vwap_requires_payment(self, test_client):
+        response = test_client.get("/v1/vwap/btc-usd")
+        assert response.status_code == 402
+
+    def test_bidask_requires_payment(self, test_client):
+        response = test_client.get("/v1/bidask/btc-usd")
+        assert response.status_code == 402
+
+    def test_equity_requires_payment(self, test_client):
+        response = test_client.get("/v1/equity/AAPL")
+        assert response.status_code == 402
+
+    def test_fx_requires_payment(self, test_client):
+        response = test_client.get("/v1/fx/eurusd")
+        assert response.status_code == 402
+
+    def test_metal_requires_payment(self, test_client):
+        response = test_client.get("/v1/metal/xauusd")
+        assert response.status_code == 402
+
+    def test_rate_requires_payment(self, test_client):
+        response = test_client.get("/v1/rate/10Y")
+        assert response.status_code == 402
+
+    def test_402_includes_payment_required_header(self, test_client):
+        response = test_client.get("/v1/vwap/btc-usd")
+        assert "PAYMENT-REQUIRED" in response.headers
+
+        req_b64 = response.headers["PAYMENT-REQUIRED"]
+        req_json = json.loads(base64.b64decode(req_b64))
+        # Should be a list of requirements (multi-network)
+        assert isinstance(req_json, list)
+        assert len(req_json) >= 1
+        assert "payTo" in req_json[0]
+        assert req_json[0]["scheme"] == "exact"
+
+    def test_402_body_contains_price(self, test_client):
+        response = test_client.get("/v1/vwap/btc-usd")
+        data = response.json()
+        assert "price_usdc" in data
+        assert "networks" in data
+
+    def test_search_is_free(self, test_client):
+        """Search endpoint should NOT require payment."""
+        # Set up mock client since search actually tries to call blocksize
+        mock_client = AsyncMock()
+        mock_client.search_pairs = AsyncMock(return_value=[])
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/search?q=btc")
+        assert response.status_code == 200
+
+    def test_instruments_is_free(self, test_client):
+        """Instruments endpoint should NOT require payment."""
+        mock_client = AsyncMock()
+        mock_client.list_vwap_instruments = AsyncMock(return_value=["btc-usd"])
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/instruments/vwap")
+        assert response.status_code == 200
+
+    def test_health_does_not_require_payment(self, test_client):
+        response = test_client.get("/health")
+        assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Data Endpoints (with mocked payment)
+# ---------------------------------------------------------------------------
+
+class TestDataEndpoints:
+    @pytest.fixture(autouse=True)
+    def _mock_payment(self):
+        with patch("src.resource_server._verify_payment", new_callable=AsyncMock, return_value={"valid": True}), \
+             patch("src.resource_server._settle_payment", new_callable=AsyncMock, return_value={"success": True}):
+            yield
+
+    def test_vwap_endpoint(self, test_client):
+        mock_vwap = VWAPData(pair="btc-usd", vwap=95432.50, timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc), currency="USD")
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/vwap/btc-usd", headers={"PAYMENT-SIGNATURE": "mock_sig"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["pair"] == "btc-usd"
+        assert data["data"]["vwap"] == 95432.50
+
+    def test_bidask_endpoint(self, test_client):
+        mock_bidask = BidAskData(pair="btc-usd", bid=95400.0, ask=95450.0, spread=50.0, spread_pct=0.0524, timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc))
+        mock_client = AsyncMock()
+        mock_client.get_bidask_snapshot = AsyncMock(return_value=mock_bidask)
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/bidask/btc-usd", headers={"PAYMENT-SIGNATURE": "mock_sig"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["bid"] == 95400.0
+        assert data["data"]["spread"] == 50.0
+
+    def test_equity_endpoint(self, test_client):
+        mock_equity = EquityData(
+            ticker="AAPL", open=180.5, high=182.0, low=179.0, last=181.5,
+            bid=181.4, ask=181.6, volume=50000000, prev_close=179.8,
+            timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc),
+        )
+        mock_client = AsyncMock()
+        mock_client.get_equity_snapshot = AsyncMock(return_value=mock_equity)
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/equity/AAPL", headers={"PAYMENT-SIGNATURE": "mock_sig"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["ticker"] == "AAPL"
+        assert data["data"]["last"] == 181.5
