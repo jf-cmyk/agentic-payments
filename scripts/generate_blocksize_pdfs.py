@@ -210,6 +210,17 @@ def generate_pricing():
     pdf.output("docs/pdf/Blocksize_Pricing_Guide.pdf")
     print("Generated: Blocksize_Pricing_Guide.pdf")
 
+def generate_architecture(pdf):
+    pdf.add_page()
+    pdf.chapter_title("System Architecture")
+    pdf.body_text("The x402 gateway acts as a middleware between the blockchain settlement layer and the institutional data feed. Below is the high-level schematic of the Agentic Data Economy:")
+    
+    # Embed the high-fidelity diagram
+    try:
+        pdf.image("docs/assets/architecture_diagram.png", x=15, y=pdf.get_y() + 5, w=180)
+    except:
+        pdf.body_text("[Architecture Diagram Asset Missing]")
+
 if __name__ == "__main__":
     generate_docs()
     generate_catalog()

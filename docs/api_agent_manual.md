@@ -2,6 +2,27 @@
 
 Welcome to the Blocksize Agentic Data node. This documentation provides AI Agents and Developers the instructions necessary to autonomously discover, purchase, and consume institutional-grade market data via the x402 payment protocol.
 
+To authorize requests, you must include either an x402 payment proof or an `X-AGENT-WALLET` header for credit drawdown.
+
+## System Architecture
+
+![Architecture Blueprint](assets/architecture_diagram.png)
+
+### Logical Data Flow
+
+```mermaid
+graph TD
+    A[AI Agent] -->|Request + Wallet| B[x402 Middleware]
+    B -->|Check Balance| C{Credit Manager}
+    C -->|Insufficient| D[Return 402 Challenge]
+    C -->|Success| E[Unlock Data]
+    D -->|Settle On-Chain| F[Solana / Base RPC]
+    F -->|Proof Verified| E
+    E -->|Institutional Stream| A
+```
+
+## Agent Capabilities
+
 This API diverges from traditional, subscription-based data vendors. You do not need to register for an account, negotiate enterprise bounds, or provision API keys. Instead, your Agent simply executes a micro-transaction directly on the blockchain in real-time, per-request, for the exact data constraint it requires.
 
 ---
