@@ -29,11 +29,11 @@ class BlocksizePDF(FPDF):
         self.ln(15)
 
     def footer(self):
-        self.set_y(-15)
+        self.set_y(-20)
         self.set_font("helvetica", "I", 8)
         self.set_text_color(120, 120, 120)
-        self.cell(0, 10, "Making DeFi Bankable | blocksize.info", 0, 0, "L")
-        self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "R")
+        self.cell(0, 5, "Blocksize Capital GmbH | Franklinstraße 11, Frankfurt | Managing Director: Christoph J. Forster", 0, 1, "C")
+        self.cell(0, 5, f"Page {self.page_no()} | making-defi-bankable.blocksize.info", 0, 0, "C")
 
     def chapter_title(self, label):
         self.set_font("helvetica", "B", 16)
@@ -154,8 +154,8 @@ def generate_pricing():
     
     # Data rows
     rows = [
-        ("Crypto Tier 1", "$0.002", "BTC, ETH, SOL"),
-        ("Crypto Tier 2", "$0.004", "LINK, AVAX, DOT"),
+        ("Core Crypto", "$0.002", "BTCUSD, ETHUSD, SOLUSD"),
+        ("Extended & State", "$0.004", "JUPUSD, WIFUSD, GNSUSD, TURBOUSD, State Proofs"),
         ("FX & Metals", "$0.005", "EURUSD, XAUUSD"),
         ("Equities", "$0.008", "AAPL, TSLA, BABA"),
     ]
