@@ -151,7 +151,7 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
                     "method": "getTransaction",
                     "params": [
                         tx_hash,
-                        {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+                        {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}
                     ]
                 }
             )
