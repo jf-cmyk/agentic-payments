@@ -566,8 +566,12 @@ def _parse_timestamp(ts: Any) -> datetime:
         return datetime.now(timezone.utc)
 
     if isinstance(ts, (int, float)):
-        if ts > 1e12:
-            ts = ts / 1000  # milliseconds → seconds
+        # Handle microseconds (> 1e14)
+        if ts > 1e14:
+            ts = ts / 1e6
+        # Handle milliseconds (> 1e11)
+        elif ts > 1e11:
+            ts = ts / 1000
         return datetime.fromtimestamp(ts, tz=timezone.utc)
 
     if isinstance(ts, str):
