@@ -315,9 +315,10 @@ async def x402_payment_middleware(request: Request, call_next):
     wallet_header = request.headers.get("X-AGENT-WALLET")
     if wallet_header:
         mgr: CreditManager = request.app.state.credits
+        client_ip = request.client.host if request.client else "unknown"
         
-        # 🎁 New Agent? Grant 50 credits automatically
-        mgr.ensure_wallet_with_welcome_pack(wallet_header)
+        # 🎁 New Agent? Grant 50 credits automatically IF stake check and IP check pass
+        await mgr.ensure_wallet_with_welcome_pack(wallet_header, client_ip)
         
         # Map path to credit cost type
         asset_type = "core"
@@ -736,8 +737,8 @@ async def health_check() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",
-        "version": "0.4.0",
-        "engine": "Credit-Enabled x402 Gateway (GTM Welcome Pack Active)",
+        "version": "0.5.0",
+        "engine": "Shielded x402 Gateway (Iron Dome Active)",
         "networks": {
             "primary": {"name": "Solana", "wallet": settings.x402.solana_wallet_address or "(not set)"},
             "fallback": {"name": "Base", "wallet": settings.x402.evm_wallet_address or "(not set)"},

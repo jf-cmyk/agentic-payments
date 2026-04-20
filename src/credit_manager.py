@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import logging
+import httpx
+import json
 from datetime import datetime
 from decimal import Decimal
 
@@ -36,6 +38,15 @@ class CreditManager:
             )
         ''')
         
+        # Trial History (for Sybil Protection)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trial_history (
+                ip_hash TEXT PRIMARY KEY,
+                address TEXT,
+                timestamp TIMESTAMP
+            )
+        ''')
+        
         conn.commit()
         conn.close()
 
@@ -48,24 +59,71 @@ class CreditManager:
         conn.close()
         return row[0] if row else 0.0
 
-    def ensure_wallet_with_welcome_pack(self, address: str) -> float:
+    async def _get_solana_balance(self, address: str) -> float:
+        """Fetch Solana balance from on-chain RPC."""
+        # Use a reliable public RPC if not configured in env
+        rpc_url = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(rpc_url, json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getBalance",
+                    "params": [address]
+                })
+                res.raise_for_status()
+                data = res.json()
+                
+                # lamports to SOL (1 SOL = 10^9 lamports)
+                lamports = data.get("result", {}).get("value", 0)
+                return float(lamports) / 1000000000.0
+        except Exception as e:
+            logger.error(f"Failed to check SOL balance for {address}: {e}")
+            return 0.0
+
+    async def ensure_wallet_with_welcome_pack(self, address: str, ip: str) -> float:
         """
-        Check if a wallet exists. If not, create it and grant the 50-credit Welcome Pack.
-        Returns the current balance.
+        Hardened Trial Grant Logic:
+        1. Check if IP has already claimed a trial (Permanent blacklist).
+        2. Check if wallet exists.
+        3. If new, verify On-Chain Stake (0.1 SOL).
+        4. Grant trial if all checks pass.
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
+            # 1. IP Check
+            cursor.execute("SELECT address FROM trial_history WHERE ip_hash = ?", (ip,))
+            if cursor.fetchone():
+                logger.warning(f"🚫 SYBIL DETECTED: IP {ip} attempted duplicate trial claim.")
+                return 0.0 # No trial for repeat IPs
+            
+            # 2. Wallet Check
             cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (address,))
             row = cursor.fetchone()
             
             if row is None:
-                # First time seeing this agent! Grant Welcome Pack.
+                # 3. Stake Check (Iron Dome)
+                sol_balance = await self._get_solana_balance(address)
+                threshold = 0.1 # 0.1 SOL
+                
+                if sol_balance < threshold:
+                    logger.warning(f"⚠️ LOW STAKE: Wallet {address} has only {sol_balance} SOL (Needs {threshold}). Trial denied.")
+                    return 0.0
+                
+                # 4. Success! Grant Welcome Pack.
                 welcome_credits = 50.0
                 cursor.execute('''
                     INSERT INTO wallets (address, balance_credits, last_updated)
                     VALUES (?, ?, ?)
                 ''', (address, welcome_credits, datetime.utcnow()))
+                
+                # Record to Trial History
+                cursor.execute('''
+                    INSERT INTO trial_history (ip_hash, address, timestamp)
+                    VALUES (?, ?, ?)
+                ''', (ip, address, datetime.utcnow()))
                 
                 # Log it as a special internal transaction
                 cursor.execute('''
@@ -74,7 +132,7 @@ class CreditManager:
                 ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, datetime.utcnow()))
                 
                 conn.commit()
-                logger.info(f"🎁 WELCOME PACK: Granted 50.0 credits to new agent {address}")
+                logger.info(f"🎁 SHIELDED TRIAL GRANTED: 50.0 credits to {address} (SOL: {sol_balance})")
                 return welcome_credits
             
             return row[0]
