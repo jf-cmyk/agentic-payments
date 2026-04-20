@@ -61,6 +61,13 @@
     .hero h1 span { color: var(--primary); }
     .hero-sub { font-size: 1.5rem; color: var(--text); max-width: 800px; margin-bottom: 3rem; font-weight: 400; }
 
+    .hero-stats {
+      display: flex; gap: 4rem; margin-bottom: 4rem; flex-wrap: wrap;
+    }
+    .stat { text-align: left; }
+    .stat-value { font-size: 1.5rem; font-weight: 800; color: var(--primary); display: block; }
+    .stat-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
     /* ─── SECTIONS ──────────────────────────────── */
     section { padding: 8rem 0; }
     h2 { font-size: 3rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 3rem; }
@@ -127,7 +134,17 @@
     <span class="hero-label">DeFi Infrastructure Solutions</span>
     <h1><span>Safeguarding</span> the shift of financial services.</h1>
     <p class="hero-sub">From institutional node operations to high-fidelity market data — Blocksize makes DeFi bankable for autonomous agents.</p>
-    <a href="https://agentic-payments-production.up.railway.app/docs" class="btn-nav">GET STARTED →</a>
+    
+    <div class="hero-stats">
+      <div class="stat"><span class="stat-value">3,900+</span><span class="stat-label">Active Instruments</span></div>
+      <div class="stat"><span class="stat-value">$0.002</span><span class="stat-label">Minimum Cost / Call</span></div>
+      <div class="stat"><span class="stat-value">&lt;500ms</span><span class="stat-label">Global Latency</span></div>
+      <div class="stat"><span class="stat-value">2</span><span class="stat-label">Settlement Networks</span></div>
+    </div>
+
+    <div class="hero-actions">
+      <a href="https://agentic-payments-production.up.railway.app/docs" class="btn-nav">GET STARTED →</a>
+    </div>
   </div>
 </section>
 
