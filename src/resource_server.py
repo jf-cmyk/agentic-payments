@@ -650,12 +650,20 @@ async def claim_credits(request: Request, payload: dict):
     if not tier_data:
         raise HTTPException(status_code=400, detail="Invalid tier")
 
-    # Verify payment (using existing internal verify logic)
-    # Note: In a real system, we'd call the same _verify_payment logic
-    # For now, let's assume verification passes if we provide a hash
-    # (The actual verification logic is in the middleware, we should refactor it or reuse it)
+    tier_data = BULK_TIERS.get(tier)
+    if not tier_data:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+
+    # Native RPC verification of the bulk payment
+    verification = await _verify_payment(base64.b64encode(json.dumps({
+        "proof": tx_hash,
+        "network": network
+    }).encode()).decode(), [])
     
-    # Simple validation for now - in production this would call _verify_payment
+    if not verification.get("valid"):
+        raise HTTPException(status_code=402, detail=f"Bulk payment verification failed: {verification.get('reason')}")
+    
+    # Credit the wallet
     mgr.add_credits(
         address=wallet, 
         credits=tier_data["credits"], 
@@ -666,7 +674,8 @@ async def claim_credits(request: Request, payload: dict):
     return {
         "status": "success",
         "added": tier_data["credits"],
-        "new_balance": mgr.get_balance(wallet)
+        "new_balance": mgr.get_balance(wallet),
+        "message": f"Successfully credited {tier_data['credits']} to {wallet}"
     }
 
 # ---------------------------------------------------------------------------
@@ -682,31 +691,35 @@ async def mcp_manifest():
     return {
         "mcp_version": "1.0",
         "name": "Blocksize Capital Data Economy",
-        "description": "Institutional market data with automated x402 payments.",
+        "description": "Institutional market data with automated x402 payments and high-performance credit drawdowns.",
+        "capabilities": {
+            "payment_modes": ["real-time-x402", "credit-drawdown"],
+            "bulk_discounts": "up to 40% via /v1/credits/purchase"
+        },
         "tools": [
             {
                 "name": "get_vwap",
-                "description": "Get real-time VWAP for crypto. Cost: $0.002–$0.004 USDC.",
+                "description": "Get real-time VWAP for crypto. Cost: 2-4 Credits (approx $0.002–$0.004). Credit-Ready: Use X-AGENT-WALLET header.",
                 "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
-                "payment": {"required": True, "currency": "USDC"}
+                "payment": {"required": True, "currency": "USDC", "credits": True}
             },
             {
                 "name": "get_bidask",
-                "description": "Get best bid/ask snapshot for crypto. Cost: $0.002–$0.004 USDC.",
+                "description": "Get best bid/ask snapshot for crypto. Cost: 2-4 Credits (approx $0.002–$0.004). Credit-Ready: Use X-AGENT-WALLET header.",
                 "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
-                "payment": {"required": True, "currency": "USDC"}
+                "payment": {"required": True, "currency": "USDC", "credits": True}
             },
             {
                 "name": "get_equity",
-                "description": "Get equity snapshot. Cost: $0.008 USDC.",
+                "description": "Get equity snapshot. Cost: 8 Credits ($0.008 USDC). Credit-Ready: Use X-AGENT-WALLET header.",
                 "parameters": {"ticker": {"type": "string", "example": "AAPL"}},
-                "payment": {"required": True, "currency": "USDC"}
+                "payment": {"required": True, "currency": "USDC", "credits": True}
             },
             {
                 "name": "batch_query",
-                "description": "Fetch multiple assets in one call and one payment.",
+                "description": "Fetch multiple assets in one call. Settlement: Sum of credits or single x402 proof.",
                 "parameters": {"reqs": {"type": "string", "example": "vwap:BTCUSD,equity:AAPL"}},
-                "payment": {"required": True, "currency": "USDC"}
+                "payment": {"required": True, "currency": "USDC", "credits": True}
             }
         ]
     }
@@ -720,12 +733,14 @@ async def health_check() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "engine": "Credit-Enabled x402 Gateway",
         "networks": {
             "primary": {"name": "Solana", "wallet": settings.x402.solana_wallet_address or "(not set)"},
             "fallback": {"name": "Base", "wallet": settings.x402.evm_wallet_address or "(not set)"},
         },
         "pricing": settings.pricing_summary,
+        "bulk_pricing": BULK_TIERS
     }
 
 
