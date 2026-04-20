@@ -159,10 +159,12 @@ class BlocksizeClient:
         result = await self._rpc_call("vwap_latest", {"ticker": pair})
 
         if isinstance(result, dict):
+            if "vwap" in result and isinstance(result["vwap"], dict):
+                result = result["vwap"]
             return VWAPData(
                 pair=result.get("ticker", pair),
                 vwap=float(result.get("price", result.get("vwap", 0))),
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                timestamp=_parse_timestamp(result.get("timestamp", result.get("ts"))),
                 currency=result.get("currency", _extract_quote(pair)),
                 source="blocksize",
             )
