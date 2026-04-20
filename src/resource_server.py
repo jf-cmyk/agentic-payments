@@ -129,11 +129,12 @@ def _get_price_for_path(path: str) -> Decimal | None:
 _SEEN_TX_HASHES: set[str] = set()
 
 async def _verify_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
-    """Natively verify the transaction on the Solana blockchain via RPC."""
+    """Natively verify the transaction on the Solana or Base blockchain via RPC."""
     try:
         decoded_str = base64.b64decode(payment_payload).decode()
         payload = json.loads(decoded_str)
         tx_hash = payload.get("proof")
+        network = payload.get("network", "solana")
         
         if not tx_hash:
             return {"valid": False, "reason": "Missing tx_hash/proof in payload"}
@@ -141,34 +142,61 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
         if tx_hash in _SEEN_TX_HASHES:
             return {"valid": False, "reason": "Transaction hash has already been used (Replay Attack)"}
             
-        rpc_url = "https://api.mainnet-beta.solana.com"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.post(
-                rpc_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "getTransaction",
-                    "params": [
-                        tx_hash,
-                        {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}
-                    ]
-                }
-            )
-            res.raise_for_status()
-            data = res.json()
+        if "solana" in network:
+            rpc_url = "https://api.mainnet-beta.solana.com"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getTransaction",
+                        "params": [
+                            tx_hash,
+                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}
+                        ]
+                    }
+                )
+                res.raise_for_status()
+                data = res.json()
+                
+            result = data.get("result")
+            if not result:
+                return {"valid": False, "reason": "Transaction not found on chain or not yet finalized"}
+                
+            meta = result.get("meta")
+            if meta and meta.get("err") is not None:
+                return {"valid": False, "reason": f"Transaction reverted on chain: {meta['err']}"}
+                
+        elif "eip155" in network or "base" in network:
+            rpc_url = "https://mainnet.base.org"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "eth_getTransactionReceipt",
+                        "params": [tx_hash]
+                    }
+                )
+                res.raise_for_status()
+                data = res.json()
             
-        result = data.get("result")
-        if not result:
-            return {"valid": False, "reason": "Transaction not found on chain or not yet finalized"}
-            
-        meta = result.get("meta")
-        if meta and meta.get("err") is not None:
-            return {"valid": False, "reason": f"Transaction reverted on chain: {meta['err']}"}
+            result = data.get("result")
+            if not result:
+                return {"valid": False, "reason": "EVM Transaction not found or not yet finalized"}
+                
+            status = result.get("status")
+            if status not in ("0x1", 1):
+                return {"valid": False, "reason": f"EVM Transaction reverted on chain: status={status}"}
+        
+        else:
+            return {"valid": False, "reason": f"Unsupported network: {network}"}
 
         # Mark as used securely
         _SEEN_TX_HASHES.add(tx_hash)
-        logger.info("NATIVELY VERIFIED: %s", tx_hash)
+        logger.info("NATIVELY VERIFIED %s: %s", network, tx_hash)
         return {"valid": True}
         
     except Exception as e:
@@ -280,7 +308,8 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
     """Get real-time VWAP for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        vwap_data = await client.get_vwap_latest(pair)
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        vwap_data = await client.get_vwap_latest(clean)
         return VWAPResponse(data=vwap_data).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -293,7 +322,8 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
     """Get bid/ask snapshot for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        bidask_data = await client.get_bidask_snapshot(pair)
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        bidask_data = await client.get_bidask_snapshot(clean)
         return BidAskResponse(data=bidask_data).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -306,7 +336,8 @@ async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
     """Get equity snapshot. Cost: $0.008 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        data = await client.get_equity_snapshot(ticker)
+        clean = ticker.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_equity_snapshot(clean)
         return EquityResponse(data=data).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -319,7 +350,8 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        data = await client.get_fx_rate(pair)
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_fx_rate(clean)
         return data.model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -332,7 +364,8 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
     """Get metal spot price. Cost: $0.005 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        data = await client.get_metal_price(ticker)
+        clean = ticker.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_metal_price(clean)
         return data.model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
