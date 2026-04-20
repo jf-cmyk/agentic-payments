@@ -32,8 +32,8 @@ class BlocksizePDF(FPDF):
         self.set_y(-20)
         self.set_font("helvetica", "I", 8)
         self.set_text_color(120, 120, 120)
-        self.cell(0, 5, "Blocksize Capital GmbH | Taunusanlage 8, Frankfurt | Managing Director: Christian Labetsch", 0, 1, "C")
-        self.cell(0, 5, f"Page {self.page_no()} | agentic-data.blocksize.info", 0, 0, "C")
+        self.cell(0, 5, "Blocksize Capital GmbH | Taunusanlage 8, 60329 Frankfurt | Directors: C. Labetzsch, C. Impekoven", 0, 1, "C")
+        self.cell(0, 5, "HRB 113470 | VAT DE321106382 | agentic-data.blocksize.info", 0, 0, "C")
 
     def chapter_title(self, label):
         self.set_font("helvetica", "B", 16)
