@@ -14,7 +14,6 @@ Endpoints:
   GET /v1/equity/{ticker}         — Equity snapshot ($0.008)
   GET /v1/fx/{pair}               — FX rate ($0.005)
   GET /v1/metal/{ticker}          — Metal price ($0.005)
-  GET /v1/rate/{maturity}         — Treasury rate ($0.005)
   GET /v1/search?q={query}        — Pair search (FREE)
   GET /v1/instruments/{service}   — Instrument list (FREE)
   GET /health                     — Health check (FREE)
@@ -98,8 +97,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # TradFi
     "/v1/fx/": settings.pricing.tradfi,
     "/v1/metal/": settings.pricing.tradfi,
-    "/v1/rate/": settings.pricing.tradfi,
-    "/v1/yield": settings.pricing.tradfi,
     # Free
     "/v1/search": None,
     "/v1/instruments/": None,
@@ -440,18 +437,6 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve metal for {ticker}", details=str(e),
         ).model_dump())
 
-@app.get("/v1/rate/{maturity}", responses=X402_RESPONSE)
-async def get_rate(maturity: str, request: Request) -> dict[str, Any]:
-    """Get US Treasury rate. Cost: $0.005 USDC."""
-    try:
-        client: BlocksizeClient = request.app.state.blocksize
-        data = await client.get_treasury_rate(maturity)
-        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "Treasury Yield", "asset_class": "rate"}}
-        return resp
-    except BlocksizeAPIError as e:
-        raise HTTPException(status_code=502, detail=ErrorResponse(
-            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve rate for {maturity}", details=str(e),
-        ).model_dump())
 
 @app.get("/v1/batch", responses=X402_RESPONSE)
 async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
@@ -480,8 +465,6 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
                 return await get_fx(ticker, request)
             elif svc == "metal":
                 return await get_metal(ticker, request)
-            elif svc == "rate":
-                return await get_rate(ticker, request)
             else:
                 return {
                     "status": "error",

@@ -91,7 +91,6 @@ def generate_catalog():
         ("FX Rates", "120+ currency pairs including majors and exotics."),
         ("US Equities", "US and Chinese stock market snapshots."),
         ("Precious Metals", "Spot prices for Gold (XAU), Silver (XAG), etc."),
-        ("Treasury Yields", "US Treasury yield curve from 1-month to 30-year.")
     ]
     
     for title, desc in services:
@@ -154,7 +153,6 @@ def generate_pricing():
         ("Crypto Tier 2", "$0.004", "LINK, AVAX, DOT"),
         ("FX & Metals", "$0.005", "EURUSD, XAUUSD"),
         ("Equities", "$0.008", "AAPL, TSLA, BABA"),
-        ("Treasury Yields", "$0.005", "10Y, 2Y, 3M")
     ]
     
     pdf.set_text_color(*BLACK)

@@ -13,7 +13,6 @@ Supported data services:
   - Bid/Ask Equities — US + Chinese (18,071 tickers)
   - Bid/Ask FX (129 pairs)
   - Bid/Ask Metals (5 tickers)
-  - US Treasury Rates (8 maturities)
   - State Price
   - Commodities (in development)
 
@@ -39,7 +38,6 @@ from src.models import (
     MetalData,
     PairInfo,
     StatePriceData,
-    TreasuryRateData,
     VWAP24HrData,
     VWAP30MinData,
     VWAPData,
@@ -441,51 +439,6 @@ class BlocksizeClient:
 
         raise BlocksizeAPIError(-1, f"Unexpected response for metal: {result}")
 
-    # -----------------------------------------------------------------------
-    # US Treasury Rates
-    # -----------------------------------------------------------------------
-
-    async def get_treasury_rate(self, maturity: str) -> TreasuryRateData:
-        """
-        Get the current US Treasury yield for a specific maturity.
-        """
-        # Blocksize formats yields as US10YUSD instead of Rates.US10Y
-        ticker = f"US{maturity.upper()}USD"
-        result = await self._rpc_call("bidask_getSnapshot", {"ticker": ticker})
-
-        if isinstance(result, dict) and "snapshot" in result:
-            items = result["snapshot"]
-            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
-            if not item:
-                raise BlocksizeAPIError(404, f"Treasury maturity {maturity} not found in master stream")
-                
-            return TreasuryRateData(
-                ticker=ticker,
-                maturity=maturity.upper(),
-                yield_pct=float(item.get("agg_mid_price", item.get("yield", 0))),
-                currency="USD",
-                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
-                source="blocksize",
-            )
-
-        raise BlocksizeAPIError(-1, f"Unexpected response for treasury rate: {result}")
-
-    async def get_treasury_curve(self) -> list[TreasuryRateData]:
-        """
-        Get the full US Treasury yield curve (all maturities).
-
-        Returns:
-            List of TreasuryRateData for all available maturities.
-        """
-        maturities = ["1M", "3M", "6M", "1Y", "2Y", "5Y", "10Y", "30Y"]
-        rates = []
-        for mat in maturities:
-            try:
-                rate = await self.get_treasury_rate(mat)
-                rates.append(rate)
-            except BlocksizeAPIError:
-                logger.warning("Could not fetch %s treasury rate", mat)
-        return rates
 
     # -----------------------------------------------------------------------
     # Search / Discovery
@@ -497,7 +450,7 @@ class BlocksizeClient:
 
         Args:
             query: Search string (e.g., 'btc', 'AAPL', 'eurusd', 'gold')
-            asset_class: Filter by class — 'crypto', 'equity', 'fx', 'metal', 'rate', or 'all'
+            asset_class: Filter by class — 'crypto', 'equity', 'fx', 'metal', or 'all'
 
         Returns:
             List of matching PairInfo objects (max 50).

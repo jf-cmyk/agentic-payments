@@ -220,17 +220,6 @@ class MetalData(BaseModel):
 # US Treasury Rate Responses
 # ---------------------------------------------------------------------------
 
-class TreasuryRateData(BaseModel):
-    """US Treasury yield data."""
-
-    ticker: str = Field(..., description="Rate identifier (e.g., Rates.US10Y)")
-    maturity: str = Field(..., description="Maturity (e.g., 10Y, 2Y, 30Y)")
-    yield_pct: float = Field(..., description="Yield in percent")
-    currency: str = Field("USD", description="Yield currency")
-    timestamp: datetime = Field(..., description="Data timestamp (UTC)")
-    source: str = Field("blocksize", description="Data provider")
-
-    def to_decision_summary(self) -> str:
         return (
             f"US TREASURY [{self.maturity}]: {self.yield_pct:.4f}% "
             f"| Source: Blocksize Capital | Time: {self.timestamp.isoformat()}"
