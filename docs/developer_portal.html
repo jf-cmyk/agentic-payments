@@ -75,9 +75,20 @@
 
     /* ─── DATA CARDS ────────────────────────────── */
     .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4rem; }
-    .catalog-item h3 { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; }
-    .catalog-item p { color: var(--text-muted); margin-bottom: 1.5rem; }
-    .endpoint { font-family: monospace; background: var(--bg-alt); padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.85rem; }
+    .catalog-item { 
+      background: #fff; padding: 2rem; border-radius: 12px; 
+      border: 1px solid var(--border); transition: all 0.3s ease; 
+    }
+    .catalog-item:hover { border-color: var(--primary); transform: translateY(-4px); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
+    .catalog-item h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; }
+    .catalog-item p { color: var(--text-muted); margin-bottom: 2rem; font-size: 0.95rem; height: 3rem; overflow: hidden; }
+    
+    .endpoint { 
+      display: block; background: #f8f9ff; color: var(--primary);
+      font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85rem; font-weight: 700;
+      padding: 1rem; border-radius: 6px; border: 2px solid rgba(79, 75, 255, 0.1);
+      text-transform: none; letter-spacing: 0;
+    }
 
     /* ─── FLOW ──────────────────────────────────── */
     .flow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; }
@@ -167,6 +178,16 @@
         <h3>FX Rates</h3>
         <p>120+ global currency pairs with institutional bid/ask snapshots.</p>
         <span class="endpoint">GET /v1/fx/{pair}</span>
+      </div>
+      <div class="catalog-item">
+        <h3>Precious Metals</h3>
+        <p>Real-time pricing for Gold, Silver, Platinum, and Palladium vs USD/EUR.</p>
+        <span class="endpoint">GET /v1/metal/{ticker}</span>
+      </div>
+      <div class="catalog-item">
+        <h3>Commodities</h3>
+        <p>Agricultural, Energy, and Industrial commodity prices with global benchmarks.</p>
+        <span class="endpoint">GET /v1/commodity/{ticker}</span>
       </div>
     </div>
   </div>

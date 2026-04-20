@@ -91,11 +91,12 @@ def generate_catalog():
     pdf.body_text("Access 3,900+ institutional-grade market instruments across all asset classes.")
     
     services = [
-        ("Real-Time VWAP", "9,400+ Crypto pairs including BTC/USD, ETH/USD."),
-        ("Bid/Ask Snapshots", "Institutional order-book depth for liquid crypto assets."),
-        ("FX Rates", "120+ currency pairs including majors and exotics."),
-        ("US Equities", "US and Chinese stock market snapshots."),
-        ("Precious Metals", "Spot prices for Gold (XAU), Silver (XAG), etc."),
+        ("Real-Time VWAP", "9,400+ Crypto pairs. -> GET /v1/vwap/{pair}"),
+        ("Bid/Ask Snapshots", "Order-book depth for crypto. -> GET /v1/bidask/{pair}"),
+        ("FX Rates", "120+ global currency pairs. -> GET /v1/fx/{pair}"),
+        ("US Equities", "US & Chinese stock market data. -> GET /v1/equity/{ticker}"),
+        ("Precious Metals", "Gold, Silver, Platinum pricing. -> GET /v1/metal/{ticker}"),
+        ("Global Commodities", "Energy and Agriculture benchmarks. -> GET /v1/commodity/{ticker}"),
     ]
     
     for title, desc in services:
@@ -155,8 +156,9 @@ def generate_pricing():
     # Data rows
     rows = [
         ("Core Crypto", "$0.002", "BTCUSD, ETHUSD, SOLUSD"),
-        ("Extended & State", "$0.004", "JUPUSD, WIFUSD, GNSUSD, TURBOUSD, State Proofs"),
+        ("Extended & State", "$0.004", "JUPUSD, WIFUSD, GNSUSD"),
         ("FX & Metals", "$0.005", "EURUSD, XAUUSD"),
+        ("Commodities", "$0.005", "BRENT, WHEAT, CORN"),
         ("Equities", "$0.008", "AAPL, TSLA, BABA"),
     ]
     
