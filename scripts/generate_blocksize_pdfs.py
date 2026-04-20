@@ -1,9 +1,10 @@
 import os
 from fpdf import FPDF
+from datetime import datetime
 
 class BlocksizePDF(FPDF):
     def header(self):
-        self.image("docs/assets/logo.png", 10, 8, 33) # Assumes logo exists
+        # self.image("docs/assets/logo.png", 10, 8, 33) 
         self.set_font("helvetica", "B", 15)
         self.cell(80)
         self.cell(30, 10, "Blocksize Capital", 0, 0, "C")
@@ -12,83 +13,67 @@ class BlocksizePDF(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font("helvetica", "I", 8)
-        self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, "C")
+        self.cell(0, 10, f"Page {self.page_no()}/{{nb}} | blocksize.info", 0, 0, "C")
 
     def chapter_title(self, label):
         self.set_font("helvetica", "B", 12)
-        self.set_fill_color(200, 220, 255)
-        self.cell(0, 6, label, 0, 1, "L", True)
+        self.set_fill_color(240, 240, 240)
+        self.cell(0, 8, label, 0, 1, "L", True)
         self.ln(4)
 
     def section_title(self, label):
         self.set_font("helvetica", "B", 10)
+        self.set_text_color(79, 75, 255)
         self.cell(0, 10, label.upper(), 0, 1, "L")
+        self.set_text_color(0, 0, 0)
 
     def body_text(self, text):
         self.set_font("helvetica", "", 10)
         self.multi_cell(0, 5, text)
         self.ln()
 
-def generate_introduction(pdf):
-    pdf.add_page()
-    pdf.chapter_title("Agentic Market Data Documentation")
-    pdf.section_title("What is x402?")
-    pdf.body_text(
-        "The x402 protocol is a pay-per-call institutional data gateway. It allows autonomous "
-        "AI agents to pay for financial data in real-time using USDC stablecoins. "
-        "There are no monthly subscriptions; you only pay for the exact data points consumed."
-    )
-    
-    pdf.section_title("The 402 Protocol Cycle")
-    pdf.body_text(
-        "1. Request: Agent requests a data endpoint without an API key.\n"
-        "2. Intercept: Server returns HTTP 402 Payment Required.\n"
-        "3. Metadata: Server includes PAYMENT-REQUIRED header with amount and destination.\n"
-        "4. Settlement: Agent sends USDC via Solana or Base L2.\n"
-        "5. Proof: Agent resubmits with PAYMENT-SIGNATURE header containing the TX hash.\n"
-        "6. Data: Server verifies and returns the institutional payload."
-    )
+    def pricing_table(self, rows):
+        self.set_font("helvetica", "B", 9)
+        self.set_fill_color(220, 220, 220)
+        self.cell(60, 8, "Tier", 1, 0, 'C', True)
+        self.cell(50, 8, "Credits", 1, 0, 'C', True)
+        self.cell(70, 8, "Price (USDC)", 1, 1, 'C', True)
+        
+        self.set_font("helvetica", "", 9)
+        for row in rows:
+            self.cell(60, 8, row[0], 1, 0, 'C')
+            self.cell(50, 8, row[1], 1, 0, 'C')
+            self.cell(70, 8, row[2], 1, 1, 'C')
+        self.ln(5)
 
-def generate_architecture(pdf):
-    pdf.add_page()
-    pdf.chapter_title("System Architecture")
-    pdf.body_text("The x402 gateway acts as a middleware between the blockchain settlement layer and the institutional data feed. Below is the high-level schematic of the Agentic Data Economy:")
-    
-    try:
-        pdf.image("docs/assets/architecture_diagram.png", x=15, y=pdf.get_y() + 5, w=180)
-    except:
-        pdf.body_text("[Architecture Diagram Asset Missing]")
-
-def generate_swimlane(pdf):
-    pdf.add_page()
-    pdf.chapter_title("Operational Swimlane")
-    pdf.body_text("The following diagram illustrates the institutional data flow and automated settlement cycle via the Iron Dome security layer:")
-    
-    try:
-        pdf.image("docs/assets/swimlane_diagram.png", x=15, y=pdf.get_y() + 5, w=180)
-    except:
-        pdf.body_text("[Swimlane Diagram Asset Missing]")
-
-def generate_endpoints(pdf):
-    pdf.add_page()
-    pdf.chapter_title("Available Endpoints")
-    endpoints = [
-        ("GET /v1/vwap/{pair}", "Volume Weighted Average Price for Crypto/FX."),
-        ("GET /v1/equity/{ticker}", "Institutional Equity Snapshot data."),
-        ("GET /v1/metal/{ticker}", "Spot pricing for precious metals."),
-        ("GET /v1/commodity/{ticker}", "Global commodity benchmarks.")
-    ]
-    for ep, desc in endpoints:
-        pdf.section_title(ep)
-        pdf.body_text(desc)
+# --- POPULATION FUNCTIONS ---
 
 def generate_docs():
     pdf = BlocksizePDF()
     pdf.alias_nb_pages()
-    generate_introduction(pdf)
-    generate_architecture(pdf)
-    generate_swimlane(pdf)
-    generate_endpoints(pdf)
+    pdf.add_page()
+    pdf.chapter_title("Institutional API Documentation")
+    
+    pdf.section_title("1. System Architecture")
+    pdf.body_text("The Blocksize Gateway is a multi-layered infrastructure designed for automated machine-to-machine data settlement.")
+    try:
+        pdf.image("docs/assets/architecture_diagram.png", x=15, y=pdf.get_y(), w=180)
+        pdf.ln(100)
+    except:
+        pdf.body_text("[2D Architecture Diagram Missing]")
+
+    pdf.add_page()
+    pdf.section_title("2. Operational Process")
+    pdf.body_text("Each request follows a strict verification and settlement flow via the Iron Dome security layer.")
+    try:
+        pdf.image("docs/assets/swimlane_diagram.png", x=15, y=pdf.get_y(), w=180)
+        pdf.ln(170)
+    except:
+        pdf.body_text("[2D Swimlane Diagram Missing]")
+
+    pdf.section_title("3. Authentication Mode")
+    pdf.body_text("- x402 Header: Include Payment-Proof signature (TX Hash).\n- Credit Header: Include X-AGENT-WALLET for drawdown.")
+
     pdf.output("docs/pdf/Blocksize_API_Documentation.pdf")
     print("Generated: Blocksize_API_Documentation.pdf")
 
@@ -97,8 +82,19 @@ def generate_catalog():
     pdf.alias_nb_pages()
     pdf.add_page()
     pdf.chapter_title("Institutional Data Catalog")
-    pdf.body_text("Our catalog covers 9,400+ instruments across all major asset classes.")
-    # Content truncated for brevity in this scratch script
+    
+    catalog = [
+        ("Crypto Market Data", "Core", "2.0 Credits", "BTC/USD, ETH/USD, SOL/USD, 4000+ pairs"),
+        ("Global Equities", "Enterprise", "8.0 Credits", "AAPL, TSLA, NVDA (US), 00700 (HK)"),
+        ("FX Spot Rates", "Standard", "4.0 Credits", "EUR/USD, GBP/USD, JPY/USD (120+ pairs)"),
+        ("Precious Metals", "Standard", "5.0 Credits", "XAU (Gold), XAG (Silver) vs USD/EUR"),
+        ("Global Commodities", "Extended", "6.0 Credits", "BRENT, WTI, NATGAS, COPPER")
+    ]
+    
+    for cat, tier, cost, symbols in catalog:
+        pdf.section_title(cat)
+        pdf.body_text(f"Service Tier: {tier}\nCost per Call: {cost}\nSymbols: {symbols}")
+    
     pdf.output("docs/pdf/Blocksize_Data_Catalog.pdf")
     print("Generated: Blocksize_Data_Catalog.pdf")
 
@@ -107,7 +103,13 @@ def generate_flow():
     pdf.alias_nb_pages()
     pdf.add_page()
     pdf.chapter_title("Autonomous User Flow")
-    pdf.body_text("Detailing the machine-to-machine interaction model.")
+    
+    pdf.section_title("1. The 402 Challenge Loop")
+    pdf.body_text("1. Agent performs GET to /v1/vwap/BTC-USD.\n2. Server returns 402 Payment Required.\n3. Server provides 'Payment-Required' header with cost and destination wallet.\n4. Agent settles USDC via Solana/Base.\n5. Agent resubmits with 'Payment-Signature' containing TX Hash.")
+    
+    pdf.section_title("2. Deterministic Unlock")
+    pdf.body_text("Upon verification, the gateway unlocks the institutional payload for 24 hours for that specific wallet/symbol pair (unless using Credits).")
+    
     pdf.output("docs/pdf/Blocksize_User_Flow.pdf")
     print("Generated: Blocksize_User_Flow.pdf")
 
@@ -115,9 +117,22 @@ def generate_pricing():
     pdf = BlocksizePDF()
     pdf.alias_nb_pages()
     pdf.add_page()
-    pdf.chapter_title("Pricing Guide")
-    pdf.section_title("Bulk Credit Drawdown Economy")
-    pdf.body_text("For institutional scale, pre-purchase credits at a discount.")
+    pdf.chapter_title("Institutional Pricing Guide")
+    
+    pdf.section_title("1. Unit Economics")
+    pdf.body_text("1 Credit = $0.001 Market Value. Credits allow for zero-latency drawdown without waiting for block confirmations.")
+
+    pdf.section_title("2. Bulk Purchase Tiers")
+    tiers = [
+        ("Starter Pouch", "1,000 Credits", "0.90 USDC (10% OFF)"),
+        ("Growth Pack", "10,000 Credits", "8.00 USDC (20% OFF)"),
+        ("Institutional Vault", "100,000 Credits", "60.00 USDC (40% OFF)")
+    ]
+    pdf.pricing_table(tiers)
+    
+    pdf.section_title("3. Performance Discounts")
+    pdf.body_text("Institutional clients consuming >1M calls/month receive custom rebate metadata in the X-AGENT-QUOTA response header.")
+    
     pdf.output("docs/pdf/Blocksize_Pricing_Guide.pdf")
     print("Generated: Blocksize_Pricing_Guide.pdf")
 
@@ -126,7 +141,16 @@ def generate_agent_manual():
     pdf.alias_nb_pages()
     pdf.add_page()
     pdf.chapter_title("Agent Integration Guide")
-    pdf.body_text("Definitive instructions for autonomous agents.")
+    
+    pdf.section_title("1. Iron Dome Requirements")
+    pdf.body_text("To prevent Sybil attacks and qualify for Trial Credits:\n- Minimum Stake: 0.1 SOL in Agent Wallet.\n- Wallet History: >24h Age and >5 Transactions.\n- IP Policy: Permanent 1-Trial-Per-IP lock.")
+    
+    pdf.section_title("2. Automated Discovery")
+    pdf.body_text("Fetch the MCP Discovery Manifest at /mcp/manifest.json to receive full tool definitions and JSON-schema parameters.")
+    
+    pdf.section_title("3. Python Example")
+    pdf.body_text("headers = {'X-AGENT-WALLET': wallet_address}\nresponse = requests.get(url, headers=headers)")
+    
     pdf.output("docs/pdf/Blocksize_Agent_Manual.pdf")
     print("Generated: Blocksize_Agent_Manual.pdf")
 
