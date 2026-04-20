@@ -105,6 +105,34 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/instruments/": None,
     "/health": None,
 }
+# ---------------------------------------------------------------------------
+# Documentation & Schemas
+# ---------------------------------------------------------------------------
+
+X402_RESPONSE = {
+    "402": {
+        "description": "Payment Required. Returns a PAYMENT-REQUIRED header with CAIP-compliant requirements.",
+        "headers": {
+            "PAYMENT-REQUIRED": {
+                "description": "Base64 encoded JSON array of payment requirements (network, recipient, amount).",
+                "schema": {"type": "string"}
+            }
+        },
+        "content": {
+            "application/json": {
+                "example": {
+                    "error": "Payment Required",
+                    "message": "This endpoint requires a payment of $0.002 USDC.",
+                    "price_usdc": "0.002",
+                    "networks": [
+                        {"name": "Solana", "caip2": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"},
+                        {"name": "Base", "caip2": "eip155:8453"}
+                    ]
+                }
+            }
+        }
+    }
+}
 
 
 def _get_price_for_request(request: Request) -> Decimal | None:
@@ -333,7 +361,7 @@ async def x402_payment_middleware(request: Request, call_next):
 # Data Endpoints
 # ---------------------------------------------------------------------------
 
-@app.get("/v1/vwap/{pair}")
+@app.get("/v1/vwap/{pair}", responses=X402_RESPONSE)
 async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
     """Get real-time VWAP for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
@@ -349,7 +377,7 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/bidask/{pair}")
+@app.get("/v1/bidask/{pair}", responses=X402_RESPONSE)
 async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
     """Get bid/ask snapshot for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
@@ -368,7 +396,7 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
 # Note: /v1/state and /v1/vwap30m have been removed as they are currently unsupported by upstream RPC
 
 
-@app.get("/v1/equity/{ticker}")
+@app.get("/v1/equity/{ticker}", responses=X402_RESPONSE)
 async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
     """Get equity snapshot. Cost: $0.008 USDC."""
     try:
@@ -384,7 +412,7 @@ async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/fx/{pair}")
+@app.get("/v1/fx/{pair}", responses=X402_RESPONSE)
 async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
     try:
@@ -398,7 +426,7 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve FX for {pair}", details=str(e),
         ).model_dump())
 
-@app.get("/v1/metal/{ticker}")
+@app.get("/v1/metal/{ticker}", responses=X402_RESPONSE)
 async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
     """Get metal spot price. Cost: $0.005 USDC."""
     try:
@@ -412,7 +440,7 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve metal for {ticker}", details=str(e),
         ).model_dump())
 
-@app.get("/v1/rate/{maturity}")
+@app.get("/v1/rate/{maturity}", responses=X402_RESPONSE)
 async def get_rate(maturity: str, request: Request) -> dict[str, Any]:
     """Get US Treasury rate. Cost: $0.005 USDC."""
     try:
@@ -425,7 +453,7 @@ async def get_rate(maturity: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve rate for {maturity}", details=str(e),
         ).model_dump())
 
-@app.get("/v1/batch")
+@app.get("/v1/batch", responses=X402_RESPONSE)
 async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
     """
     Execute a batch of data queries.
@@ -528,7 +556,48 @@ async def list_instruments(service: str, request: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Health
+# Discovery & MCP
+# ---------------------------------------------------------------------------
+
+@app.get("/mcp/manifest.json")
+async def mcp_manifest():
+    """
+    Model Context Protocol (MCP) Manifest.
+    Allows LLMs to discover tools and their payment requirements.
+    """
+    return {
+        "mcp_version": "1.0",
+        "name": "Blocksize Capital Data Economy",
+        "description": "Institutional market data with automated x402 payments.",
+        "tools": [
+            {
+                "name": "get_vwap",
+                "description": "Get real-time VWAP for crypto. Cost: $0.002–$0.004 USDC.",
+                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
+                "payment": {"required": True, "currency": "USDC"}
+            },
+            {
+                "name": "get_bidask",
+                "description": "Get best bid/ask snapshot for crypto. Cost: $0.002–$0.004 USDC.",
+                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
+                "payment": {"required": True, "currency": "USDC"}
+            },
+            {
+                "name": "get_equity",
+                "description": "Get equity snapshot. Cost: $0.008 USDC.",
+                "parameters": {"ticker": {"type": "string", "example": "AAPL"}},
+                "payment": {"required": True, "currency": "USDC"}
+            },
+            {
+                "name": "batch_query",
+                "description": "Fetch multiple assets in one call and one payment.",
+                "parameters": {"reqs": {"type": "string", "example": "vwap:BTCUSD,equity:AAPL"}},
+                "payment": {"required": True, "currency": "USDC"}
+            }
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 
 @app.get("/health")

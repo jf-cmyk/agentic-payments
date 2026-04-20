@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "blocksize-data-economy": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-http",
+        "https://agentic-payments-production.up.railway.app/mcp/manifest.json"
+      ],
+      "env": {
+        "X402_ENABLED": "true"
+      }
+    }
+  }
+}
