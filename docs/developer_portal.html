@@ -33,12 +33,12 @@
 
     /* ─── NAV ───────────────────────────────────── */
     nav {
-      position: sticky; top: 0; background: rgba(255, 255, 255, 0.9);
+      position: sticky; top: 0; background: rgba(255, 255, 255, 0.95);
       backdrop-filter: blur(10px); z-index: 1000; border-bottom: 1px solid var(--border);
     }
     .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 80px; }
-    .logo { font-weight: 800; font-size: 1.5rem; letter-spacing: -0.03em; }
-    .logo span { color: var(--primary); }
+    .logo { height: 32px; display: flex; align-items: center; }
+    .logo img { height: 100%; width: auto; }
     .nav-links { display: flex; gap: 2rem; list-style: none; }
     .nav-links a { text-decoration: none; color: var(--text); font-weight: 500; font-size: 0.9rem; }
     .nav-links a:hover { color: var(--primary); }
@@ -117,8 +117,9 @@
 <nav>
   <div class="container">
     <div class="nav-inner">
-      <div class="logo">BLOCKSIZE</div>
+      <div class="logo"><img src="assets/logo.svg" alt="Blocksize"></div>
       <ul class="nav-links">
+        <li><a href="https://blocksize.info" target="_blank">Main Website</a></li>
         <li><a href="#catalog">Data</a></li>
         <li><a href="#flow">Flow</a></li>
         <li><a href="#pricing">Pricing</a></li>
@@ -267,7 +268,10 @@
 <footer>
   <div class="container">
     <div class="footer-inner">
-      <p>© 2026 BLOCKSIZE CAPITAL. Institutional DeFi Infrastructure.</p>
+      <div>
+        <p>© 2026 BLOCKSIZE CAPITAL. Institutional DeFi Infrastructure.</p>
+        <p style="margin-top: 0.5rem;"><a href="https://blocksize.info" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: 600;">Visit main site: blocksize.info</a></p>
+      </div>
       <p>Settlement: Solana • Base</p>
     </div>
   </div>

@@ -10,16 +10,21 @@ DARK_GREY = (40, 40, 40)
 
 class BlocksizePDF(FPDF):
     def header(self):
-        # Clean white header with accent line
+        # Clean white header with accent line and logo
         self.set_draw_color(*BLUE)
         self.set_line_width(0.5)
         self.line(10, 15, 200, 15)
         
-        # Logo text
-        self.set_font("helvetica", "B", 10)
+        # Logo Image
+        logo_path = "docs/assets/logo.png"
+        if os.path.exists(logo_path):
+            self.image(logo_path, x=10, y=7, h=5)
+        
+        # Reference text (shifted right of logo)
+        self.set_font("helvetica", "B", 8)
         self.set_text_color(*BLACK)
-        self.set_xy(10, 8)
-        self.cell(0, 5, "BLOCKSIZE CAPITAL | x402 ECONOMY", 0, 0, "L")
+        self.set_xy(50, 8)
+        self.cell(0, 5, "x402 DATA ECONOMY | blocksize.info", 0, 0, "R")
         
         self.ln(15)
 
