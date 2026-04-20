@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ def _find_dotenv() -> str | None:
 
 
 class BlocksizeSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
     """Blocksize Capital API settings."""
 
     api_key: str = Field(..., alias="BLOCKSIZE_API_KEY")
@@ -83,6 +84,7 @@ class BlocksizeSettings(BaseSettings):
 
 
 class X402Settings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
     """x402 payment protocol settings — Solana (primary) + Base (fallback)."""
 
     # Receiving wallet addresses
@@ -133,6 +135,7 @@ class X402Settings(BaseSettings):
 
 
 class PricingSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
     """Tiered per-call pricing in USDC.
 
     Tiers:
@@ -158,6 +161,7 @@ class PricingSettings(BaseSettings):
 
 
 class ServerSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
     """Server runtime settings."""
 
     resource_server_port: int = Field(8402, alias="RESOURCE_SERVER_PORT")

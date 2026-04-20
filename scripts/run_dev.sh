@@ -39,13 +39,13 @@ case "$MODE" in
     mcp)
         echo -e "${GREEN}Starting MCP Server (STDIO mode)...${NC}"
         cd "$PROJECT_DIR"
-        python -m src.mcp_server
+        .venv/bin/python -m src.mcp_server
         ;;
 
     resource)
         echo -e "${GREEN}Starting Resource Server (HTTP mode) on port 8402...${NC}"
         cd "$PROJECT_DIR"
-        uvicorn src.resource_server:app --reload --port 8402 --host 0.0.0.0
+        .venv/bin/uvicorn src.resource_server:app --reload --port 8402 --host 0.0.0.0
         ;;
 
     both)
@@ -55,11 +55,11 @@ case "$MODE" in
         cd "$PROJECT_DIR"
 
         # Start resource server in background
-        uvicorn src.resource_server:app --port 8402 --host 0.0.0.0 &
+        .venv/bin/uvicorn src.resource_server:app --port 8402 --host 0.0.0.0 &
         RESOURCE_PID=$!
 
         # Start MCP server in HTTP mode
-        MCP_TRANSPORT=streamable-http python -m src.mcp_server &
+        MCP_TRANSPORT=streamable-http .venv/bin/python -m src.mcp_server &
         MCP_PID=$!
 
         # Trap to clean up both on exit
