@@ -32,7 +32,8 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
@@ -78,6 +79,19 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE"],
 )
+
+# Serve the Developer Portal as the main landing page
+@app.get("/", include_in_schema=False)
+async def get_portal():
+    """Serve the institutional developer portal."""
+    portal_path = os.path.join("docs", "developer_portal.html")
+    if os.path.exists(portal_path):
+        return FileResponse(portal_path)
+    raise HTTPException(status_code=404, detail="Developer Portal not found")
+
+# Mount assets and PDFs for public discovery
+app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
+app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
 
 
 # ---------------------------------------------------------------------------
