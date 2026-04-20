@@ -68,10 +68,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Blocksize Capital x402 Data Server",
-    description="Institutional-grade multi-asset market data, pay-per-call via x402",
-    version="0.2.0",
-    lifespan=lifespan,
+    title="Blocksize Capital Agentic Data Economy",
+    version="0.5.0",
+    description="""
+Institutional-grade financial data gateway for autonomous AI agents.
+Supports x402 Real-time Payment Settlement and Bulk Credit Drawdown.
+
+### 🛡️ Iron Dome Security Layer
+- **0.1 SOL Stake Requirement**: Agent wallets must hold >0.1 SOL to access trials.
+- **Wallet History**: Minimum age of 24 hours and 5+ transactions required.
+- **IP Guardrails**: Permanent 1-trial-per-IP policy.
+
+### 📚 Integration Artifacts
+- **Developer Portal**: [agentic-data.blocksize.info](https://agentic-payments-production.up.railway.app/)
+- **MCP Discovery**: [/mcp/manifest.json](https://agentic-payments-production.up.railway.app/mcp/manifest.json)
+- **Agent Integration Guide**: [Download PDF](https://agentic-payments-production.up.railway.app/pdf/Blocksize_Agent_Manual.pdf)
+    """,
+    lifespan=lifespan
 )
 
 app.add_middleware(

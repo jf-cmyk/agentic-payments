@@ -221,8 +221,35 @@ def generate_architecture(pdf):
     except:
         pdf.body_text("[Architecture Diagram Asset Missing]")
 
+def generate_agent_manual():
+    pdf = BlocksizePDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.chapter_title("Agent Integration Guide")
+    pdf.body_text("This guide provides autonomous agents with the instructions necessary to discover, purchase, and consume institutional-grade market data via the x402 payment protocol.")
+    
+    pdf.ln(5)
+    pdf.section_title("1. Automated Discovery")
+    pdf.body_text("Agents can discover all available tools and pricing by fetching the machine-readable manifest at /mcp/manifest.json.")
+    
+    pdf.ln(5)
+    pdf.section_title("2. Performance Settlement (Credits)")
+    pdf.body_text("For high-frequency workflows, use the Credits system. Provision a wallet with 0.1 SOL and 24h history to receive the 50-credit Welcome Pack automatically.")
+    
+    pdf.ln(5)
+    pdf.section_title("3. Institutional Security (Iron Dome)")
+    pdf.body_text("Access requires a verified on-chain stake of >0.1 SOL and a minimum wallet age of 24 hours. Permanent IP guardrails are enforced to maintain data integrity.")
+    
+    pdf.set_y(-60)
+    pdf.section_title("Technical Manual Ready")
+    pdf.body_text("For full API specs, refer to the Blocksize API Documentation PDF or the Swagger landing page.")
+    
+    pdf.output("docs/pdf/Blocksize_Agent_Manual.pdf")
+    print("Generated: Blocksize_Agent_Manual.pdf")
+
 if __name__ == "__main__":
     generate_docs()
     generate_catalog()
     generate_flow()
     generate_pricing()
+    generate_agent_manual()
