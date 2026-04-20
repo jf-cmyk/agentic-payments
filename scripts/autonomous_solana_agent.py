@@ -165,10 +165,16 @@ async def run_agent_loop(base_url_input: str):
             sample_size = min(10, len(all_instruments))
             chosen_pairs = random.sample(all_instruments, sample_size)
             
-            endpoints = ["vwap", "bidask", "state", "vwap30m"]
+            endpoints = ["vwap", "bidask"]
             
             print(f"🤖 [Agent]: Discovered {len(all_instruments)} assets. Executing 10 autonomous loops.\n")
             
+            # Ensure we have enough unique assets for 10 calls, otherwise allow repeats
+            if len(all_instruments) < 10:
+                chosen_pairs = random.choices(all_instruments, k=10)
+            else:
+                chosen_pairs = random.sample(all_instruments, 10)
+
             for i, pair in enumerate(chosen_pairs, start=1):
                 endpoint_type = random.choice(endpoints)
                 target_url = f"{base_url}/v1/{endpoint_type}/{pair}"
