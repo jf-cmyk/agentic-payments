@@ -8,9 +8,9 @@ payment protocol. Supports tiered pricing and dual-network settlement
 Endpoints:
   GET /v1/vwap/{pair}             — Real-time VWAP (crypto tier pricing)
   GET /v1/bidask/{pair}           — Bid/Ask snapshot (crypto tier pricing)
-  GET /v1/vwap30m/{ticker}        — 30-Min VWAP ($0.008 analytics)
-  GET /v1/vwap24h/{pair}          — 24-Hr VWAP ($0.008 analytics)
-  GET /v1/state/{pair}            — State Price ($0.008 analytics)
+  GET /v1/vwap30m/{ticker}        — 30-Min VWAP ($0.001 analytics)
+  GET /v1/vwap24h/{pair}          — 24-Hr VWAP ($0.001 analytics)
+  GET /v1/state/{pair}            — State Price (crypto tier pricing)
   GET /v1/equity/{ticker}         — Equity snapshot ($0.008)
   GET /v1/fx/{pair}               — FX rate ($0.005)
   GET /v1/metal/{ticker}          — Metal price ($0.005)
@@ -92,7 +92,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # Analytics tier
     "/v1/vwap30m/": settings.pricing.analytics,
     "/v1/vwap24h/": settings.pricing.analytics,
-    "/v1/state/": settings.pricing.analytics,
     # Equities
     "/v1/equity/": settings.pricing.equities,
     # TradFi
@@ -109,8 +108,8 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 
 def _get_price_for_path(path: str) -> Decimal | None:
     """Determine the price for a given request path."""
-    # Crypto VWAP and Bid/Ask use dynamic tier pricing
-    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/"):
+    # Crypto uses dynamic tier pricing
+    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/") or path.startswith("/v1/state/"):
         # Extract the pair from the path, determine base currency tier
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:

@@ -17,11 +17,11 @@ The core system is deployed as a stateless, highly scalable cloud application on
 The system currently exposes over 30,000 distinct financial instruments, structured into tiered pricing brackets based on data density and processing requirements:
 
 *   **Discovery (FREE):** Asset lookup, instrument listing, and pricing summaries.
-*   **Core Crypto ($0.002):** Real-time VWAP and Bid/Ask spreads for top-250 capitalized cryptocurrencies.
-*   **Extended Crypto ($0.004):** VWAP and Bid/Ask for 550+ long-tail and niche token pairs.
+*   **Core Crypto ($0.002):** Real-time VWAP, Bid/Ask spreads, and State Prices for top-250 capitalized cryptocurrencies.
+*   **Extended Crypto ($0.004):** VWAP, Bid/Ask, and State Prices for 550+ long-tail and niche token pairs.
 *   **Traditional Finance ($0.005):** Spot Foreign Exchange (129 pairs), Precious Metals (5 assets), and US Treasury Rates (8 maturity buckets).
 *   **Equities ($0.008):** High-level snapshot data for over 18,000 US and Chinese stocks.
-*   **Deep Analytics ($0.008):** Complex historical metrics including 30-Minute VWAP, 24-Hour VWAP, and end-of-day State Prices.
+*   **Historical Analytics ($0.001):** Complex historical metrics including 30-Minute VWAP and 24-Hour closing VWAP.
 
 ## 4. Financial & Settlement Architecture
 To support frictionless agentic purchasing, the infrastructure bypasses legacy banking rails:

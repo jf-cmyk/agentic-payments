@@ -63,13 +63,10 @@ Where `{service}` is one of `vwap`, `bidask`, `equity`, or `fx`. Returns a defin
 
 Prices fluctuate based on the capitalization and liquidity indexing requirements of the network requested. Top 250 assets default to **$0.002 USDC**. Niche and long-tail listings default to **$0.004 USDC**.
 
-**Real-Time VWAP**
+**Real-Time VWAP, Bid/Ask, and State Price**
 `GET /v1/vwap/{pair}`
-*Returns:* High-frequency, outlier-filtered Volume-Weighted Average Price.
-*Example:* `/v1/vwap/BTC-USD`
-
-**Bid/Ask Spread Snapshot**
 `GET /v1/bidask/{pair}`
+`GET /v1/state/{pair}`
 *Returns:* A consolidated top-of-book market depth snapshot across global liquidity pools.
 
 ### 2.3 Traditional Finance ($0.005 USDC)
@@ -88,18 +85,17 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 `GET /v1/rate/{maturity}`
 *Returns:* Government debt yields over 8 maturity brackets (e.g., 10Y, 2Y).
 
-### 2.4 Equities & Analytics ($0.008 USDC)
+### 2.4 Equities ($0.008 USDC)
 
 **Equities Snapshot**
 `GET /v1/equity/{ticker}`
 *Returns:* Market snapshot for 18,071 global stocks.
 
+### 2.5 Historical Analytics ($0.001 USDC)
+
 **Historical/Time-Series VWAP**
 `GET /v1/vwap30m/{ticker}` (30-Minute)
 `GET /v1/vwap24h/{ticker}` (24-Hour)
-
-**State Price End-of-Day**
-`GET /v1/state/{pair}`
 
 ---
 

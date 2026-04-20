@@ -151,7 +151,7 @@ class PricingSettings(BaseSettings):
     extended_crypto: Decimal = Field(Decimal("0.004"), alias="PRICE_EXTENDED_CRYPTO")
     tradfi: Decimal = Field(Decimal("0.005"), alias="PRICE_TRADFI")
     equities: Decimal = Field(Decimal("0.008"), alias="PRICE_EQUITIES")
-    analytics: Decimal = Field(Decimal("0.008"), alias="PRICE_ANALYTICS")
+    analytics: Decimal = Field(Decimal("0.001"), alias="PRICE_ANALYTICS")
 
     def get_crypto_price(self, base_currency: str) -> Decimal:
         """Get the price for a crypto data call based on asset tier."""
@@ -231,11 +231,11 @@ class Settings:
         """Return a human-readable pricing summary."""
         return {
             "discovery": {"price": "FREE", "includes": "search_pairs, list_instruments, get_pricing_info"},
-            "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP + Bid/Ask for Top 250 crypto"},
-            "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "RT VWAP + Bid/Ask for 550+ niche crypto"},
+            "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP, Bid/Ask, State Price for Top 250 crypto"},
+            "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "RT VWAP, Bid/Ask, State Price for 550+ niche crypto"},
             "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX (129 pairs), Metals (5), US Treasury Rates (8), Commodities"},
             "equities": {"price": f"${self.pricing.equities}", "includes": "18,071 US + Chinese stocks"},
-            "analytics": {"price": f"${self.pricing.analytics}", "includes": "30-Min VWAP, 24-Hr VWAP, State Price"},
+            "analytics": {"price": f"${self.pricing.analytics}", "includes": "30-Min VWAP, 24-Hr VWAP"},
         }
 
 

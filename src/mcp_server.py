@@ -165,8 +165,7 @@ async def get_vwap_30min(ticker: str) -> str:
 
     Provides periodic VWAP aggregated over 30-minute windows. Available for
     251 major crypto tickers. Ideal for time-series analysis and backtesting.
-
-    Cost: $0.008 USDC per call (Analytics tier).
+    Cost: $0.001 USDC per call (Analytics tier).
 
     Args:
         ticker: Base currency ticker (e.g., 'BTC', 'ETH', 'SOL').
@@ -201,8 +200,7 @@ async def get_vwap_24hr(pair: str) -> str:
 
     Provides the volume-weighted average price over the past 24 hours,
     essentially the institutional closing price. Includes 24h volume.
-
-    Cost: $0.008 USDC per call (Analytics tier).
+    Cost: $0.001 USDC per call (Analytics tier).
 
     Args:
         pair: Trading pair identifier (e.g., 'BTCUSD', 'ETHUSDT').
@@ -236,8 +234,7 @@ async def get_state_price(pair: str) -> str:
 
     The state price is a settlement-grade reference price used for
     mark-to-market and accounting purposes.
-
-    Cost: $0.008 USDC per call (Analytics tier).
+    Cost: $0.002 USDC (top 250 crypto) or $0.004 USDC (niche crypto).
 
     Args:
         pair: Trading pair identifier (e.g., 'btc-usd').
@@ -625,7 +622,7 @@ async def get_pricing_info() -> str:
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (550+ niche assets)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals, rates)\n"
         f"  📈 Equities:       ${settings.pricing.equities} (18k US + China stocks)\n"
-        f"  ⏱️  Analytics:      ${settings.pricing.analytics} (30-min, 24-hr VWAP, state price)\n"
+        f"  ⏱️  Historical:     ${settings.pricing.analytics} (30-min + 24-hr VWAP)\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)"
     )
 
