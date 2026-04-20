@@ -87,26 +87,34 @@ def generate_docs():
 def generate_catalog():
     pdf = BlocksizePDF()
     pdf.add_page()
-    pdf.chapter_title("Data Catalog")
+    pdf.chapter_title("Digital Asset Catalog")
     pdf.body_text("Access 3,900+ institutional-grade market instruments across all asset classes.")
     
-    services = [
-        ("Real-Time VWAP", "9,400+ Crypto pairs. -> GET /v1/vwap/{pair}"),
-        ("Bid/Ask Snapshots", "Order-book depth for crypto. -> GET /v1/bidask/{pair}"),
-        ("FX Rates", "120+ global currency pairs. -> GET /v1/fx/{pair}"),
-        ("US Equities", "US & Chinese stock market data. -> GET /v1/equity/{ticker}"),
-        ("Precious Metals", "Gold, Silver, Platinum pricing. -> GET /v1/metal/{ticker}"),
-        ("Global Commodities", "Energy and Agriculture benchmarks. -> GET /v1/commodity/{ticker}"),
+    # Detailed Asset Groups
+    groups = [
+        ("Core Crypto (Tier 1)", "BTCUSD, ETHUSD, SOLUSD, XRPUSD, ADAUSD, DOGEUSD, DOTUSD, AVAXUSD, SHIBUSD, LINKUSD"),
+        ("Extended & State (Tier 2)", "JUPUSD, WIFUSD, GNSUSD, TURBOUSD, PYTHUSD, BONKUSD, RNDRUSD, TIAUSD, SEIUSD, HNTUSD"),
+        ("FX Majors & Exotics", "EURUSD, GBPUSD, JPYUSD, AUDUSD, CHFUSD, USDCAD, EURGBP, EURJPY, USDMXN, USDZAR"),
+        ("Precious Metals", "XAUUSD (Gold), XAGUSD (Silver), XPTUSD (Platinum), XPDUSD (Palladium), COPPERUSD"),
+        ("Global Commodities", "BRENT (Oil), WHEAT, CORN, SUGAR, COFFEE, NATGAS"),
+        ("US Equities", "AAPL, TSLA, NVDA, MSFT, AMZN, GOOGL, META, NFLX, AMD, BABA")
     ]
     
-    for title, desc in services:
+    for title, tickers in groups:
         pdf.set_font("helvetica", "B", 11)
         pdf.set_text_color(*BLUE)
         pdf.cell(0, 7, title, 0, 1)
-        pdf.set_font("helvetica", "", 10)
+        pdf.set_font("helvetica", "", 9)
         pdf.set_text_color(*DARK_GREY)
-        pdf.multi_cell(0, 5, desc)
-        pdf.ln(3)
+        # Use a boxed display for tickers to look like a catalog
+        pdf.multi_cell(0, 5, f"Supported Tickers: {tickers}")
+        pdf.ln(4)
+
+    pdf.section_title("Real-Time Capabilities")
+    pdf.body_text(
+        "Every instrument listed is available via real-time VWAP and order-book snapshot endpoints. "
+        "Agents can discover the full 3,900+ instrument list programmatically via the /v1/vwap/instruments endpoint."
+    )
 
     pdf.output("docs/pdf/Blocksize_Data_Catalog.pdf")
     print("Generated: Blocksize_Data_Catalog.pdf")
