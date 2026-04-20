@@ -3,679 +3,316 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blocksize Capital x402 — Institutional Data for Autonomous Agents</title>
-  <meta name="description" content="Pay-per-call institutional market data for autonomous agents. Real-time crypto, FX, equities and more, settled in USDC on Solana or Base." />
+  <title>Blocksize Capital x402 — Institutional Data Economy</title>
+  <meta name="description" content="Pay-per-call institutional market data for autonomous agents. Settled in USDC on Solana or Base." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #09090f;
-      --bg-card: #111118;
-      --bg-card-hover: #16161f;
-      --border: rgba(255,255,255,0.07);
-      --border-glow: rgba(99,102,241,0.4);
-      --text: #e4e4f0;
-      --muted: #7878a0;
-      --accent: #6366f1;
-      --accent-2: #8b5cf6;
-      --accent-3: #06b6d4;
-      --green: #10b981;
-      --yellow: #f59e0b;
-      --red: #ef4444;
-      --gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+      /* BLOCKSIZE BRAND PALETTE */
+      --primary: #4f4bff;      /* Blocksize Blue */
+      --accent: #ecf781;       /* Blocksize Yellow/Lime */
+      --bg: #000000;           /* Pure Black */
+      --bg-card: #0a0a0f;      /* Near Black */
+      --bg-card-hover: #0e0e16;
+      --text: #ffffff;
+      --text-muted: #8a8a9e;
+      --border: rgba(255,255,255,0.08);
+      --border-accent: rgba(79, 75, 255, 0.4);
+      --grey-light: #f6f6f6;
+      --gradient-brand: linear-gradient(135deg, #4f4bff 0%, #06b6d4 100%);
     }
 
+    /* ─── BASE ───────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     html { scroll-behavior: smooth; }
-
     body {
       background: var(--bg);
       color: var(--text);
       font-family: 'Inter', sans-serif;
-      line-height: 1.6;
+      line-height: 1.5;
       overflow-x: hidden;
     }
 
+    /* ─── GRID / LAYOUT ──────────────────────────── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
+    section { padding: 8rem 0; border-bottom: 1px solid var(--border); }
+    .label {
+      font-size: 0.7rem; font-weight: 700; color: var(--primary);
+      text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 1rem;
+      display: inline-block;
+    }
+    h1, h2, h3 { font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
+    h2 { font-size: 2.5rem; margin-bottom: 1.5rem; }
+    p.lead { font-size: 1.125rem; color: var(--text-muted); max-width: 700px; margin-bottom: 3rem; }
+
     /* ─── NAV ───────────────────────────────────── */
     nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 1rem 2.5rem;
-      backdrop-filter: blur(16px) saturate(1.8);
-      background: rgba(9,9,15,0.75);
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      padding: 1.5rem 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--border);
     }
-    .nav-logo {
-      font-weight: 700; font-size: 1rem; letter-spacing: -0.02em;
-      background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .nav-links { display: flex; gap: 2rem; list-style: none; }
-    .nav-links a {
-      color: var(--muted); text-decoration: none; font-size: 0.875rem; font-weight: 500;
-      transition: color 0.2s;
-    }
-    .nav-links a:hover { color: var(--text); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; }
+    .logo { font-weight: 800; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem; }
+    .logo-box { width: 12px; height: 12px; background: var(--primary); transform: rotate(45deg); }
+    .nav-links { display: flex; gap: 2.5rem; list-style: none; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-weight: 500; font-size: 0.9rem; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--primary); }
     .nav-cta {
-      background: var(--accent); color: #fff; border: none; padding: 0.5rem 1.25rem;
-      border-radius: 8px; font-size: 0.875rem; font-weight: 600; cursor: pointer;
-      text-decoration: none; transition: opacity 0.2s, transform 0.2s;
+      background: var(--primary); color: white; padding: 0.6rem 1.25rem;
+      border-radius: 4px; font-weight: 600; text-decoration: none; font-size: 0.85rem;
+      transition: background 0.2s;
     }
-    .nav-cta:hover { opacity: 0.88; transform: translateY(-1px); }
-
-    /* ─── LAYOUT ────────────────────────────────── */
-    section { padding: 6rem 1.5rem; }
-    .container { max-width: 1100px; margin: 0 auto; }
-    .section-label {
-      display: inline-block; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em;
-      text-transform: uppercase; color: var(--accent); margin-bottom: 1rem;
-    }
-    h1, h2, h3 { letter-spacing: -0.02em; }
-    h2 { font-size: 2.25rem; font-weight: 700; margin-bottom: 1rem; }
-    p.lead { font-size: 1.125rem; color: var(--muted); max-width: 640px; margin-bottom: 3rem; line-height: 1.75; }
+    .nav-cta:hover { background: #3b37e0; }
 
     /* ─── HERO ──────────────────────────────────── */
     #hero {
-      padding-top: 10rem;
-      text-align: center;
-      position: relative;
+      background: radial-gradient(circle at 70% 30%, rgba(79, 75, 255, 0.15) 0%, transparent 60%);
+      padding-top: 12rem;
     }
-    .hero-glow {
-      position: absolute; width: 600px; height: 600px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
-      top: 50%; left: 50%; transform: translate(-50%, -60%);
-      pointer-events: none;
+    #hero h1 { font-size: 4.5rem; margin-bottom: 2rem; }
+    #hero h1 span { color: var(--primary); }
+    .hero-actions { display: flex; gap: 1.5rem; }
+    .btn-secondary {
+      background: transparent; color: white; border: 1px solid var(--border);
+      padding: 0.85rem 2rem; border-radius: 4px; font-weight: 600; text-decoration: none;
+      transition: background 0.2s;
     }
-    #hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4.5rem);
-      font-weight: 800;
-      line-height: 1.1;
-      margin-bottom: 1.5rem;
-    }
-    .gradient-text {
-      background: var(--gradient);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .hero-sub {
-      font-size: 1.2rem;
-      color: var(--muted);
-      max-width: 580px;
-      margin: 0 auto 2.5rem;
-    }
-    .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
-    .btn-primary {
-      background: var(--gradient);
-      color: #fff; border: none; padding: 0.85rem 2rem;
-      border-radius: 10px; font-size: 1rem; font-weight: 600;
-      cursor: pointer; text-decoration: none; transition: transform 0.2s, opacity 0.2s;
-      display: inline-block;
-    }
-    .btn-primary:hover { transform: translateY(-2px); opacity: 0.9; }
-    .btn-ghost {
-      background: transparent; color: var(--text);
-      border: 1px solid var(--border);
-      padding: 0.85rem 2rem; border-radius: 10px;
-      font-size: 1rem; font-weight: 500; cursor: pointer; text-decoration: none;
-      transition: border-color 0.2s, background 0.2s; display: inline-block;
-    }
-    .btn-ghost:hover { border-color: var(--accent); background: rgba(99,102,241,0.06); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); }
 
-    .hero-stats {
-      display: flex; justify-content: center; gap: 3rem;
-      margin-top: 4rem; flex-wrap: wrap;
-    }
-    .stat { text-align: center; }
-    .stat-value { font-size: 1.75rem; font-weight: 800; }
-    .stat-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-
-    /* ─── DATA CATALOG ──────────────────────────── */
-    #data { background: linear-gradient(180deg, var(--bg) 0%, rgba(17,17,24,0.5) 100%); }
-    .data-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 1.25rem;
-    }
+    /* ─── DATA CARDS ────────────────────────────── */
+    .data-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem; }
     .data-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      transition: border-color 0.3s, background 0.3s, transform 0.3s;
+      background: var(--bg-card); border: 1px solid var(--border); padding: 2rem;
+      border-radius: 8px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative; overflow: hidden;
     }
-    .data-card:hover {
-      border-color: var(--border-glow);
-      background: var(--bg-card-hover);
-      transform: translateY(-3px);
-    }
-    .data-card-header {
-      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
-    }
-    .data-icon {
-      width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem;
-    }
-    .data-card h3 { font-size: 1rem; font-weight: 600; }
-    .data-card p { font-size: 0.875rem; color: var(--muted); margin-bottom: 1rem; }
-    .data-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .tag {
-      font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.6rem;
-      border-radius: 999px; font-family: 'JetBrains Mono', monospace;
-    }
-    .tag-green { background: rgba(16,185,129,0.12); color: #10b981; }
-    .tag-blue { background: rgba(6,182,212,0.12); color: #06b6d4; }
-    .tag-purple { background: rgba(139,92,246,0.12); color: #8b5cf6; }
-    .tag-yellow { background: rgba(245,158,11,0.12); color: #f59e0b; }
-    .endpoint-pill {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
-      color: var(--accent-3); background: rgba(6,182,212,0.08);
-      border: 1px solid rgba(6,182,212,0.15); border-radius: 6px;
-      padding: 0.2rem 0.5rem; display: inline-block; margin-top: 0.5rem;
-    }
+    .data-card:hover { border-color: var(--primary); background: var(--bg-card-hover); transform: translateY(-4px); }
+    .data-card-icon { font-size: 1.5rem; color: var(--primary); margin-bottom: 1rem; }
+    .data-card h3 { font-size: 1.15rem; margin-bottom: 0.5rem; }
+    .data-card p { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+    .data-card .tag { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent); opacity: 0.8; }
 
     /* ─── USER FLOW ─────────────────────────────── */
-    #flow { background: var(--bg); }
-    .flow-steps { display: flex; flex-direction: column; gap: 0; position: relative; }
-    .flow-step {
-      display: grid; grid-template-columns: 64px 1fr;
-      gap: 1.5rem; align-items: flex-start;
-      padding-bottom: 2.5rem; position: relative;
+    .flow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 3rem; }
+    .step { border-left: 2px solid var(--border); padding-left: 2rem; position: relative; }
+    .step::before {
+      content: ''; position: absolute; left: -5px; top: 0; width: 8px; height: 8px;
+      background: var(--primary); border-radius: 50%;
     }
-    .flow-step:last-child { padding-bottom: 0; }
-    .flow-step::before {
-      content: '';
-      position: absolute; left: 31px; top: 52px;
-      width: 2px; height: calc(100% - 52px);
-      background: linear-gradient(to bottom, var(--accent), transparent);
-      display: block;
-    }
-    .flow-step:last-child::before { display: none; }
-    .step-num {
-      width: 52px; height: 52px; border-radius: 50%;
-      background: var(--bg-card);
-      border: 2px solid var(--accent);
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: 1rem; color: var(--accent);
-      flex-shrink: 0; box-shadow: 0 0 20px rgba(99,102,241,0.2);
-      position: relative; z-index: 1;
-    }
-    .step-content { padding-top: 0.75rem; }
-    .step-content h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem; }
-    .step-content p { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.75rem; }
-    .code-block {
-      background: #0d0d14;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.78rem;
-      color: var(--text);
-      overflow-x: auto;
-      line-height: 1.7;
-    }
-    .code-comment { color: var(--muted); }
-    .code-key { color: #8b5cf6; }
-    .code-string { color: #10b981; }
-    .code-num { color: #f59e0b; }
+    .step-num { font-size: 0.8rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem; display: block; }
+    .step h4 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+    .step p { font-size: 0.9rem; color: var(--text-muted); }
 
-    /* ─── PRICING ───────────────────────────────── */
-    #pricing { background: rgba(17,17,24,0.5); }
-    .pricing-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 1rem; margin-bottom: 3rem;
+    /* ─── PRICING TABLE ──────────────────────────── */
+    .pricing-table {
+      width: 100%; border-collapse: collapse; background: var(--bg-card);
+      border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     }
-    .price-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.5rem 1.25rem;
-      text-align: center; transition: border-color 0.3s, transform 0.3s;
-    }
-    .price-card:hover { border-color: var(--border-glow); transform: translateY(-3px); }
-    .price-card.featured {
-      border-color: var(--accent);
-      background: linear-gradient(145deg, rgba(99,102,241,0.1), var(--bg-card));
-      box-shadow: 0 0 30px rgba(99,102,241,0.15);
-    }
-    .price-icon { font-size: 1.75rem; margin-bottom: 0.75rem; }
-    .price-label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
-    .price-amount { font-size: 1.6rem; font-weight: 800; color: var(--text); }
-    .price-unit { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
-    .price-desc { font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem; line-height: 1.5; }
+    .pricing-table th { background: rgba(79, 75, 255, 0.05); color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 1.25rem 2rem; text-align: left; }
+    .pricing-table td { padding: 1.25rem 2rem; border-top: 1px solid var(--border); font-size: 0.95rem; }
+    .price-value { font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--accent); }
 
-    .pricing-compare {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden;
+    /* ─── DOCS LINKS ─────────────────────────────── */
+    .pdf-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1rem; }
+    .pdf-card {
+      background: var(--bg-card); border: 1px solid var(--border); padding: 1.5rem;
+      border-radius: 8px; display: flex; align-items: center; justify-content: space-between;
+      text-decoration: none; color: white; transition: background 0.2s;
     }
-    .compare-header {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      background: rgba(99,102,241,0.08); padding: 1rem 1.5rem;
-      font-size: 0.8rem; font-weight: 600; color: var(--muted);
-      text-transform: uppercase; letter-spacing: 0.08em;
-    }
-    .compare-row {
-      display: grid; grid-template-columns: 1fr 1fr 1fr;
-      padding: 0.9rem 1.5rem;
-      border-top: 1px solid var(--border);
-      font-size: 0.875rem; transition: background 0.15s;
-    }
-    .compare-row:hover { background: rgba(99,102,241,0.04); }
-    .compare-row .endpoint { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--accent-3); }
-    .compare-row .price-cell { font-weight: 600; }
-    .compare-row .free-tag {
-      color: var(--green); font-weight: 600;
-    }
-
-    /* ─── DOCS ──────────────────────────────────── */
-    #docs { background: var(--bg); }
-    .docs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem; }
-    .doc-card {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.5rem;
-      transition: border-color 0.3s, transform 0.3s;
-    }
-    .doc-card:hover { border-color: var(--border-glow); transform: translateY(-3px); }
-    .doc-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
-    .doc-card p { font-size: 0.875rem; color: var(--muted); margin-bottom: 1rem; }
-    .doc-link {
-      font-size: 0.8rem; font-weight: 600; color: var(--accent);
-      text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;
-    }
-    .doc-link:hover { text-decoration: underline; }
+    .pdf-card:hover { background: rgba(79, 75, 255, 0.1); border-color: var(--primary); }
+    .pdf-card span { font-weight: 600; font-size: 1rem; }
+    .pdf-card .arrow { font-size: 1.25rem; color: var(--primary); }
 
     /* ─── FOOTER ────────────────────────────────── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 2.5rem 1.5rem; text-align: center;
-      color: var(--muted); font-size: 0.8rem;
-    }
-    footer strong { color: var(--text); }
+    footer { padding: 5rem 0; border-top: 1px solid var(--border); text-align: center; }
+    .footer-text { color: var(--text-muted); font-size: 0.85rem; }
 
-    /* ─── RESPONSIVE ────────────────────────────── */
-    @media (max-width: 640px) {
-      nav { padding: 1rem; }
+    @media (max-width: 768px) {
+      #hero h1 { font-size: 3rem; }
       .nav-links { display: none; }
-      h2 { font-size: 1.75rem; }
-      .hero-stats { gap: 1.5rem; }
-      .compare-header, .compare-row { grid-template-columns: 1fr 1fr; }
-      .compare-header span:nth-child(3), .compare-row span:nth-child(3) { display: none; }
+      .pdf-links { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── NAV ─────────────────────────── -->
 <nav>
-  <span class="nav-logo">⬡ Blocksize x402</span>
-  <ul class="nav-links">
-    <li><a href="#data">Data</a></li>
-    <li><a href="#flow">How It Works</a></li>
-    <li><a href="#pricing">Pricing</a></li>
-    <li><a href="#docs">Docs</a></li>
-  </ul>
-  <a class="nav-cta" href="https://agentic-payments-production.up.railway.app/docs" target="_blank">Open API →</a>
+  <div class="container">
+    <div class="nav-inner">
+      <div class="logo">
+        <div class="logo-box"></div> 
+        BLOCKSIZE CAPITAL
+      </div>
+      <ul class="nav-links">
+        <li><a href="#catalog">Catalog</a></li>
+        <li><a href="#flow">Flow</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#resources">Resources</a></li>
+      </ul>
+      <a href="https://agentic-payments-production.up.railway.app/docs" class="nav-cta" target="_blank">Launch API</a>
+    </div>
+  </div>
 </nav>
 
-<!-- ── HERO ────────────────────────── -->
 <section id="hero">
-  <div class="hero-glow"></div>
   <div class="container">
-    <div class="section-label">x402 Payment Protocol</div>
-    <h1>Institutional Data<br><span class="gradient-text">for Autonomous Agents</span></h1>
-    <p class="hero-sub" style="margin:0 auto 2.5rem">
-      Pay-per-call market data across Crypto, FX, Equities, Metals and Rates.
-      No subscriptions. No API keys. Just USDC on Solana or Base.
-    </p>
+    <div class="label">Payment Protocol x402</div>
+    <h1>Professional Data<br><span>for Agentic Economy.</span></h1>
+    <p class="lead">Institutional-grade feeds for Equities, Crypto, FX and Macro. Pay per call, settle instantly on Solana or Base, and scale without boundaries.</p>
     <div class="hero-actions">
-      <a class="btn-primary" href="#flow">See How It Works</a>
-      <a class="btn-ghost" href="https://agentic-payments-production.up.railway.app/docs" target="_blank">Explore the API</a>
-    </div>
-    <div class="hero-stats">
-      <div class="stat"><div class="stat-value gradient-text">3,900+</div><div class="stat-label">Active Instruments</div></div>
-      <div class="stat"><div class="stat-value gradient-text">$0.002</div><div class="stat-label">Minimum Cost / Call</div></div>
-      <div class="stat"><div class="stat-value gradient-text">&lt;500ms</div><div class="stat-label">Global Latency</div></div>
-      <div class="stat"><div class="stat-value gradient-text">2</div><div class="stat-label">Settlement Networks</div></div>
+      <a href="#flow" class="nav-cta">GET STARTED</a>
+      <a href="https://agentic-payments-production.up.railway.app/docs" target="_blank" class="btn-secondary">VIEW DOCS</a>
     </div>
   </div>
 </section>
 
-<!-- ── DATA CATALOG ────────────────── -->
-<section id="data">
+<section id="catalog">
   <div class="container">
-    <div class="section-label">Data Catalog</div>
-    <h2>What Data Can Agents Access?</h2>
-    <p class="lead">All feeds are sourced from Blocksize Capital's institutional infrastructure and returned in structured JSON with rich metadata for LLM reasoning.</p>
+    <div class="label">Accessible Data</div>
+    <h2>Comprehensive Asset Catalog</h2>
+    <p class="lead">Unlock over 3,900+ institutional instruments through specialized x402 data tools.</p>
+    
     <div class="data-grid">
-
       <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(99,102,241,.12)">₿</div>
-          <h3>Real-Time Crypto VWAP</h3>
-        </div>
-        <p>Volume-weighted average price for 9,400+ crypto pairs with market cap and volume.</p>
-        <div class="data-tags">
-          <span class="tag tag-purple">crypto</span>
-          <span class="tag tag-green">live</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/vwap/{pair}</div>
+        <div class="data-card-icon">₿</div>
+        <h3>Crypto Markets</h3>
+        <p>VWAP and Order Book snapshots for 9,400+ pairs. Institutional depth and liquidity metadata included.</p>
+        <span class="tag">GET /v1/vwap/{pair}</span>
       </div>
-
       <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(6,182,212,.12)">📊</div>
-          <h3>Crypto Bid / Ask</h3>
-        </div>
-        <p>Real-time best bid, ask, mid and spread from aggregated institutional liquidity.</p>
-        <div class="data-tags">
-          <span class="tag tag-purple">crypto</span>
-          <span class="tag tag-blue">order book</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/bidask/{pair}</div>
+        <div class="data-card-icon">📈</div>
+        <h3>Equity Markets</h3>
+        <p>Real-time US and Chinese stock market snapshots. Bid, ask, mid-price and volume metrics.</p>
+        <span class="tag">GET /v1/equity/{ticker}</span>
       </div>
-
       <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(16,185,129,.12)">💱</div>
-          <h3>FX Rates</h3>
-        </div>
-        <p>Live bid/ask/mid rates for 120+ currency pairs including major, minor and exotic.</p>
-        <div class="data-tags">
-          <span class="tag tag-green">fx</span>
-          <span class="tag tag-blue">live</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/fx/{pair}</div>
+        <div class="data-card-icon">💱</div>
+        <h3>FX & Macro</h3>
+        <p>120+ currency pairs and specialized US Treasury yield curves from 1-month to 30-year maturity.</p>
+        <span class="tag">GET /v1/fx/{pair}</span>
       </div>
-
       <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(245,158,11,.12)">📈</div>
-          <h3>US Equities</h3>
-        </div>
-        <p>Institutional equity snapshots with bid/ask and volume for US and Chinese markets.</p>
-        <div class="data-tags">
-          <span class="tag tag-yellow">equity</span>
-          <span class="tag tag-green">US + CN</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/equity/{ticker}</div>
+        <div class="data-card-icon">🥇</div>
+        <h3>Precious Metals</h3>
+        <p>Global spot prices for Gold, Silver, Platinum and Palladium. Direct institutional streams.</p>
+        <span class="tag">GET /v1/metal/{ticker}</span>
       </div>
-
-      <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(139,92,246,.12)">🥇</div>
-          <h3>Precious Metals</h3>
-        </div>
-        <p>Spot prices for Gold, Silver, Platinum and Palladium in real-time.</p>
-        <div class="data-tags">
-          <span class="tag tag-purple">commodity</span>
-          <span class="tag tag-yellow">metals</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/metal/{ticker}</div>
-      </div>
-
-      <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(6,182,212,.12)">📉</div>
-          <h3>Treasury Yields</h3>
-        </div>
-        <p>US Treasury yield curve from 1M to 30Y. Ideal for macro agents and rate models.</p>
-        <div class="data-tags">
-          <span class="tag tag-blue">rates</span>
-          <span class="tag tag-green">macro</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/rate/{maturity}</div>
-      </div>
-
-      <div class="data-card" style="border-color: rgba(99,102,241,0.3); background: linear-gradient(145deg, rgba(99,102,241,0.06), var(--bg-card));">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(99,102,241,.2)">⚡</div>
-          <h3>Batch Multi-Asset</h3>
-        </div>
-        <p>Fetch up to 10+ assets across all classes in one request and one payment. Designed for high-efficiency agents.</p>
-        <div class="data-tags">
-          <span class="tag tag-purple">all classes</span>
-          <span class="tag tag-blue">single payment</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/batch?reqs=…</div>
-      </div>
-
-      <div class="data-card">
-        <div class="data-card-header">
-          <div class="data-icon" style="background:rgba(16,185,129,.12)">🔍</div>
-          <h3>Instrument Search</h3>
-        </div>
-        <p>Search for valid tickers and list all available instruments per service. Always free — no payment required.</p>
-        <div class="data-tags">
-          <span class="tag tag-green">FREE</span>
-          <span class="tag tag-blue">discovery</span>
-        </div>
-        <div class="endpoint-pill">GET /v1/search?q=…</div>
-      </div>
-
     </div>
   </div>
 </section>
 
-<!-- ── USER FLOW ────────────────────── -->
 <section id="flow">
-  <div class="container" style="max-width: 760px;">
-    <div class="section-label">User Flow</div>
-    <h2>How Does an Agent Pay?</h2>
-    <p class="lead">The x402 protocol turns HTTP payment interactions into a clean 3-step loop. Any agent that can sign a transaction can integrate in minutes.</p>
+  <div class="container">
+    <div class="label">User Flow</div>
+    <h2>Automated Settlement Cycle</h2>
+    <p class="lead">How autonomous agents consume and pay for data in four simple steps.</p>
+
     <div class="flow-steps">
-
-      <div class="flow-step">
-        <div class="step-num">1</div>
-        <div class="step-content">
-          <h3>Request the Endpoint</h3>
-          <p>Your agent makes a normal GET request to any paid data endpoint. No API key needed.</p>
-          <div class="code-block"><span class="code-comment"># Agent requests BTC VWAP</span>
-GET https://agentic-payments-production.up.railway.app/v1/vwap/BTCUSD</div>
-        </div>
+      <div class="step">
+        <span class="step-num">Step 01</span>
+        <h4>Resource Request</h4>
+        <p>The agent makes a standard GET request to any gated endpoint.</p>
       </div>
-
-      <div class="flow-step">
-        <div class="step-num">2</div>
-        <div class="step-content">
-          <h3>Receive the 402 Challenge</h3>
-          <p>The server responds with HTTP 402. The <code style="font-family:monospace;color:var(--accent-3)">PAYMENT-REQUIRED</code> header contains Base64-encoded JSON with the exact USDC amount and destination wallet.</p>
-          <div class="code-block"><span class="code-key">HTTP/1.1</span> <span class="code-num">402</span> Payment Required
-<span class="code-key">PAYMENT-REQUIRED:</span> <span class="code-string">eyJuZXR3b3JrIjogInNvbGFuYS8...</span>
-
-<span class="code-comment">// Decoded header:</span>
-[{
-  <span class="code-key">"network"</span>: <span class="code-string">"solana:mainnet"</span>,
-  <span class="code-key">"payTo"</span>: <span class="code-string">"89xvy...gtMEu"</span>,
-  <span class="code-key">"amount"</span>: <span class="code-num">0.002</span>,
-  <span class="code-key">"currency"</span>: <span class="code-string">"USDC"</span>
-}]</div>
-        </div>
+      <div class="step">
+        <span class="step-num">Step 02</span>
+        <h4>402 Challenge</h4>
+        <p>Server returns 402 with PAYMENT-REQUIRED header containing amount/wallet.</p>
       </div>
-
-      <div class="flow-step">
-        <div class="step-num">3</div>
-        <div class="step-content">
-          <h3>Pay & Submit Proof</h3>
-          <p>The agent sends USDC to the settlement wallet on Solana (or Base L2), then re-submits the request with the transaction hash as a <code style="font-family:monospace;color:var(--accent-3)">PAYMENT-SIGNATURE</code> header.</p>
-          <div class="code-block"><span class="code-comment"># Resubmit with transaction proof</span>
-GET /v1/vwap/BTCUSD
-<span class="code-key">PAYMENT-SIGNATURE:</span> <span class="code-string">eyJwcm9vZiI6IjNOc2dp...</span></div>
-        </div>
+      <div class="step">
+        <span class="step-num">Step 03</span>
+        <h4>Native Settlement</h4>
+        <p>Agent signs and broadcasts USDC on Solana or Base.</p>
       </div>
-
-      <div class="flow-step">
-        <div class="step-num">✓</div>
-        <div class="step-content" style="padding-top:0.65rem;">
-          <h3>Receive Verified Data</h3>
-          <p>The server verifies the on-chain transaction via Solana RPC, then returns the full institutional data payload — enriched with LLM-readable metadata.</p>
-          <div class="code-block">{
-  <span class="code-key">"status"</span>: <span class="code-string">"ok"</span>,
-  <span class="code-key">"data"</span>: {
-    <span class="code-key">"pair"</span>: <span class="code-string">"BTCUSD"</span>,
-    <span class="code-key">"vwap"</span>: <span class="code-num">75483.10</span>,
-    <span class="code-key">"volume"</span>: <span class="code-num">8747.92</span>,
-    <span class="code-key">"market_cap"</span>: <span class="code-num">1511062107770.38</span>
-  },
-  <span class="code-key">"meta"</span>: {
-    <span class="code-key">"provider"</span>: <span class="code-string">"Blocksize Capital"</span>,
-    <span class="code-key">"endpoint"</span>: <span class="code-string">"Real-Time VWAP"</span>,
-    <span class="code-key">"asset_class"</span>: <span class="code-string">"crypto"</span>
-  }
-}</div>
-        </div>
+      <div class="step">
+        <span class="step-num">Step 04</span>
+        <h4>Instant Unlock</h4>
+        <p>Agent resubmits with TX hash. Server verifies and delivers data.</p>
       </div>
-
     </div>
   </div>
 </section>
 
-<!-- ── PRICING ──────────────────────── -->
 <section id="pricing">
   <div class="container">
-    <div class="section-label">Pricing</div>
-    <h2>Pay Only for What You Use</h2>
-    <p class="lead">No subscriptions, no rate-limit tiers. Every call is settled in USDC. Use the Batch endpoint to combine assets and maximize data per dollar.</p>
+    <div class="label">Pricing Table</div>
+    <h2>Institutional Unit Costs</h2>
+    <p class="lead">Clear, transparent pricing based on asset liquidity and source tier.</p>
 
-    <div class="pricing-grid">
-      <div class="price-card">
-        <div class="price-icon">₿</div>
-        <div class="price-label">Crypto Tier 1</div>
-        <div class="price-amount">$0.002</div>
-        <div class="price-unit">per call</div>
-        <div class="price-desc">Major pairs: BTC, ETH, SOL, AVAX</div>
-      </div>
-      <div class="price-card">
-        <div class="price-icon">🔗</div>
-        <div class="price-label">Crypto Tier 2</div>
-        <div class="price-amount">$0.004</div>
-        <div class="price-unit">per call</div>
-        <div class="price-desc">Alt-cap pairs: LINK, AVAX, DOT, etc.</div>
-      </div>
-      <div class="price-card featured">
-        <div class="price-icon">⚡</div>
-        <div class="price-label">FX &amp; Metals</div>
-        <div class="price-amount">$0.005</div>
-        <div class="price-unit">per call</div>
-        <div class="price-desc">120+ currency pairs, Gold, Silver</div>
-      </div>
-      <div class="price-card">
-        <div class="price-icon">📈</div>
-        <div class="price-label">Equities</div>
-        <div class="price-amount">$0.008</div>
-        <div class="price-unit">per call</div>
-        <div class="price-desc">US &amp; Chinese market snapshots</div>
-      </div>
-      <div class="price-card">
-        <div class="price-icon">📉</div>
-        <div class="price-label">Rates</div>
-        <div class="price-amount">$0.005</div>
-        <div class="price-unit">per call</div>
-        <div class="price-desc">Full US Treasury yield curve</div>
-      </div>
-      <div class="price-card">
-        <div class="price-icon">🔍</div>
-        <div class="price-label">Search &amp; Discovery</div>
-        <div class="price-amount" style="color:var(--green)">FREE</div>
-        <div class="price-unit">always</div>
-        <div class="price-desc">Instrument lists, ticker search</div>
-      </div>
-    </div>
-
-    <div class="pricing-compare">
-      <div class="compare-header">
-        <span>Endpoint</span>
-        <span>Price (USDC)</span>
-        <span>Example</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/vwap/{pair}</span>
-        <span class="price-cell">$0.002 – $0.004</span>
-        <span>BTCUSD, ETHUSD</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/bidask/{pair}</span>
-        <span class="price-cell">$0.002 – $0.004</span>
-        <span>SOLUSD, LINKUSD</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/fx/{pair}</span>
-        <span class="price-cell">$0.005</span>
-        <span>EURUSD, GBPJPY</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/metal/{ticker}</span>
-        <span class="price-cell">$0.005</span>
-        <span>XAUUSD, XAGUSD</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/equity/{ticker}</span>
-        <span class="price-cell">$0.008</span>
-        <span>AAPL, TSLA</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/rate/{maturity}</span>
-        <span class="price-cell">$0.005</span>
-        <span>10Y, 2Y, 30Y</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/batch?reqs=…</span>
-        <span class="price-cell">Σ of assets</span>
-        <span>10 assets, 1 payment</span>
-      </div>
-      <div class="compare-row">
-        <span class="endpoint">/v1/search</span>
-        <span class="price-cell free-tag">FREE</span>
-        <span>Find any ticker</span>
-      </div>
-    </div>
+    <table class="pricing-table">
+      <thead>
+        <tr>
+          <th>Asset Class</th>
+          <th>Unit Cost (USDC)</th>
+          <th>Typical Examples</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Crypto Tier 1</td>
+          <td class="price-value">$0.002</td>
+          <td>BTCUSD, ETHUSD, SOLUSD</td>
+        </tr>
+        <tr>
+          <td>Crypto Tier 2</td>
+          <td class="price-value">$0.004</td>
+          <td>LINKUSD, AVAXUSD, DOTUSD</td>
+        </tr>
+        <tr>
+          <td>FX & Macro</td>
+          <td class="price-value">$0.005</td>
+          <td>EURUSD, XAUUSD, 10Y Yield</td>
+        </tr>
+        <tr>
+          <td>Equities</td>
+          <td class="price-value">$0.008</td>
+          <td>AAPL, TSLA, BABA</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
-<!-- ── DOCS ─────────────────────────── -->
-<section id="docs">
+<section id="resources">
   <div class="container">
-    <div class="section-label">Documentation</div>
-    <h2>Everything You Need to Integrate</h2>
-    <p class="lead">From interactive API explorer to copy-paste agent code — onboard in under 15 minutes.</p>
-    <div class="docs-grid">
-      <div class="doc-card">
-        <h3>📖 Interactive API Explorer</h3>
-        <p>Full Swagger UI with live request testing, 402 response schemas and all endpoint definitions with example payloads.</p>
-        <a class="doc-link" href="https://agentic-payments-production.up.railway.app/docs" target="_blank">Open Swagger UI →</a>
-      </div>
-      <div class="doc-card">
-        <h3>🤖 MCP Manifest (Agent Discovery)</h3>
-        <p>Point any MCP-compatible client (Claude Desktop, GPT Actions) to this URL to auto-discover all tools and payment parameters.</p>
-        <a class="doc-link" href="https://agentic-payments-production.up.railway.app/mcp/manifest.json" target="_blank">View Manifest →</a>
-      </div>
-      <div class="doc-card">
-        <h3>⚡ OpenAPI Schema</h3>
-        <p>Machine-readable OpenAPI 3.0 JSON schema. Import directly into Postman, Insomnia or any code-generation tool.</p>
-        <a class="doc-link" href="https://agentic-payments-production.up.railway.app/openapi.json" target="_blank">Download Schema →</a>
-      </div>
-      <div class="doc-card">
-        <h3>🏥 Health &amp; Status</h3>
-        <p>Live health check endpoint returning server status, settlement wallet addresses and full pricing table in JSON.</p>
-        <a class="doc-link" href="https://agentic-payments-production.up.railway.app/health" target="_blank">Check Health →</a>
-      </div>
-      <div class="doc-card">
-        <h3>🐍 Python Boilerplate</h3>
-        <p>A minimal, copy-paste Python script that walks through the complete 402 payment loop: request → pay → retrieve.</p>
-        <a class="doc-link" href="https://github.com/jf-cmyk/agentic-payments/blob/main/scripts/examples/client_boilerplate.py" target="_blank">View on GitHub →</a>
-      </div>
-      <div class="doc-card">
-        <h3>📦 Batch Query Guide</h3>
-        <p>Learn how to combine 10+ assets into one request using the <code style="font-family:monospace;font-size:0.8em;color:var(--accent-3)">/v1/batch</code> endpoint for maximum efficiency.</p>
-        <a class="doc-link" href="https://agentic-payments-production.up.railway.app/docs#/default/batch_request_v1_batch_get" target="_blank">See Batch Docs →</a>
-      </div>
+    <div class="label">Technical Resources</div>
+    <h2>Institutional Artifacts</h2>
+    <p class="lead">Download our high-fidelity PDF guides or explore the dynamic manifest.</p>
+
+    <div class="pdf-links">
+      <a href="docs/pdf/Blocksize_API_Documentation.pdf" class="pdf-card">
+        <span>📖 Full API Documentation</span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="docs/pdf/Blocksize_Data_Catalog.pdf" class="pdf-card">
+        <span>📦 Data Catalog (3,900+ Assets)</span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="docs/pdf/Blocksize_User_Flow.pdf" class="pdf-card">
+        <span>🔄 Autonomous User Flow</span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="docs/pdf/Blocksize_Pricing_Guide.pdf" class="pdf-card">
+        <span>💰 Full Pricing Schedule</span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="mcp/manifest.json" class="pdf-card" style="border-color: var(--accent);">
+        <span>🤖 MCP Discovery Manifest</span>
+        <span class="arrow">→</span>
+      </a>
+      <a href="openapi.json" class="pdf-card">
+        <span>⚡ Raw OpenAPI JSON</span>
+        <span class="arrow">→</span>
+      </a>
     </div>
   </div>
 </section>
 
-<!-- ── FOOTER ────────────────────────── -->
 <footer>
-  <p><strong>Blocksize Capital x402 Data Economy</strong></p>
-  <p style="margin-top:0.5rem">Settlement wallets: Solana Mainnet · Base L2 &nbsp;|&nbsp; Data provided by Blocksize Capital</p>
-  <p style="margin-top:0.5rem">Questions? Reach out to your Blocksize account manager or check the API docs above.</p>
+  <div class="container">
+    <p class="footer-text">© 2026 BLOCKSIZE CAPITAL. All Rights Reserved. x402 Protocol Implementation.</p>
+    <p class="footer-text" style="margin-top: 1rem; opacity: 0.6;">Settlement Supported on Solana Mainnet and Base L2.</p>
+  </div>
 </footer>
 
 </body>
