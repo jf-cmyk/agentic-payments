@@ -8,17 +8,39 @@ To authorize requests, you must include either an x402 payment proof or an `X-AG
 
 ![Architecture Blueprint](assets/architecture_diagram.png)
 
-### Logical Data Flow
+## Operational Swimlane
+
+![Institutional Swimlane](assets/swimlane_diagram.png)
+
+### End-to-End Sequence Flow
 
 ```mermaid
-graph TD
-    A[AI Agent] -->|Request + Wallet| B[x402 Middleware]
-    B -->|Check Balance| C{Credit Manager}
-    C -->|Insufficient| D[Return 402 Challenge]
-    C -->|Success| E[Unlock Data]
-    D -->|Settle On-Chain| F[Solana / Base RPC]
-    F -->|Proof Verified| E
-    E -->|Institutional Stream| A
+sequenceDiagram
+    participant Agent as AI Agent
+    participant Gateway as Blocksize Gateway
+    participant CM as Credit Manager
+    participant Chain as Blockchain (SOL/Base)
+    participant Feed as Institutional Feed
+
+    Agent->>Gateway: GET /v1/vwap/BTC-USD (X-AGENT-WALLET)
+    Gateway->>CM: verify_eligibility(wallet, IP)
+    CM->>Chain: getBalance + signatures
+    Chain-->>CM: 0.15 SOL, 50 txs, 48h old
+    alt New Qualified Wallet
+        CM->>CM: Grant 50 Welcome Credits
+    end
+    CM->>CM: draw_credits(2.0)
+    alt Success
+        Gateway->>Feed: fetch_data(BTC-USD)
+        Feed-->>Gateway: Institutional Data
+        Gateway-->>Agent: 200 OK + Data
+    else Insufficient Credits
+        Gateway-->>Agent: 402 Payment Required
+        Agent->>Chain: settle_transaction(USDC)
+        Chain-->>Agent: TX Hash
+        Agent->>Gateway: GET /v1/vwap/... (X-PAYMENT-PROOF)
+        Gateway-->>Agent: 200 OK + Data
+    end
 ```
 
 ## Agent Capabilities
