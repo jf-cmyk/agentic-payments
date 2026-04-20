@@ -289,8 +289,9 @@ class BlocksizeClient:
         result = await self._rpc_call("bidask_getSnapshot", {"ticker": pair})
 
         if isinstance(result, dict):
-            bid = float(result.get("bid", 0))
-            ask = float(result.get("ask", 0))
+            # Blocksize uses 'agg_bid_price' and 'agg_ask_price' for aggregated crypto snapshots
+            bid = float(result.get("agg_bid_price", result.get("bid", 0)))
+            ask = float(result.get("agg_ask_price", result.get("ask", 0)))
             spread = ask - bid
             spread_pct = (spread / ask * 100) if ask > 0 else 0.0
 
@@ -300,7 +301,7 @@ class BlocksizeClient:
                 ask=ask,
                 spread=spread,
                 spread_pct=spread_pct,
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                timestamp=_parse_timestamp(result.get("ts", result.get("timestamp"))),
                 source="blocksize",
             )
 

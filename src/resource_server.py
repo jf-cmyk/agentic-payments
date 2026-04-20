@@ -145,6 +145,7 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
             
         if "solana" in network:
             rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+            logger.info(f"Verifying Solana payment via RPC: {rpc_url.split('?')[0]}")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(
                     rpc_url,
