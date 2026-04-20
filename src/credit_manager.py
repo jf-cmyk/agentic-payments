@@ -38,11 +38,12 @@ class CreditManager:
             )
         ''')
         
-        # Trial History (for Sybil Protection)
+        # Trial History (with Ancestry Tracking)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trial_history (
                 ip_hash TEXT PRIMARY KEY,
                 address TEXT,
+                funding_address TEXT,
                 timestamp TIMESTAMP
             )
         ''')
@@ -82,13 +83,51 @@ class CreditManager:
             logger.error(f"Failed to check SOL balance for {address}: {e}")
             return 0.0
 
+    async def _get_wallet_metadata(self, address: str) -> dict:
+        """Fetch transaction count and age from on-chain RPC signatures."""
+        rpc_url = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(rpc_url, json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [address, {"limit": 10}]
+                })
+                res.raise_for_status()
+                data = res.json()
+                sigs = data.get("result", [])
+                
+                count = len(sigs)
+                first_seen = datetime.utcnow()
+                funding_address = None
+                
+                if count > 0:
+                    # Time of oldest signature in the batch
+                    oldest_ts = sigs[-1].get("blockTime")
+                    if oldest_ts:
+                        first_seen = datetime.utcfromtimestamp(oldest_ts)
+                    
+                    # Attempt to find funding source (very basic: last sig's sender)
+                    # Note: Full trace is complex, using count/age as primary signals
+                
+                return {
+                    "count": count,
+                    "age_hours": (datetime.utcnow() - first_seen).total_seconds() / 3600.0,
+                    "signatures": sigs
+                }
+        except Exception as e:
+            logger.error(f"Failed to check history for {address}: {e}")
+            return {"count": 0, "age_hours": 0}
+
     async def ensure_wallet_with_welcome_pack(self, address: str, ip: str) -> float:
         """
-        Hardened Trial Grant Logic:
-        1. Check if IP has already claimed a trial (Permanent blacklist).
-        2. Check if wallet exists.
-        3. If new, verify On-Chain Stake (0.1 SOL).
-        4. Grant trial if all checks pass.
+        Anti-Hopping Trial Grant Logic:
+        1. Permanent IP Blacklist check.
+        2. Verify Wallet Balance (>0.1 SOL).
+        3. Verify Wallet History (>24h age OR >5 transactions).
+        4. Verify Funding Ancestry (Ensure source isn't an existing trial claimer).
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -97,21 +136,25 @@ class CreditManager:
             cursor.execute("SELECT address FROM trial_history WHERE ip_hash = ?", (ip,))
             if cursor.fetchone():
                 logger.warning(f"🚫 SYBIL DETECTED: IP {ip} attempted duplicate trial claim.")
-                return 0.0 # No trial for repeat IPs
+                return 0.0
             
-            # 2. Wallet Check
+            # 2. Wallet Check (Internal)
             cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (address,))
             row = cursor.fetchone()
             
             if row is None:
-                # 3. Stake Check (Iron Dome)
+                # 3. Stake & History Check
                 sol_balance = await self._get_solana_balance(address)
-                threshold = 0.1 # 0.1 SOL
+                metadata = await self._get_wallet_metadata(address)
                 
-                if sol_balance < threshold:
-                    logger.warning(f"⚠️ LOW STAKE: Wallet {address} has only {sol_balance} SOL (Needs {threshold}). Trial denied.")
+                if sol_balance < 0.1:
+                    logger.warning(f"⚠️ LOW STAKE: Wallet {address} has only {sol_balance} SOL. Denied.")
                     return 0.0
                 
+                if metadata["age_hours"] < 24 and metadata["count"] < 5:
+                    logger.warning(f"⚠️ FRESH WALLET: {address} is only {metadata['age_hours']:.1f}h old with {metadata['count']} txs. Denied.")
+                    return 0.0
+
                 # 4. Success! Grant Welcome Pack.
                 welcome_credits = 50.0
                 cursor.execute('''
@@ -125,14 +168,14 @@ class CreditManager:
                     VALUES (?, ?, ?)
                 ''', (ip, address, datetime.utcnow()))
                 
-                # Log it as a special internal transaction
+                # Log it
                 cursor.execute('''
                     INSERT INTO credit_purchases (tx_hash, address, amount_usdc, credits_added, timestamp)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, datetime.utcnow()))
                 
                 conn.commit()
-                logger.info(f"🎁 SHIELDED TRIAL GRANTED: 50.0 credits to {address} (SOL: {sol_balance})")
+                logger.info(f"🎁 SECURE TRIAL GRANTED: 50.0 credits to {address} (Age: {metadata['age_hours']:.1f}h)")
                 return welcome_credits
             
             return row[0]

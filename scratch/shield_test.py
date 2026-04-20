@@ -23,8 +23,11 @@ class TestIronDomeShield(unittest.TestCase):
         ip = "1.2.3.4"
         
         # Mocking balance to 0.05 SOL (Threshold is 0.1)
-        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance:
+        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance, \
+             patch.object(self.mgr, '_get_wallet_metadata', new_callable=AsyncMock) as mock_meta:
             mock_balance.return_value = 0.05
+            mock_meta.return_value = {"age_hours": 100.0, "count": 10}
+            
             balance = self.run_async(self.mgr.ensure_wallet_with_welcome_pack(wallet, ip))
             
             self.assertEqual(balance, 0.0)
@@ -34,9 +37,12 @@ class TestIronDomeShield(unittest.TestCase):
         wallet = "funded_wallet"
         ip = "5.6.7.8"
         
-        # Mocking balance to 0.15 SOL
-        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance:
+        # Mocking balance to 0.15 SOL and Age 48h
+        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance, \
+             patch.object(self.mgr, '_get_wallet_metadata', new_callable=AsyncMock) as mock_meta:
             mock_balance.return_value = 0.15
+            mock_meta.return_value = {"age_hours": 48.0, "count": 10}
+            
             balance = self.run_async(self.mgr.ensure_wallet_with_welcome_pack(wallet, ip))
             
             self.assertEqual(balance, 50.0)
@@ -48,8 +54,11 @@ class TestIronDomeShield(unittest.TestCase):
         ip = "9.9.9.9"
         
         # First wallet succeeds
-        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance:
+        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance, \
+             patch.object(self.mgr, '_get_wallet_metadata', new_callable=AsyncMock) as mock_meta:
+            
             mock_balance.return_value = 0.2
+            mock_meta.return_value = {"age_hours": 48.0, "count": 10}
             self.run_async(self.mgr.ensure_wallet_with_welcome_pack(wallet_1, ip))
             
             # Second wallet with SAME IP fails regardless of stake
@@ -58,6 +67,23 @@ class TestIronDomeShield(unittest.TestCase):
             
             self.assertEqual(balance_2, 0.0)
             self.assertEqual(self.mgr.get_balance(wallet_2), 0.0)
+
+    def test_rejection_fresh_wallet(self):
+        wallet = "fresh_wallet"
+        ip = "12.12.12.12"
+        
+        # Mocking balance to 0.5 SOL (Stake is OK)
+        # BUT mocking age to 1 hour and count to 1 (Fresh!)
+        with patch.object(self.mgr, '_get_solana_balance', new_callable=AsyncMock) as mock_balance, \
+             patch.object(self.mgr, '_get_wallet_metadata', new_callable=AsyncMock) as mock_meta:
+            
+            mock_balance.return_value = 0.5
+            mock_meta.return_value = {"age_hours": 1.0, "count": 1}
+            
+            balance = self.run_async(self.mgr.ensure_wallet_with_welcome_pack(wallet, ip))
+            
+            self.assertEqual(balance, 0.0)
+            self.assertEqual(self.mgr.get_balance(wallet), 0.0)
 
 if __name__ == "__main__":
     unittest.main()
