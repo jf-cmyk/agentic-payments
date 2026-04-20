@@ -128,7 +128,7 @@ def _get_price_for_path(path: str) -> Decimal | None:
 
 async def _verify_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
     """Verify a payment via the CDP Facilitator."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         response = await client.post(
             f"{settings.x402.facilitator_url}/verify",
             json={
@@ -142,7 +142,7 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
 
 async def _settle_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
     """Settle a payment via the CDP Facilitator."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         response = await client.post(
             f"{settings.x402.facilitator_url}/settle",
             json={
