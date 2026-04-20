@@ -29,21 +29,24 @@ SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.co
 # --------------------------------------------------------------------------------
 # WALLET MANAGEMENT
 # --------------------------------------------------------------------------------
-def load_or_create_wallet():
-    if os.path.exists(WALLET_FILE):
-        with open(WALLET_FILE, "r") as f:
-            data = json.load(f)
-            # Load from array of bytes
-            kp = Keypair.from_bytes(bytes(data))
-            print(f"🤖 [Agent]: Loaded existing wallet from {WALLET_FILE}")
-            return kp
-    else:
-        kp = Keypair()
-        with open(WALLET_FILE, "w") as f:
-            json.dump(list(bytes(kp)), f)
-        print(f"🤖 [Agent]: Generated BRAND NEW local Agent Wallet!")
-        print(f"   Saved private key to {WALLET_FILE}")
+def load_secure_wallet():
+    """Load the agent identity from secure environment variables."""
+    encoded_key = os.getenv("AGENT_PRIVATE_KEY")
+    if not encoded_key:
+        print("🚨 SECURITY ERROR: AGENT_PRIVATE_KEY not found in .env!")
+        print("   Please ensure you have set your rotated private key in your environment.")
+        sys.exit(1)
+    
+    try:
+        # Key is stored as base64 encoded bytes of the 64-byte keypair
+        import base64
+        kp_bytes = base64.b64decode(encoded_key)
+        kp = Keypair.from_bytes(kp_bytes)
+        print(f"🤖 [Agent]: Identity loaded securely from Environment")
         return kp
+    except Exception as e:
+        print(f"🚨 FAILED TO LOAD IDENTITY: {e}")
+        sys.exit(1)
 
 async def get_usdc_balance(rpc: AsyncClient, agent_pubkey: Pubkey):
     ata = get_associated_token_address(agent_pubkey, USDC_MINT)
@@ -117,7 +120,7 @@ async def run_agent_loop(base_url_input: str):
     parsed = urllib.parse.urlparse(base_url_input)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     
-    kp = load_or_create_wallet()
+    kp = load_secure_wallet()
     wallet_addr = str(kp.pubkey())
     
     print("\n" + "="*60)
