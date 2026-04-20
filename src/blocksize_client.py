@@ -288,20 +288,26 @@ class BlocksizeClient:
         """
         result = await self._rpc_call("bidask_getSnapshot", {"ticker": pair})
 
-        if isinstance(result, dict):
-            # Blocksize uses 'agg_bid_price' and 'agg_ask_price' for aggregated crypto snapshots
-            bid = float(result.get("agg_bid_price", result.get("bid", 0)))
-            ask = float(result.get("agg_ask_price", result.get("ask", 0)))
+        if isinstance(result, dict) and "snapshot" in result:
+            items = result["snapshot"]
+            # Find the specific pair in the massive returned list, or default to empty dict
+            item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
+            
+            bid = float(item.get("agg_bid_price", item.get("bid", 0)))
+            ask = float(item.get("agg_ask_price", item.get("ask", 0)))
+            mid = float(item.get("agg_mid_price", item.get("mid", (bid + ask) / 2 if ask > 0 else 0)))
+            
             spread = ask - bid
             spread_pct = (spread / ask * 100) if ask > 0 else 0.0
 
             return BidAskData(
-                pair=result.get("ticker", pair),
+                pair=item.get("ticker", pair),
                 bid=bid,
                 ask=ask,
+                mid=mid,
                 spread=spread,
                 spread_pct=spread_pct,
-                timestamp=_parse_timestamp(result.get("ts", result.get("timestamp"))),
+                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
                 source="blocksize",
             )
 
@@ -323,27 +329,27 @@ class BlocksizeClient:
     async def get_equity_snapshot(self, ticker: str) -> EquityData:
         """
         Get the latest snapshot for a US or Chinese equity.
-
-        Args:
-            ticker: Stock ticker symbol (numeric or alphanumeric)
-
-        Returns:
-            EquityData with OHLCV and bid/ask data.
         """
-        result = await self._rpc_call("bidask_equity_getSnapshot", {"ticker": ticker})
+        # Blocksize deprecated specific equity endpoints; all data now routes via main snapshot array
+        result = await self._rpc_call("bidask_getSnapshot", {"ticker": ticker})
 
-        if isinstance(result, dict):
+        if isinstance(result, dict) and "snapshot" in result:
+            items = result["snapshot"]
+            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+            if not item:
+                raise BlocksizeAPIError(404, f"Equity ticker {ticker} not found in master stream")
+                
             return EquityData(
-                ticker=str(result.get("ticker", ticker)),
-                open=_safe_float(result.get("open")),
-                high=_safe_float(result.get("high")),
-                low=_safe_float(result.get("low")),
-                last=_safe_float(result.get("last")),
-                bid=_safe_float(result.get("bidPrice")),
-                ask=_safe_float(result.get("askPrice")),
-                volume=_safe_float(result.get("volume")),
-                prev_close=_safe_float(result.get("prevClose")),
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                ticker=str(item.get("ticker", ticker)),
+                open=_safe_float(item.get("open")),
+                high=_safe_float(item.get("high")),
+                low=_safe_float(item.get("low")),
+                last=_safe_float(item.get("last", item.get("agg_mid_price"))),  # Fallback to mid price
+                bid=_safe_float(item.get("bidPrice", item.get("agg_bid_price"))),
+                ask=_safe_float(item.get("askPrice", item.get("agg_ask_price"))),
+                volume=_safe_float(item.get("volume", item.get("agg_bid_size"))),
+                prev_close=_safe_float(item.get("prevClose")),
+                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
                 source="blocksize",
             )
 
@@ -365,31 +371,30 @@ class BlocksizeClient:
     async def get_fx_rate(self, pair: str) -> FXData:
         """
         Get the current FX rate for a currency pair.
-
-        Args:
-            pair: FX pair (e.g., 'eurusd', 'gbpjpy')
-
-        Returns:
-            FXData with bid/ask/mid rates.
         """
-        result = await self._rpc_call("bidask_fx_getSnapshot", {"ticker": pair})
+        result = await self._rpc_call("bidask_getSnapshot", {"ticker": pair})
 
-        if isinstance(result, dict):
-            bid = _safe_float(result.get("bid"))
-            ask = _safe_float(result.get("ask"))
-            mid = _safe_float(result.get("mid"))
+        if isinstance(result, dict) and "snapshot" in result:
+            items = result["snapshot"]
+            item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
+            if not item:
+                raise BlocksizeAPIError(404, f"FX pair {pair} not found in master stream")
+                
+            bid = _safe_float(item.get("agg_bid_price", item.get("bid")))
+            ask = _safe_float(item.get("agg_ask_price", item.get("ask")))
+            mid = _safe_float(item.get("agg_mid_price", item.get("mid")))
             if bid and ask and not mid:
                 mid = (bid + ask) / 2
 
             base, quote = _split_pair(pair)
             return FXData(
                 pair=pair,
-                base_currency=result.get("baseCurrency", base),
-                quote_currency=result.get("quoteCurrency", quote),
+                base_currency=item.get("baseCurrency", base),
+                quote_currency=item.get("quoteCurrency", quote),
                 bid=bid,
                 ask=ask,
                 mid=mid,
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
                 source="blocksize",
             )
 
@@ -411,27 +416,26 @@ class BlocksizeClient:
     async def get_metal_price(self, ticker: str) -> MetalData:
         """
         Get the spot price for a precious/base metal.
-
-        Args:
-            ticker: Metal ticker (e.g., 'xauusd', 'xagusd', 'copperusd')
-
-        Returns:
-            MetalData with spot price.
         """
-        result = await self._rpc_call("bidask_metal_getSnapshot", {"ticker": ticker})
+        result = await self._rpc_call("bidask_getSnapshot", {"ticker": ticker})
 
         metal_names = {
             "xauusd": "Gold", "xagusd": "Silver", "xptusd": "Platinum",
             "xpdusd": "Palladium", "copperusd": "Copper",
         }
 
-        if isinstance(result, dict):
+        if isinstance(result, dict) and "snapshot" in result:
+            items = result["snapshot"]
+            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+            if not item:
+                raise BlocksizeAPIError(404, f"Metal ticker {ticker} not found in master stream")
+
             return MetalData(
                 ticker=ticker,
-                name=result.get("name", metal_names.get(ticker.lower(), ticker)),
-                price=float(result.get("price", result.get("mid", result.get("last", 0)))),
-                currency=result.get("quoteCurrency", "USD"),
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                name=item.get("name", metal_names.get(ticker.lower(), ticker)),
+                price=float(item.get("agg_mid_price", item.get("price", 0))),
+                currency=item.get("quoteCurrency", "USD"),
+                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
                 source="blocksize",
             )
 
@@ -444,23 +448,23 @@ class BlocksizeClient:
     async def get_treasury_rate(self, maturity: str) -> TreasuryRateData:
         """
         Get the current US Treasury yield for a specific maturity.
-
-        Args:
-            maturity: Maturity code (e.g., '10Y', '2Y', '30Y', '1M', '3M', '5Y', '6M', '1Y')
-
-        Returns:
-            TreasuryRateData with yield percentage.
         """
-        ticker = f"Rates.US{maturity.upper()}"
-        result = await self._rpc_call("bidask_rate_getSnapshot", {"ticker": ticker})
+        # Blocksize formats yields as US10YUSD instead of Rates.US10Y
+        ticker = f"US{maturity.upper()}USD"
+        result = await self._rpc_call("bidask_getSnapshot", {"ticker": ticker})
 
-        if isinstance(result, dict):
+        if isinstance(result, dict) and "snapshot" in result:
+            items = result["snapshot"]
+            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+            if not item:
+                raise BlocksizeAPIError(404, f"Treasury maturity {maturity} not found in master stream")
+                
             return TreasuryRateData(
                 ticker=ticker,
                 maturity=maturity.upper(),
-                yield_pct=float(result.get("yield", result.get("price", result.get("last", 0)))),
+                yield_pct=float(item.get("agg_mid_price", item.get("yield", 0))),
                 currency="USD",
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                timestamp=_parse_timestamp(item.get("ts", item.get("timestamp"))),
                 source="blocksize",
             )
 
