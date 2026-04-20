@@ -10,23 +10,24 @@ DARK_GREY = (40, 40, 40)
 
 class BlocksizePDF(FPDF):
     def header(self):
-        # Header Blue bar
-        self.set_fill_color(*BLUE)
-        self.rect(0, 0, 210, 15, "F")
+        # Clean white header with accent line
+        self.set_draw_color(*BLUE)
+        self.set_line_width(0.5)
+        self.line(10, 15, 200, 15)
         
-        # Logo placeholder text
-        self.set_font("helvetica", "B", 12)
-        self.set_text_color(255, 255, 255)
-        self.set_xy(10, 5)
-        self.cell(0, 5, "BLOCKSIZE CAPITAL x402", 0, 0, "L")
+        # Logo text
+        self.set_font("helvetica", "B", 10)
+        self.set_text_color(*BLACK)
+        self.set_xy(10, 8)
+        self.cell(0, 5, "BLOCKSIZE CAPITAL | x402 ECONOMY", 0, 0, "L")
         
-        self.ln(20)
+        self.ln(15)
 
     def footer(self):
         self.set_y(-15)
         self.set_font("helvetica", "I", 8)
-        self.set_text_color(128, 128, 128)
-        self.cell(0, 10, "Institutional Market Data Economy | blocksize.info", 0, 0, "L")
+        self.set_text_color(120, 120, 120)
+        self.cell(0, 10, "Making DeFi Bankable | blocksize.info", 0, 0, "L")
         self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "R")
 
     def chapter_title(self, label):
