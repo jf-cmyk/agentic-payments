@@ -104,6 +104,7 @@
     .pricing-table th { text-align: left; padding: 1.5rem; border-bottom: 2px solid var(--text); font-weight: 800; text-transform: uppercase; font-size: 0.75rem; }
     .pricing-table td { padding: 1.5rem; border-bottom: 1px solid var(--border); }
     .price-bold { font-weight: 800; color: var(--primary); }
+    .credit-badge { background: #ecf781; color: #000; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.7rem; }
 
     /* ─── RESOURCES ─────────────────────────────── */
     .resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1rem; }
@@ -257,6 +258,44 @@
         </tr>
       </tbody>
     </table>
+
+    <div style="margin-top: 6rem;">
+      <h3>Bulk <span>Credit Tiers</span></h3>
+      <p style="color: var(--text-muted); margin-bottom: 2rem;">Pre-pay for institutional credits to receive significant discounts and eliminate per-call transaction latency.</p>
+      <table class="pricing-table">
+        <thead>
+          <tr>
+            <th>Tier Package</th>
+            <th>Credits</th>
+            <th>Purchase Price</th>
+            <th>Discount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Starter Pouch</td>
+            <td>1,000 Credits</td>
+            <td class="price-bold">$0.90 USDC</td>
+            <td><span class="credit-badge">10% OFF</span></td>
+          </tr>
+          <tr>
+            <td>Growth Pack</td>
+            <td>10,000 Credits</td>
+            <td class="price-bold">$8.00 USDC</td>
+            <td><span class="credit-badge">20% OFF</span></td>
+          </tr>
+          <tr>
+            <td>Institutional Vault</td>
+            <td>100,000 Credits</td>
+            <td class="price-bold">$60.00 USDC</td>
+            <td><span class="credit-badge">40% OFF</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top: 2rem; background: #f8f9ff; padding: 2rem; border-radius: 8px; border: 1px solid rgba(79, 75, 255, 0.1);">
+        <p style="font-size: 0.85rem; color: var(--text-muted);"><strong>Implementation Note:</strong> Credit usage is requested via the <code>X-AGENT-WALLET</code> header. 1 Credit is consumed per $0.001 value (e.g., Core Crypto costs 2 Credits).</p>
+      </div>
+    </div>
   </div>
 </section>
 

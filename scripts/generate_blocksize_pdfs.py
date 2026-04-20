@@ -178,6 +178,28 @@ def generate_pricing():
         pdf.cell(70, 8, examples, 1, 1)
         
     pdf.ln(10)
+    pdf.section_title("Bulk Credit Drawdown Economy")
+    pdf.body_text("For institutional scale and automated agent workflows, pre-purchase credits at a discount to eliminate per-call settlement latency.")
+    
+    # Credit tiers
+    pdf.set_fill_color(*GREY)
+    pdf.set_font("helvetica", "B", 9)
+    pdf.cell(60, 8, "Tier Package", 1, 0, 'L', True)
+    pdf.cell(60, 8, "Credits", 1, 0, 'C', True)
+    pdf.cell(70, 8, "Purchase Price", 1, 1, 'C', True)
+    
+    pdf.set_font("helvetica", "", 9)
+    credit_tiers = [
+        ("Starter Pouch", "1,000", "$0.90 USDC (10% OFF)"),
+        ("Growth Pack", "10,000", "$8.00 USDC (20% OFF)"),
+        ("Institutional", "100,000", "$60.00 USDC (40% OFF)")
+    ]
+    for name, qty, price in credit_tiers:
+        pdf.cell(60, 7, name, 1)
+        pdf.cell(60, 7, qty, 1, 0, 'C')
+        pdf.cell(70, 7, price, 1, 1, 'C')
+
+    pdf.ln(10)
     pdf.section_title("Free Access")
     pdf.body_text("Service discovery, ticker search, and instrument lists are always FREE.")
 
