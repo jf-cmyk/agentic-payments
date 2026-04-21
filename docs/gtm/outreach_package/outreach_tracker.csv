@@ -1,0 +1,6 @@
+account,domain,priority,segment,target_role,email,source,confidence,verification_status,message_variant,status,next_action,notes
+Dune,dune.com,A,Onchain analytics/API,"API partnerships / data platform / DevRel",,,,"pending","Dune Variant","prep","Run Hunter Domain Search","Find one high-fit API/platform contact"
+Browserbase,browserbase.com,A,Agent tooling,"Founder / product / partnerships / DevRel",,,,"pending","Browserbase Variant","prep","Run Hunter Domain Search","Use DM backup if email sparse"
+Firecrawl,firecrawl.dev,A,Agent tooling/web data,"Founder / product / partnerships / DevRel",,,,"pending","Firecrawl Variant","prep","Run Hunter Domain Search","Use Finder/Verifier if public founder names are known"
+Exa,exa.ai,A,Agent search/API,"Product / partnerships / founder / API platform",,,,"pending","Exa Variant","prep","Run Hunter Domain Search","Focus on AI-native research workflow"
+Coinbase Developer Platform / x402,coinbase.com,A,Protocol ecosystem,"x402 ecosystem / CDP partnerships / DevRel",,,,"pending","Coinbase/x402 Variant","prep","Run Hunter Domain Search","Manual filtering required because coinbase.com is broad"

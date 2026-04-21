@@ -29,6 +29,7 @@ Approval received on 2026-04-21:
 | [design_partner_targets.md](design_partner_targets.md) | Design partner categories and target examples |
 | [named_account_outreach_prep.md](named_account_outreach_prep.md) | 25-account outreach prep with ranking, asks, and contact-path hypotheses |
 | [outreach_sequences.md](outreach_sequences.md) | Draft email, DM, follow-up, and call agenda sequences |
+| [outreach_package/README.md](outreach_package/README.md) | Packaged first-batch outreach plan and handoff artifacts |
 | [protocol_partner_memo.md](protocol_partner_memo.md) | Protocol landscape and partnership priorities |
 | [local_backlog.md](local_backlog.md) | Linear-ready backlog kept local until Linear details are approved |
 
@@ -44,3 +45,11 @@ Weekly review:
 
 - Review paid usage, activation, pipeline, blocker closure, and protocol/partner changes.
 - Decide whether to double down, adjust ICP, or change offer/pricing.
+
+## Calendar Rules
+
+- Use the calendar plugin for creating or sending calendar invites.
+- Always include `jf@blocksize-capital.com` as a participant.
+- Prefer Austin working hours, interpreted as America/Chicago business hours.
+- When proposing times, give invitees options inside those working hours unless Johann specifies a fixed time.
+- Do not create or send calendar invites without Johann's explicit approval.

@@ -12,6 +12,8 @@ This is Linear-ready but intentionally local until Johann approves Linear team/p
 | GTM-005 | Add mock/testnet payment mode | Local mock mode can complete the 402 flow when explicitly enabled |
 | GTM-013 | Convert target categories into named accounts | 25 named targets drafted with segment, priority, rationale, ask, and contact-path hypothesis |
 | GTM-014 | Draft first outreach email | Initial email, DM, segment variants, follow-ups, and call agenda drafted locally |
+| GTM-020 | Package first-batch outreach artifacts | Route decision, account briefs, Hunter.io workflow, message pack, meeting template, tracker, and handoff email prepared locally |
+| GTM-021 | Run Hunter enrichment for first 5 accounts | 25 candidate lead rows generated for Johann review; no messages sent |
 
 ## P0 - Demo readiness
 

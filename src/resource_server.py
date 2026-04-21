@@ -115,7 +115,8 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # Crypto — dynamic pricing based on asset tier (handled separately)
     "/v1/vwap/": None,  # set dynamically
     "/v1/bidask/": None,  # set dynamically
-    # Equities
+    "/v1/state/": None,  # set dynamically
+    # Analytics tier
     "/v1/equity/": settings.pricing.equities,
     # TradFi
     "/v1/fx/": settings.pricing.tradfi,
@@ -131,6 +132,8 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 PATH_TO_ASSET_TYPE = {
     "/v1/vwap/": "core",
     "/v1/bidask/": "core",
+    "/v1/state/": "core",
+    "/v1/vwap30m/": "analytics", # analytics is cheap
     "/v1/equity/": "equities",
     "/v1/fx/": "tradfi",
     "/v1/metal/": "tradfi",
@@ -197,7 +200,7 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         return total if total > 0 else None
 
     # Crypto uses dynamic tier pricing
-    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/"):
+    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/") or path.startswith("/v1/state/"):
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:
             pair = parts[3]
@@ -456,8 +459,23 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-# Note: /v1/state, /v1/vwap30m, /v1/vwap24h, and /v1/rate are not offered
-# through the HTTP resource server.
+@app.get("/v1/state/{pair}", responses=X402_RESPONSE)
+async def get_state_price(pair: str, request: Request) -> dict[str, Any]:
+    """Get institutional state/reference price for a crypto pair. Cost: $0.002–$0.004 USDC."""
+    try:
+        client: BlocksizeClient = request.app.state.blocksize
+        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        data = await client.get_state_price(clean)
+        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "State Price", "asset_class": "crypto"}}
+        return resp
+    except BlocksizeAPIError as e:
+        raise HTTPException(status_code=502, detail=ErrorResponse(
+            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve state price for {pair}", details=str(e),
+        ).model_dump())
+
+
+# Note: /v1/vwap30m, /v1/vwap24h, and /v1/rate are currently not offered
+# through the HTTP resource server natively.
 
 
 @app.get("/v1/equity/{ticker}", responses=X402_RESPONSE)
@@ -722,6 +740,12 @@ async def mcp_manifest():
             {
                 "name": "get_bidask",
                 "description": "Get best bid/ask snapshot for crypto. Cost: 2-4 Credits (approx $0.002–$0.004). Credit-Ready: Use X-AGENT-WALLET header.",
+                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
+                "payment": {"required": True, "currency": "USDC", "credits": True}
+            },
+            {
+                "name": "get_state_price",
+                "description": "Get institutional state/reference price for crypto. Cost: 2-4 Credits ($0.002–$0.004 USDC). Credit-Ready: Use X-AGENT-WALLET header.",
                 "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
                 "payment": {"required": True, "currency": "USDC", "credits": True}
             },
