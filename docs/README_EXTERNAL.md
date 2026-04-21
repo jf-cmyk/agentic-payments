@@ -17,7 +17,7 @@ Our API uses a **Pay-Per-Call** model. There are no monthly subscriptions.
 2.  **Challenge:** The server returns `HTTP 402 Payment Required`.
 3.  **Metadata:** Look at the `PAYMENT-REQUIRED` header. It contains a Base64-encoded JSON array specifying the amount (USDC) and the destination wallet.
 4.  **Payment:** Your agent sends the USDC (on Solana or Base L2).
-5.  **Proof:** Re-submit the request with the `PAYMENT-SIGNATURE` header containing your transaction hash.
+5.  **Proof:** Re-submit the request with the `PAYMENT-SIGNATURE` header containing base64-encoded JSON with at least `proof` and `network` fields.
 6.  **Data:** The server verifies the transaction and returns the institutional data instantly.
 
 ### 3. Accepted Networks

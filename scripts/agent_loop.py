@@ -1,10 +1,30 @@
-import sys
 import base64
 import json
-import httpx
-import asyncio
+import sys
+import time
 
-async def fetch_data(client, url, iteration):
+import asyncio
+import httpx
+
+
+def _decode_payment_requirements(response):
+    req_header = response.headers.get("PAYMENT-REQUIRED")
+    if not req_header:
+        return []
+    return json.loads(base64.b64decode(req_header))
+
+
+def _build_payment_signature(tx_hash: str, network: str) -> str:
+    payload = {
+        "proof": tx_hash,
+        "network": network,
+        "timestamp": int(time.time()),
+        "agent_pubkey": "manual_agent",
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+async def fetch_data(client, url, iteration, mock_mode=False):
     print(f"\n[{iteration}/3] Requesting data from {url}...")
     response = await client.get(url)
 
@@ -17,13 +37,12 @@ async def fetch_data(client, url, iteration):
         
         # Step 2: Extract the destination wallet address
         pay_to_address = "UNKNOWN"
-        req_header = response.headers.get("PAYMENT-REQUIRED")
-        
-        if req_header:
-            decoded_reqs = json.loads(base64.b64decode(req_header))
-            sol_req = next((r for r in decoded_reqs if "solana" in str(r.get("network", "")).lower()), None)
-            if sol_req:
-                pay_to_address = sol_req.get("address")
+        network = "solana"
+        decoded_reqs = _decode_payment_requirements(response)
+        sol_req = next((r for r in decoded_reqs if "solana" in str(r.get("network", "")).lower()), None)
+        if sol_req:
+            pay_to_address = sol_req.get("payTo", "UNKNOWN")
+            network = sol_req.get("network", network)
 
         # Step 3: Prompt the user to use Phantom
         print("\n" + "="*55)
@@ -37,7 +56,11 @@ async def fetch_data(client, url, iteration):
         print("   and copy the Transaction Signature (Hash).")
         print("="*55 + "\n")
 
-        tx_hash = input("Paste your Phantom Transaction Signature here: ").strip()
+        if mock_mode:
+            tx_hash = f"mock_agent_loop_{int(time.time())}_{iteration}"
+            print(f"Mock mode enabled. Using proof: {tx_hash}")
+        else:
+            tx_hash = input("Paste your Phantom Transaction Signature here: ").strip()
 
         if not tx_hash:
             print("[-] No transaction signature provided. Stopping agent.")
@@ -45,9 +68,7 @@ async def fetch_data(client, url, iteration):
 
         # Step 4: Resubmit the request with the proof
         print("\n[*] Resubmitting request with payment proof...")
-        headers = {
-            "PAYMENT-SIGNATURE": tx_hash 
-        }
+        headers = {"PAYMENT-SIGNATURE": _build_payment_signature(tx_hash, network)}
         
         final_response = await client.get(url, headers=headers)
         
@@ -73,16 +94,18 @@ async def fetch_data(client, url, iteration):
 
 async def main():
     if len(sys.argv) < 2:
-        print("Usage: python agent_loop.py [URL]")
-        print("Example: python agent_loop.py https://agentic-payments-production.up.railway.app/v1/vwap/BTC-USD")
+        print("Usage: python agent_loop.py [URL] [--mock]")
+        print("Example: python agent_loop.py http://localhost:8402/v1/vwap/BTC-USD --mock")
+        print("Mock mode requires the server to run with X402_ALLOW_MOCK_PAYMENTS=true.")
         sys.exit(1)
 
     url = sys.argv[1]
+    mock_mode = "--mock" in sys.argv[2:]
     print("🤖 Agent starting. Target: fetch data 3 times.")
 
     async with httpx.AsyncClient() as client:
         for i in range(1, 4):
-            success = await fetch_data(client, url, i)
+            success = await fetch_data(client, url, i, mock_mode=mock_mode)
             if not success:
                 break
             

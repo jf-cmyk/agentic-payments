@@ -19,7 +19,7 @@ The system currently exposes over 30,000 distinct financial instruments, structu
 *   **Discovery (FREE):** Asset lookup, instrument listing, and pricing summaries.
 *   **Core Crypto ($0.002):** Real-time VWAP, Bid/Ask spreads, and State Prices for top-250 capitalized cryptocurrencies.
 *   **Extended Crypto ($0.004):** VWAP, Bid/Ask, and State Prices for 550+ long-tail and niche token pairs.
-*   **Traditional Finance ($0.005):** Spot Foreign Exchange (129 pairs), Precious Metals (5 assets), and US Treasury Rates (8 maturity buckets).
+*   **Traditional Finance ($0.005):** Spot Foreign Exchange (129 pairs) and Precious Metals (5 assets). Rates/Treasury endpoints are intentionally not offered in this portfolio.
 *   **Equities ($0.008):** High-level snapshot data for over 18,000 US and Chinese stocks.
 *   **Historical Analytics ($0.001):** Complex historical metrics including 30-Minute VWAP and 24-Hour closing VWAP.
 

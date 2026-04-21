@@ -84,12 +84,10 @@ async def simulate_agent_flow() -> None:
 
         # Step 5: Pricing summary
         print("💰 Step 5: Pricing info")
-        print(f"   VWAP:        ${settings.pricing.vwap} USDC/call")
-        print(f"   Bid/Ask:     ${settings.pricing.bidask} USDC/call")
-        print(f"   Search:      ${settings.pricing.search} USDC/call")
-        print(f"   Instruments: ${settings.pricing.instruments} USDC/call")
-        print(f"   Network:     {settings.x402.network}")
-        print(f"   Wallet:      {settings.x402.wallet_address}")
+        for tier, details in settings.pricing_summary.items():
+            print(f"   {tier}: {details['price']} USDC/call — {details['includes']}")
+        print(f"   Primary network: {settings.x402.primary_network}")
+        print(f"   Primary wallet:  {settings.x402.primary_wallet or '(not configured)'}")
 
         print()
         print("=" * 60)

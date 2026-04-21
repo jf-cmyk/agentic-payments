@@ -173,7 +173,8 @@ async def run_agent_loop(base_url_input: str):
             else:
                 chosen_pairs = random.sample(all_instruments, 6)
 
-            # Build the batch queries list: 6 crypto + 4 TradFi/Commodity
+            # Build the batch queries list: 6 crypto + 3 TradFi/commodity calls.
+            # Rates/Treasury endpoints are intentionally not offered in this portfolio.
             batch_reqs = []
             for pair in chosen_pairs:
                 batch_reqs.append(f"{random.choice(endpoints)}:{pair}")
@@ -181,11 +182,10 @@ async def run_agent_loop(base_url_input: str):
             batch_reqs.extend([
                 "equity:AAPL",
                 "fx:EURUSD",
-                "metal:XAUUSD",
-                "rate:10Y"
+                "metal:XAUUSD"
             ])
             
-            print(f"🤖 [Agent]: Assembling BATCH payload containing 10 assets across all asset classes...\n")
+            print(f"🤖 [Agent]: Assembling BATCH payload containing 9 assets across offered asset classes...\n")
             
             reqs_str = ",".join(batch_reqs)
             target_url = f"{base_url}/v1/batch?reqs={reqs_str}"

@@ -11,13 +11,13 @@ import pytest
 
 from src.mcp_server import (
     get_vwap, get_bid_ask, get_vwap_30min, get_equity,
-    get_fx_rate, get_metal_price, get_treasury_rate, get_yield_curve,
+    get_fx_rate, get_metal_price,
     search_pairs, list_instruments, get_pricing_info,
 )
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
     VWAPData, BidAskData, VWAP30MinData, EquityData, FXData,
-    MetalData, TreasuryRateData, PairInfo,
+    MetalData, PairInfo,
 )
 from datetime import datetime, timezone
 
@@ -115,30 +115,6 @@ class TestMetalTool:
         assert "2350.5" in result
 
 
-class TestTreasuryTool:
-    @pytest.mark.asyncio
-    async def test_get_treasury_rate_success(self):
-        mock_data = TreasuryRateData(ticker="Rates.US10Y", maturity="10Y", yield_pct=4.25, currency="USD", timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc))
-        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.get_treasury_rate = AsyncMock(return_value=mock_data)
-            result = await get_treasury_rate("10Y")
-        assert "US TREASURY [10Y]" in result
-        assert "4.25" in result
-
-    @pytest.mark.asyncio
-    async def test_get_yield_curve_success(self):
-        mock_rates = [
-            TreasuryRateData(ticker="Rates.US2Y", maturity="2Y", yield_pct=4.5, currency="USD", timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc)),
-            TreasuryRateData(ticker="Rates.US10Y", maturity="10Y", yield_pct=4.25, currency="USD", timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc)),
-        ]
-        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.get_treasury_curve = AsyncMock(return_value=mock_rates)
-            result = await get_yield_curve()
-        assert "Yield Curve" in result
-        assert "4.25" in result
-        assert "4.5" in result
-
-
 # ---------------------------------------------------------------------------
 # Discovery Tools (FREE)
 # ---------------------------------------------------------------------------
@@ -171,6 +147,7 @@ class TestGetPricingInfoTool:
         assert "Core Crypto" in result
         assert "Extended Crypto" in result
         assert "TradFi" in result
+        assert "rates" not in result.lower()
         assert "Equities" in result
         assert "Analytics" in result
         assert "FREE" in result

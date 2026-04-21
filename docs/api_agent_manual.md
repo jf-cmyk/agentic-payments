@@ -109,7 +109,6 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 **Real-Time VWAP, Bid/Ask, and State Price**
 `GET /v1/vwap/{pair}`
 `GET /v1/bidask/{pair}`
-`GET /v1/state/{pair}`
 *Returns:* A consolidated top-of-book market depth snapshot across global liquidity pools.
 
 ### 2.3 Traditional Finance ($0.005 USDC)
@@ -124,21 +123,19 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 *Returns:* Spot rates for institutional stores of value.
 *Example:* `/v1/metal/XAU-USD` (Gold)
 
-**US Treasury Rates**
-`GET /v1/rate/{maturity}`
-*Returns:* Government debt yields over 8 maturity brackets (e.g., 10Y, 2Y).
-
 ### 2.4 Equities ($0.008 USDC)
 
 **Equities Snapshot**
 `GET /v1/equity/{ticker}`
 *Returns:* Market snapshot for 18,071 global stocks.
 
-### 2.5 Historical Analytics ($0.001 USDC)
+### 2.5 MCP Analytics ($0.001 USDC)
 
-**Historical/Time-Series VWAP**
-`GET /v1/vwap30m/{ticker}` (30-Minute)
-`GET /v1/vwap24h/{ticker}` (24-Hour)
+Historical/time-series VWAP and state-price tools are available through MCP tooling where configured. They are not part of the current HTTP quickstart surface.
+
+### 2.6 Not Offered
+
+US Treasury rates and yield-curve endpoints have been intentionally removed from this portfolio.
 
 ---
 

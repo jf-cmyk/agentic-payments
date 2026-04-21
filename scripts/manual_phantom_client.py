@@ -3,6 +3,24 @@ import base64
 import json
 import httpx
 import asyncio
+import time
+
+
+def _decode_payment_requirements(response):
+    req_header = response.headers.get("PAYMENT-REQUIRED")
+    if not req_header:
+        return []
+    return json.loads(base64.b64decode(req_header))
+
+
+def _build_payment_signature(tx_hash: str, network: str) -> str:
+    payload = {
+        "proof": tx_hash,
+        "network": network,
+        "timestamp": int(time.time()),
+        "agent_pubkey": "manual_phantom_client",
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
 
 async def main():
     if len(sys.argv) < 2:
@@ -25,14 +43,12 @@ async def main():
             
             # Step 2: Extract the destination wallet address from the base64 headers
             pay_to_address = "UNKNOWN"
-            req_header = response.headers.get("PAYMENT-REQUIRED")
-            
-            if req_header:
-                decoded_reqs = json.loads(base64.b64decode(req_header))
-                # Find the Solana payment requirement
-                sol_req = next((r for r in decoded_reqs if "solana" in str(r.get("network", "")).lower()), None)
-                if sol_req:
-                    pay_to_address = sol_req.get("address")
+            network = "solana"
+            decoded_reqs = _decode_payment_requirements(response)
+            sol_req = next((r for r in decoded_reqs if "solana" in str(r.get("network", "")).lower()), None)
+            if sol_req:
+                pay_to_address = sol_req.get("payTo", "UNKNOWN")
+                network = sol_req.get("network", network)
 
             # Step 3: Prompt the user to use Phantom
             print("\n" + "="*55)
@@ -44,6 +60,8 @@ async def main():
             print(f"4. Send to address: {pay_to_address}")
             print("5. Wait for confirmation, view the transaction on Solscan,")
             print("   and copy the Transaction Signature (Hash).")
+            print("   For local demos only, run the server with X402_ALLOW_MOCK_PAYMENTS=true")
+            print("   and enter a proof beginning with mock_ instead of a real transaction.")
             print("="*55 + "\n")
 
             tx_hash = input("Paste your Phantom Transaction Signature here: ").strip()
@@ -54,9 +72,7 @@ async def main():
 
             # Step 4: Resubmit the request with the proof
             print("\n[*] Resubmitting request with payment proof...")
-            headers = {
-                "PAYMENT-SIGNATURE": tx_hash 
-            }
+            headers = {"PAYMENT-SIGNATURE": _build_payment_signature(tx_hash, network)}
             
             final_response = await client.get(url, headers=headers)
             

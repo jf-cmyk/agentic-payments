@@ -141,21 +141,6 @@ class TestFXParsing:
 
 
 # ---------------------------------------------------------------------------
-# Treasury Rates
-# ---------------------------------------------------------------------------
-
-class TestTreasuryRates:
-    @pytest.mark.asyncio
-    async def test_get_treasury_rate(self, client):
-        mock_result = {"yield": 4.25, "timestamp": "2026-04-19T20:00:00Z"}
-        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
-            rate = await client.get_treasury_rate("10Y")
-        assert rate.maturity == "10Y"
-        assert rate.yield_pct == 4.25
-        assert rate.ticker == "Rates.US10Y"
-
-
-# ---------------------------------------------------------------------------
 # Instrument Listing
 # ---------------------------------------------------------------------------
 

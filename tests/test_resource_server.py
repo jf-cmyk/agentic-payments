@@ -64,9 +64,9 @@ class TestPaymentGate:
         response = test_client.get("/v1/metal/xauusd")
         assert response.status_code == 402
 
-    def test_rate_requires_payment(self, test_client):
+    def test_rate_is_not_offered(self, test_client):
         response = test_client.get("/v1/rate/10Y")
-        assert response.status_code == 402
+        assert response.status_code == 404
 
     def test_402_includes_payment_required_header(self, test_client):
         response = test_client.get("/v1/vwap/btc-usd")

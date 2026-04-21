@@ -60,7 +60,7 @@ async def get_data_autonomously(endpoint: str):
                 return
 
             pay_to = sol_req["payTo"]
-            amount_usdc = float(sol_req["amount"])
+            amount_usdc = int(sol_req["maxAmountRequired"]) / 1_000_000
             print(f"💸 Paying {amount_usdc} USDC to {pay_to}...")
 
             # 4. Execute Native Transfer (Note: Simplified for SOL native here)
@@ -73,7 +73,10 @@ async def get_data_autonomously(endpoint: str):
             print("⚠️ Once confirmed, re-submit with 'PAYMENT-SIGNATURE' header.")
             
             # 5. Proof Transmission
-            # proof_header = base64.b64encode(json.dumps({"proof": tx_hash}).encode()).decode()
+            # proof_header = base64.b64encode(json.dumps({
+            #     "proof": tx_hash,
+            #     "network": sol_req["network"],
+            # }).encode()).decode()
             # final_res = await client.get(url, headers={"PAYMENT-SIGNATURE": proof_header})
             # print(final_res.json())
 

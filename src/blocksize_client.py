@@ -286,10 +286,12 @@ class BlocksizeClient:
         """
         result = await self._rpc_call("bidask_getSnapshot", {"ticker": pair})
 
-        if isinstance(result, dict) and "snapshot" in result:
-            items = result["snapshot"]
-            # Find the specific pair in the massive returned list, or default to empty dict
-            item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
+        if isinstance(result, dict):
+            item = result
+            if "snapshot" in result:
+                items = result["snapshot"]
+                # Find the specific pair in the massive returned list, or default to empty dict
+                item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
             
             bid = float(item.get("agg_bid_price", item.get("bid", 0)))
             ask = float(item.get("agg_ask_price", item.get("ask", 0)))
@@ -331,9 +333,11 @@ class BlocksizeClient:
         # Blocksize deprecated specific equity endpoints; all data now routes via main snapshot array
         result = await self._rpc_call("bidask_getSnapshot", {"ticker": ticker})
 
-        if isinstance(result, dict) and "snapshot" in result:
-            items = result["snapshot"]
-            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+        if isinstance(result, dict):
+            item = result
+            if "snapshot" in result:
+                items = result["snapshot"]
+                item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
             if not item:
                 raise BlocksizeAPIError(404, f"Equity ticker {ticker} not found in master stream")
                 
@@ -372,9 +376,11 @@ class BlocksizeClient:
         """
         result = await self._rpc_call("bidask_getSnapshot", {"ticker": pair})
 
-        if isinstance(result, dict) and "snapshot" in result:
-            items = result["snapshot"]
-            item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
+        if isinstance(result, dict):
+            item = result
+            if "snapshot" in result:
+                items = result["snapshot"]
+                item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
             if not item:
                 raise BlocksizeAPIError(404, f"FX pair {pair} not found in master stream")
                 
@@ -422,9 +428,11 @@ class BlocksizeClient:
             "xpdusd": "Palladium", "copperusd": "Copper",
         }
 
-        if isinstance(result, dict) and "snapshot" in result:
-            items = result["snapshot"]
-            item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+        if isinstance(result, dict):
+            item = result
+            if "snapshot" in result:
+                items = result["snapshot"]
+                item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
             if not item:
                 raise BlocksizeAPIError(404, f"Metal ticker {ticker} not found in master stream")
 

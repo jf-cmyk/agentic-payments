@@ -10,7 +10,6 @@ Asset Classes:
   - Equities:   18,071 US + Chinese stocks
   - FX:         129 currency pairs
   - Metals:     Gold, Silver, Platinum, Palladium, Copper
-  - Rates:      US Treasury yield curve (1M–30Y)
 
 Payment Model:
   Tiered pricing in USDC — settled on Solana (primary) or Base L2 (fallback).
@@ -33,7 +32,6 @@ from src.models import (
     ErrorResponse,
     InstrumentListResponse,
     PairSearchResponse,
-    TreasuryRateResponse,
     VWAPResponse,
 )
 
@@ -58,7 +56,7 @@ mcp = FastMCP(
     instructions=(
         "Institutional-grade multi-asset market data for AI agents. "
         "Access real-time VWAP, bid/ask spreads, equities, FX, metals, "
-        "and US Treasury rates across 30,000+ instruments. "
+        "and analytics across 30,000+ instruments. "
         "Outlier-filtered, decision-ready output. "
         "Pay per call via x402 (USDC on Solana or Base L2). "
         "No subscription required."
@@ -379,83 +377,6 @@ async def get_metal_price(ticker: str) -> str:
 
 
 # ===========================================================================
-# US TREASURY RATES
-# ===========================================================================
-
-@mcp.tool
-async def get_treasury_rate(maturity: str = "10Y") -> str:
-    """
-    Get the current US Treasury yield for a specific maturity.
-
-    Available maturities: 1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, 30Y.
-
-    Cost: $0.005 USDC per call (TradFi tier).
-
-    Args:
-        maturity: Treasury maturity. Options: '1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'.
-                  Default: '10Y'.
-    """
-    try:
-        client = await _get_client()
-        data = await client.get_treasury_rate(maturity)
-
-        summary = data.to_decision_summary()
-        details = json.dumps(data.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except BlocksizeAPIError as e:
-        return json.dumps(ErrorResponse(
-            error_code="BLOCKSIZE_API_ERROR",
-            message=f"Failed to retrieve treasury rate for '{maturity}'",
-            details=str(e),
-        ).model_dump())
-    except Exception as e:
-        logger.error("Error in get_treasury_rate(%s): %s", maturity, e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"Error retrieving treasury rate for '{maturity}'",
-            details=str(e),
-        ).model_dump())
-
-
-@mcp.tool
-async def get_yield_curve() -> str:
-    """
-    Get the full US Treasury yield curve (all 8 maturities).
-
-    Returns yields for 1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, and 30Y.
-    Essential for macro analysis, rate-sensitive trading strategies,
-    and yield curve inversion monitoring.
-
-    Cost: $0.005 USDC per call (TradFi tier — single call for full curve).
-    """
-    try:
-        client = await _get_client()
-        rates = await client.get_treasury_curve()
-
-        if not rates:
-            return "No treasury rate data available."
-
-        response = TreasuryRateResponse(rates=rates)
-
-        lines = ["US Treasury Yield Curve:"]
-        for r in rates:
-            lines.append(f"  {r.maturity:>4s}: {r.yield_pct:.4f}%")
-
-        summary = "\n".join(lines)
-        details = json.dumps(response.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except Exception as e:
-        logger.error("Error in get_yield_curve: %s", e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message="Error retrieving yield curve",
-            details=str(e),
-        ).model_dump())
-
-
-# ===========================================================================
 # DISCOVERY TOOLS (FREE)
 # ===========================================================================
 
@@ -464,14 +385,14 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
     """
     Search through 30,000+ instruments across all asset classes. FREE.
 
-    Searches crypto, equities, FX, metals, and rates. Returns matching pairs
+    Searches crypto, equities, FX, and metals. Returns matching pairs
     with their available data services and pricing tier.
 
     Cost: FREE — no payment required.
 
     Args:
-        query: Search term (e.g., 'btc', 'AAPL', 'eurusd', 'gold', 'treasury').
-        asset_class: Filter by class. Options: 'all', 'crypto', 'equity', 'fx', 'metal', 'rate'.
+        query: Search term (e.g., 'btc', 'AAPL', 'eurusd', 'gold').
+        asset_class: Filter by class. Options: 'all', 'crypto', 'equity', 'fx', 'metal'.
                      Default: 'all'.
     """
     try:
@@ -605,7 +526,6 @@ async def get_pricing_info() -> str:
             "equities": "18,071 US + Chinese stocks",
             "fx": "129 currency pairs",
             "metals": "Gold, Silver, Platinum, Palladium, Copper",
-            "us_treasury": "8 maturities (1M–30Y)",
             "state_price": "Available",
             "dexs": "56 DEXs across 11 chains",
         },
@@ -620,9 +540,9 @@ async def get_pricing_info() -> str:
         f"  🆓 Discovery:      FREE (search, list, pricing)\n"
         f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (top 250 by market cap)\n"
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (550+ niche assets)\n"
-        f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals, rates)\n"
+        f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
         f"  📈 Equities:       ${settings.pricing.equities} (18k US + China stocks)\n"
-        f"  ⏱️  Historical:     ${settings.pricing.analytics} (30-min + 24-hr VWAP)\n"
+        f"  ⏱️  Analytics:      ${settings.pricing.analytics} (30-min + 24-hr VWAP)\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)"
     )
 
@@ -642,15 +562,14 @@ async def server_info() -> str:
         "version": "0.2.0",
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
-            "30,000+ instruments across crypto, equities, FX, metals, and rates. "
+            "30,000+ instruments across crypto, equities, FX, metals, and analytics. "
             "Pay per call via x402."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
-        "asset_classes": ["crypto", "equities", "fx", "metals", "rates", "commodities"],
+        "asset_classes": ["crypto", "equities", "fx", "metals", "commodities", "analytics"],
         "tools": [
             "get_vwap", "get_bid_ask", "get_vwap_30min", "get_vwap_24hr",
             "get_state_price", "get_equity", "get_fx_rate", "get_metal_price",
-            "get_treasury_rate", "get_yield_curve",
             "search_pairs", "list_instruments", "get_pricing_info",
         ],
         "payment": {

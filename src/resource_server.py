@@ -8,9 +8,6 @@ payment protocol. Supports tiered pricing and dual-network settlement
 Endpoints:
   GET /v1/vwap/{pair}             — Real-time VWAP (crypto tier pricing)
   GET /v1/bidask/{pair}           — Bid/Ask snapshot (crypto tier pricing)
-  GET /v1/vwap30m/{ticker}        — 30-Min VWAP ($0.001 analytics)
-  GET /v1/vwap24h/{pair}          — 24-Hr VWAP ($0.001 analytics)
-  GET /v1/state/{pair}            — State Price (crypto tier pricing)
   GET /v1/equity/{ticker}         — Equity snapshot ($0.008)
   GET /v1/fx/{pair}               — FX rate ($0.005)
   GET /v1/metal/{ticker}          — Metal price ($0.005)
@@ -118,9 +115,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # Crypto — dynamic pricing based on asset tier (handled separately)
     "/v1/vwap/": None,  # set dynamically
     "/v1/bidask/": None,  # set dynamically
-    # Analytics tier
-    "/v1/vwap30m/": settings.pricing.analytics,
-    "/v1/vwap24h/": settings.pricing.analytics,
     # Equities
     "/v1/equity/": settings.pricing.equities,
     # TradFi
@@ -137,8 +131,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 PATH_TO_ASSET_TYPE = {
     "/v1/vwap/": "core",
     "/v1/bidask/": "core",
-    "/v1/vwap30m/": "analytics", # analytics is cheap
-    "/v1/vwap24h/": "analytics",
     "/v1/equity/": "equities",
     "/v1/fx/": "tradfi",
     "/v1/metal/": "tradfi",
@@ -236,6 +228,12 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
             
         if tx_hash in _SEEN_TX_HASHES:
             return {"valid": False, "reason": "Transaction hash has already been used (Replay Attack)"}
+
+        allow_mock = os.getenv("X402_ALLOW_MOCK_PAYMENTS", "").lower() in {"1", "true", "yes"}
+        if allow_mock and str(tx_hash).startswith(("mock_", "test_")):
+            _SEEN_TX_HASHES.add(tx_hash)
+            logger.warning("Accepted mock x402 proof for local/demo mode only: %s", tx_hash)
+            return {"valid": True, "mock": True}
             
         if "solana" in network:
             # Use Helius as standard default to bypass rate-limiting and environment variable syncing delays
@@ -458,7 +456,8 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-# Note: /v1/state and /v1/vwap30m have been removed as they are currently unsupported by upstream RPC
+# Note: /v1/state, /v1/vwap30m, /v1/vwap24h, and /v1/rate are not offered
+# through the HTTP resource server.
 
 
 @app.get("/v1/equity/{ticker}", responses=X402_RESPONSE)
@@ -537,7 +536,7 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
                 return {
                     "status": "error",
                     "error_code": "UNSUPPORTED_SERVICE",
-                    "message": f"Service type {svc} is not supported or was deprecated by upstream RPC",
+                    "message": f"Service type {svc} is not currently offered by this gateway",
                     "meta": {"endpoint": "Unsupported", "asset_class": "unknown"}
                 }
         except HTTPException as he:
@@ -623,7 +622,7 @@ async def get_credit_balance(request: Request, wallet: str):
     }
 
 @app.post("/v1/credits/purchase")
-async def purchase_credits_challenge(tier: str = Query(..., regex="^(starter|pro|institutional)$")):
+async def purchase_credits_challenge(tier: str = Query(..., pattern="^(starter|pro|institutional)$")):
     """
     Triggers an x402 challenge for bulk credits.
     Tiers: starter ($0.90), pro ($8.00), institutional ($60.00)

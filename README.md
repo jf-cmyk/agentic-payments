@@ -102,9 +102,9 @@ Discovery tools are **FREE**, ensuring zero-friction onboarding for agents. Data
 | **🆓 Discovery** | `search_pairs`, `list_instruments`, `get_pricing_info` | All | **FREE** |
 | **📊 Core Crypto** | `get_vwap`, `get_bid_ask` | Top ~250 crypto by market cap | **$0.002** |
 | **📊 Extended Crypto**| `get_vwap`, `get_bid_ask` | 550+ long-tail / niche crypto | **$0.004** |
-| **🏦 TradFi** | `get_fx_rate`, `get_metal_price`, `get_treasury_rate`, `get_yield_curve` | FX, Metals, US Treasury Rates | **$0.005** |
+| **🏦 TradFi** | `get_fx_rate`, `get_metal_price` | FX, Metals | **$0.005** |
 | **📈 Equities** | `get_equity` | 18,071 US + Chinese stocks | **$0.008** |
-| **⏱️ Analytics** | `get_vwap_30min`, `get_vwap_24hr`, `get_state_price` | Time-series and settlement data | **$0.008** |
+| **⏱️ Analytics** | `get_vwap_30min`, `get_vwap_24hr`, `get_state_price` | MCP-only time-series and settlement data | **$0.001 - $0.004** |
 
 ## Architecture
 
@@ -131,6 +131,9 @@ uvicorn src.resource_server:app --port 8402
 
 All paid endpoints return a `402 Payment Required` status if the `PAYMENT-SIGNATURE` header is missing.
 The `PAYMENT-REQUIRED` response header contains base64-encoded payment requirements listing accepted networks (Solana priority, then Base).
+
+Current HTTP demo surface: `/v1/vwap/{pair}`, `/v1/bidask/{pair}`, `/v1/equity/{ticker}`, `/v1/fx/{pair}`, `/v1/metal/{ticker}`, and `/v1/batch`.
+Rates and Treasury endpoints are intentionally not offered in this portfolio.
 
 ## Development
 

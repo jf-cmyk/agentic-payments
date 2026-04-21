@@ -10,7 +10,6 @@ Asset classes covered:
   - Equities (US + Chinese stocks)
   - FX (129 currency pairs)
   - Metals (Gold, Silver, Platinum, Palladium, Copper)
-  - US Treasury Rates (1M–30Y yields)
   - Commodities
 """
 
@@ -217,28 +216,6 @@ class MetalData(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# US Treasury Rate Responses
-# ---------------------------------------------------------------------------
-
-        return (
-            f"US TREASURY [{self.maturity}]: {self.yield_pct:.4f}% "
-            f"| Source: Blocksize Capital | Time: {self.timestamp.isoformat()}"
-        )
-
-
-class TreasuryRateResponse(BaseModel):
-    """Response wrapper for rate queries — supports multiple maturities."""
-
-    status: str = "ok"
-    rates: list[TreasuryRateData]
-    meta: dict = Field(default_factory=lambda: {
-        "provider": "Blocksize Capital",
-        "asset_class": "fixed_income",
-        "description": "US Treasury yield curve",
-    })
-
-
-# ---------------------------------------------------------------------------
 # State Price Responses
 # ---------------------------------------------------------------------------
 
@@ -267,10 +244,10 @@ class PairInfo(BaseModel):
     pair: str = Field(..., description="Pair identifier (e.g., BTC-USD)")
     base_currency: str = Field("", description="Base asset")
     quote_currency: str = Field("", description="Quote asset")
-    asset_class: str = Field("crypto", description="Asset class (crypto, equity, fx, metal, rate)")
+    asset_class: str = Field("crypto", description="Asset class (crypto, equity, fx, metal)")
     services: list[str] = Field(
         default_factory=list,
-        description="Available services (vwap, bidask, vwap30m, vwap24h, state)",
+        description="Available services, such as vwap and bidask",
     )
     tier: str = Field("core", description="Pricing tier (core, extended, tradfi, equities, analytics)")
 
@@ -284,7 +261,7 @@ class PairSearchResponse(BaseModel):
     pairs: list[PairInfo] = Field(..., description="Matching pairs (max 50)")
     meta: dict = Field(default_factory=lambda: {
         "provider": "Blocksize Capital",
-        "total_coverage": "30,000+ instruments across crypto, equities, FX, metals, rates",
+        "total_coverage": "30,000+ instruments across crypto, equities, FX, and metals",
     })
 
 
