@@ -56,20 +56,12 @@ def generate_docs():
     
     pdf.section_title("1. System Architecture")
     pdf.body_text("The Blocksize Gateway is a multi-layered infrastructure designed for automated machine-to-machine data settlement.")
-    try:
-        pdf.image("docs/assets/architecture_diagram.png", x=15, y=pdf.get_y(), w=180)
-        pdf.ln(100)
-    except:
-        pdf.body_text("[2D Architecture Diagram Missing]")
+    pdf.body_text("The Blocksize Gateway is a multi-layered infrastructure designed for automated machine-to-machine data settlement. (Internal Network Diagram omitted for security).")
 
     pdf.add_page()
     pdf.section_title("2. Operational Process")
     pdf.body_text("Each request follows a strict verification and settlement flow via the Iron Dome security layer.")
-    try:
-        pdf.image("docs/assets/swimlane_diagram.png", x=15, y=pdf.get_y(), w=180)
-        pdf.ln(170)
-    except:
-        pdf.body_text("[2D Swimlane Diagram Missing]")
+    pdf.body_text("Each request follows a strict verification and settlement flow via the Iron Dome security layer. Refer to the internal documentation for the full operational sequence.")
 
     pdf.section_title("3. Authentication Mode")
     pdf.body_text("- x402 Header: Include Payment-Proof signature (TX Hash).\n- Credit Header: Include X-AGENT-WALLET for drawdown.")
