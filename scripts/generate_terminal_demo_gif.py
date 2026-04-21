@@ -68,7 +68,7 @@ TRANSCRIPT_LINES: list[tuple[str, str]] = [
     (
         "[*] Requesting BATCH endpoint: https://agentic-payments-production.up.railway.app/"
         "v1/batch?reqs=bidask:AVAXUSD,vwap:ETHUSD,bidask:SOLUSD,bidask:SOLUSD,bidask:BTCUSD,"
-        "bidask:LINKUSD,equity:AAPL,fx:EURUSD,metal:XAUUSD,rate:10Y",
+        "bidask:LINKUSD,equity:AAPL,fx:EURUSD,metal:XAUUSD",
         "link",
     ),
     ("   ⛔ Intercepted 402 Payment Required for entire batch.", "alert"),
@@ -88,34 +88,64 @@ TRANSCRIPT_LINES: list[tuple[str, str]] = [
     ("   🎉 SUCCESS! Huge Multi-Asset Payload Retrieved:", "green"),
     ("{", "main"),
     ('  "status": "ok",', "main"),
-    ('  "batch_size": 10,', "main"),
+    ('  "batch_size": 9,', "main"),
     ('  "results": [', "main"),
     ("    {", "main"),
     ('      "request": "bidask:AVAXUSD",', "main"),
-    ('      "response": { "status": "ok", "asset_class": "crypto", "bid": 9.2214, "ask": 9.2313 }', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "crypto", '
+        '"bid": 9.2214, "ask": 9.2313, "spread_pct": 0.1077 }',
+        "main",
+    ),
     ("    },", "main"),
     ("    {", "main"),
     ('      "request": "vwap:ETHUSD",', "main"),
-    ('      "response": { "status": "ok", "asset_class": "crypto", "vwap": 2315.8964 }', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "crypto", '
+        '"vwap": 2315.8964, "volume": 2155.4426 }',
+        "main",
+    ),
+    ("    },", "main"),
+    ("    {", "main"),
+    ('      "request": "bidask:BTCUSD",', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "crypto", '
+        '"bid": 75688.0362, "ask": 75688.1021 }',
+        "main",
+    ),
+    ("    },", "main"),
+    ("    {", "main"),
+    ('      "request": "bidask:LINKUSD",', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "crypto", '
+        '"bid": 9.2721, "ask": 9.2794 }',
+        "main",
+    ),
     ("    },", "main"),
     ("    {", "main"),
     ('      "request": "equity:AAPL",', "main"),
     (
-        '      "response": { "status": "error", "message": "Equity ticker AAPL not found in master stream" }',
-        "alert",
+        '      "response": { "status": "ok", "asset_class": "equity", '
+        '"ticker": "AAPL", "last": 181.52, "bid": 181.40, "ask": 181.60 }',
+        "main",
     ),
     ("    },", "main"),
     ("    {", "main"),
     ('      "request": "fx:EURUSD",', "main"),
-    ('      "response": { "status": "ok", "asset_class": "fx", "mid": 1.178736 }', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "fx", '
+        '"bid": 1.178685, "ask": 1.178787, "mid": 1.178736 }',
+        "main",
+    ),
     ("    },", "main"),
     ("    {", "main"),
     ('      "request": "metal:XAUUSD",', "main"),
-    ('      "response": { "status": "ok", "asset_class": "metal", "price": 4809.55 }', "main"),
+    (
+        '      "response": { "status": "ok", "asset_class": "metal", '
+        '"name": "Gold", "price": 4809.55 }',
+        "main",
+    ),
     ("    },", "main"),
-    ("    {", "main"),
-    ('      "request": "rate:10Y",', "main"),
-    ('      "response": { "status": "ok", "asset_class": "rate", "yield_pct": 4.251193 }', "main"),
     ("    }", "main"),
     ("  ]", "main"),
     ("}", "main"),

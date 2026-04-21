@@ -120,6 +120,34 @@
     footer { padding: 5rem 0; border-top: 1px solid var(--border); }
     .footer-inner { display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; }
 
+    .hero h1 { font-size: 5rem; font-weight: 800; line-height: 1; letter-spacing: -0.04em; margin-bottom: 2rem; max-width: 60%; }
+    .hero-sub { font-size: 1.5rem; color: var(--text); max-width: 60%; margin-bottom: 3rem; font-weight: 400; }
+
+    /* ─── MCP WIDGET ────────────────────────────── */
+    .mcp-widget {
+      position: absolute; top: 10rem; right: 2rem; width: 440px;
+      background: #0d0d0d; color: #fff; border-radius: 12px; overflow: hidden;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
+      font-family: 'Fira Code', monospace; font-size: 0.75rem;
+    }
+    .mcp-header { 
+      background: rgba(255,255,255,0.05); padding: 0.75rem 1.25rem; 
+      display: flex; justify-content: center; align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .mcp-title { text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; font-size: 0.65rem; color: #aaa; }
+    .mcp-copy { 
+      background: var(--primary); color: #fff; border: none; padding: 4px 10px; 
+      border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 0.65rem;
+    }
+    .mcp-copy:hover { opacity: 0.9; }
+    .mcp-body { padding: 0; line-height: 0; }
+    .mcp-body img { width: 100%; height: auto; display: block; }
+
+    @media (max-width: 1100px) {
+      .mcp-widget { display: none; }
+      .hero h1, .hero-sub { max-width: 100%; }
+    }
     @media (max-width: 768px) {
       .hero h1 { font-size: 3rem; }
       .nav-links { display: none; }
@@ -157,8 +185,13 @@
       <div class="stat"><span class="stat-value">2</span><span class="stat-label">Settlement Networks</span></div>
     </div>
 
-    <div class="hero-actions">
-      <a href="https://agentic-payments-production.up.railway.app/docs" class="btn-nav">GET STARTED →</a>
+    <div class="mcp-widget">
+      <div class="mcp-header">
+        <span class="mcp-title">AGENT TERMINAL DEMO</span>
+      </div>
+      <div class="mcp-body">
+        <img src="assets/agent_demo.gif" alt="Agent Demo">
+      </div>
     </div>
   </div>
 </section>
@@ -337,10 +370,6 @@
       <a href="pdf/Blocksize_Agent_Manual.pdf" class="resource-card" style="border-color: var(--secondary);">
         <h4 style="color: var(--secondary);">Agent Integration Guide</h4>
         <p style="font-size: 0.75rem; color: var(--text-muted);">Iron Dome security specs, MCP discovery, and integration snippets.</p>
-      </a>
-      <a href="pdf/Blocksize_State_Coverage.pdf" class="resource-card">
-        <h4>State Data Coverage</h4>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Institutional coverage for 130+ reference price assets across EVM and Solana.</p>
       </a>
       <a href="https://agentic-payments-production.up.railway.app/mcp/manifest.json" class="resource-card" target="_blank" style="border-color: var(--primary);">
         <h4 style="color: var(--primary);">MCP Discovery Manifest</h4>
