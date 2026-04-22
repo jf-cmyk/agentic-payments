@@ -1,0 +1,17 @@
+stages:
+  - deploy
+
+default:
+  image: node:20
+
+variables:
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+deploy_production:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - npm install -g @railway/cli
+  script:
+    - railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME"
