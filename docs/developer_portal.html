@@ -202,7 +202,7 @@
       gap: 1rem;
     }
     .surface-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .catalog-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+    .catalog-grid { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
     .resource-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     .flow-steps { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
@@ -335,6 +335,7 @@
     @media (max-width: 960px) {
       .hero-grid { grid-template-columns: 1fr; }
       .hero h1 { font-size: 3.8rem; max-width: none; }
+      .catalog-grid { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 768px) {
       .nav-links { display: none; }
@@ -342,6 +343,7 @@
       .hero h1 { font-size: 3rem; }
       h2 { font-size: 2.2rem; }
       .container { padding: 0 1.25rem; }
+      .catalog-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
