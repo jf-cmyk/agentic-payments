@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from src.resource_server import app
 from src.models import VWAPData, BidAskData
+from src.public_metadata import REPOSITORY_URL
 
 
 @pytest.fixture
@@ -58,6 +59,8 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "io.github.jf-cmyk/blocksize-agentic-payments"
+        assert data["repository"]["url"] == REPOSITORY_URL
+        assert data["remotes"][0]["url"].endswith("/mcp/server/")
 
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200

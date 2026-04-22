@@ -62,6 +62,7 @@ from src.public_metadata import (
     SUPPORT_URL,
     SWAGGER_URL,
     USER_FLOW_URL,
+    build_server_json,
 )
 from src.public_mcp_server import public_mcp
 
@@ -91,21 +92,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Blocksize Capital Agentic Data Economy",
     version=APP_VERSION,
-    description="""
+    description=f"""
 Institutional-grade financial data gateway for autonomous AI agents.
 Supports x402 real-time payment settlement, bulk wallet credits, and a public
 remote MCP discovery surface for directory listings and client onboarding.
 
 ### Public Integration Surfaces
-- **Developer Portal**: [Homepage](https://agentic-payments-production.up.railway.app/)
-- **Remote MCP URL**: [Streamable HTTP](https://agentic-payments-production.up.railway.app/mcp/server/)
-- **MCP Manifest**: [Listing metadata](https://agentic-payments-production.up.railway.app/mcp/manifest.json)
-- **OpenAPI**: [JSON schema](https://agentic-payments-production.up.railway.app/openapi.json)
-- **Swagger UI**: [Interactive docs](https://agentic-payments-production.up.railway.app/docs)
-- **Quickstart**: [Remote MCP install guide](https://agentic-payments-production.up.railway.app/quickstart/remote-mcp)
-- **Prompt Examples**: [Example prompts](https://agentic-payments-production.up.railway.app/prompt-examples)
-- **Privacy Policy**: [Privacy](https://agentic-payments-production.up.railway.app/privacy)
-- **Support**: [Contact and troubleshooting](https://agentic-payments-production.up.railway.app/support)
+- **Developer Portal**: [Homepage]({PUBLIC_BASE_URL}/)
+- **Remote MCP URL**: [Streamable HTTP]({REMOTE_MCP_URL})
+- **MCP Manifest**: [Listing metadata]({MCP_MANIFEST_URL})
+- **OpenAPI**: [JSON schema]({OPENAPI_URL})
+- **Swagger UI**: [Interactive docs]({SWAGGER_URL})
+- **Quickstart**: [Remote MCP install guide]({QUICKSTART_URL})
+- **Prompt Examples**: [Example prompts]({PROMPT_EXAMPLES_URL})
+- **Privacy Policy**: [Privacy]({PRIVACY_POLICY_URL})
+- **Support**: [Contact and troubleshooting]({SUPPORT_URL})
     """,
     lifespan=lifespan
 )
@@ -163,10 +164,7 @@ async def get_support_page():
 @app.get("/server.json", include_in_schema=False)
 async def get_server_json():
     """Serve the official MCP Registry metadata file."""
-    path = Path("server.json")
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="server.json not found")
-    return FileResponse(path)
+    return JSONResponse(build_server_json())
 
 
 @app.get("/.well-known/glama.json", include_in_schema=False)

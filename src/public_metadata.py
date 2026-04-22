@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from urllib.parse import quote_plus
 
 APP_VERSION = "0.6.0"
 
-PUBLIC_BASE_URL = "https://agentic-payments-production.up.railway.app"
-REPOSITORY_URL = "https://github.com/jf-cmyk/agentic-payments"
+
+def _normalized_url(env_var: str, default: str) -> str:
+    """Return a stable URL value without a trailing slash."""
+    return os.getenv(env_var, default).rstrip("/")
+
+
+PUBLIC_BASE_URL = _normalized_url(
+    "PUBLIC_BASE_URL",
+    "https://agentic-payments-production.up.railway.app",
+)
+REPOSITORY_URL = os.getenv(
+    "PUBLIC_REPOSITORY_URL",
+    "https://github.com/jf-cmyk/agentic-payments",
+)
+REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "github")
 
 REMOTE_MCP_PATH = "/mcp/server"
 REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
@@ -39,7 +53,35 @@ INSTRUMENT_COUNTS = {
     "metals": 5,
 }
 
-OFFICIAL_REGISTRY_NAME = "io.github.jf-cmyk/blocksize-agentic-payments"
+OFFICIAL_REGISTRY_NAME = os.getenv(
+    "PUBLIC_REGISTRY_NAME",
+    "io.github.jf-cmyk/blocksize-agentic-payments",
+)
+
+
+def build_server_json() -> dict[str, object]:
+    """Build the official MCP Registry metadata payload."""
+    return {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": OFFICIAL_REGISTRY_NAME,
+        "description": (
+            "Public remote MCP discovery server for Blocksize Capital. "
+            "Free instrument discovery, pricing inspection, and documentation "
+            "search for agent builders evaluating the paid x402 market data API."
+        ),
+        "repository": {
+            "url": REPOSITORY_URL,
+            "source": REPOSITORY_SOURCE,
+        },
+        "homepage": f"{PUBLIC_BASE_URL}/",
+        "version": APP_VERSION,
+        "remotes": [
+            {
+                "url": REMOTE_MCP_URL,
+                "type": "streamable-http",
+            }
+        ],
+    }
 
 
 STATIC_DOCUMENTS = {
