@@ -1,6 +1,5 @@
 import asyncio
 import os
-import json
 import httpx
 from dotenv import load_dotenv
 

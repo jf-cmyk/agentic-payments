@@ -7,3 +7,5 @@ dist/
 build/
 .pytest_cache/
 agent_wallet.json
+credits.db
+.DS_Store

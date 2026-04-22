@@ -1,5 +1,4 @@
 import asyncio
-import os
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
@@ -13,7 +12,8 @@ async def main():
     
     async with AsyncClient("https://mainnet.helius-rpc.com/?api-key=2a2801c5-01ca-458f-9aaa-5aafc1886571") as client:
         bal = (await client.get_balance(old_kp.pubkey())).value
-        if bal < 6000: return
+        if bal < 6000:
+            return
         
         # Leave a tiny bit of SOL to avoid the "fully empty account" simulation quirks
         amount = bal - 10000

@@ -15,7 +15,6 @@ Set BLOCKSIZE_API_KEY in your .env to run.
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 

@@ -9,7 +9,6 @@ async def probe():
     api_key = os.getenv("BLOCKSIZE_API_KEY")
     url = "https://data.blocksize.capital/marketdata/v1/api"
     
-    prefixes = ["vwap", "state", "state_price", "reference", "reference_price"]
     suffixes = ["latest", "getSnapshot", "instruments", "getLatest", "snapshot"]
     
     templates = [

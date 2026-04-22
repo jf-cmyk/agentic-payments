@@ -25,7 +25,7 @@ import sys
 from fastmcp import FastMCP
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
-from src.config import settings, TOP_250_CRYPTO
+from src.config import settings
 from src.models import (
     BidAskResponse,
     EquityResponse,
@@ -33,6 +33,27 @@ from src.models import (
     InstrumentListResponse,
     PairSearchResponse,
     VWAPResponse,
+)
+from src.public_metadata import (
+    AGENT_MANUAL_URL,
+    APP_VERSION,
+    DATA_CATALOG_URL,
+    DISCOVERABLE_SYMBOL_COUNT,
+    INSTRUMENT_COUNTS,
+    MCP_MANIFEST_URL,
+    OPENAPI_URL,
+    PRIVACY_POLICY_URL,
+    PROMPT_EXAMPLES_URL,
+    PUBLIC_BASE_URL,
+    QUICKSTART_URL,
+    REPOSITORY_URL,
+    REMOTE_MCP_URL,
+    SERVER_JSON_URL,
+    SUPPORT_URL,
+    SWAGGER_URL,
+    get_static_document,
+    search_api_url,
+    search_static_documents,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,7 +77,7 @@ mcp = FastMCP(
     instructions=(
         "Institutional-grade multi-asset market data for AI agents. "
         "Access real-time VWAP, bid/ask spreads, equities, FX, metals, "
-        "and analytics across 30,000+ instruments. "
+        "and analytics across more than 27,000 discoverable symbols. "
         "Outlier-filtered, decision-ready output. "
         "Pay per call via x402 (USDC on Solana or Base L2). "
         "No subscription required."
@@ -64,6 +85,11 @@ mcp = FastMCP(
 )
 
 _client: BlocksizeClient | None = None
+READ_ONLY_TOOL_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
 
 
 async def _get_client() -> BlocksizeClient:
@@ -74,11 +100,85 @@ async def _get_client() -> BlocksizeClient:
     return _client
 
 
+def _error_payload(error_code: str, message: str, details: str | None = None) -> str:
+    """Build a consistent JSON error string for MCP tools."""
+    return json.dumps(
+        ErrorResponse(
+            error_code=error_code,
+            message=message,
+            details=details,
+        ).model_dump()
+    )
+
+
+def _instrument_search_result(pair_info) -> dict[str, object]:
+    """Convert a pair search match into an OpenAI-style search result."""
+    pair = pair_info.pair.upper()
+    title = f"{pair} market data"
+    return {
+        "id": f"instrument:{pair_info.asset_class}:{pair_info.pair}",
+        "title": title,
+        "url": search_api_url(pair_info.pair),
+        "metadata": {
+            "type": "instrument",
+            "asset_class": pair_info.asset_class,
+            "services": pair_info.services,
+            "pricing_tier": pair_info.tier,
+        },
+    }
+
+
+def _instrument_fetch_payload(pair_info) -> dict[str, object]:
+    """Convert a pair search match into a document-style payload."""
+    pair = pair_info.pair.upper()
+    services = ", ".join(pair_info.services)
+    endpoints = []
+    if "vwap" in pair_info.services:
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/vwap/{pair}")
+    if "bidask" in pair_info.services:
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/bidask/{pair}")
+    if pair_info.asset_class == "equity":
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/equity/{pair_info.base_currency}")
+    if pair_info.asset_class == "fx":
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/fx/{pair}")
+    if pair_info.asset_class == "metal":
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/metal/{pair}")
+
+    text = (
+        f"{pair} is available through Blocksize Capital as a {pair_info.asset_class} "
+        f"instrument. Available services: {services}. Pricing tier: {pair_info.tier}. "
+        "Live paid HTTP API access is pay-per-call through x402 or wallet credits. "
+        f"Use the remote MCP discovery tools to find instruments, then call the "
+        f"paid HTTP API endpoints documented in {SWAGGER_URL}. "
+        f"Suggested endpoints: {'; '.join(endpoints) if endpoints else SWAGGER_URL}."
+    )
+    return {
+        "id": f"instrument:{pair_info.asset_class}:{pair_info.pair}",
+        "title": f"{pair} market data",
+        "text": text,
+        "url": search_api_url(pair_info.pair),
+        "metadata": {
+            "type": "instrument",
+            "asset_class": pair_info.asset_class,
+            "services": pair_info.services,
+            "pricing_tier": pair_info.tier,
+        },
+    }
+
+
 # ===========================================================================
 # CRYPTO TOOLS
 # ===========================================================================
 
-@mcp.tool
+@mcp.tool(
+    title="Crypto VWAP Snapshot",
+    description=(
+        "Use this when you need the latest institutional crypto VWAP for one "
+        "trading pair. Returns a single paid snapshot only; use search_pairs "
+        "first if you do not know the exact symbol."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_vwap(pair: str) -> str:
     """
     Get the real-time Volume Weighted Average Price (VWAP) for a crypto trading pair.
@@ -120,7 +220,14 @@ async def get_vwap(pair: str) -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Crypto Bid Ask Snapshot",
+    description=(
+        "Use this when you need the current bid, ask, and spread for one crypto "
+        "pair. Returns a single paid snapshot only; it does not stream quotes."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_bid_ask(pair: str) -> str:
     """
     Get the current best bid/ask prices and spread for a crypto trading pair.
@@ -156,7 +263,14 @@ async def get_bid_ask(pair: str) -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Thirty Minute VWAP",
+    description=(
+        "Use this when you need the 30-minute crypto VWAP for one base asset. "
+        "This is a paid analytics snapshot, not a live tick feed."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_vwap_30min(ticker: str) -> str:
     """
     Get the 30-minute VWAP snapshot for a crypto asset.
@@ -191,7 +305,14 @@ async def get_vwap_30min(ticker: str) -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Twenty Four Hour VWAP",
+    description=(
+        "Use this when you need a 24-hour VWAP or closing-style reference price "
+        "for one crypto pair. This is a paid analytics snapshot."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_vwap_24hr(pair: str) -> str:
     """
     Get the 24-hour VWAP (closing price) for a crypto pair.
@@ -225,7 +346,14 @@ async def get_vwap_24hr(pair: str) -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="State Price Snapshot",
+    description=(
+        "Use this when you need the settlement-style state or reference price for "
+        "one crypto pair. Returns one paid snapshot."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_state_price(pair: str) -> str:
     """
     Get the state/reference price for a crypto pair.
@@ -263,7 +391,14 @@ async def get_state_price(pair: str) -> str:
 # EQUITIES TOOLS
 # ===========================================================================
 
-@mcp.tool
+@mcp.tool(
+    title="Equity Snapshot",
+    description=(
+        "Use this when you need the latest snapshot for one supported equity "
+        "ticker. Returns a single paid stock snapshot only."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_equity(ticker: str) -> str:
     """
     Get the latest snapshot for a US or Chinese equity (stock).
@@ -304,7 +439,14 @@ async def get_equity(ticker: str) -> str:
 # FX & METALS TOOLS
 # ===========================================================================
 
-@mcp.tool
+@mcp.tool(
+    title="FX Snapshot",
+    description=(
+        "Use this when you need the latest bid, ask, and mid rate for one FX pair. "
+        "Returns a single paid snapshot only."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_fx_rate(pair: str) -> str:
     """
     Get the current exchange rate for an FX (foreign exchange) pair.
@@ -340,7 +482,14 @@ async def get_fx_rate(pair: str) -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Metal Snapshot",
+    description=(
+        "Use this when you need the latest spot price for one supported metal ticker. "
+        "Returns a single paid snapshot only."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_metal_price(ticker: str) -> str:
     """
     Get the spot price for a precious or industrial metal.
@@ -380,10 +529,17 @@ async def get_metal_price(ticker: str) -> str:
 # DISCOVERY TOOLS (FREE)
 # ===========================================================================
 
-@mcp.tool
+@mcp.tool(
+    title="Instrument Search",
+    description=(
+        "Use this to discover valid crypto, equity, FX, or metal symbols before "
+        "calling paid market data tools. This is free and does not return live prices."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def search_pairs(query: str, asset_class: str = "all") -> str:
     """
-    Search through 30,000+ instruments across all asset classes. FREE.
+    Search through more than 27,000 discoverable symbols across all asset classes. FREE.
 
     Searches crypto, equities, FX, and metals. Returns matching pairs
     with their available data services and pricing tier.
@@ -426,7 +582,14 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Instrument List",
+    description=(
+        "Use this to list all supported instruments for one Blocksize service. "
+        "This is free and is best for capability discovery, not live market data."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def list_instruments(service: str = "vwap") -> str:
     """
     List all available instruments for a Blocksize data service. FREE.
@@ -488,7 +651,14 @@ async def list_instruments(service: str = "vwap") -> str:
         ).model_dump())
 
 
-@mcp.tool
+@mcp.tool(
+    title="Pricing Information",
+    description=(
+        "Use this to inspect the current free and paid tiers, settlement networks, "
+        "and pricing guidance before using Blocksize data tools."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_pricing_info() -> str:
     """
     Get complete pricing information for all Blocksize Capital data tools. FREE.
@@ -551,6 +721,125 @@ async def get_pricing_info() -> str:
 
 
 # ---------------------------------------------------------------------------
+# OPENAI-STYLE DISCOVERY TOOLS
+# ---------------------------------------------------------------------------
+
+@mcp.tool(
+    title="Catalog Search",
+    description=(
+        "Use this when a remote MCP client needs OpenAI-style search across "
+        "Blocksize documentation and free instrument metadata. This does not "
+        "return paid live market data."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def search(query: str) -> str:
+    """
+    Search Blocksize documents and instrument metadata using an OpenAI-compatible shape.
+
+    Returns a JSON document with a single top-level `results` array containing
+    documentation pages and supported instrument matches.
+    """
+    try:
+        results = search_static_documents(query)
+        if not results:
+            for fallback_id in ("doc:quickstart", "doc:pricing"):
+                doc = get_static_document(fallback_id)
+                if doc is None:
+                    continue
+                results.append(
+                    {
+                        "id": doc["id"],
+                        "title": doc["title"],
+                        "url": doc["url"],
+                        "metadata": doc["metadata"],
+                    }
+                )
+
+        client = await _get_client()
+        instrument_matches = await client.search_pairs(query, "all")
+        for match in instrument_matches[:10]:
+            results.append(_instrument_search_result(match))
+
+        deduped: list[dict[str, object]] = []
+        seen_ids: set[str] = set()
+        for item in results:
+            item_id = str(item["id"])
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            deduped.append(item)
+
+        return json.dumps({"results": deduped[:12]}, indent=2)
+    except Exception as e:
+        logger.error("Error in search(%s): %s", query, e, exc_info=True)
+        return _error_payload(
+            "INTERNAL_ERROR",
+            f"Error searching the Blocksize catalog for '{query}'",
+            str(e),
+        )
+
+
+@mcp.tool(
+    title="Catalog Fetch",
+    description=(
+        "Use this when a remote MCP client needs the full contents of a document "
+        "or instrument guide returned by search. This does not execute paid "
+        "market data requests."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def fetch(id: str) -> str:
+    """
+    Fetch one document-style payload for a known documentation or instrument id.
+
+    Supported ids:
+    - doc:<slug>
+    - instrument:<asset_class>:<pair>
+    """
+    try:
+        static_doc = get_static_document(id)
+        if static_doc is not None:
+            return json.dumps(static_doc, indent=2)
+
+        if id.startswith("instrument:"):
+            _, asset_class, pair = id.split(":", 2)
+            client = await _get_client()
+            matches = await client.search_pairs(pair, asset_class)
+            exact = next(
+                (
+                    match for match in matches
+                    if match.pair.lower() == pair.lower()
+                    and match.asset_class.lower() == asset_class.lower()
+                ),
+                None,
+            )
+            if exact is None:
+                return _error_payload(
+                    "NOT_FOUND",
+                    f"No instrument metadata found for '{id}'",
+                )
+            return json.dumps(_instrument_fetch_payload(exact), indent=2)
+
+        return _error_payload(
+            "INVALID_ID",
+            "Unsupported fetch id. Use an id returned by the search tool.",
+        )
+    except ValueError:
+        return _error_payload(
+            "INVALID_ID",
+            "Unsupported fetch id. Use an id returned by the search tool.",
+        )
+    except Exception as e:
+        logger.error("Error in fetch(%s): %s", id, e, exc_info=True)
+        return _error_payload(
+            "INTERNAL_ERROR",
+            f"Error fetching '{id}'",
+            str(e),
+        )
+
+
+# ---------------------------------------------------------------------------
 # MCP Resources (Read-Only Context)
 # ---------------------------------------------------------------------------
 
@@ -559,24 +848,43 @@ async def server_info() -> str:
     """Blocksize Capital MCP server information and capabilities."""
     return json.dumps({
         "name": "Blocksize Capital MCP Server",
-        "version": "0.2.0",
+        "version": APP_VERSION,
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
-            "30,000+ instruments across crypto, equities, FX, metals, and analytics. "
+            "Discovery across crypto, equities, FX, metals, and analytics plus "
+            "paid HTTP market data access via x402. "
             "Pay per call via x402."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
-        "asset_classes": ["crypto", "equities", "fx", "metals", "commodities", "analytics"],
+        "asset_classes": ["crypto", "equities", "fx", "metals", "analytics"],
         "tools": [
             "get_vwap", "get_bid_ask", "get_vwap_30min", "get_vwap_24hr",
             "get_state_price", "get_equity", "get_fx_rate", "get_metal_price",
-            "search_pairs", "list_instruments", "get_pricing_info",
+            "search_pairs", "list_instruments", "get_pricing_info", "search", "fetch",
         ],
         "payment": {
             "protocol": "x402",
             "networks": ["Solana (primary)", "Base L2 (fallback)"],
             "currency": "USDC",
             "model": "tiered pay-per-call (no subscription)",
+        },
+        "coverage": {
+            "discoverable_symbols": DISCOVERABLE_SYMBOL_COUNT,
+            **INSTRUMENT_COUNTS,
+        },
+        "links": {
+            "remote_mcp": REMOTE_MCP_URL,
+            "manifest": MCP_MANIFEST_URL,
+            "openapi": OPENAPI_URL,
+            "swagger": SWAGGER_URL,
+            "quickstart": QUICKSTART_URL,
+            "prompt_examples": PROMPT_EXAMPLES_URL,
+            "privacy_policy": PRIVACY_POLICY_URL,
+            "support": SUPPORT_URL,
+            "server_json": SERVER_JSON_URL,
+            "agent_manual": AGENT_MANUAL_URL,
+            "data_catalog": DATA_CATALOG_URL,
+            "repository": REPOSITORY_URL,
         },
     }, indent=2)
 
@@ -589,9 +897,9 @@ def main() -> None:
     """Run the MCP server."""
     transport = settings.server.mcp_transport
 
-    logger.info("Starting Blocksize Capital MCP Server v0.2.0")
+    logger.info("Starting Blocksize Capital MCP Server v%s", APP_VERSION)
     logger.info("Transport: %s", transport)
-    logger.info("Tools: 13 tools across 6 asset classes")
+    logger.info("Tools: 13 tools across 5 asset classes")
 
     if transport == "streamable-http":
         mcp.run(

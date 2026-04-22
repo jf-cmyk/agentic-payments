@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blocksize Remote MCP Quickstart</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-alt: #f6f6f6;
+      --text: #0d0d0d;
+      --muted: #5f6368;
+      --border: #e5e7eb;
+      --accent: #4f4bff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem 5rem;
+    }
+    h1, h2 { line-height: 1.1; letter-spacing: -0.02em; }
+    h1 { font-size: 3rem; margin-bottom: 1rem; }
+    h2 { margin-top: 2.5rem; font-size: 1.7rem; }
+    p, li { color: var(--muted); }
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.95rem;
+    }
+    pre {
+      background: #0d0d0d;
+      color: #f4f4f5;
+      padding: 1rem;
+      border-radius: 12px;
+      overflow-x: auto;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem;
+      background: var(--bg-alt);
+      margin-top: 1rem;
+    }
+    .pill {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      background: rgba(79, 75, 255, 0.12);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    ul { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="pill">Public Remote MCP</span>
+    <h1>Blocksize Remote MCP Quickstart</h1>
+    <p>
+      Public remote discovery endpoint:
+      <a href="https://agentic-payments-production.up.railway.app/mcp/server">https://agentic-payments-production.up.railway.app/mcp/server</a>
+    </p>
+
+    <div class="card">
+      <strong>What this public remote server is for</strong>
+      <p>
+        The public remote MCP exposes free discovery and documentation tools: instrument search,
+        supported instrument lists, pricing inspection, and document-style <code>search</code>/<code>fetch</code>.
+        Live paid market data remains available through the x402-protected HTTP API and the advanced local MCP setup.
+      </p>
+    </div>
+
+    <h2>ChatGPT Developer Mode</h2>
+    <p>
+      OpenAI’s current docs say developer mode supports remote MCP servers over Streamable HTTP.
+      In ChatGPT, enable Developer mode under Settings, then create or add an app pointing at the remote MCP URL above.
+    </p>
+    <p>
+      Reference docs:
+      <a href="https://platform.openai.com/docs/developer-mode">Developer mode</a> and
+      <a href="https://platform.openai.com/docs/mcp/overview">remote MCP overview</a>.
+    </p>
+
+    <h2>Cursor</h2>
+    <p>
+      Cursor’s MCP docs say Streamable HTTP servers can be configured with a URL. Add this to
+      <code>.cursor/mcp.json</code> or <code>~/.cursor/mcp.json</code>:
+    </p>
+    <pre><code>{
+  "mcpServers": {
+    "blocksize-discovery": {
+      "url": "https://agentic-payments-production.up.railway.app/mcp/server"
+    }
+  }
+}</code></pre>
+
+    <h2>Anthropic Messages API</h2>
+    <p>
+      Anthropic’s MCP connector docs say remote servers must be publicly exposed over HTTP and support
+      Streamable HTTP or SSE. Use the public MCP URL in the <code>mcp_servers</code> array:
+    </p>
+    <pre><code>{
+  "mcp_servers": [
+    {
+      "type": "url",
+      "url": "https://agentic-payments-production.up.railway.app/mcp/server",
+      "name": "blocksize-discovery"
+    }
+  ]
+}</code></pre>
+
+    <h2>Any Streamable HTTP Client</h2>
+    <p>
+      If your agent runtime supports remote MCP over Streamable HTTP, point it at the same URL:
+      <code>https://agentic-payments-production.up.railway.app/mcp/server</code>.
+    </p>
+
+    <h2>Paid Data Access</h2>
+    <p>
+      For live paid market data, use the REST API documented in
+      <a href="https://agentic-payments-production.up.railway.app/docs">Swagger</a> and
+      <a href="https://agentic-payments-production.up.railway.app/openapi.json">OpenAPI JSON</a>.
+      The public pricing and payment model are documented in the
+      <a href="https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf">Pricing Guide</a>
+      and
+      <a href="https://agentic-payments-production.up.railway.app/pdf/Blocksize_Agent_Manual.pdf">Agent Manual</a>.
+    </p>
+
+    <h2>Advanced Local MCP</h2>
+    <p>
+      Advanced builders who want the full MCP tool surface can run the local server from the repository:
+    </p>
+    <pre><code>uv venv
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+python -m src.mcp_server</code></pre>
+    <p>
+      The local MCP flow requires Blocksize credentials and is intended for direct builder integrations,
+      not anonymous public directory installs.
+    </p>
+  </main>
+</body>
+</html>

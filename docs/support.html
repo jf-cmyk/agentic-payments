@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blocksize Support</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: #ffffff;
+      color: #111827;
+      line-height: 1.7;
+    }
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem 5rem;
+    }
+    h1 { font-size: 2.8rem; letter-spacing: -0.02em; }
+    h2 { margin-top: 2rem; }
+    p, li { color: #4b5563; }
+    a { color: #4f4bff; text-decoration: none; }
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 1.25rem;
+      background: #f9fafb;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Support and Troubleshooting</h1>
+    <div class="card">
+      <strong>Primary support channel</strong>
+      <p><a href="mailto:info@blocksize.capital">info@blocksize.capital</a></p>
+      <p>GitHub repository: <a href="https://github.com/jf-cmyk/agentic-payments">jf-cmyk/agentic-payments</a></p>
+    </div>
+
+    <h2>Before You Contact Us</h2>
+    <ul>
+      <li>Confirm the remote MCP URL is <code>https://agentic-payments-production.up.railway.app/mcp/server</code>.</li>
+      <li>Check the <a href="https://agentic-payments-production.up.railway.app/health">health endpoint</a> for current status.</li>
+      <li>Verify installation steps in the <a href="https://agentic-payments-production.up.railway.app/quickstart/remote-mcp">quickstart</a>.</li>
+      <li>Review the <a href="https://agentic-payments-production.up.railway.app/docs">OpenAPI docs</a> if your issue is related to paid HTTP access.</li>
+    </ul>
+
+    <h2>What to Include</h2>
+    <ul>
+      <li>The client you are using, such as ChatGPT Developer Mode, Cursor, Claude, Smithery, or a custom runtime.</li>
+      <li>The MCP URL or HTTP endpoint you attempted to call.</li>
+      <li>The tool name or endpoint name that failed.</li>
+      <li>The approximate time of failure and any relevant error text.</li>
+      <li>Whether the issue affects the free discovery server or the paid HTTP API.</li>
+    </ul>
+
+    <h2>Reviewer Links</h2>
+    <ul>
+      <li><a href="https://agentic-payments-production.up.railway.app/mcp/manifest.json">MCP Manifest</a></li>
+      <li><a href="https://agentic-payments-production.up.railway.app/server.json">Official Registry Metadata</a></li>
+      <li><a href="https://agentic-payments-production.up.railway.app/prompt-examples">Prompt Examples</a></li>
+      <li><a href="https://agentic-payments-production.up.railway.app/privacy">Privacy Policy</a></li>
+    </ul>
+  </main>
+</body>
+</html>

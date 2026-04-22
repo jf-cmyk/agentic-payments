@@ -14,9 +14,6 @@ import asyncio
 import httpx
 from solders.keypair import Keypair # type: ignore
 from solana.rpc.async_api import AsyncClient # type: ignore
-from solana.transaction import Transaction # type: ignore
-from solders.system_program import TransferParams, transfer # type: ignore
-from solders.pubkey import Pubkey # type: ignore
 
 # CONFIG
 BASE_URL = "https://agentic-payments-production.up.railway.app"
@@ -26,7 +23,7 @@ async def get_data_autonomously(endpoint: str):
     # 1. Load Identity
     try:
         pk_bytes = base64.b64decode(os.getenv("AGENT_PRIVATE_KEY", ""))
-        keypair = Keypair.from_bytes(pk_bytes)
+        Keypair.from_bytes(pk_bytes)
     except Exception:
         print("❌ Error: Please set AGENT_PRIVATE_KEY environment variable.")
         return
@@ -65,7 +62,7 @@ async def get_data_autonomously(endpoint: str):
 
             # 4. Execute Native Transfer (Note: Simplified for SOL native here)
             # In production, use spl-token transfer for USDC.
-            sol_client = AsyncClient(SOLANA_RPC)
+            AsyncClient(SOLANA_RPC)
             # (Payment logic abbreviated for boilerplate clarity)
             # tx_hash = "PAYMENT_TX_HASH_GOES_HERE"
             

@@ -19,7 +19,8 @@ from src.models import VWAPData, BidAskData, EquityData
 @pytest.fixture
 def test_client():
     """Create a FastAPI test client."""
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,32 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert "pricing" in data
         assert "networks" in data
+        assert "links" in data
+
+
+class TestPublicListingSurfaces:
+    def test_manifest_exposes_remote_mcp_url(self, test_client):
+        response = test_client.get("/mcp/manifest.json")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["transport"]["type"] == "streamable-http"
+        assert data["transport"]["url"].endswith("/mcp/server")
+
+    def test_public_remote_mcp_endpoint_exists(self, test_client):
+        response = test_client.get("/mcp/server")
+        assert response.status_code != 404
+
+    def test_server_json_is_served(self, test_client):
+        response = test_client.get("/server.json")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "io.github.jf-cmyk/blocksize-agentic-payments"
+
+    def test_support_and_privacy_pages_exist(self, test_client):
+        assert test_client.get("/support").status_code == 200
+        assert test_client.get("/privacy").status_code == 200
+        assert test_client.get("/quickstart/remote-mcp").status_code == 200
+        assert test_client.get("/prompt-examples").status_code == 200
 
 
 # ---------------------------------------------------------------------------

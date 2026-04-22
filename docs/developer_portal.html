@@ -4,409 +4,667 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Blocksize — Agentic Market Data for AI Agents</title>
-  <meta name="description" content="Institutional Market Data Economy for autonomous AI agents. Real-time VWAP, Equities, and FX powered by x402 on-chain settlement." />
+  <meta
+    name="description"
+    content="Blocksize Capital provides agent-native market data with a public remote MCP discovery server and x402-paid HTTP market data endpoints."
+  />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
       --primary: #4f4bff;
-      --text: #000000;
-      --text-muted: #666666;
+      --primary-soft: rgba(79, 75, 255, 0.08);
+      --text: #0d0d0d;
+      --text-muted: #5f6368;
       --bg: #ffffff;
       --bg-alt: #f6f6f6;
-      --border: #e5e5e5;
+      --border: #e5e7eb;
       --grid: rgba(0, 0, 0, 0.05);
+      --success: #10b981;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
-
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: 'Inter', sans-serif;
+      font-family: "Inter", sans-serif;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
     }
 
     .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
+    section { padding: 7rem 0; }
+    h2 { font-size: 3rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 2rem; }
+    h2 span { color: var(--primary); }
+    h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.75rem; }
+    p { color: var(--text-muted); }
 
-    /* ─── NAV ───────────────────────────────────── */
     nav {
-      position: sticky; top: 0; background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px); z-index: 1000; border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
     }
-    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 80px; }
+    .nav-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 80px;
+    }
     .logo { height: 32px; display: flex; align-items: center; }
     .logo img { height: 100%; width: auto; }
-    .nav-links { display: flex; gap: 2rem; list-style: none; }
-    .nav-links a { text-decoration: none; color: var(--text); font-weight: 500; font-size: 0.9rem; }
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      list-style: none;
+    }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 500;
+      font-size: 0.92rem;
+    }
     .nav-links a:hover { color: var(--primary); }
     .btn-nav {
-      background: var(--text); color: #fff; padding: 0.75rem 1.5rem; border-radius: 4px;
-      text-decoration: none; font-weight: 600; font-size: 0.85rem;
+      background: var(--text);
+      color: #fff;
+      padding: 0.75rem 1.4rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 0.85rem;
     }
 
-    /* ─── HERO ──────────────────────────────────── */
     .hero {
-      padding: 10rem 0;
-      background-image: 
+      padding: 9rem 0;
+      background-image:
         linear-gradient(var(--grid) 1px, transparent 1px),
         linear-gradient(90deg, var(--grid) 1px, transparent 1px);
       background-size: 50px 50px;
       position: relative;
+      overflow: hidden;
     }
-    .hero-label { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; margin-bottom: 2rem; display: block; }
-    .hero h1 { font-size: 5rem; font-weight: 800; line-height: 1; letter-spacing: -0.04em; margin-bottom: 2rem; }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 3rem;
+      align-items: center;
+    }
+    .hero-label {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 1.5rem;
+      display: inline-block;
+    }
+    .hero h1 {
+      font-size: 5rem;
+      font-weight: 800;
+      line-height: 0.95;
+      letter-spacing: -0.05em;
+      margin-bottom: 1.5rem;
+      max-width: 11ch;
+    }
     .hero h1 span { color: var(--primary); }
-    .hero-sub { font-size: 1.5rem; color: var(--text); max-width: 800px; margin-bottom: 3rem; font-weight: 400; }
-
-    .status-active { color: #10b981; font-weight: 700; }
-
+    .hero-sub {
+      font-size: 1.35rem;
+      max-width: 48rem;
+      margin-bottom: 2rem;
+      color: var(--text);
+    }
+    .hero-copy {
+      color: var(--text-muted);
+      max-width: 42rem;
+      margin-bottom: 2rem;
+    }
     .hero-stats {
-      display: flex; gap: 4rem; margin-bottom: 4rem; flex-wrap: wrap;
+      display: flex;
+      gap: 2.5rem;
+      flex-wrap: wrap;
     }
-    .stat { text-align: left; }
-    .stat-value { font-size: 1.5rem; font-weight: 800; color: var(--primary); display: block; }
-    .stat-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
-    /* ─── SECTIONS ──────────────────────────────── */
-    section { padding: 8rem 0; }
-    h2 { font-size: 3rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 3rem; }
-    h2 span { color: var(--primary); }
-
-    /* ─── DATA CARDS ────────────────────────────── */
-    .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4rem; }
-    .catalog-item { 
-      background: #fff; padding: 2rem; border-radius: 12px; 
-      border: 1px solid var(--border); transition: all 0.3s ease; 
+    .stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--primary);
     }
-    .catalog-item:hover { border-color: var(--primary); transform: translateY(-4px); box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
-    .catalog-item h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; }
-    .catalog-item p { color: var(--text-muted); margin-bottom: 2rem; font-size: 0.95rem; height: 3rem; overflow: hidden; }
-    
-    .endpoint { 
-      display: block; background: #f8f9ff; color: var(--primary);
-      font-family: 'Fira Code', 'Courier New', monospace; font-size: 0.85rem; font-weight: 700;
-      padding: 1rem; border-radius: 6px; border: 2px solid rgba(79, 75, 255, 0.1);
-      text-transform: none; letter-spacing: 0;
+    .stat-label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 700;
     }
 
-    /* ─── FLOW ──────────────────────────────────── */
-    .flow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; }
-    .step { padding: 2rem; background: var(--bg-alt); border-radius: 8px; }
-    .step-num { color: var(--primary); font-weight: 800; font-size: 1.25rem; margin-bottom: 1rem; display: block; }
-    .step h4 { font-weight: 700; margin-bottom: 0.5rem; }
-    .step p { font-size: 0.9rem; color: var(--text-muted); }
+    .hero-card,
+    .surface-card,
+    .catalog-item,
+    .resource-card,
+    .step {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #fff;
+    }
+    .hero-card {
+      padding: 1.5rem;
+      background: #0d0d0d;
+      color: #fff;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.15);
+    }
+    .hero-card .eyebrow {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #9ca3af;
+      margin-bottom: 0.75rem;
+      font-weight: 800;
+    }
+    .hero-card .url {
+      display: block;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 1rem;
+      color: #fff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      overflow-wrap: anywhere;
+    }
+    .hero-card p { color: #c7c9d1; font-size: 0.95rem; }
+    .hero-card .mode {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      background: rgba(16, 185, 129, 0.12);
+      color: #8ce3c2;
+      font-weight: 700;
+      font-size: 0.78rem;
+    }
+    .hero-card img {
+      width: 100%;
+      border-radius: 12px;
+      margin-top: 1.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
 
-    /* ─── TABLE ─────────────────────────────────── */
-    .pricing-table { width: 100%; border-collapse: collapse; margin-top: 2rem; }
-    .pricing-table th { text-align: left; padding: 1.5rem; border-bottom: 2px solid var(--text); font-weight: 800; text-transform: uppercase; font-size: 0.75rem; }
-    .pricing-table td { padding: 1.5rem; border-bottom: 1px solid var(--border); }
-    .price-bold { font-weight: 800; color: var(--primary); }
-    .credit-badge { background: #ecf781; color: #000; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 800; font-size: 0.7rem; }
+    .surface-grid,
+    .catalog-grid,
+    .resource-grid,
+    .flow-steps {
+      display: grid;
+      gap: 1rem;
+    }
+    .surface-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .catalog-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+    .resource-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .flow-steps { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
-    /* ─── RESOURCES ─────────────────────────────── */
-    .resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1rem; }
+    .surface-card,
+    .catalog-item,
+    .step {
+      padding: 1.5rem;
+    }
+    .surface-card strong {
+      display: inline-block;
+      margin-bottom: 0.8rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--primary);
+    }
+    .surface-card code,
+    .catalog-item .endpoint {
+      display: block;
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      background: var(--primary-soft);
+      color: var(--primary);
+      border-radius: 12px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
+    }
+    .surface-card ul { padding-left: 1.15rem; }
+    .surface-card li { color: var(--text-muted); }
+    .catalog-item:hover,
+    .resource-card:hover,
+    .surface-card:hover {
+      border-color: var(--primary);
+      transform: translateY(-3px);
+      transition: all 0.2s ease;
+    }
+
+    .step-num {
+      display: inline-block;
+      color: var(--primary);
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+      font-size: 1.1rem;
+    }
+
+    .pricing-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1.5rem;
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .pricing-table th {
+      text-align: left;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 2px solid var(--text);
+      font-weight: 800;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .pricing-table td {
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .price-bold { color: var(--primary); font-weight: 800; }
+    .credit-badge {
+      display: inline-block;
+      background: #ecf781;
+      color: #111827;
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+
     .resource-card {
-      border: 1px solid var(--border); padding: 2rem; text-decoration: none; color: inherit;
-      display: flex; align-items: center; justify-content: space-between; transition: border-color 0.2s;
+      text-decoration: none;
+      color: inherit;
+      padding: 1.5rem;
+      min-height: 150px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
-    .resource-card:hover { border-color: var(--primary); }
-    .resource-card h4 { font-weight: 700; }
-    .arrow { color: var(--primary); font-weight: 800; }
-
-    /* ─── FOOTER ────────────────────────────────── */
-    footer { padding: 5rem 0; border-top: 1px solid var(--border); }
-    .footer-inner { display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; }
-
-    .hero h1 { font-size: 5rem; font-weight: 800; line-height: 1; letter-spacing: -0.04em; margin-bottom: 2rem; max-width: 60%; }
-    .hero-sub { font-size: 1.5rem; color: var(--text); max-width: 60%; margin-bottom: 3rem; font-weight: 400; }
-
-    /* ─── MCP WIDGET ────────────────────────────── */
-    .mcp-widget {
-      position: absolute; top: 10rem; right: 2rem; width: 440px;
-      background: #0d0d0d; color: #fff; border-radius: 12px; overflow: hidden;
-      box-shadow: 0 40px 100px rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1);
-      font-family: 'Fira Code', monospace; font-size: 0.75rem;
+    .resource-card .arrow {
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 1.1rem;
     }
-    .mcp-header { 
-      background: rgba(255,255,255,0.05); padding: 0.75rem 1.25rem; 
-      display: flex; justify-content: center; align-items: center;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-    .mcp-title { text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; font-size: 0.65rem; color: #aaa; }
-    .mcp-copy { 
-      background: var(--primary); color: #fff; border: none; padding: 4px 10px; 
-      border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 0.65rem;
-    }
-    .mcp-copy:hover { opacity: 0.9; }
-    .mcp-body { padding: 0; line-height: 0; }
-    .mcp-body img { width: 100%; height: auto; display: block; }
+    .resource-card h4 { font-size: 1.05rem; }
 
-    @media (max-width: 1100px) {
-      .mcp-widget { display: none; }
-      .hero h1, .hero-sub { max-width: 100%; }
+    .callout {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #4f4bff, #6e6bff);
+      color: #fff;
+    }
+    .callout p { color: rgba(255, 255, 255, 0.88); }
+
+    footer {
+      padding: 4rem 0;
+      border-top: 1px solid var(--border);
+      background: var(--bg-alt);
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 2rem;
+    }
+    .status-active { color: var(--success); font-weight: 700; }
+
+    @media (max-width: 960px) {
+      .hero-grid { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 3.8rem; max-width: none; }
     }
     @media (max-width: 768px) {
-      .hero h1 { font-size: 3rem; }
       .nav-links { display: none; }
+      .hero { padding: 7rem 0; }
+      .hero h1 { font-size: 3rem; }
+      h2 { font-size: 2.2rem; }
+      .container { padding: 0 1.25rem; }
     }
   </style>
 </head>
 <body>
-
-<nav>
-  <div class="container">
-    <div class="nav-inner">
-      <div class="logo"><img src="assets/logo.svg" alt="Blocksize"></div>
-      <ul class="nav-links">
-        <li><a href="https://blocksize.info" target="_blank">Main Website</a></li>
-        <li><a href="#catalog">Data</a></li>
-        <li><a href="#flow">Flow</a></li>
-        <li><a href="#pricing">Pricing</a></li>
-        <li><a href="#resources">Docs</a></li>
-      </ul>
-      <a href="https://agentic-payments-production.up.railway.app/docs" class="btn-nav">LAUNCH API</a>
-    </div>
-  </div>
-</nav>
-
-<section class="hero">
-  <div class="container">
-    <span class="hero-label">PROPELLING THE AGENTIC ECONOMY</span>
-    <h1>Agentic Market <span>Data</span></h1>
-    <p class="hero-sub">The first institutional-grade data gateway designed for autonomous AI agents. Real-time, on-chain settlement for machines.</p>
-    
-    <div class="hero-stats">
-      <div class="stat"><span class="stat-value">3,900+</span><span class="stat-label">Active Instruments</span></div>
-      <div class="stat"><span class="stat-value">$0.002</span><span class="stat-label">Minimum Cost / Call</span></div>
-      <div class="stat"><span class="stat-value">&lt;500ms</span><span class="stat-label">Global Latency</span></div>
-      <div class="stat"><span class="stat-value">2</span><span class="stat-label">Settlement Networks</span></div>
-    </div>
-
-    <div class="mcp-widget">
-      <div class="mcp-header">
-        <span class="mcp-title">AGENT TERMINAL DEMO</span>
-      </div>
-      <div class="mcp-body">
-        <img src="assets/agent_demo.gif" alt="Agent Demo">
+  <nav>
+    <div class="container">
+      <div class="nav-inner">
+        <div class="logo"><img src="assets/logo.svg" alt="Blocksize" /></div>
+        <ul class="nav-links">
+          <li><a href="#surfaces">Surfaces</a></li>
+          <li><a href="#catalog">Data</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#resources">Docs</a></li>
+        </ul>
+        <a href="/docs" class="btn-nav">Open API</a>
       </div>
     </div>
-  </div>
-</section>
+  </nav>
 
+  <section class="hero">
+    <div class="container">
+      <div class="hero-grid">
+        <div>
+          <span class="hero-label">PUBLIC DISCOVERY + PAID MARKET DATA</span>
+          <h1>Agentic Market <span>Data</span></h1>
+          <p class="hero-sub">
+            Blocksize Capital gives agent builders a public remote MCP discovery server and
+            x402-protected HTTP market data for live paid access.
+          </p>
+          <p class="hero-copy">
+            Use the public MCP surface to discover symbols, inspect pricing, and fetch integration docs.
+            Route live production quotes, VWAP, equities, FX, and metals through the paid HTTP API
+            or the advanced local MCP setup.
+          </p>
+          <div class="hero-stats">
+            <div>
+              <span class="stat-value">27,000+</span>
+              <span class="stat-label">Discoverable Symbols</span>
+            </div>
+            <div>
+              <span class="stat-value">$0.002</span>
+              <span class="stat-label">Minimum Cost / Call</span>
+            </div>
+            <div>
+              <span class="stat-value">HTTP</span>
+              <span class="stat-label">Streamable Remote MCP</span>
+            </div>
+            <div>
+              <span class="stat-value">2</span>
+              <span class="stat-label">Settlement Networks</span>
+            </div>
+          </div>
+        </div>
 
-<section id="catalog" style="background: var(--bg-alt);">
-  <div class="container">
-    <h2>Market <span>Data</span></h2>
-    <div class="catalog-grid">
-      <div class="catalog-item">
-        <h3>Crypto Assets</h3>
-        <p>VWAP and Order Book snapshots for 9,400+ pairs with institutional liquidity depth.</p>
-        <span class="endpoint">GET /v1/vwap/{pair}</span>
-      </div>
-      <div class="catalog-item">
-        <h3>Equities</h3>
-        <p>Snapshot data for US and Chinese equities, including bid/ask/mid and global volume.</p>
-        <span class="endpoint">GET /v1/equity/{ticker}</span>
-      </div>
-      <div class="catalog-item">
-        <h3>FX Rates</h3>
-        <p>120+ global currency pairs with institutional bid/ask snapshots.</p>
-        <span class="endpoint">GET /v1/fx/{pair}</span>
-      </div>
-      <div class="catalog-item">
-        <h3>Precious Metals</h3>
-        <p>Real-time pricing for Gold, Silver, Platinum, and Palladium vs USD/EUR.</p>
-        <span class="endpoint">GET /v1/metal/{ticker}</span>
-      </div>
-      <div class="catalog-item">
-        <h3>Commodities</h3>
-        <p>Agricultural, Energy, and Industrial commodity prices with global benchmarks.</p>
-        <span class="endpoint">GET /v1/commodity/{ticker}</span>
+        <div class="hero-card">
+          <div class="eyebrow">Public Remote MCP URL</div>
+          <span class="url">https://agentic-payments-production.up.railway.app/mcp/server</span>
+          <p>
+            Read-only discovery tools for ChatGPT Developer Mode, Cursor, Claude MCP clients,
+            Smithery, Glama, and official registry listings.
+          </p>
+          <span class="mode">Listing-safe discovery mode</span>
+          <img src="assets/agent_demo.gif" alt="Blocksize discovery demo" />
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="flow">
-  <div class="container">
-    <h2>Agent <span>Flow</span></h2>
-    <div class="flow-steps">
-      <div class="step">
-        <span class="step-num">01</span>
-        <h4>Request</h4>
-        <p>Request any gated data endpoint via standard HTTP GET.</p>
-      </div>
-      <div class="step">
-        <span class="step-num">02</span>
-        <h4>Challenge</h4>
-        <p>Receive 402 with Payment-Required metadata.</p>
-      </div>
-      <div class="step">
-        <span class="step-num">03</span>
-        <h4>Settle</h4>
-        <p>Broadcast USDC payment on Solana or Base.</p>
-      </div>
-      <div class="step">
-        <span class="step-num">04</span>
-        <h4>Unlock</h4>
-        <p>Resubmit with TX hash to receive verified data.</p>
+  <section id="surfaces" style="background: var(--bg-alt);">
+    <div class="container">
+      <h2>Integration <span>Surfaces</span></h2>
+      <div class="surface-grid">
+        <div class="surface-card">
+          <strong>Public Remote MCP</strong>
+          <h3>Directory and client onboarding</h3>
+          <p>
+            Free instrument search, instrument listing, pricing inspection, and document-style
+            <code>search</code>/<code>fetch</code> for remote MCP clients.
+          </p>
+          <code>/mcp/server</code>
+        </div>
+        <div class="surface-card">
+          <strong>Paid HTTP API</strong>
+          <h3>Live production market data</h3>
+          <p>
+            x402 or wallet-credit access to live market data endpoints for crypto, state price,
+            equities, FX, metals, and batch requests.
+          </p>
+          <code>/openapi.json</code>
+        </div>
+        <div class="surface-card">
+          <strong>Advanced Local MCP</strong>
+          <h3>Full builder workflow</h3>
+          <p>
+            Run the local MCP server from this repository when you want the full paid tool surface
+            inside your own MCP-compatible desktop or IDE workflow.
+          </p>
+          <code>python -m src.mcp_server</code>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="pricing" style="background: var(--bg-alt);">
-  <div class="container">
-    <h2>Unit <span>Pricing</span></h2>
-    <table class="pricing-table">
-      <thead>
-        <tr>
-          <th>Asset Class</th>
-          <th>Unit Cost (USDC)</th>
-          <th>Examples</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Core Crypto</td>
-          <td class="price-bold">$0.002</td>
-          <td>BTCUSD, ETHUSD, SOLUSD</td>
-        </tr>
-        <tr>
-          <td>Extended & State</td>
-          <td class="price-bold">$0.004</td>
-          <td>JUPUSD, WIFUSD, GNSUSD, TURBOUSD, State Proofs</td>
-        </tr>
-        <tr>
-          <td>FX & Metals</td>
-          <td class="price-bold">$0.005</td>
-          <td>EURUSD, XAUUSD</td>
-        </tr>
-        <tr>
-          <td>US Equities</td>
-          <td class="price-bold">$0.008</td>
-          <td>AAPL, TSLA</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div style="margin-top: 3rem; background: linear-gradient(135deg, #4f4bff, #6e6bff); color: #fff; padding: 2.5rem; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 2rem;">
-      <div style="flex: 1;">
-        <h3 style="color: #fff; margin-bottom: 0.5rem; font-size: 1.5rem;">Free Agent <span>Trial</span></h3>
-        <p style="font-size: 0.95rem; opacity: 0.9; line-height: 1.6;">Maximize your autonomous testing with zero initial cost. Every new <strong>active agent wallet</strong> address is automatically provisioned with <strong>50 Free Credits</strong> ($0.05 value) upon first interaction.</p>
-        <p style="font-size: 0.8rem; color: #ecf781; margin-top: 0.5rem; font-weight: 700;">Anti-Hopping Security Active: Trial requires a verified 0.1 SOL Stake, Wallet Age >24h, and authentic transaction history.</p>
-      </div>
-      <div style="background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.2);">
-        <p style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem; font-weight: 700;">First Interaction</p>
-        <span style="font-size: 2rem; font-weight: 800; color: var(--secondary);">+50</span>
-        <p style="font-size: 0.7rem; font-weight: 600; opacity: 0.8;">CREDITS FREE</p>
+  <section id="catalog">
+    <div class="container">
+      <h2>Market <span>Coverage</span></h2>
+      <div class="catalog-grid">
+        <div class="catalog-item">
+          <h3>Crypto VWAP and Bid/Ask</h3>
+          <p>Institutional crypto snapshots across 9,410 VWAP pairs and 1,962 bid/ask pairs.</p>
+          <span class="endpoint">GET /v1/vwap/{pair}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>State Price and Analytics</h3>
+          <p>Settlement-style reference prices plus 30-minute and 24-hour VWAP analytics.</p>
+          <span class="endpoint">GET /v1/state/{pair}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>Equities</h3>
+          <p>Snapshots for 18,071 supported US and Chinese equity tickers.</p>
+          <span class="endpoint">GET /v1/equity/{ticker}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>FX</h3>
+          <p>Bid, ask, and mid snapshots for 129 supported foreign exchange pairs.</p>
+          <span class="endpoint">GET /v1/fx/{pair}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>Metals</h3>
+          <p>Spot pricing for gold, silver, platinum, palladium, and copper.</p>
+          <span class="endpoint">GET /v1/metal/{ticker}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>Discovery and Docs</h3>
+          <p>Free symbol search, service listings, pricing info, and OpenAI-style document search.</p>
+          <span class="endpoint">MCP tools: search_pairs, list_instruments, search, fetch</span>
+        </div>
       </div>
     </div>
+  </section>
 
-    <div style="margin-top: 4rem;">
-      <h3>Bulk <span>Credit Tiers</span></h3>
-      <p style="color: var(--text-muted); margin-bottom: 2rem;">Pre-pay for institutional credits to receive significant discounts and eliminate per-call transaction latency.</p>
+  <section style="background: var(--bg-alt);">
+    <div class="container">
+      <h2>Agent <span>Flow</span></h2>
+      <div class="flow-steps">
+        <div class="step">
+          <span class="step-num">01</span>
+          <h3>Discover</h3>
+          <p>Use the public remote MCP server to find supported symbols, pricing tiers, and setup docs.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">02</span>
+          <h3>Choose Path</h3>
+          <p>For live production data, move from discovery into the paid HTTP API or the advanced local MCP setup.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">03</span>
+          <h3>Settle</h3>
+          <p>Use wallet credits or x402 payment proofs on Solana or Base for live market data calls.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">04</span>
+          <h3>Operate</h3>
+          <p>Scale with credit drawdown, bulk tiers, and instrument-aware routing once your agent is in production.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="container">
+      <h2>Unit <span>Pricing</span></h2>
       <table class="pricing-table">
         <thead>
           <tr>
-            <th>Tier Package</th>
-            <th>Credits</th>
-            <th>Purchase Price</th>
-            <th>Discount</th>
+            <th>Asset Class</th>
+            <th>Unit Cost (USDC)</th>
+            <th>Examples</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Starter Pouch</td>
-            <td>1,000 Credits</td>
-            <td class="price-bold">$0.90 USDC</td>
-            <td><span class="credit-badge">10% OFF</span></td>
+            <td>Core Crypto</td>
+            <td class="price-bold">$0.002</td>
+            <td>BTCUSD, ETHUSD, SOLUSD</td>
           </tr>
           <tr>
-            <td>Growth Pack</td>
-            <td>10,000 Credits</td>
-            <td class="price-bold">$8.00 USDC</td>
-            <td><span class="credit-badge">20% OFF</span></td>
+            <td>Extended and State</td>
+            <td class="price-bold">$0.004</td>
+            <td>JUPUSD, WIFUSD, state price snapshots</td>
           </tr>
           <tr>
-            <td>Institutional Vault</td>
-            <td>100,000 Credits</td>
-            <td class="price-bold">$60.00 USDC</td>
-            <td><span class="credit-badge">40% OFF</span></td>
+            <td>FX and Metals</td>
+            <td class="price-bold">$0.005</td>
+            <td>EURUSD, GBPUSD, XAUUSD</td>
+          </tr>
+          <tr>
+            <td>US Equities</td>
+            <td class="price-bold">$0.008</td>
+            <td>AAPL, TSLA, NVDA</td>
           </tr>
         </tbody>
       </table>
-      <div style="margin-top: 2rem; background: #f8f9ff; padding: 2rem; border-radius: 8px; border: 1px solid rgba(79, 75, 255, 0.1);">
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;"><strong>Implementation Note:</strong> Credit usage is requested via the <code>X-AGENT-WALLET</code> header. 1 Credit is consumed per $0.001 value (e.g., Core Crypto costs 2 Credits).</p>
-        <p style="font-size: 0.85rem; color: var(--text-muted);">Prefer a traditional commitment model? <a href="https://blocksize.info/crypto-market-data/" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: 700;">Explore Enterprise Subscriptions →</a></p>
+
+      <div class="callout">
+        <h3>Bulk Credit Tiers</h3>
+        <p>
+          Credit drawdown removes per-call settlement latency for repeat agents while preserving the
+          same underlying x402 economics.
+        </p>
+        <table class="pricing-table" style="margin-top: 1rem; background: transparent;">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Credits</th>
+              <th>Price</th>
+              <th>Discount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Starter Pouch</td>
+              <td>1,000</td>
+              <td class="price-bold" style="color: #fff;">$0.90</td>
+              <td><span class="credit-badge">10% OFF</span></td>
+            </tr>
+            <tr>
+              <td>Growth Pack</td>
+              <td>10,000</td>
+              <td class="price-bold" style="color: #fff;">$8.00</td>
+              <td><span class="credit-badge">20% OFF</span></td>
+            </tr>
+            <tr>
+              <td>Institutional Vault</td>
+              <td>100,000</td>
+              <td class="price-bold" style="color: #fff;">$60.00</td>
+              <td><span class="credit-badge">40% OFF</span></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="resources">
-  <div class="container">
-    <h2>Technical <span>Artifacts</span></h2>
-    <div class="resource-grid">
-      <a href="/docs" class="resource-card" target="_blank">
-        <h4>Institutional API Docs (Swagger)</h4>
-        <span class="arrow">→</span>
-      </a>
-      <a href="pdf/Blocksize_Data_Catalog.pdf" class="resource-card">
-        <h4>9,400+ Instrument Catalog</h4>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Institutional coverage across Crypto, FX, Metals, and Global Equities. Rates are not part of this portfolio.</p>
-      </a>
-      <a href="pdf/Blocksize_User_Flow.pdf" class="resource-card">
-        <h4>M2M Settlement Lifecycle</h4>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Step-by-step guide to x402 challenges and deterministic settlement.</p>
-      </a>
-      <a href="pdf/Blocksize_Pricing_Guide.pdf" class="resource-card">
-        <h4>Bulk Tiers & Unit Economics</h4>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Deep dive into credit purchase tiers and per-call cost structures.</p>
-      </a>
-      <a href="pdf/Blocksize_Agent_Manual.pdf" class="resource-card" style="border-color: var(--secondary);">
-        <h4 style="color: var(--secondary);">Agent Integration Guide</h4>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Iron Dome security specs, MCP discovery, and integration snippets.</p>
-      </a>
-      <a href="https://agentic-payments-production.up.railway.app/mcp/manifest.json" class="resource-card" target="_blank" style="border-color: var(--primary);">
-        <h4 style="color: var(--primary);">MCP Discovery Manifest</h4>
-        <span class="arrow" style="color: var(--primary);">→</span>
-      </a>
+  <section id="resources" style="background: var(--bg-alt);">
+    <div class="container">
+      <h2>Technical <span>Artifacts</span></h2>
+      <div class="resource-grid">
+        <a href="/quickstart/remote-mcp" class="resource-card">
+          <div>
+            <h4>Remote MCP Quickstart</h4>
+            <p>Install instructions for ChatGPT, Cursor, Claude MCP clients, and other Streamable HTTP runtimes.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/prompt-examples" class="resource-card">
+          <div>
+            <h4>Prompt Examples</h4>
+            <p>Reviewer-friendly prompts for discovery, pricing inspection, and integration handoff.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/privacy" class="resource-card">
+          <div>
+            <h4>Privacy Policy</h4>
+            <p>Accessible policy covering request metadata, wallet-related inputs, and operational logging.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/support" class="resource-card">
+          <div>
+            <h4>Support</h4>
+            <p>Contact path, troubleshooting checklist, and reviewer links.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/docs" class="resource-card">
+          <div>
+            <h4>Swagger UI</h4>
+            <p>Interactive documentation for the paid HTTP market data API.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/mcp/manifest.json" class="resource-card">
+          <div>
+            <h4>MCP Manifest</h4>
+            <p>Public listing metadata for the remote discovery server.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/server.json" class="resource-card">
+          <div>
+            <h4>Official Registry Metadata</h4>
+            <p>Remote server descriptor prepared for the MCP Registry publisher flow.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="pdf/Blocksize_Agent_Manual.pdf" class="resource-card">
+          <div>
+            <h4>Agent Integration Guide</h4>
+            <p>x402 flow, wallet-credit model, and system integration notes.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+      </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<footer style="background: var(--bg-alt); padding: 4rem 0;">
-  <div class="container" style="text-align: left; font-size: 0.85rem; color: var(--text-muted);">
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 4rem;">
-      <div>
-        <div class="logo" style="height: 32px; margin-bottom: 2rem;"><img src="assets/logo.svg" alt="Blocksize"></div>
-        <p style="font-weight: 700; color: var(--text); margin-bottom: 0.5rem;">Blocksize Capital GmbH</p>
-        <p>Taunusanlage 8</p>
-        <p>60329 Frankfurt, Germany</p>
-        <p style="margin-top: 1rem;">Email: <a href="mailto:info@blocksize.capital" style="color: inherit; text-decoration: none;">info@blocksize.capital</a></p>
-        <p>Phone: +49 (0)69 870 0990 80</p>
-      </div>
-      <div>
-        <p style="font-weight: 700; color: var(--text); margin-bottom: 1rem;">Legal & Register</p>
-        <p>Managing Directors: Christian Labetzsch, Christoph Impekoven</p>
-        <p>Amtsgericht Frankfurt am Main, HRB 113470</p>
-        <p>VAT ID: DE321106382</p>
-        <p style="margin-top: 1rem; font-size: 0.75rem; line-height: 1.6;">Online dispute resolution: <br><a href="http://ec.europa.eu/consumers/odr/" target="_blank" style="color: inherit;">ec.europa.eu/consumers/odr/</a></p>
-      </div>
-      <div>
-        <p style="font-weight: 700; color: var(--text); margin-bottom: 1rem;">Infrastructure</p>
-        <p>Solana Mainnet: <span class="status-active">Verified</span></p>
-        <p>Base L2: <span class="status-active">Verified</span></p>
-        <p>x402 Facilitator: <span class="status-active">Active</span></p>
-        <p style="margin-top: 1.5rem;"><a href="https://blocksize.info" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: 600;">Visit main site: blocksize.info</a></p>
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="logo" style="margin-bottom: 1rem;"><img src="assets/logo.svg" alt="Blocksize" /></div>
+          <p style="font-weight: 700; color: var(--text);">Blocksize Capital GmbH</p>
+          <p>Taunusanlage 8</p>
+          <p>60329 Frankfurt, Germany</p>
+          <p style="margin-top: 1rem;">Email: <a href="mailto:info@blocksize.capital">info@blocksize.capital</a></p>
+          <p>Phone: +49 (0)69 870 0990 80</p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: var(--text); margin-bottom: 0.8rem;">Listing Surface</p>
+          <p>Remote MCP: <span class="status-active">Streamable HTTP</span></p>
+          <p>Glama Claim File: <span class="status-active">Ready</span></p>
+          <p>Official Registry Metadata: <span class="status-active">Ready</span></p>
+          <p>Support and Privacy Pages: <span class="status-active">Ready</span></p>
+        </div>
+        <div>
+          <p style="font-weight: 700; color: var(--text); margin-bottom: 0.8rem;">Infrastructure</p>
+          <p>Solana Mainnet: <span class="status-active">Verified</span></p>
+          <p>Base L2: <span class="status-active">Verified</span></p>
+          <p>x402 Settlement Flow: <span class="status-active">Active</span></p>
+          <p style="margin-top: 1rem;">
+            <a href="https://blocksize.info" target="_blank">Visit blocksize.info</a>
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-</footer>
-
+  </footer>
 </body>
 </html>

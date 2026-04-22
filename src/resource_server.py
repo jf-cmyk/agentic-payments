@@ -24,6 +24,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -43,8 +44,32 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
+from src.public_metadata import (
+    AGENT_MANUAL_URL,
+    APP_VERSION,
+    CONTACT_EMAIL,
+    DATA_CATALOG_URL,
+    GLAMA_WELL_KNOWN_URL,
+    MCP_MANIFEST_URL,
+    OPENAPI_URL,
+    PRICING_GUIDE_URL,
+    PRIVACY_POLICY_URL,
+    PROMPT_EXAMPLES_URL,
+    PUBLIC_BASE_URL,
+    QUICKSTART_URL,
+    REMOTE_MCP_PATH,
+    REMOTE_MCP_URL,
+    REPOSITORY_URL,
+    SERVER_JSON_URL,
+    SUPPORT_URL,
+    SWAGGER_URL,
+    USER_FLOW_URL,
+)
+from src.public_mcp_server import public_mcp
 
 logger = logging.getLogger(__name__)
+DOCS_DIR = Path("docs")
+PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
 
 
 # ---------------------------------------------------------------------------
@@ -59,27 +84,30 @@ async def lifespan(app: FastAPI):
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
     logger.info("Solana Wallet: %s", settings.x402.solana_wallet_address)
     logger.info("Base Wallet: %s", settings.x402.evm_wallet_address)
-    yield
+    async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
+        yield
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
 
 
 app = FastAPI(
     title="Blocksize Capital Agentic Data Economy",
-    version="0.5.0",
+    version=APP_VERSION,
     description="""
 Institutional-grade financial data gateway for autonomous AI agents.
-Supports x402 Real-time Payment Settlement and Bulk Credit Drawdown.
+Supports x402 real-time payment settlement, bulk wallet credits, and a public
+remote MCP discovery surface for directory listings and client onboarding.
 
-### 🛡️ Iron Dome Security Layer
-- **0.1 SOL Stake Requirement**: Agent wallets must hold >0.1 SOL to access trials.
-- **Wallet History**: Minimum age of 24 hours and 5+ transactions required.
-- **IP Guardrails**: Permanent 1-trial-per-IP policy.
-
-### 📚 Integration Artifacts
-- **Developer Portal**: [agentic-data.blocksize.info](https://agentic-payments-production.up.railway.app/)
-- **MCP Discovery**: [/mcp/manifest.json](https://agentic-payments-production.up.railway.app/mcp/manifest.json)
-- **Agent Integration Guide**: [Download PDF](https://agentic-payments-production.up.railway.app/pdf/Blocksize_Agent_Manual.pdf)
+### Public Integration Surfaces
+- **Developer Portal**: [Homepage](https://agentic-payments-production.up.railway.app/)
+- **Remote MCP URL**: [Streamable HTTP](https://agentic-payments-production.up.railway.app/mcp/server)
+- **MCP Manifest**: [Listing metadata](https://agentic-payments-production.up.railway.app/mcp/manifest.json)
+- **OpenAPI**: [JSON schema](https://agentic-payments-production.up.railway.app/openapi.json)
+- **Swagger UI**: [Interactive docs](https://agentic-payments-production.up.railway.app/docs)
+- **Quickstart**: [Remote MCP install guide](https://agentic-payments-production.up.railway.app/quickstart/remote-mcp)
+- **Prompt Examples**: [Example prompts](https://agentic-payments-production.up.railway.app/prompt-examples)
+- **Privacy Policy**: [Privacy](https://agentic-payments-production.up.railway.app/privacy)
+- **Support**: [Contact and troubleshooting](https://agentic-payments-production.up.railway.app/support)
     """,
     lifespan=lifespan
 )
@@ -96,14 +124,66 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 async def get_portal():
     """Serve the institutional developer portal."""
-    portal_path = os.path.join("docs", "developer_portal.html")
-    if os.path.exists(portal_path):
+    portal_path = DOCS_DIR / "developer_portal.html"
+    if portal_path.exists():
         return FileResponse(portal_path)
     raise HTTPException(status_code=404, detail="Developer Portal not found")
 
-# Mount assets and PDFs for public discovery
+
+def _serve_doc(filename: str, description: str) -> FileResponse:
+    """Serve a static documentation page from the docs directory."""
+    path = DOCS_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{description} not found")
+    return FileResponse(path)
+
+
+@app.get("/quickstart/remote-mcp", include_in_schema=False)
+async def get_remote_quickstart():
+    """Serve the public remote MCP quickstart page."""
+    return _serve_doc("remote_mcp_quickstart.html", "Remote MCP quickstart")
+
+
+@app.get("/prompt-examples", include_in_schema=False)
+async def get_prompt_examples():
+    """Serve prompt examples for reviewers and users."""
+    return _serve_doc("prompt_examples.html", "Prompt examples")
+
+
+@app.get("/privacy", include_in_schema=False)
+async def get_privacy_policy():
+    """Serve the privacy policy page."""
+    return _serve_doc("privacy_policy.html", "Privacy policy")
+
+
+@app.get("/support", include_in_schema=False)
+async def get_support_page():
+    """Serve the support and troubleshooting page."""
+    return _serve_doc("support.html", "Support page")
+
+
+@app.get("/server.json", include_in_schema=False)
+async def get_server_json():
+    """Serve the official MCP Registry metadata file."""
+    path = Path("server.json")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="server.json not found")
+    return FileResponse(path)
+
+
+@app.get("/.well-known/glama.json", include_in_schema=False)
+async def get_glama_well_known() -> dict[str, object]:
+    """Serve the Glama connector claim file."""
+    return {
+        "$schema": "https://glama.ai/mcp/schemas/connector.json",
+        "maintainers": [{"email": CONTACT_EMAIL}],
+    }
+
+
+# Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
+app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +217,6 @@ PATH_TO_ASSET_TYPE = {
     "/v1/equity/": "equities",
     "/v1/fx/": "tradfi",
     "/v1/metal/": "tradfi",
-    "/v1/commodity/": "tradfi",
 }
 # ---------------------------------------------------------------------------
 # Documentation & Schemas
@@ -182,7 +261,8 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         total = Decimal("0.0")
         queries = reqs.split(",")
         for q in queries:
-            if ":" not in q: continue
+            if ":" not in q:
+                continue
             svc, pair = q.split(":", 1)
             # Find the mock path for this service to calculate price
             mock_path = f"/v1/{svc}/{pair}"
@@ -515,7 +595,7 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = ticker.replace("-", "").replace("/", "").replace("_", "")
         data = await client.get_metal_price(clean)
-        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "commodity", "asset_class": "metal"}}
+        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "Metal Price", "asset_class": "metal"}}
         return resp
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -563,7 +643,8 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
             return {"status": "error", "error_code": "BATCH_EXECUTION_ERROR", "message": str(e)}
 
     for q in queries:
-        if ":" not in q: continue
+        if ":" not in q:
+            continue
         svc, ticker = q.split(":", 1)
         tasks.append(_safe_fetch(svc, ticker))
         
@@ -720,48 +801,89 @@ async def claim_credits(request: Request, payload: dict):
 async def mcp_manifest():
     """
     Model Context Protocol (MCP) Manifest.
-    Allows LLMs to discover tools and their payment requirements.
+    Provides listing metadata for the public remote discovery server.
     """
     return {
         "mcp_version": "1.0",
-        "name": "Blocksize Capital Data Economy",
-        "description": "Institutional market data with automated x402 payments and high-performance credit drawdowns.",
+        "name": "Blocksize Capital Remote Discovery",
+        "description": (
+            "Public remote MCP discovery server for Blocksize Capital. "
+            "Exposes free instrument discovery, pricing inspection, and "
+            "documentation search tools. Live market data remains available "
+            "through the x402-protected HTTP API."
+        ),
+        "version": APP_VERSION,
+        "transport": {
+            "type": "streamable-http",
+            "url": REMOTE_MCP_URL,
+        },
         "capabilities": {
-            "payment_modes": ["real-time-x402", "credit-drawdown"],
-            "bulk_discounts": "up to 40% via /v1/credits/purchase"
+            "discovery_modes": ["instrument-search", "pricing-inspection", "document-search"],
+            "paid_api_modes": ["real-time-x402", "credit-drawdown"],
+            "bulk_discounts": "up to 40% via /v1/credits/purchase",
+            "public_remote_server": "read-only and listing-safe",
+        },
+        "links": {
+            "homepage": PUBLIC_BASE_URL,
+            "openapi": OPENAPI_URL,
+            "swagger": SWAGGER_URL,
+            "quickstart": QUICKSTART_URL,
+            "prompt_examples": PROMPT_EXAMPLES_URL,
+            "privacy_policy": PRIVACY_POLICY_URL,
+            "support": SUPPORT_URL,
+            "agent_manual": AGENT_MANUAL_URL,
+            "pricing_guide": PRICING_GUIDE_URL,
+            "data_catalog": DATA_CATALOG_URL,
+            "user_flow": USER_FLOW_URL,
+            "server_json": SERVER_JSON_URL,
+            "glama_claim": GLAMA_WELL_KNOWN_URL,
+            "repository": REPOSITORY_URL,
         },
         "tools": [
             {
-                "name": "get_vwap",
-                "description": "Get real-time VWAP for crypto. Cost: 2-4 Credits (approx $0.002–$0.004). Credit-Ready: Use X-AGENT-WALLET header.",
-                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
-                "payment": {"required": True, "currency": "USDC", "credits": True}
+                "name": "search_pairs",
+                "description": "Search supported crypto, equity, FX, and metal symbols. Free and read-only.",
+                "parameters": {
+                    "query": {"type": "string", "example": "BTC"},
+                    "asset_class": {"type": "string", "example": "crypto"},
+                },
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
-                "name": "get_bidask",
-                "description": "Get best bid/ask snapshot for crypto. Cost: 2-4 Credits (approx $0.002–$0.004). Credit-Ready: Use X-AGENT-WALLET header.",
-                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
-                "payment": {"required": True, "currency": "USDC", "credits": True}
+                "name": "list_instruments",
+                "description": "List the supported instruments for a service such as vwap, bidask, equity, or fx. Free and read-only.",
+                "parameters": {"service": {"type": "string", "example": "vwap"}},
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
-                "name": "get_state_price",
-                "description": "Get institutional state/reference price for crypto. Cost: 2-4 Credits ($0.002–$0.004 USDC). Credit-Ready: Use X-AGENT-WALLET header.",
-                "parameters": {"pair": {"type": "string", "example": "BTCUSD"}},
-                "payment": {"required": True, "currency": "USDC", "credits": True}
+                "name": "get_pricing_info",
+                "description": "Inspect Blocksize pricing tiers, networks, and credit options. Free and read-only.",
+                "parameters": {},
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
-                "name": "get_equity",
-                "description": "Get equity snapshot. Cost: 8 Credits ($0.008 USDC). Credit-Ready: Use X-AGENT-WALLET header.",
-                "parameters": {"ticker": {"type": "string", "example": "AAPL"}},
-                "payment": {"required": True, "currency": "USDC", "credits": True}
+                "name": "search",
+                "description": "OpenAI-style document and catalog search across Blocksize docs and instrument metadata. Free and read-only.",
+                "parameters": {"query": {"type": "string", "example": "pricing"}},
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
-                "name": "batch_query",
-                "description": "Fetch multiple assets in one call. Settlement: Sum of credits or single x402 proof.",
-                "parameters": {"reqs": {"type": "string", "example": "vwap:BTCUSD,equity:AAPL"}},
-                "payment": {"required": True, "currency": "USDC", "credits": True}
-            }
-        ]
+                "name": "fetch",
+                "description": "OpenAI-style document fetch for ids returned by search. Free and read-only.",
+                "parameters": {"id": {"type": "string", "example": "doc:quickstart"}},
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
+            },
+        ],
+        "paid_api": {
+            "openapi_url": OPENAPI_URL,
+            "swagger_url": SWAGGER_URL,
+            "payment_model": "x402 or wallet credits",
+        },
     }
 
 
@@ -773,14 +895,24 @@ async def health_check() -> dict[str, Any]:
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",
-        "version": "0.5.0",
+        "version": APP_VERSION,
         "engine": "Shielded x402 Gateway (Iron Dome Active)",
         "networks": {
             "primary": {"name": "Solana", "wallet": settings.x402.solana_wallet_address or "(not set)"},
             "fallback": {"name": "Base", "wallet": settings.x402.evm_wallet_address or "(not set)"},
         },
         "pricing": settings.pricing_summary,
-        "bulk_pricing": BULK_TIERS
+        "bulk_pricing": BULK_TIERS,
+        "links": {
+            "remote_mcp": REMOTE_MCP_URL,
+            "manifest": MCP_MANIFEST_URL,
+            "quickstart": QUICKSTART_URL,
+            "prompt_examples": PROMPT_EXAMPLES_URL,
+            "privacy_policy": PRIVACY_POLICY_URL,
+            "support": SUPPORT_URL,
+            "server_json": SERVER_JSON_URL,
+            "glama_claim": GLAMA_WELL_KNOWN_URL,
+        },
     }
 
 

@@ -8,11 +8,9 @@ Dual-network payment: Solana (priority) + Base (fallback).
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict

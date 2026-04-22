@@ -12,7 +12,7 @@ import pytest
 from src.mcp_server import (
     get_vwap, get_bid_ask, get_vwap_30min, get_equity,
     get_fx_rate, get_metal_price,
-    search_pairs, list_instruments, get_pricing_info,
+    search_pairs, get_pricing_info, search, fetch,
 )
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
@@ -152,3 +152,53 @@ class TestGetPricingInfoTool:
         assert "Analytics" in result
         assert "FREE" in result
         assert "Solana" in result
+
+
+class TestOpenAIStyleDiscoveryTools:
+    @pytest.mark.asyncio
+    async def test_search_returns_results_payload(self):
+        mock_pairs = [
+            PairInfo(
+                pair="btc-usd",
+                base_currency="BTC",
+                quote_currency="USD",
+                asset_class="crypto",
+                services=["vwap", "bidask"],
+                tier="core",
+            )
+        ]
+        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
+            mock_client.return_value.search_pairs = AsyncMock(return_value=mock_pairs)
+            result = await search("btc")
+
+        parsed = json.loads(result)
+        assert "results" in parsed
+        assert any(item["id"].startswith("instrument:") for item in parsed["results"])
+        assert any(item["id"] == "doc:pricing" or item["id"] == "doc:quickstart" for item in parsed["results"])
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_static_doc(self):
+        result = await fetch("doc:quickstart")
+        parsed = json.loads(result)
+        assert parsed["id"] == "doc:quickstart"
+        assert "remote mcp" in parsed["text"].lower()
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_instrument_doc(self):
+        mock_pairs = [
+            PairInfo(
+                pair="btc-usd",
+                base_currency="BTC",
+                quote_currency="USD",
+                asset_class="crypto",
+                services=["vwap", "bidask"],
+                tier="core",
+            )
+        ]
+        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
+            mock_client.return_value.search_pairs = AsyncMock(return_value=mock_pairs)
+            result = await fetch("instrument:crypto:btc-usd")
+
+        parsed = json.loads(result)
+        assert parsed["id"] == "instrument:crypto:btc-usd"
+        assert "paid http api" in parsed["text"].lower()

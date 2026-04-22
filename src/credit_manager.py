@@ -2,9 +2,7 @@ import sqlite3
 import os
 import logging
 import httpx
-import json
 from datetime import datetime
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +99,6 @@ class CreditManager:
                 
                 count = len(sigs)
                 first_seen = datetime.utcnow()
-                funding_address = None
-                
                 if count > 0:
                     # Time of oldest signature in the batch
                     oldest_ts = sigs[-1].get("blockTime")

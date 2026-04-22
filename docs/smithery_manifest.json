@@ -1,22 +1,23 @@
 {
-  "name": "Blocksize Capital Agentic Data Economy",
-  "version": "0.4.0",
-  "description": "Institutional-grade market data with automated x402 payments and high-performance credit drawdowns. Powered by Blocksize Capital.",
+  "name": "Blocksize Capital Remote Discovery",
+  "version": "0.6.0",
+  "description": "Public remote MCP discovery server for Blocksize Capital. Free instrument discovery, pricing inspection, and documentation search for the paid x402 market data API.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://agentic-payments-production.up.railway.app/",
   "repository": "https://github.com/jf-cmyk/agentic-payments",
-  "license": "Proprietary",
+  "license": "MIT",
   "category": "Finance",
   "mcp_manifest": "https://agentic-payments-production.up.railway.app/mcp/manifest.json",
   "capabilities": {
-    "pricing_models": ["Pay-per-call (x402)", "Credit Drawdown"],
+    "remote_transport": "streamable-http",
+    "pricing_models": ["Pay-per-call HTTP API (x402)", "Credit Drawdown"],
     "networks": ["Solana", "Base L2"],
-    "onboarding_incentive": "50 Free Credits for new wallets"
+    "public_remote_server": "Read-only discovery and documentation tools"
   },
   "endpoints": {
-    "vwap": "https://agentic-payments-production.up.railway.app/v1/vwap/{pair}",
-    "equity": "https://agentic-payments-production.up.railway.app/v1/equity/{ticker}",
-    "fx": "https://agentic-payments-production.up.railway.app/v1/fx/{pair}",
-    "credits": "https://agentic-payments-production.up.railway.app/v1/credits/purchase"
+    "remote_mcp": "https://agentic-payments-production.up.railway.app/mcp/server",
+    "quickstart": "https://agentic-payments-production.up.railway.app/quickstart/remote-mcp",
+    "openapi": "https://agentic-payments-production.up.railway.app/openapi.json",
+    "pricing": "https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf"
   }
 }

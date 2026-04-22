@@ -1,6 +1,4 @@
-import os
 from fpdf import FPDF
-from datetime import datetime
 
 class BlocksizePDF(FPDF):
     def header(self):

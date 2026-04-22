@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blocksize Prompt Examples</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      background: #ffffff;
+      color: #111827;
+      line-height: 1.65;
+    }
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem 5rem;
+    }
+    h1 { font-size: 2.8rem; letter-spacing: -0.02em; }
+    h2 { margin-top: 2.2rem; }
+    p, li { color: #4b5563; }
+    .example {
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 1.25rem;
+      margin-top: 1rem;
+      background: #f9fafb;
+    }
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+    pre {
+      background: #0d0d0d;
+      color: #f4f4f5;
+      padding: 1rem;
+      border-radius: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    a { color: #4f4bff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Prompt Examples</h1>
+    <p>
+      These examples are designed for the public remote MCP discovery server at
+      <a href="https://agentic-payments-production.up.railway.app/mcp/server">/mcp/server</a>.
+      They demonstrate the free discovery layer that routes users into the paid HTTP API.
+    </p>
+
+    <div class="example">
+      <h2>1. Discover supported symbols</h2>
+      <pre><code>Use the Blocksize discovery connector only.
+Search for instruments related to BTC, SOL, and EURUSD.
+Then tell me which exact symbols and services are supported.</code></pre>
+    </div>
+
+    <div class="example">
+      <h2>2. Price and payment planning</h2>
+      <pre><code>Using the Blocksize discovery connector, inspect the pricing tiers.
+Then explain the cheapest way to pull BTCUSD, ETHUSD, EURUSD, and AAPL data,
+including whether credits or direct x402 settlement are better.</code></pre>
+    </div>
+
+    <div class="example">
+      <h2>3. Integration handoff</h2>
+      <pre><code>Use Blocksize search and fetch to find the remote MCP quickstart and the pricing guide.
+Summarize the exact next steps for a developer who wants to:
+1. add the discovery MCP to Cursor
+2. call the paid HTTP API for live data
+3. top up credits for an agent wallet</code></pre>
+    </div>
+
+    <div class="example">
+      <h2>4. Catalog fetch with citations</h2>
+      <pre><code>Use the Blocksize connector's search tool to find docs about privacy and support.
+Fetch the most relevant documents and summarize the logging policy and support channel,
+with links back to the original docs.</code></pre>
+    </div>
+  </main>
+</body>
+</html>

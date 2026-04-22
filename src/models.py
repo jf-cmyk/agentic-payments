@@ -261,7 +261,7 @@ class PairSearchResponse(BaseModel):
     pairs: list[PairInfo] = Field(..., description="Matching pairs (max 50)")
     meta: dict = Field(default_factory=lambda: {
         "provider": "Blocksize Capital",
-        "total_coverage": "30,000+ instruments across crypto, equities, FX, and metals",
+        "total_coverage": "27,000+ discoverable symbols across crypto, equities, FX, and metals",
     })
 
 

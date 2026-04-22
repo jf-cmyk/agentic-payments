@@ -4,7 +4,7 @@ Unit tests for the Blocksize Capital API client.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest

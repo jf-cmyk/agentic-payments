@@ -6,8 +6,9 @@ import os
 import time
 from dotenv import load_dotenv
 
-load_dotenv()
 import httpx
+
+load_dotenv()
 
 try:
     from solana.rpc.async_api import AsyncClient
@@ -15,7 +16,6 @@ try:
     from solders.pubkey import Pubkey
     from spl.token.instructions import get_associated_token_address, transfer_checked, TransferCheckedParams
     from solana.transaction import Transaction
-    from solders.system_program import TransferParams, transfer
     from solana.rpc.commitment import Confirmed
 except Exception:
     print("[-] Missing Solana libraries! Please run:")
@@ -42,7 +42,7 @@ def load_secure_wallet():
         import base64
         kp_bytes = base64.b64decode(encoded_key)
         kp = Keypair.from_bytes(kp_bytes)
-        print(f"🤖 [Agent]: Identity loaded securely from Environment")
+        print("🤖 [Agent]: Identity loaded securely from Environment")
         return kp
     except Exception as e:
         print(f"🚨 FAILED TO LOAD IDENTITY: {e}")
@@ -106,7 +106,7 @@ async def send_usdc(rpc: AsyncClient, kp: Keypair, destination: str, amount_usdc
         print(f"   ❌ Transaction failed on chain: {confirm.value[0].err}")
         return ""
         
-    print(f"   ✅ Transaction Confirmed!")
+    print("   ✅ Transaction Confirmed!")
     return tx_hash
 
 
@@ -185,7 +185,7 @@ async def run_agent_loop(base_url_input: str):
                 "metal:XAUUSD"
             ])
             
-            print(f"🤖 [Agent]: Assembling BATCH payload containing 9 assets across offered asset classes...\n")
+            print("🤖 [Agent]: Assembling BATCH payload containing 9 assets across offered asset classes...\n")
             
             reqs_str = ",".join(batch_reqs)
             target_url = f"{base_url}/v1/batch?reqs={reqs_str}"
@@ -194,7 +194,7 @@ async def run_agent_loop(base_url_input: str):
             response = await client.get(target_url)
 
             if response.status_code == 402:
-                print(f"   ⛔️ Intercepted 402 Payment Required for entire batch.")
+                print("   ⛔️ Intercepted 402 Payment Required for entire batch.")
                 
                 data = response.json()
                 price = float(data.get("price_usdc", 0.002))
@@ -231,7 +231,7 @@ async def run_agent_loop(base_url_input: str):
                 final_resp = await client.get(target_url, headers={"PAYMENT-SIGNATURE": signature_header})
                 
                 if final_resp.status_code == 200:
-                    print(f"   🎉 SUCCESS! Huge Multi-Asset Payload Retrieved:")
+                    print("   🎉 SUCCESS! Huge Multi-Asset Payload Retrieved:")
                     print(json.dumps(final_resp.json(), indent=2))
                 else:
                     print(f"   ❌ Verification failed: HTTP {final_resp.status_code} - {final_resp.text}")

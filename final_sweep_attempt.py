@@ -1,6 +1,4 @@
 import asyncio
-import os
-import base64
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey

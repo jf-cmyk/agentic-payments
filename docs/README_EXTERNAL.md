@@ -1,52 +1,62 @@
-# 🪙 Blocksize Capital x402 Data Economy
-### High-Performance Market Data for Autonomous Agents
+# Blocksize Capital Remote MCP and Paid API
 
-This server provides institutional-grade market data (Crypto, Equities, FX, Metals, Rates) gated behind the **x402 Payment Protocol**. It is designed for autonomous agents that can pay for their own data consumption in real-time.
+Blocksize Capital provides:
 
----
+- A public remote MCP discovery server for agent builders
+- A paid HTTP market data API for live production data
 
-## 🚀 Quick Start for Agent Developers
+## Public discovery MCP
 
-### 1. Discover the Tools
-The server is **MCP-Compatible**. If you use Claude Desktop or any MCP-compliant client, point it to our manifest:
-- **Manifest URL:** `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
+- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server`
+- Manifest: `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
+- Quickstart: `https://agentic-payments-production.up.railway.app/quickstart/remote-mcp`
+- Prompt examples: `https://agentic-payments-production.up.railway.app/prompt-examples`
 
-### 2. The Payment Protocol (x402)
-Our API uses a **Pay-Per-Call** model. There are no monthly subscriptions.
-1.  **Request:** Your agent makes a standard GET request to a data endpoint.
-2.  **Challenge:** The server returns `HTTP 402 Payment Required`.
-3.  **Metadata:** Look at the `PAYMENT-REQUIRED` header. It contains a Base64-encoded JSON array specifying the amount (USDC) and the destination wallet.
-4.  **Payment:** Your agent sends the USDC (on Solana or Base L2).
-5.  **Proof:** Re-submit the request with the `PAYMENT-SIGNATURE` header containing base64-encoded JSON with at least `proof` and `network` fields.
-6.  **Data:** The server verifies the transaction and returns the institutional data instantly.
+The public MCP server is read-only and exposes:
 
-### 3. Accepted Networks
-- **Solana (Mainnet):** $0.002 - $0.008 USDC per call.
-- **Base L2:** Supported fallback for EVM-native agents.
+- `search_pairs`
+- `list_instruments`
+- `get_pricing_info`
+- `search`
+- `fetch`
 
----
+## Paid HTTP API
 
-## 🛠 Integration Example (Python)
+Live market data is available via the HTTP API and documented here:
 
-We provide a bare-bones integration script in this repository:
-👉 `scripts/examples/client_boilerplate.py`
+- Swagger UI: `https://agentic-payments-production.up.railway.app/docs`
+- OpenAPI JSON: `https://agentic-payments-production.up.railway.app/openapi.json`
 
-Simply provide your private key and the script handles the entire loop: **Request -> Pay -> Retrieve**.
+Supported paid endpoints:
 
----
+- `GET /v1/vwap/{pair}`
+- `GET /v1/bidask/{pair}`
+- `GET /v1/state/{pair}`
+- `GET /v1/equity/{ticker}`
+- `GET /v1/fx/{pair}`
+- `GET /v1/metal/{ticker}`
+- `GET /v1/batch`
 
-## 📊 Current Pricing (USDC)
+Free discovery endpoints:
 
-| Service | Price | Description |
-| :--- | :--- | :--- |
-| **Real-Time VWAP** | $0.002 - $0.004 | Tiered by asset liquidity |
-| **Bid/Ask Snapshot** | $0.002 - $0.004 | Deep liquidity order book data |
-| **Equities** | $0.008 | US & Chinese stock snapshots |
-| **FX & Metals** | $0.005 | Gold, Silver, and 120+ FX pairs |
-| **Batch Query** | Dynamic | Sum of assets (Cheaper than individual calls) |
-| **Search** | FREE | Find valid tickers and instrument lists |
+- `GET /v1/search`
+- `GET /v1/instruments/{service}`
+- `GET /health`
 
----
+## Pricing
 
-## 👩‍💻 Support
-For API key upgrades or custom throughput limits, contact the project maintainer.
+| Service | Price |
+| --- | --- |
+| Core crypto | $0.002 |
+| Extended crypto and state price | $0.004 |
+| FX and metals | $0.005 |
+| Equities | $0.008 |
+
+Bulk credit tiers are documented in the public pricing guide:
+
+- `https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf`
+
+## Policy and support
+
+- Privacy policy: `https://agentic-payments-production.up.railway.app/privacy`
+- Support: `https://agentic-payments-production.up.railway.app/support`
