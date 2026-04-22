@@ -9,8 +9,47 @@
     content="Blocksize Capital provides agent-native market data with a public remote MCP discovery server and x402-paid HTTP market data endpoints."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
+    @font-face {
+      font-display: swap;
+      font-family: 'Almarena Neue';
+      font-style: normal;
+      font-weight: 400;
+      src: url('/fonts/AlmarenaNeue-DisplayRegular.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: 'Hind';
+      font-style: normal;
+      font-weight: 400;
+      src: url('/fonts/hind-v17-latin-regular.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: 'Hind';
+      font-style: normal;
+      font-weight: 500;
+      src: url('/fonts/hind-v17-latin-500.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: 'Hind';
+      font-style: normal;
+      font-weight: 600;
+      src: url('/fonts/hind-v17-latin-600.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: 'Roboto';
+      font-style: normal;
+      font-weight: 400;
+      src: url('/fonts/roboto-mono-v23-latin-500.woff2') format('woff2');
+    }
+
     :root {
       --primary: #4f4bff;
       --primary-soft: rgba(79, 75, 255, 0.08);
@@ -28,16 +67,19 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: "Inter", sans-serif;
+      font-family: "Hind", Arial, Helvetica, sans-serif;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
     }
 
     .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
     section { padding: 7rem 0; }
-    h2 { font-size: 3rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 2rem; }
-    h2 span { color: var(--primary); }
-    h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.75rem; }
+    h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; }
+    h1 { font-size: clamp(3rem, 4.5vw, 4.5rem); }
+    h2 { font-size: clamp(3rem, 4vw, 4.5rem); margin-bottom: 2rem; }
+    h2 span, h1 span { color: var(--primary); }
+    h3 { font-size: clamp(2.1875rem, 3.5vw, 3rem); margin-bottom: 0.75rem; }
+    h4 { font-size: clamp(1.5rem, 3vw, 2.25rem); margin-bottom: 0.75rem; }
     p { color: var(--text-muted); }
 
     nav {
@@ -72,7 +114,7 @@
       background: var(--text);
       color: #fff;
       padding: 0.75rem 1.4rem;
-      border-radius: 8px;
+      border-radius: 0;
       text-decoration: none;
       font-weight: 700;
       font-size: 0.85rem;
@@ -95,15 +137,14 @@
     }
     .hero-label {
       color: var(--text-muted);
+      font-family: "Roboto", monospace;
       font-size: 0.85rem;
-      font-weight: 700;
+      font-weight: 400;
       letter-spacing: 0.08em;
       margin-bottom: 1.5rem;
       display: inline-block;
     }
     .hero h1 {
-      font-size: 5rem;
-      font-weight: 800;
       line-height: 0.95;
       letter-spacing: -0.05em;
       margin-bottom: 1.5rem;
@@ -134,11 +175,12 @@
     }
     .stat-label {
       display: block;
+      font-family: "Roboto", monospace;
       font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-muted);
-      font-weight: 700;
+      font-weight: 400;
     }
 
     .hero-card,
@@ -147,7 +189,7 @@
     .resource-card,
     .step {
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: 0;
       background: #fff;
     }
     .hero-card {
@@ -168,7 +210,7 @@
       display: block;
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
+      border-radius: 0;
       padding: 1rem;
       color: #fff;
       font-family: "SFMono-Regular", Consolas, monospace;
@@ -189,7 +231,7 @@
     }
     .hero-card img {
       width: 100%;
-      border-radius: 12px;
+      border-radius: 0;
       margin-top: 1.25rem;
       border: 1px solid rgba(255, 255, 255, 0.1);
     }
@@ -232,7 +274,7 @@
       padding: 0.85rem 1rem;
       background: var(--primary-soft);
       color: var(--primary);
-      border-radius: 12px;
+      border-radius: 0;
       font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.82rem;
       overflow-wrap: anywhere;
@@ -260,7 +302,7 @@
       border-collapse: collapse;
       margin-top: 1.5rem;
       background: #fff;
-      border-radius: 16px;
+      border-radius: 0;
       overflow: hidden;
     }
     .pricing-table th {
@@ -294,7 +336,7 @@
       background: #ecf781;
       color: #111827;
       padding: 0.2rem 0.45rem;
-      border-radius: 6px;
+      border-radius: 0;
       font-size: 0.72rem;
       font-weight: 800;
     }
@@ -318,7 +360,7 @@
     .callout {
       margin-top: 2.5rem;
       padding: 2.5rem;
-      border-radius: 20px;
+      border-radius: 0;
       background: linear-gradient(135deg, #4f4bff, #6e6bff);
       color: #fff;
       box-shadow: 0 20px 40px rgba(79, 75, 255, 0.15);
@@ -581,12 +623,12 @@
         </table>
       </div>
 
-      <div style="margin-top: 2.5rem; padding: 2.5rem; border: 1px solid var(--border); border-radius: 20px; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
+      <div style="margin-top: 2.5rem; padding: 2.5rem; border: 1px solid var(--border); border-radius: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
         <div>
           <h3 style="margin-bottom: 0.75rem; color: var(--text); font-size: 1.5rem;">Enterprise Subscriptions</h3>
           <p style="margin: 0; max-width: 42rem; color: var(--text-muted); font-size: 1.05rem; line-height: 1.6;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
         </div>
-        <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" class="btn-nav" style="background: var(--primary); white-space: nowrap; padding: 1rem 1.75rem; font-size: 0.95rem;">View Subscriptions →</a>
+        <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" class="btn-nav" style="background: var(--text); white-space: nowrap; padding: 1rem 1.75rem; font-size: 0.95rem;">View Subscriptions →</a>
       </div>
     </div>
   </section>
@@ -677,7 +719,8 @@
           <p>Base L2: <span class="status-active">Verified</span></p>
           <p>x402 Settlement Flow: <span class="status-active">Active</span></p>
           <p style="margin-top: 1rem;">
-            <a href="https://blocksize.info" target="_blank">Visit blocksize.info</a>
+            <a href="https://blocksize.info" target="_blank">Visit blocksize.info</a><br>
+            <a href="https://blocksize.info/terms-conditions-data/" target="_blank">Data Usage Policy</a>
           </p>
         </div>
       </div>
