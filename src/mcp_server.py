@@ -701,7 +701,7 @@ async def get_pricing_info() -> str:
         },
         "competitive_note": (
             "An agent making 10,000 VWAP calls/month pays ~$20 vs. Pyth Pro $2,000+/month. "
-            "Pure pay-per-use, or explore traditional flat-rate subscriptions for high consumption agents at https://blocksize.info/crypto-market-data/."
+            "Pure pay-per-use, or explore traditional flat-rate subscriptions for high consumption agents at https://blocksize.info/crypto-market-data/#pricing."
         ),
     }
 
@@ -714,7 +714,7 @@ async def get_pricing_info() -> str:
         f"  📈 Equities:       ${settings.pricing.equities} (18k US + China stocks)\n"
         f"  ⏱️  Analytics:      ${settings.pricing.analytics} (30-min + 24-hr VWAP)\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)\n"
-        f"High Consumption Agents: Subscriptions available at https://blocksize.info/crypto-market-data/"
+        f"High Consumption Agents: Subscriptions available at https://blocksize.info/crypto-market-data/#pricing"
     )
 
     details = json.dumps(pricing, indent=2, default=str)
