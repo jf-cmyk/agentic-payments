@@ -30,7 +30,7 @@ USER_FLOW_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_User_Flow.pdf"
 CONTACT_EMAIL = "info@blocksize.capital"
 CONTACT_PHONE = "+49 (0)69 870 0990 80"
 
-DISCOVERABLE_SYMBOL_COUNT = "7,000+"
+DISCOVERABLE_SYMBOL_COUNT = 6_368
 
 INSTRUMENT_COUNTS = {
     "crypto_vwap_pairs": 6362,
