@@ -6,14 +6,13 @@ full multi-asset data platform as MCP tools that any LLM client (Claude Desktop,
 Cursor, LangChain, etc.) can discover and call.
 
 Asset Classes:
-  - Crypto:     9,410 RT VWAP pairs, 1,962 Bid/Ask pairs, 251 30-Min VWAP, State Price
-  - Equities:   18,071 US + Chinese stocks
-  - FX:         129 currency pairs
+  - Crypto:     Real-time VWAP and shared bid/ask snapshots
+  - FX:         Shared bid/ask snapshots where supported by the upstream key
   - Metals:     Gold, Silver, Platinum, Palladium, Copper
 
 Payment Model:
   Tiered pricing in USDC — settled on Solana (primary) or Base L2 (fallback).
-  Discovery tools are FREE. Data tools: $0.002–$0.008 per call.
+  Discovery tools are FREE. Data tools: $0.002–$0.005 per call.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
 from src.models import (
     BidAskResponse,
-    EquityResponse,
     ErrorResponse,
     InstrumentListResponse,
     PairSearchResponse,
@@ -76,8 +74,8 @@ mcp = FastMCP(
     "Blocksize Capital",
     instructions=(
         "Institutional-grade multi-asset market data for AI agents. "
-        "Access real-time VWAP, bid/ask spreads, equities, FX, metals, "
-        "and analytics across more than 27,000 discoverable symbols. "
+        "Access real-time VWAP, bid/ask spreads, FX, and metals across "
+        "thousands of discoverable symbols. "
         "Outlier-filtered, decision-ready output. "
         "Pay per call via x402 (USDC on Solana or Base L2). "
         "No subscription required."
@@ -135,14 +133,12 @@ def _instrument_fetch_payload(pair_info) -> dict[str, object]:
     endpoints = []
     if "vwap" in pair_info.services:
         endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/vwap/{pair}")
-    if "bidask" in pair_info.services:
-        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/bidask/{pair}")
-    if pair_info.asset_class == "equity":
-        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/equity/{pair_info.base_currency}")
     if pair_info.asset_class == "fx":
         endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/fx/{pair}")
-    if pair_info.asset_class == "metal":
+    elif pair_info.asset_class == "metal":
         endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/metal/{pair}")
+    elif "bidask" in pair_info.services:
+        endpoints.append(f"GET {PUBLIC_BASE_URL}/v1/bidask/{pair}")
 
     text = (
         f"{pair} is available through Blocksize Capital as a {pair_info.asset_class} "
@@ -263,178 +259,6 @@ async def get_bid_ask(pair: str) -> str:
         ).model_dump())
 
 
-@mcp.tool(
-    title="Thirty Minute VWAP",
-    description=(
-        "Use this when you need the 30-minute crypto VWAP for one base asset. "
-        "This is a paid analytics snapshot, not a live tick feed."
-    ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
-)
-async def get_vwap_30min(ticker: str) -> str:
-    """
-    Get the 30-minute VWAP snapshot for a crypto asset.
-
-    Provides periodic VWAP aggregated over 30-minute windows. Available for
-    251 major crypto tickers. Ideal for time-series analysis and backtesting.
-    Cost: $0.001 USDC per call (Analytics tier).
-
-    Args:
-        ticker: Base currency ticker (e.g., 'BTC', 'ETH', 'SOL').
-                NOT a trading pair — just the base asset symbol.
-    """
-    try:
-        client = await _get_client()
-        data = await client.get_vwap_30min(ticker)
-        summary = data.to_decision_summary()
-        details = json.dumps(data.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except BlocksizeAPIError as e:
-        return json.dumps(ErrorResponse(
-            error_code="BLOCKSIZE_API_ERROR",
-            message=f"Failed to retrieve 30-min VWAP for '{ticker}'",
-            details=str(e),
-        ).model_dump())
-    except Exception as e:
-        logger.error("Error in get_vwap_30min(%s): %s", ticker, e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"Error retrieving 30-min VWAP for '{ticker}'",
-            details=str(e),
-        ).model_dump())
-
-
-@mcp.tool(
-    title="Twenty Four Hour VWAP",
-    description=(
-        "Use this when you need a 24-hour VWAP or closing-style reference price "
-        "for one crypto pair. This is a paid analytics snapshot."
-    ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
-)
-async def get_vwap_24hr(pair: str) -> str:
-    """
-    Get the 24-hour VWAP (closing price) for a crypto pair.
-
-    Provides the volume-weighted average price over the past 24 hours,
-    essentially the institutional closing price. Includes 24h volume.
-    Cost: $0.001 USDC per call (Analytics tier).
-
-    Args:
-        pair: Trading pair identifier (e.g., 'BTCUSD', 'ETHUSDT').
-    """
-    try:
-        client = await _get_client()
-        data = await client.get_vwap_24hr(pair)
-        summary = data.to_decision_summary()
-        details = json.dumps(data.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except BlocksizeAPIError as e:
-        return json.dumps(ErrorResponse(
-            error_code="BLOCKSIZE_API_ERROR",
-            message=f"Failed to retrieve 24h VWAP for '{pair}'",
-            details=str(e),
-        ).model_dump())
-    except Exception as e:
-        logger.error("Error in get_vwap_24hr(%s): %s", pair, e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"Error retrieving 24h VWAP for '{pair}'",
-            details=str(e),
-        ).model_dump())
-
-
-@mcp.tool(
-    title="State Price Snapshot",
-    description=(
-        "Use this when you need the settlement-style state or reference price for "
-        "one crypto pair. Returns one paid snapshot."
-    ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
-)
-async def get_state_price(pair: str) -> str:
-    """
-    Get the state/reference price for a crypto pair.
-
-    The state price is a settlement-grade reference price used for
-    mark-to-market and accounting purposes.
-    Cost: $0.002 USDC (top 250 crypto) or $0.004 USDC (niche crypto).
-
-    Args:
-        pair: Trading pair identifier (e.g., 'btc-usd').
-    """
-    try:
-        client = await _get_client()
-        data = await client.get_state_price(pair)
-        summary = data.to_decision_summary()
-        details = json.dumps(data.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except BlocksizeAPIError as e:
-        return json.dumps(ErrorResponse(
-            error_code="BLOCKSIZE_API_ERROR",
-            message=f"Failed to retrieve state price for '{pair}'",
-            details=str(e),
-        ).model_dump())
-    except Exception as e:
-        logger.error("Error in get_state_price(%s): %s", pair, e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"Error retrieving state price for '{pair}'",
-            details=str(e),
-        ).model_dump())
-
-
-# ===========================================================================
-# EQUITIES TOOLS
-# ===========================================================================
-
-@mcp.tool(
-    title="Equity Snapshot",
-    description=(
-        "Use this when you need the latest snapshot for one supported equity "
-        "ticker. Returns a single paid stock snapshot only."
-    ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
-)
-async def get_equity(ticker: str) -> str:
-    """
-    Get the latest snapshot for a US or Chinese equity (stock).
-
-    Returns OHLCV, bid/ask, and previous close for 18,071 tickers.
-    No other crypto MCP server offers equity data.
-
-    Cost: $0.008 USDC per call (Equities tier).
-
-    Args:
-        ticker: Stock ticker symbol (e.g., 'AAPL', 'TSLA', 'NVDA', 'BABA').
-    """
-    try:
-        client = await _get_client()
-        data = await client.get_equity_snapshot(ticker)
-        response = EquityResponse(data=data)
-
-        summary = data.to_decision_summary()
-        details = json.dumps(response.model_dump(), default=str, indent=2)
-        return f"{summary}\n\n<details>\n{details}\n</details>"
-
-    except BlocksizeAPIError as e:
-        return json.dumps(ErrorResponse(
-            error_code="BLOCKSIZE_API_ERROR",
-            message=f"Failed to retrieve equity data for '{ticker}'",
-            details=str(e),
-        ).model_dump())
-    except Exception as e:
-        logger.error("Error in get_equity(%s): %s", ticker, e, exc_info=True)
-        return json.dumps(ErrorResponse(
-            error_code="INTERNAL_ERROR",
-            message=f"Error retrieving equity data for '{ticker}'",
-            details=str(e),
-        ).model_dump())
-
-
 # ===========================================================================
 # FX & METALS TOOLS
 # ===========================================================================
@@ -532,23 +356,23 @@ async def get_metal_price(ticker: str) -> str:
 @mcp.tool(
     title="Instrument Search",
     description=(
-        "Use this to discover valid crypto, equity, FX, or metal symbols before "
+        "Use this to discover valid crypto, FX, or metal symbols before "
         "calling paid market data tools. This is free and does not return live prices."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def search_pairs(query: str, asset_class: str = "all") -> str:
     """
-    Search through more than 27,000 discoverable symbols across all asset classes. FREE.
+    Search through the currently enabled upstream symbols. FREE.
 
-    Searches crypto, equities, FX, and metals. Returns matching pairs
+    Searches crypto, FX, and metals. Returns matching pairs
     with their available data services and pricing tier.
 
     Cost: FREE — no payment required.
 
     Args:
-        query: Search term (e.g., 'btc', 'AAPL', 'eurusd', 'gold').
-        asset_class: Filter by class. Options: 'all', 'crypto', 'equity', 'fx', 'metal'.
+        query: Search term (e.g., 'btc', 'eurusd', 'xauusd').
+        asset_class: Filter by class. Options: 'all', 'crypto', 'fx', 'metal'.
                      Default: 'all'.
     """
     try:
@@ -596,10 +420,10 @@ async def list_instruments(service: str = "vwap") -> str:
 
     Args:
         service: Service to list. Options:
-                 'vwap' — Real-time VWAP crypto (9,410 pairs)
-                 'bidask' — Bid/Ask crypto (1,962 pairs)
-                 'equity' — US + Chinese equities (18,071)
-                 'fx' — FX currency pairs (129)
+                 'vwap' — Real-time VWAP crypto pairs
+                 'bidask' — Shared upstream bid/ask instrument namespace
+                 'fx' — FX currency pairs derived from the shared bid/ask namespace
+                 'metal' — Supported metal tickers exposed by this gateway
                  Default: 'vwap'.
 
     Cost: FREE — no payment required.
@@ -611,14 +435,14 @@ async def list_instruments(service: str = "vwap") -> str:
             instruments = await client.list_vwap_instruments()
         elif service == "bidask":
             instruments = await client.list_bidask_instruments()
-        elif service == "equity":
-            instruments = await client.list_equity_instruments()
         elif service == "fx":
             instruments = await client.list_fx_instruments()
+        elif service == "metal":
+            instruments = await client.list_metal_instruments()
         else:
             return json.dumps(ErrorResponse(
                 error_code="INVALID_SERVICE",
-                message=f"Unknown service '{service}'. Use 'vwap', 'bidask', 'equity', or 'fx'.",
+                message=f"Unknown service '{service}'. Use 'vwap', 'bidask', 'fx', or 'metal'.",
             ).model_dump())
 
         response = InstrumentListResponse(
@@ -689,14 +513,10 @@ async def get_pricing_info() -> str:
         },
         "tiers": settings.pricing_summary,
         "coverage": {
-            "rt_vwap_crypto": "9,410 pairs (800 base currencies)",
-            "bidask_crypto": "1,962 pairs (629 base currencies)",
-            "vwap_30min_crypto": "251 tickers",
-            "vwap_24hr_crypto": "42 tickers",
-            "equities": "18,071 US + Chinese stocks",
-            "fx": "129 currency pairs",
+            "rt_vwap_crypto": "6,362 enabled crypto pairs",
+            "shared_bidask_namespace": "2,365 enabled upstream symbols",
+            "fx": "3 enabled FX pairs",
             "metals": "Gold, Silver, Platinum, Palladium, Copper",
-            "state_price": "Available",
             "dexs": "56 DEXs across 11 chains",
         },
         "competitive_note": (
@@ -708,11 +528,9 @@ async def get_pricing_info() -> str:
     summary = (
         "Blocksize Capital Pricing (USDC per call):\n"
         f"  🆓 Discovery:      FREE (search, list, pricing)\n"
-        f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (top 250 by market cap)\n"
-        f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (550+ niche assets)\n"
+        f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (high-liquidity VWAP pairs)\n"
+        f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
-        f"  📈 Equities:       ${settings.pricing.equities} (18k US + China stocks)\n"
-        f"  ⏱️  Analytics:      ${settings.pricing.analytics} (30-min + 24-hr VWAP)\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)\n"
         f"High Consumption Agents: Subscriptions available at https://blocksize.info/crypto-market-data/#pricing"
     )
@@ -852,15 +670,14 @@ async def server_info() -> str:
         "version": APP_VERSION,
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
-            "Discovery across crypto, equities, FX, metals, and analytics plus "
+            "Discovery across crypto, FX, and metals plus "
             "paid HTTP market data access via x402. "
             "Pay per call via x402."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
-        "asset_classes": ["crypto", "equities", "fx", "metals", "analytics"],
+        "asset_classes": ["crypto", "fx", "metals"],
         "tools": [
-            "get_vwap", "get_bid_ask", "get_vwap_30min", "get_vwap_24hr",
-            "get_state_price", "get_equity", "get_fx_rate", "get_metal_price",
+            "get_vwap", "get_bid_ask", "get_fx_rate", "get_metal_price",
             "search_pairs", "list_instruments", "get_pricing_info", "search", "fetch",
         ],
         "payment": {
@@ -900,7 +717,7 @@ def main() -> None:
 
     logger.info("Starting Blocksize Capital MCP Server v%s", APP_VERSION)
     logger.info("Transport: %s", transport)
-    logger.info("Tools: 13 tools across 5 asset classes")
+    logger.info("Tools: 9 tools across 3 asset classes")
 
     if transport == "streamable-http":
         mcp.run(

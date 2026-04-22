@@ -229,11 +229,9 @@ class Settings:
         """Return a human-readable pricing summary."""
         return {
             "discovery": {"price": "FREE", "includes": "search_pairs, list_instruments, get_pricing_info"},
-            "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP, Bid/Ask, State Price for Top 250 crypto"},
-            "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "RT VWAP, Bid/Ask, State Price for 550+ niche crypto"},
-            "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX (129 pairs), Metals (5), Commodities"},
-            "equities": {"price": f"${self.pricing.equities}", "includes": "18,071 US + Chinese stocks"},
-            "analytics": {"price": f"${self.pricing.analytics}", "includes": "30-Min VWAP, 24-Hr VWAP"},
+            "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP for top crypto pairs"},
+            "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "Bid/ask and long-tail crypto pairs"},
+            "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX pairs and supported metal snapshots"},
         }
 
 

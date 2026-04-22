@@ -10,7 +10,7 @@
   "version": "0.6.0",
   "remotes": [
     {
-      "url": "https://agentic-payments-production.up.railway.app/mcp/server",
+      "url": "https://agentic-payments-production.up.railway.app/mcp/server/",
       "type": "streamable-http"
     }
   ]

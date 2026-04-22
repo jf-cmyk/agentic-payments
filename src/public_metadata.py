@@ -10,7 +10,7 @@ PUBLIC_BASE_URL = "https://agentic-payments-production.up.railway.app"
 REPOSITORY_URL = "https://github.com/jf-cmyk/agentic-payments"
 
 REMOTE_MCP_PATH = "/mcp/server"
-REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}"
+REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
 MCP_MANIFEST_URL = f"{PUBLIC_BASE_URL}/mcp/manifest.json"
 SERVER_JSON_URL = f"{PUBLIC_BASE_URL}/server.json"
 OPENAPI_URL = f"{PUBLIC_BASE_URL}/openapi.json"
@@ -30,16 +30,13 @@ USER_FLOW_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_User_Flow.pdf"
 CONTACT_EMAIL = "info@blocksize.capital"
 CONTACT_PHONE = "+49 (0)69 870 0990 80"
 
-DISCOVERABLE_SYMBOL_COUNT = 27_615
+DISCOVERABLE_SYMBOL_COUNT = 6_368
 
 INSTRUMENT_COUNTS = {
-    "crypto_vwap_pairs": 9410,
-    "crypto_bidask_pairs": 1962,
-    "equity_tickers": 18071,
-    "fx_pairs": 129,
+    "crypto_vwap_pairs": 6362,
+    "shared_bidask_instruments": 2365,
+    "fx_pairs": 3,
     "metals": 5,
-    "analytics_30min_tickers": 251,
-    "analytics_24hr_pairs": 42,
 }
 
 OFFICIAL_REGISTRY_NAME = "io.github.jf-cmyk/blocksize-agentic-payments"
@@ -69,8 +66,8 @@ STATIC_DOCUMENTS = {
         "url": PRICING_GUIDE_URL,
         "keywords": ["pricing", "credits", "cost", "usdc", "x402"],
         "text": (
-            "Per-call pricing for crypto, equities, FX, metals, analytics, and "
-            "bulk credit tiers for Blocksize Capital's paid HTTP market data API."
+            "Per-call pricing for crypto, FX, metals, and bulk credit tiers for "
+            "Blocksize Capital's paid HTTP market data API."
         ),
     },
     "manual": {

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.resource_server import app
-from src.models import VWAPData, BidAskData, EquityData
+from src.models import VWAPData, BidAskData
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
         assert data["transport"]["type"] == "streamable-http"
-        assert data["transport"]["url"].endswith("/mcp/server")
+        assert data["transport"]["url"].endswith("/mcp/server/")
 
     def test_public_remote_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/mcp/server")
@@ -79,9 +79,9 @@ class TestPaymentGate:
         response = test_client.get("/v1/bidask/btc-usd")
         assert response.status_code == 402
 
-    def test_equity_requires_payment(self, test_client):
-        response = test_client.get("/v1/equity/AAPL")
-        assert response.status_code == 402
+    def test_state_is_not_offered(self, test_client):
+        response = test_client.get("/v1/state/btc-usd")
+        assert response.status_code == 404
 
     def test_fx_requires_payment(self, test_client):
         response = test_client.get("/v1/fx/eurusd")
@@ -171,19 +171,3 @@ class TestDataEndpoints:
         data = response.json()
         assert data["data"]["bid"] == 95400.0
         assert data["data"]["spread"] == 50.0
-
-    def test_equity_endpoint(self, test_client):
-        mock_equity = EquityData(
-            ticker="AAPL", open=180.5, high=182.0, low=179.0, last=181.5,
-            bid=181.4, ask=181.6, volume=50000000, prev_close=179.8,
-            timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc),
-        )
-        mock_client = AsyncMock()
-        mock_client.get_equity_snapshot = AsyncMock(return_value=mock_equity)
-        app.state.blocksize = mock_client
-
-        response = test_client.get("/v1/equity/AAPL", headers={"PAYMENT-SIGNATURE": "mock_sig"})
-        assert response.status_code == 200
-        data = response.json()
-        assert data["data"]["ticker"] == "AAPL"
-        assert data["data"]["last"] == 181.5

@@ -150,14 +150,27 @@ class TestInstrumentListing:
         mock_result = ["btc-usd", "eth-usd", "sol-usd"]
         with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
             instruments = await client.list_vwap_instruments()
-        assert instruments == ["btc-usd", "eth-usd", "sol-usd"]
+        assert instruments == ["BTC-USD", "ETH-USD", "SOL-USD"]
 
     @pytest.mark.asyncio
     async def test_list_vwap_instruments_dict(self, client):
-        mock_result = {"instruments": ["btc-eur", "eth-eur"]}
+        mock_result = {"instruments": [
+            {"ticker": "btc-eur", "base_currency": "BTC", "quote_currency": "EUR"},
+            {"ticker": "eth-eur", "base_currency": "ETH", "quote_currency": "EUR"},
+        ]}
         with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
             instruments = await client.list_vwap_instruments()
-        assert instruments == ["btc-eur", "eth-eur"]
+        assert instruments == ["BTC-EUR", "ETH-EUR"]
+
+    @pytest.mark.asyncio
+    async def test_list_fx_instruments_derived_from_bidask_catalog(self, client):
+        mock_result = {"instruments": [
+            {"ticker": "EURUSD", "base_currency": "EUR", "quote_currency": "USD"},
+            {"ticker": "BTCUSD", "base_currency": "BTC", "quote_currency": "USD"},
+        ]}
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
+            instruments = await client.list_fx_instruments()
+        assert instruments == ["EURUSD"]
 
 
 # ---------------------------------------------------------------------------
@@ -167,20 +180,25 @@ class TestInstrumentListing:
 class TestPairSearch:
     @pytest.mark.asyncio
     async def test_search_pairs(self, client):
-        with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["btc-usd", "btc-eur", "eth-usd"]), \
-             patch.object(client, "list_bidask_instruments", new_callable=AsyncMock, return_value=["btc-usd", "sol-usd"]), \
-             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]):
+        with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["BTC-USD", "BTC-EUR", "ETH-USD"]), \
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[
+                 {"ticker": "BTC-USD", "base_currency": "BTC", "quote_currency": "USD"},
+                 {"ticker": "SOL-USD", "base_currency": "SOL", "quote_currency": "USD"},
+             ]), \
+             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
             results = await client.search_pairs("btc")
         assert len(results) == 2
         pair_names = [r.pair for r in results]
-        assert "btc-eur" in pair_names
-        assert "btc-usd" in pair_names
+        assert "BTC-EUR" in pair_names
+        assert "BTC-USD" in pair_names
 
     @pytest.mark.asyncio
     async def test_search_pairs_no_match(self, client):
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["btc-usd"]), \
-             patch.object(client, "list_bidask_instruments", new_callable=AsyncMock, return_value=[]), \
-             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]):
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
             results = await client.search_pairs("nonexistent")
         assert len(results) == 0
 
@@ -188,16 +206,18 @@ class TestPairSearch:
     async def test_search_pairs_max_50(self, client):
         instruments = [f"test-{i}" for i in range(100)]
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=instruments), \
-             patch.object(client, "list_bidask_instruments", new_callable=AsyncMock, return_value=[]), \
-             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]):
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
             results = await client.search_pairs("test")
         assert len(results) == 50
 
     @pytest.mark.asyncio
     async def test_search_assigns_tier(self, client):
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["BTCUSD", "NICHETOKEN123"]), \
-             patch.object(client, "list_bidask_instruments", new_callable=AsyncMock, return_value=[]), \
-             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]):
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_fx_instruments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
             results = await client.search_pairs("", asset_class="crypto")
 
         btc_result = [r for r in results if "BTC" in r.base_currency]

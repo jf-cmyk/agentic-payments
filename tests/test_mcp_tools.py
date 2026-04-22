@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.mcp_server import (
-    get_vwap, get_bid_ask, get_vwap_30min, get_equity,
+    get_vwap, get_bid_ask,
     get_fx_rate, get_metal_price,
     search_pairs, get_pricing_info, search, fetch,
 )
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
-    VWAPData, BidAskData, VWAP30MinData, EquityData, FXData,
+    VWAPData, BidAskData, FXData,
     MetalData, PairInfo,
 )
 from datetime import datetime, timezone
@@ -54,40 +54,6 @@ class TestGetBidAskTool:
             result = await get_bid_ask("eth-usd")
         assert "BID/ASK [eth-usd]" in result
         assert "3200" in result
-
-
-# ---------------------------------------------------------------------------
-# Analytics Tools
-# ---------------------------------------------------------------------------
-
-class TestVWAP30MinTool:
-    @pytest.mark.asyncio
-    async def test_get_vwap_30min_success(self):
-        mock_data = VWAP30MinData(ticker="BTC", vwap=95000.0, quote_currency="EUR", timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc))
-        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.get_vwap_30min = AsyncMock(return_value=mock_data)
-            result = await get_vwap_30min("BTC")
-        assert "30-MIN VWAP [BTC]" in result
-        assert "95000" in result
-
-
-# ---------------------------------------------------------------------------
-# Equities Tools
-# ---------------------------------------------------------------------------
-
-class TestEquityTool:
-    @pytest.mark.asyncio
-    async def test_get_equity_success(self):
-        mock_data = EquityData(
-            ticker="AAPL", open=180.5, high=182.0, low=179.0, last=181.5,
-            bid=181.4, ask=181.6, volume=50000000, prev_close=179.8,
-            timestamp=datetime(2026, 4, 19, 20, 0, tzinfo=timezone.utc),
-        )
-        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.get_equity_snapshot = AsyncMock(return_value=mock_data)
-            result = await get_equity("AAPL")
-        assert "EQUITY [AAPL]" in result
-        assert "181.5" in result
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +114,8 @@ class TestGetPricingInfoTool:
         assert "Extended Crypto" in result
         assert "TradFi" in result
         assert "rates" not in result.lower()
-        assert "Equities" in result
-        assert "Analytics" in result
+        assert "Equities" not in result
+        assert "Analytics" not in result
         assert "FREE" in result
         assert "Solana" in result
 

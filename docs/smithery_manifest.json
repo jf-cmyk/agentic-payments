@@ -15,7 +15,7 @@
     "public_remote_server": "Read-only discovery and documentation tools"
   },
   "endpoints": {
-    "remote_mcp": "https://agentic-payments-production.up.railway.app/mcp/server",
+    "remote_mcp": "https://agentic-payments-production.up.railway.app/mcp/server/",
     "quickstart": "https://agentic-payments-production.up.railway.app/quickstart/remote-mcp",
     "openapi": "https://agentic-payments-production.up.railway.app/openapi.json",
     "pricing": "https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf"

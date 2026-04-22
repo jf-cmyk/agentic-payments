@@ -1,24 +1,18 @@
 """
-Blocksize Capital API Client.
+Blocksize Capital API client.
 
-Wraps the Blocksize REST (JSON-RPC 2.0) and WebSocket APIs into a clean
-async interface. Handles authentication, request formatting, retries,
-and response parsing.
+The deployed Agentic Payments gateway currently uses JSON-RPC 2.0 over HTTP.
+It does not maintain websocket subscriptions itself.
 
-Supported data services:
-  - Real-Time VWAP Crypto (9,410 pairs)
-  - 30-Minute VWAP Crypto (251 tickers)
-  - 24-Hour VWAP / Closing Price (42 tickers)
-  - Bid/Ask Crypto (1,962 pairs)
-  - Bid/Ask Equities — US + Chinese (18,071 tickers)
-  - Bid/Ask FX (129 pairs)
-  - Bid/Ask Metals (5 tickers)
-  - State Price
-  - Commodities (in development)
+Verified upstream methods for the deployed key:
+  - vwap_latest
+  - vwap_instruments
+  - bidask_getSnapshot
+  - bidask_instruments
 
-Production endpoints:
-  REST:  https://data.blocksize.capital/marketdata/v1/api
-  WS:    wss://data.blocksize.capital/marketdata/v1/ws
+The wider Blocksize platform documentation discusses websocket transport and
+subscription-style notifications in general, but this repo's integration path
+is request/response over HTTP POST.
 """
 
 from __future__ import annotations
@@ -44,6 +38,19 @@ from src.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+FIAT_CURRENCIES = {
+    "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SEK", "NOK",
+    "DKK", "CNH", "CNY", "HKD", "SGD", "MXN", "BRL", "ZAR", "TRY", "PLN",
+    "CZK", "HUF", "RON", "ILS", "INR",
+}
+METAL_TICKERS = {
+    "XAUUSD": "Gold",
+    "XAGUSD": "Silver",
+    "XPTUSD": "Platinum",
+    "XPDUSD": "Palladium",
+    "COPPERUSD": "Copper",
+}
 
 
 class BlocksizeAPIError(Exception):
@@ -184,11 +191,7 @@ class BlocksizeClient:
     async def list_vwap_instruments(self) -> list[str]:
         """List all instruments available for real-time VWAP data."""
         result = await self._rpc_call("vwap_instruments")
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "instruments" in result:
-            return result["instruments"]
-        return []
+        return self._extract_instrument_tickers(result)
 
     # -----------------------------------------------------------------------
     # 30-Minute VWAP (Crypto)
@@ -316,11 +319,7 @@ class BlocksizeClient:
     async def list_bidask_instruments(self) -> list[str]:
         """List all instruments available for bid/ask data."""
         result = await self._rpc_call("bidask_instruments")
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "instruments" in result:
-            return result["instruments"]
-        return []
+        return self._extract_instrument_tickers(result)
 
     # -----------------------------------------------------------------------
     # Equities (US + Chinese)
@@ -405,13 +404,17 @@ class BlocksizeClient:
         raise BlocksizeAPIError(-1, f"Unexpected response for FX: {result}")
 
     async def list_fx_instruments(self) -> list[str]:
-        """List available FX pairs."""
-        result = await self._rpc_call("bidask_fx_instruments")
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict) and "instruments" in result:
-            return result["instruments"]
-        return []
+        """List available FX pairs derived from the shared bid/ask catalog."""
+        entries = await self._list_bidask_entries()
+        return sorted(
+            entry["ticker"]
+            for entry in entries
+            if self._is_fx_entry(entry)
+        )
+
+    async def list_metal_instruments(self) -> list[str]:
+        """Return the metal tickers supported by the HTTP gateway."""
+        return sorted(METAL_TICKERS)
 
     # -----------------------------------------------------------------------
     # Metals & Commodities
@@ -472,7 +475,13 @@ class BlocksizeClient:
         if asset_class in ("all", "crypto"):
             try:
                 vwap_instruments = set(await self.list_vwap_instruments())
-                bidask_instruments = set(await self.list_bidask_instruments())
+                bidask_instruments = {
+                    entry["ticker"]
+                    for entry in await self._list_bidask_entries()
+                    if not self._is_fx_entry(entry)
+                    and not self._is_metal_entry(entry)
+                    and not self._is_equity_like_entry(entry)
+                }
                 all_crypto = vwap_instruments | bidask_instruments
 
                 for instrument in sorted(all_crypto):
@@ -514,7 +523,99 @@ class BlocksizeClient:
             except BlocksizeAPIError:
                 logger.warning("Could not search FX instruments")
 
+        # Search metals
+        if asset_class in ("all", "metal") and len(matches) < 50:
+            for inst in await self.list_metal_instruments():
+                if query_lower in inst.lower() and len(matches) < 50:
+                    base, quote = _split_pair(inst)
+                    matches.append(PairInfo(
+                        pair=inst,
+                        base_currency=base,
+                        quote_currency=quote,
+                        asset_class="metal",
+                        services=["metal"],
+                        tier="tradfi",
+                    ))
+
         return matches
+
+    async def _list_bidask_entries(self) -> list[dict[str, str]]:
+        """Return normalized bid/ask instrument entries from the shared catalog."""
+        result = await self._rpc_call("bidask_instruments")
+        return self._extract_instrument_entries(result)
+
+    @staticmethod
+    def _extract_instrument_entries(result: Any) -> list[dict[str, str]]:
+        """Normalize instrument payloads into ticker/base/quote records."""
+        if isinstance(result, dict) and "instruments" in result:
+            raw_items = result["instruments"]
+        elif isinstance(result, list):
+            raw_items = result
+        else:
+            raw_items = []
+
+        entries: list[dict[str, str]] = []
+        for item in raw_items:
+            if isinstance(item, str):
+                ticker = item.upper()
+                base, quote = _split_pair(ticker)
+                entries.append({
+                    "ticker": ticker,
+                    "base_currency": base,
+                    "quote_currency": quote,
+                })
+                continue
+
+            if not isinstance(item, dict):
+                continue
+
+            ticker = str(item.get("ticker", "")).upper()
+            if not ticker:
+                continue
+
+            base = str(
+                item.get("base_currency")
+                or item.get("baseCurrency")
+                or _split_pair(ticker)[0]
+            ).upper()
+            quote = str(
+                item.get("quote_currency")
+                or item.get("quoteCurrency")
+                or _split_pair(ticker)[1]
+            ).upper()
+            entries.append({
+                "ticker": ticker,
+                "base_currency": base,
+                "quote_currency": quote,
+            })
+
+        return entries
+
+    @classmethod
+    def _extract_instrument_tickers(cls, result: Any) -> list[str]:
+        """Extract just the instrument ticker strings from an RPC result."""
+        return [entry["ticker"] for entry in cls._extract_instrument_entries(result)]
+
+    @staticmethod
+    def _is_fx_entry(entry: dict[str, str]) -> bool:
+        """Return True when an instrument looks like an FX pair."""
+        return (
+            entry["base_currency"] in FIAT_CURRENCIES
+            and entry["quote_currency"] in FIAT_CURRENCIES
+        )
+
+    @staticmethod
+    def _is_metal_entry(entry: dict[str, str]) -> bool:
+        """Return True when an instrument is one of the supported metals."""
+        return entry["ticker"] in METAL_TICKERS
+
+    @staticmethod
+    def _is_equity_like_entry(entry: dict[str, str]) -> bool:
+        """Identify exchange-listed equity-like symbols in the shared bid/ask feed."""
+        return (
+            entry["base_currency"].endswith("X")
+            and entry["quote_currency"] in {"USD", "USDT", "USDC"}
+        )
 
 
 # ---------------------------------------------------------------------------

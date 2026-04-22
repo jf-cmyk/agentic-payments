@@ -43,7 +43,7 @@ public_mcp = FastMCP(
     name="search_pairs",
     title="Instrument Search",
     description=(
-        "Use this to discover supported crypto, equity, FX, or metal symbols before "
+        "Use this to discover supported crypto, FX, or metal symbols before "
         "using Blocksize's paid HTTP API. This is free and read-only."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
@@ -58,7 +58,7 @@ async def public_search_pairs(query: str, asset_class: str = "all") -> str:
     title="Instrument List",
     description=(
         "Use this to list supported instruments for one service such as vwap, bidask, "
-        "equity, or fx. This is free and read-only."
+        "fx, or metal. This is free and read-only."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )

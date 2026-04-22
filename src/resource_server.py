@@ -7,8 +7,7 @@ payment protocol. Supports tiered pricing and dual-network settlement
 
 Endpoints:
   GET /v1/vwap/{pair}             — Real-time VWAP (crypto tier pricing)
-  GET /v1/bidask/{pair}           — Bid/Ask snapshot (crypto tier pricing)
-  GET /v1/equity/{ticker}         — Equity snapshot ($0.008)
+  GET /v1/bidask/{pair}           — Bid/Ask snapshot (shared upstream namespace)
   GET /v1/fx/{pair}               — FX rate ($0.005)
   GET /v1/metal/{ticker}          — Metal price ($0.005)
   GET /v1/search?q={query}        — Pair search (FREE)
@@ -38,7 +37,6 @@ from src.config import settings
 from src.credit_manager import CreditManager, CREDIT_COSTS, BULK_TIERS
 from src.models import (
     BidAskResponse,
-    EquityResponse,
     ErrorResponse,
     InstrumentListResponse,
     PairSearchResponse,
@@ -100,7 +98,7 @@ remote MCP discovery surface for directory listings and client onboarding.
 
 ### Public Integration Surfaces
 - **Developer Portal**: [Homepage](https://agentic-payments-production.up.railway.app/)
-- **Remote MCP URL**: [Streamable HTTP](https://agentic-payments-production.up.railway.app/mcp/server)
+- **Remote MCP URL**: [Streamable HTTP](https://agentic-payments-production.up.railway.app/mcp/server/)
 - **MCP Manifest**: [Listing metadata](https://agentic-payments-production.up.railway.app/mcp/manifest.json)
 - **OpenAPI**: [JSON schema](https://agentic-payments-production.up.railway.app/openapi.json)
 - **Swagger UI**: [Interactive docs](https://agentic-payments-production.up.railway.app/docs)
@@ -195,9 +193,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # Crypto — dynamic pricing based on asset tier (handled separately)
     "/v1/vwap/": None,  # set dynamically
     "/v1/bidask/": None,  # set dynamically
-    "/v1/state/": None,  # set dynamically
-    # Analytics tier
-    "/v1/equity/": settings.pricing.equities,
     # TradFi
     "/v1/fx/": settings.pricing.tradfi,
     "/v1/metal/": settings.pricing.tradfi,
@@ -212,9 +207,6 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 PATH_TO_ASSET_TYPE = {
     "/v1/vwap/": "core",
     "/v1/bidask/": "core",
-    "/v1/state/": "core",
-    "/v1/vwap30m/": "analytics", # analytics is cheap
-    "/v1/equity/": "equities",
     "/v1/fx/": "tradfi",
     "/v1/metal/": "tradfi",
 }
@@ -280,7 +272,7 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         return total if total > 0 else None
 
     # Crypto uses dynamic tier pricing
-    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/") or path.startswith("/v1/state/"):
+    if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/"):
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:
             pair = parts[3]
@@ -539,41 +531,6 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/state/{pair}", responses=X402_RESPONSE)
-async def get_state_price(pair: str, request: Request) -> dict[str, Any]:
-    """Get institutional state/reference price for a crypto pair. Cost: $0.002–$0.004 USDC."""
-    try:
-        client: BlocksizeClient = request.app.state.blocksize
-        clean = pair.replace("-", "").replace("/", "").replace("_", "")
-        data = await client.get_state_price(clean)
-        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "State Price", "asset_class": "crypto"}}
-        return resp
-    except BlocksizeAPIError as e:
-        raise HTTPException(status_code=502, detail=ErrorResponse(
-            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve state price for {pair}", details=str(e),
-        ).model_dump())
-
-
-# Note: /v1/vwap30m, /v1/vwap24h, and /v1/rate are currently not offered
-# through the HTTP resource server natively.
-
-
-@app.get("/v1/equity/{ticker}", responses=X402_RESPONSE)
-async def get_equity(ticker: str, request: Request) -> dict[str, Any]:
-    """Get equity snapshot. Cost: $0.008 USDC."""
-    try:
-        client: BlocksizeClient = request.app.state.blocksize
-        clean = ticker.replace("-", "").replace("/", "").replace("_", "")
-        data = await client.get_equity_snapshot(clean)
-        resp = EquityResponse(data=data).model_dump()
-        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Equity Data", "asset_class": "equity"}
-        return resp
-    except BlocksizeAPIError as e:
-        raise HTTPException(status_code=502, detail=ErrorResponse(
-            error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve equity for {ticker}", details=str(e),
-        ).model_dump())
-
-
 @app.get("/v1/fx/{pair}", responses=X402_RESPONSE)
 async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
@@ -608,7 +565,7 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
     """
     Execute a batch of data queries.
     Pass a comma separated list of svc:pair in the `reqs` query parameter.
-    Example: /v1/batch?reqs=vwap:BTCUSD,bidask:ETHUSD,equity:AAPL
+    Example: /v1/batch?reqs=vwap:BTCUSD,bidask:ETHUSD,fx:EURUSD
     """
     import asyncio
     
@@ -624,8 +581,6 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
                 return await get_vwap(ticker, request)
             elif svc == "bidask":
                 return await get_bidask(ticker, request)
-            elif svc == "equity":
-                return await get_equity(ticker, request)
             elif svc == "fx":
                 return await get_fx(ticker, request)
             elif svc == "metal":
@@ -689,10 +644,10 @@ async def list_instruments(service: str, request: Request) -> dict[str, Any]:
             instruments = await client.list_vwap_instruments()
         elif service == "bidask":
             instruments = await client.list_bidask_instruments()
-        elif service == "equity":
-            instruments = await client.list_equity_instruments()
         elif service == "fx":
             instruments = await client.list_fx_instruments()
+        elif service == "metal":
+            instruments = await client.list_metal_instruments()
         else:
             raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
         return InstrumentListResponse(
@@ -842,7 +797,7 @@ async def mcp_manifest():
         "tools": [
             {
                 "name": "search_pairs",
-                "description": "Search supported crypto, equity, FX, and metal symbols. Free and read-only.",
+                "description": "Search supported crypto, FX, and metal symbols. Free and read-only.",
                 "parameters": {
                     "query": {"type": "string", "example": "BTC"},
                     "asset_class": {"type": "string", "example": "crypto"},
@@ -852,8 +807,8 @@ async def mcp_manifest():
             },
             {
                 "name": "list_instruments",
-                "description": "List the supported instruments for a service such as vwap, bidask, equity, or fx. Free and read-only.",
-                "parameters": {"service": {"type": "string", "example": "vwap"}},
+                "description": "List the supported instruments for a service such as vwap, bidask, fx, or metal. Free and read-only.",
+                "parameters": {"service": {"type": "string", "example": "metal"}},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
@@ -924,6 +879,8 @@ def run_resource_server() -> None:
         host="0.0.0.0",
         port=settings.server.resource_server_port,
         log_level=settings.server.log_level.lower(),
+        proxy_headers=True,
+        forwarded_allow_ips="*",
         reload=False,
     )
 

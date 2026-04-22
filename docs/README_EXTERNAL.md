@@ -7,7 +7,7 @@ Blocksize Capital provides:
 
 ## Public discovery MCP
 
-- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server`
+- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server/`
 - Manifest: `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
 - Quickstart: `https://agentic-payments-production.up.railway.app/quickstart/remote-mcp`
 - Prompt examples: `https://agentic-payments-production.up.railway.app/prompt-examples`
@@ -31,8 +31,6 @@ Supported paid endpoints:
 
 - `GET /v1/vwap/{pair}`
 - `GET /v1/bidask/{pair}`
-- `GET /v1/state/{pair}`
-- `GET /v1/equity/{ticker}`
 - `GET /v1/fx/{pair}`
 - `GET /v1/metal/{ticker}`
 - `GET /v1/batch`
@@ -48,9 +46,8 @@ Free discovery endpoints:
 | Service | Price |
 | --- | --- |
 | Core crypto | $0.002 |
-| Extended crypto and state price | $0.004 |
+| Extended crypto and shared bid/ask | $0.004 |
 | FX and metals | $0.005 |
-| Equities | $0.008 |
 
 Bulk credit tiers are documented in the public pricing guide:
 

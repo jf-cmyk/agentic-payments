@@ -381,12 +381,12 @@
           </p>
           <p class="hero-copy">
             Use the public MCP surface to discover symbols, inspect pricing, and fetch integration docs.
-            Route live production quotes, VWAP, equities, FX, and metals through the paid HTTP API
+            Route live production quotes, VWAP, FX, and metals through the paid HTTP API
             or the advanced local MCP setup.
           </p>
           <div class="hero-stats">
             <div>
-              <span class="stat-value">27,000+</span>
+              <span class="stat-value">6,368</span>
               <span class="stat-label">Discoverable Symbols</span>
             </div>
             <div>
@@ -406,7 +406,7 @@
 
         <div class="hero-card">
           <div class="eyebrow">Public Remote MCP URL</div>
-          <span class="url">https://agentic-payments-production.up.railway.app/mcp/server</span>
+          <span class="url">https://agentic-payments-production.up.railway.app/mcp/server/</span>
           <p>
             Read-only discovery tools for ChatGPT Developer Mode, Cursor, Claude MCP clients,
             Smithery, Glama, and official registry listings.
@@ -428,14 +428,14 @@
           <p>
             Free instrument discovery, pricing inspection, and robust document search tools for remote MCP clients.
           </p>
-          <code>/mcp/server</code>
+          <code>/mcp/server/</code>
         </div>
         <div class="surface-card">
           <strong>Paid HTTP API</strong>
           <h3>Live production market data</h3>
           <p>
-            x402 or wallet-credit access to live market data endpoints for crypto, state price,
-            equities, FX, metals, and batch requests.
+            x402 or wallet-credit access to live market data endpoints for crypto,
+            FX, metals, and batch requests.
           </p>
           <code>/openapi.json</code>
         </div>
@@ -458,22 +458,17 @@
       <div class="catalog-grid">
         <div class="catalog-item">
           <h3>Crypto VWAP and Bid/Ask</h3>
-          <p>Institutional crypto snapshots across 9,410 VWAP pairs and 1,962 bid/ask pairs.</p>
+          <p>Institutional crypto snapshots across 6,362 enabled VWAP pairs and a shared bid/ask namespace.</p>
           <span class="endpoint">GET /v1/vwap/{pair}</span>
         </div>
         <div class="catalog-item">
-          <h3>State Price and Analytics</h3>
-          <p>Settlement-style reference prices plus 30-minute and 24-hour VWAP analytics.</p>
-          <span class="endpoint">GET /v1/state/{pair}</span>
-        </div>
-        <div class="catalog-item">
-          <h3>Equities</h3>
-          <p>Snapshots for 18,071 supported US and Chinese equity tickers.</p>
-          <span class="endpoint">GET /v1/equity/{ticker}</span>
+          <h3>Shared Bid/Ask Namespace</h3>
+          <p>2,365 enabled upstream bid/ask instruments, including crypto pairs and other shared symbols.</p>
+          <span class="endpoint">GET /v1/bidask/{pair}</span>
         </div>
         <div class="catalog-item">
           <h3>FX</h3>
-          <p>Bid, ask, and mid snapshots for 129 supported foreign exchange pairs.</p>
+          <p>Bid, ask, and mid snapshots for the currently enabled foreign exchange pairs.</p>
           <span class="endpoint">GET /v1/fx/{pair}</span>
         </div>
         <div class="catalog-item">
@@ -536,19 +531,14 @@
             <td>BTCUSD, ETHUSD, SOLUSD</td>
           </tr>
           <tr>
-            <td>Extended and State</td>
+            <td>Extended Crypto</td>
             <td class="price-bold">$0.004</td>
-            <td>JUPUSD, WIFUSD, state price snapshots</td>
+            <td>JUPUSD, WIFUSD, AAVEUSD</td>
           </tr>
           <tr>
             <td>FX and Metals</td>
             <td class="price-bold">$0.005</td>
             <td>EURUSD, GBPUSD, XAUUSD</td>
-          </tr>
-          <tr>
-            <td>US Equities</td>
-            <td class="price-bold">$0.008</td>
-            <td>AAPL, TSLA, NVDA</td>
           </tr>
         </tbody>
       </table>

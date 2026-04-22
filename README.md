@@ -8,7 +8,7 @@ Institutional-grade market data for AI agents, with two public integration layer
 ## Public URLs
 
 - Homepage: `https://agentic-payments-production.up.railway.app/`
-- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server`
+- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server/`
 - MCP manifest: `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
 - OpenAPI JSON: `https://agentic-payments-production.up.railway.app/openapi.json`
 - Swagger UI: `https://agentic-payments-production.up.railway.app/docs`
@@ -40,8 +40,6 @@ The paid HTTP API is the production data path for live access:
 
 - `GET /v1/vwap/{pair}`
 - `GET /v1/bidask/{pair}`
-- `GET /v1/state/{pair}`
-- `GET /v1/equity/{ticker}`
 - `GET /v1/fx/{pair}`
 - `GET /v1/metal/{ticker}`
 - `GET /v1/batch`
@@ -65,13 +63,10 @@ That mode is intended for direct builder integrations and requires local credent
 
 ## Coverage
 
-- 9,410 crypto VWAP pairs
-- 1,962 crypto bid/ask pairs
-- 18,071 equity tickers
-- 129 FX pairs
+- 6,362 enabled crypto VWAP pairs
+- 2,365 enabled shared bid/ask instruments
+- 3 enabled FX pairs
 - 5 metal tickers
-- 251 30-minute VWAP analytics tickers
-- 42 24-hour VWAP pairs
 
 ## Local Development
 
