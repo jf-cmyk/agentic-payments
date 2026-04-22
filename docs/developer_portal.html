@@ -51,22 +51,28 @@
     }
 
     :root {
-      --primary: #4f4bff;
+      --off-white: #FAFAFA;
+      --heading: #000;
+      --paragraph: #0A0D12;
+      --light-paragraph: #535862;
+      --light-heading: #6E737C;
+      --white-heading: #F6F6F6;
+      --white-paragraph: #E9EAEB;
+      --purple: #4F4BFF;
+      --gray: #1A1A1A;
+      --green: #47CD89;
+      --yellow: #EBF781;
+
       --primary-soft: rgba(79, 75, 255, 0.08);
-      --text: #0d0d0d;
-      --text-muted: #5f6368;
-      --bg: #ffffff;
-      --bg-alt: #f6f6f6;
       --border: #e5e7eb;
       --grid: rgba(0, 0, 0, 0.05);
-      --success: #10b981;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
-      background: var(--bg);
-      color: var(--text);
+      background: var(--off-white);
+      color: var(--paragraph);
       font-family: "Hind", Arial, Helvetica, sans-serif;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
@@ -74,13 +80,20 @@
 
     .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
     section { padding: 7rem 0; }
-    h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; }
+    h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; color: var(--heading); margin-bottom: 1.35rem; line-height: 1.125em; }
     h1 { font-size: clamp(3rem, 4.5vw, 4.5rem); }
     h2 { font-size: clamp(3rem, 4vw, 4.5rem); margin-bottom: 2rem; }
-    h2 span, h1 span { color: var(--primary); }
-    h3 { font-size: clamp(2.1875rem, 3.5vw, 3rem); margin-bottom: 0.75rem; }
-    h4 { font-size: clamp(1.5rem, 3vw, 2.25rem); margin-bottom: 0.75rem; }
-    p { color: var(--text-muted); }
+    h2 span, h1 span { color: var(--purple); }
+    h3 { font-size: clamp(2.1875rem, 3.5vw, 3rem); margin-bottom: 1rem; }
+    h4 { font-size: clamp(1.5rem, 3vw, 2.25rem); margin-bottom: 1rem; }
+    p { color: var(--light-paragraph); margin-top: 1rem; margin-bottom: 1rem; line-height: 150%; }
+
+    a { transition: all 0.2s; }
+    a:hover { opacity: 0.75; }
+    a:not(.text-inherit) { color: var(--purple); }
+    ul { list-style: disc; margin-left: 1rem; }
+    ol { list-style: number; margin-left: 1rem; }
+    li { margin: 0.5rem 0; color: var(--light-paragraph); }
 
     nav {
       position: sticky;
@@ -105,13 +118,13 @@
     }
     .nav-links a {
       text-decoration: none;
-      color: var(--text);
+      color: var(--paragraph);
       font-weight: 500;
       font-size: 0.92rem;
     }
-    .nav-links a:hover { color: var(--primary); }
+    .nav-links a:hover { color: var(--purple); }
     .btn-nav {
-      background: var(--text);
+      background: var(--heading);
       color: #fff;
       padding: 0.75rem 1.4rem;
       border-radius: 0;
@@ -136,7 +149,7 @@
       align-items: center;
     }
     .hero-label {
-      color: var(--text-muted);
+      color: var(--light-paragraph);
       font-family: "Roboto", monospace;
       font-size: 0.85rem;
       font-weight: 400;
@@ -155,10 +168,10 @@
       font-size: 1.35rem;
       max-width: 48rem;
       margin-bottom: 2rem;
-      color: var(--text);
+      color: var(--paragraph);
     }
     .hero-copy {
-      color: var(--text-muted);
+      color: var(--light-paragraph);
       max-width: 42rem;
       margin-bottom: 2rem;
     }
@@ -171,7 +184,7 @@
       display: block;
       font-size: 1.5rem;
       font-weight: 800;
-      color: var(--primary);
+      color: var(--purple);
     }
     .stat-label {
       display: block;
@@ -179,7 +192,7 @@
       font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--text-muted);
+      color: var(--light-paragraph);
       font-weight: 400;
     }
 
@@ -194,15 +207,15 @@
     }
     .hero-card {
       padding: 1.5rem;
-      background: #0d0d0d;
-      color: #fff;
+      background: var(--gray);
+      color: var(--white-heading);
       box-shadow: 0 30px 80px rgba(0, 0, 0, 0.15);
     }
     .hero-card .eyebrow {
       font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.12em;
-      color: #9ca3af;
+      color: var(--light-heading);
       margin-bottom: 0.75rem;
       font-weight: 800;
     }
@@ -218,14 +231,14 @@
       margin-bottom: 1rem;
       overflow-wrap: anywhere;
     }
-    .hero-card p { color: #c7c9d1; font-size: 0.95rem; }
+    .hero-card p { color: var(--white-paragraph); font-size: 0.95rem; }
     .hero-card .mode {
       display: inline-block;
       margin-top: 1rem;
       padding: 0.35rem 0.65rem;
       border-radius: 999px;
-      background: rgba(16, 185, 129, 0.12);
-      color: #8ce3c2;
+      background: rgba(71, 205, 137, 0.12);
+      color: var(--green);
       font-weight: 700;
       font-size: 0.78rem;
     }
@@ -265,7 +278,7 @@
       font-size: 0.8rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--primary);
+      color: var(--purple);
     }
     .surface-card code,
     .catalog-item .endpoint {
@@ -273,25 +286,25 @@
       margin-top: 1rem;
       padding: 0.85rem 1rem;
       background: var(--primary-soft);
-      color: var(--primary);
+      color: var(--purple);
       border-radius: 0;
       font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.82rem;
       overflow-wrap: anywhere;
     }
     .surface-card ul { padding-left: 1.15rem; }
-    .surface-card li { color: var(--text-muted); }
+    .surface-card li { color: var(--light-paragraph); }
     .catalog-item:hover,
     .resource-card:hover,
     .surface-card:hover {
-      border-color: var(--primary);
+      border-color: var(--purple);
       transform: translateY(-3px);
       transition: all 0.2s ease;
     }
 
     .step-num {
       display: inline-block;
-      color: var(--primary);
+      color: var(--purple);
       font-weight: 800;
       margin-bottom: 0.75rem;
       font-size: 1.1rem;
@@ -308,12 +321,12 @@
     .pricing-table th {
       text-align: left;
       padding: 1.5rem 1.75rem;
-      border-bottom: 2px solid var(--text);
+      border-bottom: 2px solid var(--heading);
       font-weight: 800;
       font-size: 0.8rem;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: var(--text-muted);
+      color: var(--light-paragraph);
     }
     .pricing-table td {
       padding: 1.5rem 1.75rem;
@@ -330,11 +343,11 @@
     .callout .pricing-table td {
       border-bottom-color: rgba(255, 255, 255, 0.15);
     }
-    .price-bold { color: var(--primary); font-weight: 800; }
+    .price-bold { color: var(--purple); font-weight: 800; }
     .credit-badge {
       display: inline-block;
-      background: #ecf781;
-      color: #111827;
+      background: var(--yellow);
+      color: var(--heading);
       padding: 0.2rem 0.45rem;
       border-radius: 0;
       font-size: 0.72rem;
@@ -351,7 +364,7 @@
       justify-content: space-between;
     }
     .resource-card .arrow {
-      color: var(--primary);
+      color: var(--purple);
       font-weight: 800;
       font-size: 1.1rem;
     }
@@ -361,24 +374,24 @@
       margin-top: 2.5rem;
       padding: 2.5rem;
       border-radius: 0;
-      background: linear-gradient(135deg, #4f4bff, #6e6bff);
-      color: #fff;
+      background: var(--purple);
+      color: var(--white-paragraph);
       box-shadow: 0 20px 40px rgba(79, 75, 255, 0.15);
     }
-    .callout h3 { font-size: 1.5rem; margin-bottom: 1rem; }
+    .callout h3 { font-size: 1.5rem; margin-bottom: 1rem; color: var(--white-heading); }
     .callout p { color: rgba(255, 255, 255, 0.9); font-size: 1.05rem; }
 
     footer {
       padding: 4rem 0;
       border-top: 1px solid var(--border);
-      background: var(--bg-alt);
+      background: #ffffff;
     }
     .footer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       gap: 2rem;
     }
-    .status-active { color: var(--success); font-weight: 700; }
+    .status-active { color: var(--green); font-weight: 700; }
 
     @media (max-width: 960px) {
       .hero-grid { grid-template-columns: 1fr; }
@@ -460,7 +473,7 @@
     </div>
   </section>
 
-  <section id="surfaces" style="background: var(--bg-alt);">
+  <section id="surfaces" style="background: var(--white-heading);">
     <div class="container">
       <h2>Integration <span>Surfaces</span></h2>
       <div class="surface-grid">
@@ -527,7 +540,7 @@
     </div>
   </section>
 
-  <section style="background: var(--bg-alt);">
+  <section style="background: var(--white-heading);">
     <div class="container">
       <h2>Agent <span>Flow</span></h2>
       <div class="flow-steps">
@@ -633,7 +646,7 @@
     </div>
   </section>
 
-  <section id="resources" style="background: var(--bg-alt);">
+  <section id="resources" style="background: var(--white-heading);">
     <div class="container">
       <h2>Technical <span>Artifacts</span></h2>
       <div class="resource-grid">
