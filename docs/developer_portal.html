@@ -259,16 +259,18 @@
     }
     .pricing-table th {
       text-align: left;
-      padding: 1.1rem 1.25rem;
+      padding: 1.5rem 1.75rem;
       border-bottom: 2px solid var(--text);
       font-weight: 800;
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
+      color: var(--text-muted);
     }
     .pricing-table td {
-      padding: 1.1rem 1.25rem;
+      padding: 1.5rem 1.75rem;
       border-bottom: 1px solid var(--border);
+      font-size: 0.95rem;
     }
     .price-bold { color: var(--primary); font-weight: 800; }
     .credit-badge {
@@ -298,13 +300,15 @@
     .resource-card h4 { font-size: 1.05rem; }
 
     .callout {
-      margin-top: 2rem;
-      padding: 1.5rem;
-      border-radius: 18px;
+      margin-top: 2.5rem;
+      padding: 2.5rem;
+      border-radius: 20px;
       background: linear-gradient(135deg, #4f4bff, #6e6bff);
       color: #fff;
+      box-shadow: 0 20px 40px rgba(79, 75, 255, 0.15);
     }
-    .callout p { color: rgba(255, 255, 255, 0.88); }
+    .callout h3 { font-size: 1.5rem; margin-bottom: 1rem; }
+    .callout p { color: rgba(255, 255, 255, 0.9); font-size: 1.05rem; }
 
     footer {
       padding: 4rem 0;
@@ -570,12 +574,12 @@
         </table>
       </div>
 
-      <div style="margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--border); border-radius: 16px; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+      <div style="margin-top: 2.5rem; padding: 2.5rem; border: 1px solid var(--border); border-radius: 20px; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
         <div>
-          <h3 style="margin-bottom: 0.5rem; color: var(--text);">Enterprise Subscriptions</h3>
-          <p style="margin: 0; max-width: 40rem; color: var(--text-muted);">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
+          <h3 style="margin-bottom: 0.75rem; color: var(--text); font-size: 1.5rem;">Enterprise Subscriptions</h3>
+          <p style="margin: 0; max-width: 42rem; color: var(--text-muted); font-size: 1.05rem; line-height: 1.6;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
         </div>
-        <a href="https://blocksize.info/crypto-market-data/" target="_blank" class="btn-nav" style="background: var(--primary); white-space: nowrap;">View Subscriptions →</a>
+        <a href="https://blocksize.info/crypto-market-data/" target="_blank" class="btn-nav" style="background: var(--primary); white-space: nowrap; padding: 1rem 1.75rem; font-size: 0.95rem;">View Subscriptions →</a>
       </div>
     </div>
   </section>
@@ -652,8 +656,6 @@
           <p style="font-weight: 700; color: var(--text);">Blocksize Capital GmbH</p>
           <p>Taunusanlage 8</p>
           <p>60329 Frankfurt, Germany</p>
-          <p style="margin-top: 1rem;">Email: <a href="mailto:info@blocksize.capital">info@blocksize.capital</a></p>
-          <p>Phone: +49 (0)69 870 0990 80</p>
         </div>
         <div>
           <p style="font-weight: 700; color: var(--text); margin-bottom: 0.8rem;">Listing Surface</p>
