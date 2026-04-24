@@ -78,7 +78,7 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 1180px; margin: 0 auto; padding: 0 1.5rem; }
+    .container { max-width: 84.25rem; width: 92%; margin: 0 auto; }
     section { padding: 5.25rem 0; }
     h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; color: var(--heading); margin-bottom: 1.35rem; line-height: 1.125em; }
     h1 { font-size: clamp(2.65rem, 4vw, 4rem); }
@@ -105,6 +105,7 @@
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
+      position: relative;
       display: flex;
       justify-content: flex-start;
       align-items: center;
@@ -137,8 +138,43 @@
     }
     .nav-links a:hover,
     .nav-links button:hover { color: var(--heading); opacity: 0.65; }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 2.25rem;
+      margin-left: auto;
+    }
+    .nav-action-link {
+      color: var(--paragraph);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.88rem;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .nav-action-link:hover {
+      opacity: 0.65;
+    }
+    .nav-action-button {
+      background: var(--heading);
+      border: 1px solid #1e1e1e;
+      color: #fff !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0.72rem 1.5rem 0.62rem;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 0.88rem;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .nav-action-button:visited {
+      color: #fff !important;
+    }
     .nav-item {
-      position: relative;
+      position: static;
       margin: 0;
       color: var(--paragraph);
       list-style: none;
@@ -146,39 +182,42 @@
     .nav-trigger {
       display: inline-flex;
       align-items: center;
-      gap: 0.35rem;
+      gap: 0.25rem;
       padding: 0;
     }
     .nav-chevron {
-      font-size: 0.8rem;
+      width: 1rem;
+      height: 1rem;
       transform-origin: center;
       transition: transform 0.2s ease;
     }
-    .nav-item:hover .nav-chevron,
-    .nav-item:focus-within .nav-chevron {
+    .nav-chevron path {
+      stroke: var(--light-paragraph);
+    }
+    .nav-item.is-open .nav-chevron {
       transform: rotate(180deg);
     }
     .dropdown-panel {
       position: absolute;
-      top: calc(100% + 1rem);
+      top: 100%;
       left: 0;
-      width: min(760px, 78vw);
+      width: 100%;
       display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
       border: 1px solid var(--border);
       background: #fff;
       opacity: 0;
       visibility: hidden;
-      transform: translateY(8px);
+      transform: translateY(6px);
       transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
-      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.08);
+      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.08);
     }
     .dropdown-panel.align-right {
-      left: auto;
-      right: 0;
+      left: 0;
+      right: auto;
     }
-    .nav-item:hover .dropdown-panel,
-    .nav-item:focus-within .dropdown-panel {
+    .nav-item.is-open .dropdown-panel {
       opacity: 1;
       visibility: visible;
       transform: translateY(0);
@@ -202,13 +241,21 @@
       list-style: none;
     }
     .dropdown-links a {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
       padding: 0.72rem 0.8rem;
       background: transparent;
       text-decoration: none;
       color: var(--paragraph);
       font-weight: 600;
       white-space: normal;
+    }
+    .protocol-icon {
+      width: 1.25rem;
+      height: 1.25rem;
+      object-fit: contain;
+      flex: 0 0 auto;
     }
     .dropdown-links a:hover {
       background: var(--off-white);
@@ -260,6 +307,32 @@
     a.btn-nav,
     a.btn-nav:visited {
       color: #fff !important;
+    }
+    .btn-arrow {
+      gap: 0.55rem;
+      padding-right: 0.95rem;
+    }
+    .btn-arrow svg {
+      width: 1.45rem;
+      height: 1.45rem;
+      transition: transform 0.25s ease;
+    }
+    .btn-arrow path {
+      stroke: #fff;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .btn-arrow circle {
+      fill: var(--yellow);
+      transition: opacity 0.25s ease;
+      mix-blend-mode: darken;
+    }
+    .btn-arrow:hover svg {
+      transform: translateX(0.18rem) rotate(45deg);
+    }
+    .btn-arrow:hover circle {
+      opacity: 0.75;
     }
 
     .hero {
@@ -534,12 +607,18 @@
       .hero h1 { font-size: 3.1rem; max-width: none; }
       .catalog-grid { grid-template-columns: repeat(2, 1fr); }
       .dropdown-panel {
-        width: min(680px, 86vw);
+        gap: 1.5rem;
       }
     }
     @media (max-width: 768px) {
       .nav-inner { align-items: flex-start; flex-direction: column; gap: 0.8rem; }
       .nav-links { overflow-x: auto; flex-wrap: nowrap; width: 100%; padding-bottom: 0.2rem; }
+      .nav-actions {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 1.25rem;
+        margin-left: 0;
+      }
       .dropdown-panel {
         position: static;
         width: 100%;
@@ -551,8 +630,7 @@
         transform: none;
         display: none;
       }
-      .nav-item:hover .dropdown-panel,
-      .nav-item:focus-within .dropdown-panel {
+      .nav-item.is-open .dropdown-panel {
         display: grid;
       }
       .dropdown-links {
@@ -561,7 +639,7 @@
       .hero { padding: 7.75rem 0 4rem; }
       .hero h1 { font-size: 2.55rem; }
       h2 { font-size: 2.2rem; }
-      .container { padding: 0 1.15rem; }
+      .container { padding: 0; }
       .catalog-grid { grid-template-columns: 1fr; }
       .hero-actions .btn-nav { width: 100%; }
     }
@@ -574,18 +652,23 @@
         <div class="logo"><img src="assets/logo.svg" alt="Blocksize" /></div>
         <ul class="nav-links">
           <li class="nav-item">
-            <button class="nav-trigger" type="button">Protocols <span class="nav-chevron">▾</span></button>
+            <button class="nav-trigger" type="button" aria-expanded="false">
+              Protocols
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
             <div class="dropdown-panel">
               <div class="dropdown-left">
                 <div class="dropdown-kicker">Supported Protocols</div>
                 <div class="dropdown-links">
-                  <a href="https://blocksize.info/staking/protocols/solana/" target="_blank" rel="noreferrer">Solana</a>
-                  <a href="https://blocksize.info/staking/protocols/chainlink/" target="_blank" rel="noreferrer">Chainlink</a>
-                  <a href="https://blocksize.info/staking/protocols/polygon/" target="_blank" rel="noreferrer">Polygon</a>
-                  <a href="https://blocksize.info/staking/protocols/pyth/" target="_blank" rel="noreferrer">Pyth</a>
-                  <a href="https://blocksize.info/staking/protocols/redstone/" target="_blank" rel="noreferrer">Redstone</a>
-                  <a href="https://blocksize.info/staking/protocols/supra/" target="_blank" rel="noreferrer">Supra</a>
-                  <a href="https://blocksize.info/staking/protocols/eigenlayer/" target="_blank" rel="noreferrer">Eigenlayer</a>
+                  <a href="https://blocksize.info/staking/protocols/solana/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/bd5db846-d176-4899-92a8-2526e27c1c10" alt="" class="protocol-icon" loading="lazy">Solana</a>
+                  <a href="https://blocksize.info/staking/protocols/chainlink/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/54e79626-bd99-40ae-829c-1fb555ef9f51" alt="" class="protocol-icon" loading="lazy">Chainlink</a>
+                  <a href="https://blocksize.info/staking/protocols/polygon/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8423b7b4-6962-42bd-9459-7df403dc7cfe" alt="" class="protocol-icon" loading="lazy">Polygon</a>
+                  <a href="https://blocksize.info/staking/protocols/pyth/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3bd2ee79-41df-4afc-a093-6f89f26e6e77" alt="" class="protocol-icon" loading="lazy">Pyth</a>
+                  <a href="https://blocksize.info/staking/protocols/redstone/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/36a91a45-9e92-45b9-afc1-8109165ae84c" alt="" class="protocol-icon" loading="lazy">Redstone</a>
+                  <a href="https://blocksize.info/staking/protocols/supra/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/d8010f0b-6847-46d3-8bf3-c7e87242a20d" alt="" class="protocol-icon" loading="lazy">Supra</a>
+                  <a href="https://blocksize.info/staking/protocols/eigenlayer/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b9ddf559-142e-4302-a9ad-738a5b69f4c4" alt="" class="protocol-icon" loading="lazy">Eigenlayer</a>
                 </div>
               </div>
               <div class="dropdown-right">
@@ -600,7 +683,12 @@
           </li>
           <li class="nav-item"><a href="https://blocksize.info/staking/" target="_blank" rel="noreferrer">Staking</a></li>
           <li class="nav-item">
-            <button class="nav-trigger" type="button">Crypto Data <span class="nav-chevron">▾</span></button>
+            <button class="nav-trigger" type="button" aria-expanded="false">
+              Crypto Data
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
             <div class="dropdown-panel">
               <div class="dropdown-left">
                 <div class="dropdown-kicker">Crypto Data for Individuals and Enterprises</div>
@@ -621,7 +709,12 @@
             </div>
           </li>
           <li class="nav-item">
-            <button class="nav-trigger" type="button">Company <span class="nav-chevron">▾</span></button>
+            <button class="nav-trigger" type="button" aria-expanded="false">
+              Company
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
             <div class="dropdown-panel align-right">
               <div class="dropdown-left">
                 <div class="dropdown-kicker">About Blocksize</div>
@@ -642,8 +735,11 @@
               </div>
             </div>
           </li>
-          <li class="nav-item"><a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer">Contact</a></li>
         </ul>
+        <div class="nav-actions">
+          <a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer" class="nav-action-link">Contact</a>
+          <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="nav-action-button">Data Free-Trial</a>
+        </div>
       </div>
     </div>
   </nav>
@@ -683,7 +779,14 @@
           </div>
           <div class="hero-actions">
             <a href="/docs" class="btn-nav">Open API Docs</a>
-            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav">View Subscriptions</a>
+            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav btn-arrow">
+              View Subscriptions
+              <svg width="31" height="31" viewBox="0 0 31 31" fill="none" aria-hidden="true">
+                <path d="M9.04175 21.9582L21.9584 9.0415"></path>
+                <path d="M9.04175 9.0415H21.9584V21.9582"></path>
+                <circle cx="22.8112" cy="8.18868" r="8.18868"></circle>
+              </svg>
+            </a>
           </div>
         </div>
 
@@ -972,5 +1075,44 @@
       </div>
     </div>
   </footer>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const navItems = Array.from(document.querySelectorAll(".nav-item"));
+
+      const closeMenus = () => {
+        navItems.forEach((item) => {
+          item.classList.remove("is-open");
+          const trigger = item.querySelector(".nav-trigger");
+          if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+      };
+
+      navItems.forEach((item) => {
+        const trigger = item.querySelector(".nav-trigger");
+        if (!trigger) return;
+
+        trigger.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const wasOpen = item.classList.contains("is-open");
+          closeMenus();
+          if (!wasOpen) {
+            item.classList.add("is-open");
+            trigger.setAttribute("aria-expanded", "true");
+          }
+        });
+      });
+
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest("nav")) {
+          closeMenus();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMenus();
+      });
+    });
+  </script>
 </body>
 </html>
