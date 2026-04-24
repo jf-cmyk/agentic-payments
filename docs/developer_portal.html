@@ -334,6 +334,17 @@
     .btn-arrow:hover circle {
       opacity: 0.75;
     }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--heading);
+      color: var(--heading) !important;
+    }
+    .btn-ghost:visited {
+      color: var(--heading) !important;
+    }
+    .btn-ghost.btn-arrow path {
+      stroke: var(--heading);
+    }
 
     .hero {
       padding: 8.6rem 0 5rem;
@@ -779,7 +790,7 @@
           </div>
           <div class="hero-actions">
             <a href="/docs" class="btn-nav">Open API Docs</a>
-            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav btn-arrow">
+            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav btn-arrow btn-ghost">
               View Subscriptions
               <svg width="31" height="31" viewBox="0 0 31 31" fill="none" aria-hidden="true">
                 <path d="M9.04175 21.9582L21.9584 9.0415"></path>
