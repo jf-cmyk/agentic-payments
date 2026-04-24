@@ -78,63 +78,192 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
-    section { padding: 7rem 0; }
+    .container { max-width: 1180px; margin: 0 auto; padding: 0 1.5rem; }
+    section { padding: 5.25rem 0; }
     h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; color: var(--heading); margin-bottom: 1.35rem; line-height: 1.125em; }
-    h1 { font-size: clamp(3rem, 4.5vw, 4.5rem); }
-    h2 { font-size: clamp(3rem, 4vw, 4.5rem); margin-bottom: 2rem; }
-    h2 span, h1 span { color: var(--purple); }
-    h3 { font-size: clamp(2.1875rem, 3.5vw, 3rem); margin-bottom: 1rem; }
-    h4 { font-size: clamp(1.5rem, 3vw, 2.25rem); margin-bottom: 1rem; }
+    h1 { font-size: clamp(2.65rem, 4vw, 4rem); }
+    h2 { font-size: clamp(2.25rem, 3.2vw, 3.3rem); margin-bottom: 1.4rem; }
+    h3 { font-size: clamp(1.55rem, 2.4vw, 2.15rem); margin-bottom: 0.85rem; }
+    h4 { font-size: clamp(1.15rem, 2vw, 1.55rem); margin-bottom: 0.75rem; }
     p { color: var(--light-paragraph); margin-top: 1rem; margin-bottom: 1rem; line-height: 150%; }
 
     a { transition: all 0.2s; }
     a:hover { opacity: 0.75; }
-    a:not(.text-inherit) { color: var(--purple); }
+    a:not(.text-inherit) { color: var(--heading); }
     ul { list-style: disc; margin-left: 1rem; }
     ol { list-style: number; margin-left: 1rem; }
     li { margin: 0.5rem 0; color: var(--light-paragraph); }
 
     nav {
-      position: sticky;
+      position: fixed;
       top: 0;
+      left: 0;
+      right: 0;
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.94);
-      backdrop-filter: blur(10px);
+      background: rgba(250, 250, 250, 0.96);
+      backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: center;
-      height: 80px;
+      gap: 2rem;
+      min-height: 72px;
+      padding: 0.85rem 0;
     }
     .logo { height: 32px; display: flex; align-items: center; }
     .logo img { height: 100%; width: auto; }
     .nav-links {
       display: flex;
-      gap: 2rem;
+      gap: 1.1rem;
       list-style: none;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-left: 0;
     }
-    .nav-links a {
+    .nav-links a,
+    .nav-links button {
       text-decoration: none;
       color: var(--paragraph);
       font-weight: 500;
-      font-size: 0.92rem;
+      font-size: 0.88rem;
+      line-height: 1;
+      white-space: nowrap;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      font-family: inherit;
     }
-    .nav-links a:hover { color: var(--purple); }
+    .nav-links a:hover,
+    .nav-links button:hover { color: var(--heading); opacity: 0.65; }
+    .nav-item {
+      position: relative;
+      margin: 0;
+      color: var(--paragraph);
+      list-style: none;
+    }
+    .nav-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0;
+    }
+    .nav-chevron {
+      font-size: 0.8rem;
+      transform-origin: center;
+      transition: transform 0.2s ease;
+    }
+    .nav-item:hover .nav-chevron,
+    .nav-item:focus-within .nav-chevron {
+      transform: rotate(180deg);
+    }
+    .dropdown-panel {
+      position: absolute;
+      top: calc(100% + 1rem);
+      left: 0;
+      width: min(760px, 78vw);
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      border: 1px solid var(--border);
+      background: #fff;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.08);
+    }
+    .dropdown-panel.align-right {
+      left: auto;
+      right: 0;
+    }
+    .nav-item:hover .dropdown-panel,
+    .nav-item:focus-within .dropdown-panel {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+    .dropdown-left {
+      padding: 1.35rem;
+    }
+    .dropdown-kicker {
+      font-family: "Roboto", monospace;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--light-heading);
+      margin-bottom: 0.9rem;
+    }
+    .dropdown-links {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.45rem;
+      margin: 0;
+      list-style: none;
+    }
+    .dropdown-links a {
+      display: block;
+      padding: 0.72rem 0.8rem;
+      background: transparent;
+      text-decoration: none;
+      color: var(--paragraph);
+      font-weight: 600;
+      white-space: normal;
+    }
+    .dropdown-links a:hover {
+      background: var(--off-white);
+      opacity: 1;
+    }
+    .dropdown-right {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 1.35rem;
+      background: #000;
+      color: #fff;
+    }
+    .dropdown-right p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.84);
+    }
+    .dropdown-right .promo-kicker {
+      font-family: "Almarena Neue", sans-serif;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(255, 255, 255, 0.75);
+      margin-bottom: 0.85rem;
+    }
+    .dropdown-right .promo-title {
+      font-family: "Almarena Neue", sans-serif;
+      font-size: 1.5rem;
+      line-height: 1.1;
+      margin-bottom: 1rem;
+      color: #fff;
+    }
     .btn-nav {
       background: var(--heading);
       color: #fff;
-      padding: 0.75rem 1.4rem;
+      padding: 0.95rem 1.45rem;
       border-radius: 0;
       text-decoration: none;
       font-weight: 700;
-      font-size: 0.85rem;
+      font-size: 0.86rem;
+      letter-spacing: 0.01em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+    }
+    .btn-nav,
+    .btn-nav:visited,
+    a.btn-nav,
+    a.btn-nav:visited {
+      color: #fff !important;
     }
 
     .hero {
-      padding: 9rem 0;
+      padding: 8.6rem 0 5rem;
       background-image:
         linear-gradient(var(--grid) 1px, transparent 1px),
         linear-gradient(90deg, var(--grid) 1px, transparent 1px);
@@ -145,7 +274,7 @@
     .hero-grid {
       display: grid;
       grid-template-columns: 1.2fr 0.8fr;
-      gap: 3rem;
+      gap: 2.5rem;
       align-items: center;
     }
     .hero-label {
@@ -160,40 +289,46 @@
     .hero h1 {
       line-height: 0.95;
       letter-spacing: -0.05em;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.1rem;
       max-width: 11ch;
     }
-    .hero h1 span { color: var(--primary); }
+    .hero h1 span { color: var(--purple); }
     .hero-sub {
-      font-size: 1.35rem;
+      font-size: 1.08rem;
       max-width: 48rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.2rem;
       color: var(--paragraph);
     }
     .hero-copy {
       color: var(--light-paragraph);
       max-width: 42rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.5rem;
     }
     .hero-stats {
       display: flex;
-      gap: 2.5rem;
+      gap: 1.5rem 2rem;
       flex-wrap: wrap;
+      margin-bottom: 1.5rem;
     }
     .stat-value {
       display: block;
-      font-size: 1.5rem;
+      font-size: 1.2rem;
       font-weight: 800;
       color: var(--purple);
     }
     .stat-label {
       display: block;
       font-family: "Roboto", monospace;
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--light-paragraph);
       font-weight: 400;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 0.9rem;
+      flex-wrap: wrap;
     }
 
     .hero-card,
@@ -206,7 +341,7 @@
       background: #fff;
     }
     .hero-card {
-      padding: 1.5rem;
+      padding: 1.3rem;
       background: var(--gray);
       color: var(--white-heading);
       box-shadow: 0 30px 80px rgba(0, 0, 0, 0.15);
@@ -224,14 +359,14 @@
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 0;
-      padding: 1rem;
+      padding: 0.9rem;
       color: #fff;
       font-family: "SFMono-Regular", Consolas, monospace;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       margin-bottom: 1rem;
       overflow-wrap: anywhere;
     }
-    .hero-card p { color: var(--white-paragraph); font-size: 0.95rem; }
+    .hero-card p { color: var(--white-paragraph); font-size: 0.88rem; }
     .hero-card .mode {
       display: inline-block;
       margin-top: 1rem;
@@ -264,7 +399,7 @@
     .surface-card,
     .catalog-item,
     .step {
-      padding: 1.5rem;
+      padding: 1.25rem;
       display: flex;
       flex-direction: column;
     }
@@ -278,15 +413,15 @@
       font-size: 0.8rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: var(--purple);
+      color: var(--light-paragraph);
     }
     .surface-card code,
     .catalog-item .endpoint {
       display: block;
       margin-top: 1rem;
-      padding: 0.85rem 1rem;
+      padding: 0.78rem 0.9rem;
       background: var(--primary-soft);
-      color: var(--purple);
+      color: var(--paragraph);
       border-radius: 0;
       font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.82rem;
@@ -297,14 +432,14 @@
     .catalog-item:hover,
     .resource-card:hover,
     .surface-card:hover {
-      border-color: var(--purple);
+      border-color: var(--heading);
       transform: translateY(-3px);
       transition: all 0.2s ease;
     }
 
     .step-num {
       display: inline-block;
-      color: var(--purple);
+      color: var(--heading);
       font-weight: 800;
       margin-bottom: 0.75rem;
       font-size: 1.1rem;
@@ -343,7 +478,7 @@
     .callout .pricing-table td {
       border-bottom-color: rgba(255, 255, 255, 0.15);
     }
-    .price-bold { color: var(--purple); font-weight: 800; }
+    .price-bold { color: var(--heading); font-weight: 800; }
     .credit-badge {
       display: inline-block;
       background: var(--yellow);
@@ -357,18 +492,18 @@
     .resource-card {
       text-decoration: none;
       color: inherit;
-      padding: 1.5rem;
+      padding: 1.25rem;
       min-height: 150px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
     }
     .resource-card .arrow {
-      color: var(--purple);
+      color: var(--heading);
       font-weight: 800;
       font-size: 1.1rem;
     }
-    .resource-card h4 { font-size: 1.05rem; }
+    .resource-card h4 { font-size: 1rem; }
 
     .callout {
       margin-top: 2.5rem;
@@ -382,10 +517,11 @@
     .callout p { color: rgba(255, 255, 255, 0.9); font-size: 1.05rem; }
 
     footer {
-      padding: 4rem 0;
+      padding: 3.25rem 0;
       border-top: 1px solid var(--border);
       background: #ffffff;
     }
+    body.portal-page { padding-top: 72px; }
     .footer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -395,31 +531,119 @@
 
     @media (max-width: 960px) {
       .hero-grid { grid-template-columns: 1fr; }
-      .hero h1 { font-size: 3.8rem; max-width: none; }
+      .hero h1 { font-size: 3.1rem; max-width: none; }
       .catalog-grid { grid-template-columns: repeat(2, 1fr); }
+      .dropdown-panel {
+        width: min(680px, 86vw);
+      }
     }
     @media (max-width: 768px) {
-      .nav-links { display: none; }
-      .hero { padding: 7rem 0; }
-      .hero h1 { font-size: 3rem; }
+      .nav-inner { align-items: flex-start; flex-direction: column; gap: 0.8rem; }
+      .nav-links { overflow-x: auto; flex-wrap: nowrap; width: 100%; padding-bottom: 0.2rem; }
+      .dropdown-panel {
+        position: static;
+        width: 100%;
+        min-width: 280px;
+        grid-template-columns: 1fr;
+        margin-top: 0.75rem;
+        opacity: 1;
+        visibility: visible;
+        transform: none;
+        display: none;
+      }
+      .nav-item:hover .dropdown-panel,
+      .nav-item:focus-within .dropdown-panel {
+        display: grid;
+      }
+      .dropdown-links {
+        grid-template-columns: 1fr;
+      }
+      .hero { padding: 7.75rem 0 4rem; }
+      .hero h1 { font-size: 2.55rem; }
       h2 { font-size: 2.2rem; }
-      .container { padding: 0 1.25rem; }
+      .container { padding: 0 1.15rem; }
       .catalog-grid { grid-template-columns: 1fr; }
+      .hero-actions .btn-nav { width: 100%; }
     }
   </style>
 </head>
-<body>
+<body class="portal-page">
   <nav>
     <div class="container">
       <div class="nav-inner">
         <div class="logo"><img src="assets/logo.svg" alt="Blocksize" /></div>
         <ul class="nav-links">
-          <li><a href="#surfaces">Surfaces</a></li>
-          <li><a href="#catalog">Data</a></li>
-          <li><a href="#pricing">Pricing</a></li>
-          <li><a href="#resources">Docs</a></li>
+          <li class="nav-item">
+            <button class="nav-trigger" type="button">Protocols <span class="nav-chevron">▾</span></button>
+            <div class="dropdown-panel">
+              <div class="dropdown-left">
+                <div class="dropdown-kicker">Supported Protocols</div>
+                <div class="dropdown-links">
+                  <a href="https://blocksize.info/staking/protocols/solana/" target="_blank" rel="noreferrer">Solana</a>
+                  <a href="https://blocksize.info/staking/protocols/chainlink/" target="_blank" rel="noreferrer">Chainlink</a>
+                  <a href="https://blocksize.info/staking/protocols/polygon/" target="_blank" rel="noreferrer">Polygon</a>
+                  <a href="https://blocksize.info/staking/protocols/pyth/" target="_blank" rel="noreferrer">Pyth</a>
+                  <a href="https://blocksize.info/staking/protocols/redstone/" target="_blank" rel="noreferrer">Redstone</a>
+                  <a href="https://blocksize.info/staking/protocols/supra/" target="_blank" rel="noreferrer">Supra</a>
+                  <a href="https://blocksize.info/staking/protocols/eigenlayer/" target="_blank" rel="noreferrer">Eigenlayer</a>
+                </div>
+              </div>
+              <div class="dropdown-right">
+                <div>
+                  <div class="promo-kicker">For Blockchain Foundations</div>
+                  <div class="promo-title">Looking for a validator that meets your standards?</div>
+                  <p>Let&apos;s build a secure DeFi ecosystem together.</p>
+                </div>
+                <a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer" class="btn-nav">Run With Us</a>
+              </div>
+            </div>
+          </li>
+          <li class="nav-item"><a href="https://blocksize.info/staking/" target="_blank" rel="noreferrer">Staking</a></li>
+          <li class="nav-item">
+            <button class="nav-trigger" type="button">Crypto Data <span class="nav-chevron">▾</span></button>
+            <div class="dropdown-panel">
+              <div class="dropdown-left">
+                <div class="dropdown-kicker">Crypto Data for Individuals and Enterprises</div>
+                <div class="dropdown-links">
+                  <a href="https://blocksize.info/crypto-market-data/" target="_blank" rel="noreferrer">Crypto Data</a>
+                  <a href="https://matrix.blocksize.capital/api-docs" target="_blank" rel="noreferrer">API Docs</a>
+                  <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer">Pricing</a>
+                  <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer">Login</a>
+                </div>
+              </div>
+              <div class="dropdown-right">
+                <div>
+                  <div class="promo-kicker">Free Trial</div>
+                  <div class="promo-title">Easily create an API key to test our aggregated crypto data 14 days for free.</div>
+                </div>
+                <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="btn-nav">Start Free Trial</a>
+              </div>
+            </div>
+          </li>
+          <li class="nav-item">
+            <button class="nav-trigger" type="button">Company <span class="nav-chevron">▾</span></button>
+            <div class="dropdown-panel align-right">
+              <div class="dropdown-left">
+                <div class="dropdown-kicker">About Blocksize</div>
+                <div class="dropdown-links">
+                  <a href="https://blocksize.info/company/about-us/" target="_blank" rel="noreferrer">About Us</a>
+                  <a href="https://blocksize.info/career/" target="_blank" rel="noreferrer">Career</a>
+                  <a href="https://blocksize.info/blog/" target="_blank" rel="noreferrer">Blog</a>
+                  <a href="https://blocksize.info/media/" target="_blank" rel="noreferrer">Media</a>
+                </div>
+              </div>
+              <div class="dropdown-right">
+                <div>
+                  <div class="promo-kicker">Blocksize Capital</div>
+                  <div class="promo-title">Infrastructure for institutional staking and market data.</div>
+                  <p>Explore our company, team, and research.</p>
+                </div>
+                <a href="https://blocksize.info/company/about-us/" target="_blank" rel="noreferrer" class="btn-nav">More About Us</a>
+              </div>
+            </div>
+          </li>
+          <li class="nav-item"><a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer">Contact</a></li>
         </ul>
-        <a href="/docs" class="btn-nav">Open API</a>
       </div>
     </div>
   </nav>
@@ -456,6 +680,10 @@
               <span class="stat-value">2</span>
               <span class="stat-label">Settlement Networks</span>
             </div>
+          </div>
+          <div class="hero-actions">
+            <a href="/docs" class="btn-nav">Open API Docs</a>
+            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav">View Subscriptions</a>
           </div>
         </div>
 
@@ -512,24 +740,29 @@
       <h2>Market <span>Coverage</span></h2>
       <div class="catalog-grid">
         <div class="catalog-item">
-          <h3>Crypto VWAP and Bid/Ask</h3>
+          <h3>Crypto (VWAP & BidAsk)</h3>
           <p>Institutional crypto snapshots across 6,362 enabled VWAP pairs and a shared bid/ask namespace.</p>
-          <span class="endpoint">GET /v1/vwap/{pair}</span>
+          <span class="endpoint">GET /v1/vwap/{pair}<br>GET /v1/bidask/{pair}</span>
         </div>
         <div class="catalog-item">
-          <h3>Shared Bid/Ask Namespace</h3>
-          <p>2,365 enabled upstream bid/ask instruments, including crypto pairs and other shared symbols.</p>
+          <h3>Equities (Bid/Ask)</h3>
+          <p>Global equity pricing data served through the unified bid/ask endpoint.</p>
+          <span class="endpoint">GET /v1/bidask/{symbol}</span>
+        </div>
+        <div class="catalog-item">
+          <h3>FX (Bid/Ask)</h3>
+          <p>Bid, ask, and mid snapshots for the currently enabled foreign exchange pairs.</p>
           <span class="endpoint">GET /v1/bidask/{pair}</span>
         </div>
         <div class="catalog-item">
-          <h3>FX</h3>
-          <p>Bid, ask, and mid snapshots for the currently enabled foreign exchange pairs.</p>
-          <span class="endpoint">GET /v1/fx/{pair}</span>
+          <h3>Metals (Bid/Ask)</h3>
+          <p>Spot pricing for gold, silver, platinum, palladium, and copper.</p>
+          <span class="endpoint">GET /v1/bidask/{ticker}</span>
         </div>
         <div class="catalog-item">
-          <h3>Metals</h3>
-          <p>Spot pricing for gold, silver, platinum, palladium, and copper.</p>
-          <span class="endpoint">GET /v1/metal/{ticker}</span>
+          <h3>Commodities (Bid/Ask)</h3>
+          <p>Market data for leading global commodities accessed via the unified endpoint.</p>
+          <span class="endpoint">GET /v1/bidask/{ticker}</span>
         </div>
         <div class="catalog-item">
           <h3>Discovery and Docs</h3>
@@ -636,12 +869,12 @@
         </table>
       </div>
 
-      <div style="margin-top: 2.5rem; padding: 2.5rem; border: 1px solid var(--border); border-radius: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
+      <div style="margin-top: 2rem; padding: 2rem; border: 1px solid var(--border); border-radius: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
         <div>
-          <h3 style="margin-bottom: 0.75rem; color: var(--text); font-size: 1.5rem;">Enterprise Subscriptions</h3>
-          <p style="margin: 0; max-width: 42rem; color: var(--text-muted); font-size: 1.05rem; line-height: 1.6;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
+          <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Enterprise Subscriptions</h3>
+          <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
         </div>
-        <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" class="btn-nav" style="background: var(--text); white-space: nowrap; padding: 1rem 1.75rem; font-size: 0.95rem;">View Subscriptions →</a>
+        <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">View Subscriptions</a>
       </div>
     </div>
   </section>
