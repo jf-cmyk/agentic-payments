@@ -58,9 +58,18 @@ class TestPublicListingSurfaces:
         response = test_client.get("/server.json")
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "io.gitlab.jfocke/agentic-payments"
+        assert data["name"] == "info.blocksize.mcp/agentic-payments"
         assert data["repository"]["url"] == REPOSITORY_URL
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
+
+    def test_well_known_claim_files_exist(self, test_client):
+        glama = test_client.get("/.well-known/glama.json")
+        assert glama.status_code == 200
+        assert glama.json()["maintainers"][0]["email"] == "info@blocksize.capital"
+
+        registry_auth = test_client.get("/.well-known/mcp-registry-auth")
+        assert registry_auth.status_code == 200
+        assert registry_auth.text.startswith("v=MCPv1; k=ed25519; p=")
 
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200

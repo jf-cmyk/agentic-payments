@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
@@ -49,6 +49,8 @@ from src.public_metadata import (
     DATA_CATALOG_URL,
     GLAMA_WELL_KNOWN_URL,
     MCP_MANIFEST_URL,
+    MCP_REGISTRY_AUTH_CONTENT,
+    MCP_REGISTRY_AUTH_URL,
     OPENAPI_URL,
     PRICING_GUIDE_URL,
     PRIVACY_POLICY_URL,
@@ -174,6 +176,12 @@ async def get_glama_well_known() -> dict[str, object]:
         "$schema": "https://glama.ai/mcp/schemas/connector.json",
         "maintainers": [{"email": CONTACT_EMAIL}],
     }
+
+
+@app.get("/.well-known/mcp-registry-auth", include_in_schema=False)
+async def get_mcp_registry_auth() -> PlainTextResponse:
+    """Serve the MCP Registry HTTP domain verification file."""
+    return PlainTextResponse(MCP_REGISTRY_AUTH_CONTENT)
 
 
 # Mount assets, PDFs, and the public remote MCP discovery server
@@ -790,6 +798,7 @@ async def mcp_manifest():
             "user_flow": USER_FLOW_URL,
             "server_json": SERVER_JSON_URL,
             "glama_claim": GLAMA_WELL_KNOWN_URL,
+            "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
             "repository": REPOSITORY_URL,
         },
         "tools": [
@@ -865,6 +874,7 @@ async def health_check() -> dict[str, Any]:
             "support": SUPPORT_URL,
             "server_json": SERVER_JSON_URL,
             "glama_claim": GLAMA_WELL_KNOWN_URL,
+            "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
         },
     }
 

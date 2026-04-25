@@ -49,11 +49,11 @@ What still requires approval:
 
 Recommended namespace:
 
-- `io.gitlab.jfocke/agentic-payments`
+- `info.blocksize.mcp/agentic-payments`
 
 Reason:
 
-- This matches the current GitLab repository namespace and the public metadata served by `/server.json`.
+- This matches the reverse-DNS namespace for `mcp.blocksize.info` and can be authenticated using the public HTTP verification file at `/.well-known/mcp-registry-auth`.
 
 ### 2. Smithery
 

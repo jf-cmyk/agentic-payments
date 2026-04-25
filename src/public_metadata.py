@@ -35,6 +35,10 @@ PROMPT_EXAMPLES_URL = f"{PUBLIC_BASE_URL}/prompt-examples"
 PRIVACY_POLICY_URL = f"{PUBLIC_BASE_URL}/privacy"
 SUPPORT_URL = f"{PUBLIC_BASE_URL}/support"
 GLAMA_WELL_KNOWN_URL = f"{PUBLIC_BASE_URL}/.well-known/glama.json"
+MCP_REGISTRY_AUTH_URL = f"{PUBLIC_BASE_URL}/.well-known/mcp-registry-auth"
+MCP_REGISTRY_AUTH_CONTENT = (
+    "v=MCPv1; k=ed25519; p=0E8nsn4Fk8E2qn6zUIP2VItzW7+etYnGuiBVMnjJaas="
+)
 
 AGENT_MANUAL_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Agent_Manual.pdf"
 PRICING_GUIDE_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Pricing_Guide.pdf"
@@ -55,7 +59,7 @@ INSTRUMENT_COUNTS = {
 
 OFFICIAL_REGISTRY_NAME = os.getenv(
     "PUBLIC_REGISTRY_NAME",
-    "io.gitlab.jfocke/agentic-payments",
+    "info.blocksize.mcp/agentic-payments",
 )
 
 
@@ -65,9 +69,7 @@ def build_server_json() -> dict[str, object]:
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
         "name": OFFICIAL_REGISTRY_NAME,
         "description": (
-            "Public remote MCP discovery server for Blocksize Capital. "
-            "Free instrument discovery, pricing inspection, and documentation "
-            "search for agent builders evaluating the paid x402 market data API."
+            "Public MCP discovery for Blocksize market data, pricing, and docs."
         ),
         "repository": {
             "url": REPOSITORY_URL,
