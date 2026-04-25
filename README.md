@@ -7,16 +7,16 @@ Institutional-grade market data for AI agents, with two public integration layer
 
 ## Public URLs
 
-- Homepage: `https://agentic-payments-production.up.railway.app/`
-- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server/`
-- MCP manifest: `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
-- OpenAPI JSON: `https://agentic-payments-production.up.railway.app/openapi.json`
-- Swagger UI: `https://agentic-payments-production.up.railway.app/docs`
-- Quickstart: `https://agentic-payments-production.up.railway.app/quickstart/remote-mcp`
-- Prompt examples: `https://agentic-payments-production.up.railway.app/prompt-examples`
-- Privacy policy: `https://agentic-payments-production.up.railway.app/privacy`
-- Support: `https://agentic-payments-production.up.railway.app/support`
-- MCP Registry metadata: `https://agentic-payments-production.up.railway.app/server.json`
+- Homepage: `https://mcp.blocksize.info/`
+- Remote MCP URL: `https://mcp.blocksize.info/mcp/server/`
+- MCP manifest: `https://mcp.blocksize.info/mcp/manifest.json`
+- OpenAPI JSON: `https://mcp.blocksize.info/openapi.json`
+- Swagger UI: `https://mcp.blocksize.info/docs`
+- Quickstart: `https://mcp.blocksize.info/quickstart/remote-mcp`
+- Prompt examples: `https://mcp.blocksize.info/prompt-examples`
+- Privacy policy: `https://mcp.blocksize.info/privacy`
+- Support: `https://mcp.blocksize.info/support`
+- MCP Registry metadata: `https://mcp.blocksize.info/server.json`
 
 ## Product Shape
 

@@ -80,7 +80,7 @@ Finally, the Agent resubmits the exact same `GET` request, this time appending t
 
 ```http
 GET /v1/vwap/BTC-USD HTTP/1.1
-Host: agentic-payments-production.up.railway.app
+Host: mcp.blocksize.info
 PAYMENT-SIGNATURE: eyJhbGciOiJFZERTQ...<agent_cryptographic_signature>
 ```
 
@@ -153,7 +153,7 @@ const agentWallet = await AgentKit.fundWallet("solana", "5.00");
 
 // The client automatically manages 402 interceptions
 const apiClient = new BlocksizeX402Client({
-    baseUrl: "https://agentic-payments-production.up.railway.app",
+    baseUrl: "https://mcp.blocksize.info",
     wallet: agentWallet,
 });
 
@@ -166,7 +166,7 @@ console.log(btcVwap.price);
 If you are developing non-agentic software or testing natively, you can verify the `402` integration using cURL:
 
 ```bash
-curl -i https://agentic-payments-production.up.railway.app/v1/fx/JPY-USD
+curl -i https://mcp.blocksize.info/v1/fx/JPY-USD
 ```
 
 You will observe the raw JSON validation constraints block routing appropriately.

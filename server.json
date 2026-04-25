@@ -1,16 +1,16 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.jf-cmyk/blocksize-agentic-payments",
+  "name": "io.gitlab.jfocke/agentic-payments",
   "description": "Public remote MCP discovery server for Blocksize Capital. Free instrument discovery, pricing inspection, and documentation search for agent builders evaluating the paid x402 market data API.",
   "repository": {
-    "url": "https://github.com/jf-cmyk/agentic-payments",
-    "source": "github"
+    "url": "https://gitlab.com/jfocke/agentic-payments",
+    "source": "gitlab"
   },
-  "homepage": "https://agentic-payments-production.up.railway.app/",
+  "homepage": "https://mcp.blocksize.info/",
   "version": "0.6.0",
   "remotes": [
     {
-      "url": "https://agentic-payments-production.up.railway.app/mcp/server/",
+      "url": "https://mcp.blocksize.info/mcp/server/",
       "type": "streamable-http"
     }
   ]

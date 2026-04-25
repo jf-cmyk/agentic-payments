@@ -38,22 +38,22 @@ What exists:
 
 - `server.json`
 - public Streamable HTTP endpoint
-- GitHub repository metadata
+- GitLab repository metadata
 
 What still requires approval:
 
 1. Deploy the current changes publicly.
 2. Install `mcp-publisher`.
-3. Authenticate with GitHub device flow.
+3. Authenticate with the registry publisher flow.
 4. Run `mcp-publisher publish`.
 
 Recommended namespace:
 
-- `io.github.jf-cmyk/blocksize-agentic-payments`
+- `io.gitlab.jfocke/agentic-payments`
 
 Reason:
 
-- This can be published immediately with GitHub authentication tied to the current repository owner.
+- This matches the current GitLab repository namespace and the public metadata served by `/server.json`.
 
 ### 2. Smithery
 

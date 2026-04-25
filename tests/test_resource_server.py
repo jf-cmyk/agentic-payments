@@ -58,7 +58,7 @@ class TestPublicListingSurfaces:
         response = test_client.get("/server.json")
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "io.github.jf-cmyk/blocksize-agentic-payments"
+        assert data["name"] == "io.gitlab.jfocke/agentic-payments"
         assert data["repository"]["url"] == REPOSITORY_URL
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
 

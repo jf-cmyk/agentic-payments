@@ -32,13 +32,13 @@ Why:
 1. Start with free discovery.
 
 ```bash
-curl -s "https://agentic-payments-production.up.railway.app/v1/search?q=btc"
+curl -s "https://mcp.blocksize.info/v1/search?q=btc"
 ```
 
 2. Request paid data without payment.
 
 ```bash
-curl -i "https://agentic-payments-production.up.railway.app/v1/vwap/BTC-USD"
+curl -i "https://mcp.blocksize.info/v1/vwap/BTC-USD"
 ```
 
 Expected:

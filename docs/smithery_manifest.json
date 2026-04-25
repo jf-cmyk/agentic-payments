@@ -3,11 +3,11 @@
   "version": "0.6.0",
   "description": "Public remote MCP discovery server for Blocksize Capital. Free instrument discovery, pricing inspection, and documentation search for the paid x402 market data API.",
   "author": "Blocksize Capital GmbH",
-  "homepage": "https://agentic-payments-production.up.railway.app/",
-  "repository": "https://github.com/jf-cmyk/agentic-payments",
+  "homepage": "https://mcp.blocksize.info/",
+  "repository": "https://gitlab.com/jfocke/agentic-payments",
   "license": "MIT",
   "category": "Finance",
-  "mcp_manifest": "https://agentic-payments-production.up.railway.app/mcp/manifest.json",
+  "mcp_manifest": "https://mcp.blocksize.info/mcp/manifest.json",
   "capabilities": {
     "remote_transport": "streamable-http",
     "pricing_models": ["Pay-per-call HTTP API (x402)", "Credit Drawdown"],
@@ -15,9 +15,9 @@
     "public_remote_server": "Read-only discovery and documentation tools"
   },
   "endpoints": {
-    "remote_mcp": "https://agentic-payments-production.up.railway.app/mcp/server/",
-    "quickstart": "https://agentic-payments-production.up.railway.app/quickstart/remote-mcp",
-    "openapi": "https://agentic-payments-production.up.railway.app/openapi.json",
-    "pricing": "https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf"
+    "remote_mcp": "https://mcp.blocksize.info/mcp/server/",
+    "quickstart": "https://mcp.blocksize.info/quickstart/remote-mcp",
+    "openapi": "https://mcp.blocksize.info/openapi.json",
+    "pricing": "https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf"
   }
 }

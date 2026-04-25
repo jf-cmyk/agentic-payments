@@ -19,8 +19,8 @@ import time
 import httpx
 
 # The live URL of your deployed Blocksize server
-RAILWAY_URL = "https://agentic-payments-production.up.railway.app"
-ENDPOINT = f"{RAILWAY_URL}/v1/vwap/BTC-USD"
+BASE_URL = "https://mcp.blocksize.info"
+ENDPOINT = f"{BASE_URL}/v1/vwap/BTC-USD"
 
 async def run_agent():
     print("🤖 [Agent]: Waking up. I need the latest BTC-USD VWAP data.")

@@ -16,7 +16,7 @@ from solders.keypair import Keypair # type: ignore
 from solana.rpc.async_api import AsyncClient # type: ignore
 
 # CONFIG
-BASE_URL = "https://agentic-payments-production.up.railway.app"
+BASE_URL = "https://mcp.blocksize.info"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com" # Use Helius for production
 
 async def get_data_autonomously(endpoint: str):

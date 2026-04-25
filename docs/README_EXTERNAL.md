@@ -7,10 +7,10 @@ Blocksize Capital provides:
 
 ## Public discovery MCP
 
-- Remote MCP URL: `https://agentic-payments-production.up.railway.app/mcp/server/`
-- Manifest: `https://agentic-payments-production.up.railway.app/mcp/manifest.json`
-- Quickstart: `https://agentic-payments-production.up.railway.app/quickstart/remote-mcp`
-- Prompt examples: `https://agentic-payments-production.up.railway.app/prompt-examples`
+- Remote MCP URL: `https://mcp.blocksize.info/mcp/server/`
+- Manifest: `https://mcp.blocksize.info/mcp/manifest.json`
+- Quickstart: `https://mcp.blocksize.info/quickstart/remote-mcp`
+- Prompt examples: `https://mcp.blocksize.info/prompt-examples`
 
 The public MCP server is read-only and exposes:
 
@@ -24,8 +24,8 @@ The public MCP server is read-only and exposes:
 
 Live market data is available via the HTTP API and documented here:
 
-- Swagger UI: `https://agentic-payments-production.up.railway.app/docs`
-- OpenAPI JSON: `https://agentic-payments-production.up.railway.app/openapi.json`
+- Swagger UI: `https://mcp.blocksize.info/docs`
+- OpenAPI JSON: `https://mcp.blocksize.info/openapi.json`
 
 Supported paid endpoints:
 
@@ -51,9 +51,9 @@ Free discovery endpoints:
 
 Bulk credit tiers are documented in the public pricing guide:
 
-- `https://agentic-payments-production.up.railway.app/pdf/Blocksize_Pricing_Guide.pdf`
+- `https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf`
 
 ## Policy and support
 
-- Privacy policy: `https://agentic-payments-production.up.railway.app/privacy`
-- Support: `https://agentic-payments-production.up.railway.app/support`
+- Privacy policy: `https://mcp.blocksize.info/privacy`
+- Support: `https://mcp.blocksize.info/support`

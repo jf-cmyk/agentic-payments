@@ -41,7 +41,7 @@ TRANSCRIPT_LINES: list[tuple[str, str]] = [
     ("✅ Agent batch run complete.", "green"),
     (
         "(Agentic Payments) user@anonymous-macbook Agentic Payments % python "
-        "scripts/autonomous_solana_agent.py https://agentic-payments-production.up.railway.app",
+        "scripts/autonomous_solana_agent.py https://mcp.blocksize.info",
         "prompt",
     ),
     ("", "main"),
@@ -66,7 +66,7 @@ TRANSCRIPT_LINES: list[tuple[str, str]] = [
     ),
     ("", "main"),
     (
-        "[*] Requesting BATCH endpoint: https://agentic-payments-production.up.railway.app/"
+        "[*] Requesting BATCH endpoint: https://mcp.blocksize.info/"
         "v1/batch?reqs=bidask:AVAXUSD,vwap:ETHUSD,bidask:SOLUSD,bidask:SOLUSD,bidask:BTCUSD,"
         "bidask:LINKUSD,equity:AAPL,fx:EURUSD,metal:XAUUSD",
         "link",

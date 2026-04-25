@@ -5,7 +5,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-http",
-        "https://agentic-payments-production.up.railway.app/mcp/manifest.json"
+        "https://mcp.blocksize.info/mcp/manifest.json"
       ],
       "env": {
         "X402_ENABLED": "true"

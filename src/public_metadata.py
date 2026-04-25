@@ -15,13 +15,13 @@ def _normalized_url(env_var: str, default: str) -> str:
 
 PUBLIC_BASE_URL = _normalized_url(
     "PUBLIC_BASE_URL",
-    "https://agentic-payments-production.up.railway.app",
+    "https://mcp.blocksize.info",
 )
 REPOSITORY_URL = os.getenv(
     "PUBLIC_REPOSITORY_URL",
-    "https://github.com/jf-cmyk/agentic-payments",
+    "https://gitlab.com/jfocke/agentic-payments",
 )
-REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "github")
+REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "gitlab")
 
 REMOTE_MCP_PATH = "/mcp/server"
 REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
@@ -55,7 +55,7 @@ INSTRUMENT_COUNTS = {
 
 OFFICIAL_REGISTRY_NAME = os.getenv(
     "PUBLIC_REGISTRY_NAME",
-    "io.github.jf-cmyk/blocksize-agentic-payments",
+    "io.gitlab.jfocke/agentic-payments",
 )
 
 
