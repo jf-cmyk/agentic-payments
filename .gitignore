@@ -10,3 +10,4 @@ agent_wallet.json
 credits.db
 .DS_Store
 mcp-registry-key.pem
+tools/mcp-publisher
