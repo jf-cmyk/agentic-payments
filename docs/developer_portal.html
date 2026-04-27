@@ -106,14 +106,14 @@
     }
     .nav-inner {
       position: relative;
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto minmax(260px, 1fr);
       align-items: center;
-      gap: 2.5rem;
+      column-gap: clamp(2rem, 4vw, 4.5rem);
       min-height: 96px;
       padding: 1.75rem 0 1.45rem;
     }
-    .logo { width: 11.8rem; display: flex; align-items: center; flex: 0 0 auto; }
+    .logo { width: 11.8rem; display: flex; align-items: center; justify-self: start; }
     .logo img { width: 100%; height: auto; }
     .nav-links {
       display: flex;
@@ -122,9 +122,7 @@
       flex-wrap: nowrap;
       align-items: center;
       margin-left: 0;
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
+      justify-self: center;
     }
     .nav-links a,
     .nav-links button {
@@ -145,8 +143,7 @@
       display: flex;
       align-items: center;
       gap: 2.25rem;
-      margin-left: auto;
-      flex: 0 0 auto;
+      justify-self: end;
     }
     .nav-action-link {
       color: var(--paragraph);
@@ -649,10 +646,11 @@
     @media (max-width: 1220px) {
       body.portal-page { padding-top: 68px; }
       .nav-inner {
+        display: flex;
+        justify-content: space-between;
         min-height: 68px;
         padding: 1.65rem 0 1.35rem;
         align-items: center;
-        flex-direction: row;
         gap: 1rem;
       }
       .logo { width: 7.2rem; }
