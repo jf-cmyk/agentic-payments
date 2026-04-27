@@ -107,21 +107,23 @@
     .nav-inner {
       position: relative;
       display: flex;
-      justify-content: flex-start;
+      justify-content: space-between;
       align-items: center;
-      gap: 2rem;
-      min-height: 72px;
-      padding: 0.85rem 0;
+      gap: 2.5rem;
+      padding: 1.25rem 0;
     }
-    .logo { height: 32px; display: flex; align-items: center; }
-    .logo img { height: 100%; width: auto; }
+    .logo { width: 11.8rem; display: flex; align-items: center; flex: 0 0 auto; }
+    .logo img { width: 100%; height: auto; }
     .nav-links {
       display: flex;
-      gap: 1.1rem;
+      gap: 4.5rem;
       list-style: none;
       flex-wrap: wrap;
       align-items: center;
       margin-left: 0;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
     }
     .nav-links a,
     .nav-links button {
@@ -143,6 +145,7 @@
       align-items: center;
       gap: 2.25rem;
       margin-left: auto;
+      flex: 0 0 auto;
     }
     .nav-action-link {
       color: var(--paragraph);
@@ -162,11 +165,10 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 42px;
-      padding: 0.72rem 1.5rem 0.62rem;
+      padding: 0.75rem 1.5rem 0.625rem;
       text-decoration: none;
       font-weight: 700;
-      font-size: 0.88rem;
+      font-size: 0.875rem;
       line-height: 1;
       white-space: nowrap;
     }
@@ -607,7 +609,7 @@
       border-top: 1px solid var(--border);
       background: #ffffff;
     }
-    body.portal-page { padding-top: 72px; }
+    body.portal-page { padding-top: 68px; }
     .footer-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -616,6 +618,12 @@
     .status-active { color: var(--green); font-weight: 700; }
 
     @media (max-width: 960px) {
+      .nav-inner { justify-content: flex-start; }
+      .nav-links {
+        position: static;
+        transform: none;
+        gap: 1.5rem;
+      }
       .hero-grid { grid-template-columns: 1fr; }
       .hero h1 { font-size: 3.1rem; max-width: none; }
       .catalog-grid { grid-template-columns: repeat(2, 1fr); }
@@ -625,7 +633,16 @@
     }
     @media (max-width: 768px) {
       .nav-inner { align-items: flex-start; flex-direction: column; gap: 0.8rem; }
-      .nav-links { overflow-x: auto; flex-wrap: nowrap; width: 100%; padding-bottom: 0.2rem; }
+      .logo { width: 7.2rem; }
+      .nav-links {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        width: 100%;
+        padding-bottom: 0.2rem;
+        position: static;
+        transform: none;
+        gap: 1.1rem;
+      }
       .nav-actions {
         width: 100%;
         justify-content: flex-start;
