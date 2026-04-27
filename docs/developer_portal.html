@@ -639,12 +639,6 @@
     .status-active { color: var(--green); font-weight: 700; }
 
     @media (max-width: 960px) {
-      .nav-inner { justify-content: flex-start; }
-      .nav-links {
-        position: static;
-        transform: none;
-        gap: 1.5rem;
-      }
       .hero-grid { grid-template-columns: 1fr; }
       .hero h1 { font-size: 3.1rem; max-width: none; }
       .catalog-grid { grid-template-columns: repeat(2, 1fr); }
@@ -652,7 +646,7 @@
         gap: 1.5rem;
       }
     }
-    @media (max-width: 768px) {
+    @media (max-width: 1120px) {
       body.portal-page { padding-top: 68px; }
       .nav-inner {
         min-height: 68px;
