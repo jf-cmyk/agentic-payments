@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated, Literal
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from src.mcp_server import (
     READ_ONLY_TOOL_ANNOTATIONS,
@@ -26,6 +28,58 @@ from src.public_metadata import (
     REMOTE_MCP_URL,
     SUPPORT_URL,
 )
+
+InstrumentSearchQuery = Annotated[
+    str,
+    Field(
+        description=(
+            "Symbol, ticker, asset, or pair to search for, such as BTC, BTC-USD, "
+            "ETH, EURUSD, or XAUUSD."
+        ),
+        min_length=1,
+        max_length=80,
+    ),
+]
+AssetClassFilter = Annotated[
+    Literal["all", "crypto", "fx", "metal"],
+    Field(
+        description=(
+            "Optional asset-class filter. Use all for the full catalog, crypto "
+            "for digital assets, fx for currency pairs, or metal for metals."
+        ),
+    ),
+]
+InstrumentService = Annotated[
+    Literal["vwap", "bidask", "fx", "metal"],
+    Field(
+        description=(
+            "Blocksize service namespace to list: vwap for crypto VWAP pairs, "
+            "bidask for shared bid/ask symbols, fx for FX pairs, or metal for metals."
+        ),
+    ),
+]
+CatalogSearchQuery = Annotated[
+    str,
+    Field(
+        description=(
+            "Documentation or catalog search query, such as pricing, quickstart, "
+            "credits, x402, Solana, Base, BTC, or VWAP."
+        ),
+        min_length=1,
+        max_length=120,
+    ),
+]
+CatalogFetchId = Annotated[
+    str,
+    Field(
+        description=(
+            "Result id returned by the search tool, for example doc:pricing, "
+            "doc:quickstart, or instrument:crypto:BTCUSD."
+        ),
+        min_length=1,
+        max_length=160,
+    ),
+]
 
 public_mcp = FastMCP(
     "Blocksize Capital Remote Discovery",
@@ -49,7 +103,10 @@ public_mcp = FastMCP(
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_search_pairs(query: str, asset_class: str = "all") -> str:
+async def public_search_pairs(
+    query: InstrumentSearchQuery,
+    asset_class: AssetClassFilter = "all",
+) -> str:
     """Search supported instruments on the public remote MCP surface."""
     return await search_local_pairs(query, asset_class)
 
@@ -63,7 +120,7 @@ async def public_search_pairs(query: str, asset_class: str = "all") -> str:
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_list_instruments(service: str = "vwap") -> str:
+async def public_list_instruments(service: InstrumentService = "vwap") -> str:
     """List supported instruments on the public remote MCP surface."""
     return await list_local_instruments(service)
 
@@ -92,7 +149,7 @@ async def public_get_pricing_info() -> str:
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_search(query: str) -> str:
+async def public_search(query: CatalogSearchQuery) -> str:
     """Search docs and catalog entries in a document-oriented shape."""
     return await search_catalog(query)
 
@@ -106,7 +163,7 @@ async def public_search(query: str) -> str:
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_fetch(id: str) -> str:
+async def public_fetch(id: CatalogFetchId) -> str:
     """Fetch one documentation or instrument payload."""
     return await fetch_catalog(id)
 
