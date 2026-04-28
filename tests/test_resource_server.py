@@ -79,6 +79,25 @@ class TestPublicListingSurfaces:
         assert registry_auth.status_code == 200
         assert registry_auth.text.startswith("v=MCPv1; k=ed25519; p=")
 
+        x402 = test_client.get("/.well-known/x402")
+        assert x402.status_code == 200
+        x402_data = x402.json()
+        assert x402_data["version"] == 1
+        assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
+
+    def test_openapi_marks_paid_routes_for_x402_discovery(self, test_client):
+        response = test_client.get("/openapi.json")
+        assert response.status_code == 200
+        data = response.json()
+
+        vwap = data["paths"]["/v1/vwap/{pair}"]["get"]
+        payment_info = vwap["x-payment-info"]
+        assert payment_info["protocols"] == [{"x402": {}}]
+        assert payment_info["price"]["mode"] == "dynamic"
+
+        fx = data["paths"]["/v1/fx/{pair}"]["get"]
+        assert fx["x-payment-info"]["price"]["amount"] == str(settings.pricing.tradfi)
+
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200
         assert test_client.get("/privacy").status_code == 200
@@ -98,6 +117,11 @@ class TestPaymentGate:
     def test_bidask_requires_payment(self, test_client):
         response = test_client.get("/v1/bidask/btc-usd")
         assert response.status_code == 402
+
+    def test_unsupported_methods_are_not_payment_challenged(self, test_client):
+        response = test_client.post("/v1/vwap/btc-usd")
+        assert response.status_code == 405
+        assert "PAYMENT-REQUIRED" not in response.headers
 
     def test_state_is_not_offered(self, test_client):
         response = test_client.get("/v1/state/btc-usd")
@@ -121,17 +145,23 @@ class TestPaymentGate:
 
         req_b64 = response.headers["PAYMENT-REQUIRED"]
         req_json = json.loads(base64.b64decode(req_b64))
-        # Should be a list of requirements (multi-network)
-        assert isinstance(req_json, list)
-        assert len(req_json) >= 1
-        assert "payTo" in req_json[0]
-        assert req_json[0]["scheme"] == "exact"
+        assert req_json["x402Version"] == 2
+        assert req_json["resource"]["url"].endswith("/v1/vwap/btc-usd")
+        assert isinstance(req_json["accepts"], list)
+        assert len(req_json["accepts"]) >= 1
+        assert "payTo" in req_json["accepts"][0]
+        assert "amount" in req_json["accepts"][0]
+        assert req_json["accepts"][0]["scheme"] == "exact"
+        assert "bazaar" in req_json["extensions"]
 
     def test_402_body_contains_price(self, test_client):
         response = test_client.get("/v1/vwap/btc-usd")
         data = response.json()
+        assert data["x402Version"] == 2
         assert "price_usdc" in data
         assert "networks" in data
+        assert "accepts" in data
+        assert "legacy_requirements" in data
 
     def test_search_is_free(self, test_client):
         """Search endpoint should NOT require payment."""

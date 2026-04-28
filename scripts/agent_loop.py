@@ -7,11 +7,36 @@ import asyncio
 import httpx
 
 
+def _normalise_payment_requirements(decoded):
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
+        return []
+    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
+    requirements = []
+    for accept in decoded["accepts"]:
+        if not isinstance(accept, dict):
+            continue
+        requirements.append({
+            "scheme": accept.get("scheme", "exact"),
+            "network": accept.get("network", ""),
+            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
+            "resource": accept.get("payTo", ""),
+            "description": resource.get("description", "Blocksize Capital institutional market data"),
+            "mimeType": resource.get("mimeType", "application/json"),
+            "payTo": accept.get("payTo", ""),
+            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
+            "asset": accept.get("asset", ""),
+            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
+        })
+    return requirements
+
+
 def _decode_payment_requirements(response):
     req_header = response.headers.get("PAYMENT-REQUIRED")
     if not req_header:
         return []
-    return json.loads(base64.b64decode(req_header))
+    return _normalise_payment_requirements(json.loads(base64.b64decode(req_header)))
 
 
 def _build_payment_signature(tx_hash: str, network: str) -> str:

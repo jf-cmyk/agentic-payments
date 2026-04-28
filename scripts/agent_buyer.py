@@ -22,6 +22,31 @@ import httpx
 BASE_URL = "https://mcp.blocksize.info"
 ENDPOINT = f"{BASE_URL}/v1/vwap/BTC-USD"
 
+def _normalise_payment_requirements(decoded):
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
+        return []
+    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
+    requirements = []
+    for accept in decoded["accepts"]:
+        if not isinstance(accept, dict):
+            continue
+        requirements.append({
+            "scheme": accept.get("scheme", "exact"),
+            "network": accept.get("network", ""),
+            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
+            "resource": accept.get("payTo", ""),
+            "description": resource.get("description", "Blocksize Capital institutional market data"),
+            "mimeType": resource.get("mimeType", "application/json"),
+            "payTo": accept.get("payTo", ""),
+            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
+            "asset": accept.get("asset", ""),
+            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
+        })
+    return requirements
+
+
 async def run_agent():
     print("🤖 [Agent]: Waking up. I need the latest BTC-USD VWAP data.")
     
@@ -35,7 +60,9 @@ async def run_agent():
             
             # 2. Parse the invoice
             invoice_b64 = response.headers.get("PAYMENT-REQUIRED")
-            invoice = json.loads(base64.b64decode(invoice_b64).decode())
+            invoice = _normalise_payment_requirements(
+                json.loads(base64.b64decode(invoice_b64).decode())
+            )
             
             # We pick the Solana requirement (the first one)
             solana_req = invoice[0]

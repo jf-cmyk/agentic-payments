@@ -188,6 +188,19 @@ async def get_mcp_registry_auth() -> PlainTextResponse:
     return PlainTextResponse(MCP_REGISTRY_AUTH_CONTENT)
 
 
+@app.get("/.well-known/x402", include_in_schema=False)
+async def get_x402_well_known() -> dict[str, object]:
+    """Serve x402scan-compatible paid resource discovery."""
+    return {
+        "version": 1,
+        "resources": X402_WELL_KNOWN_RESOURCES,
+        "instructions": (
+            "Register the listed paid HTTP endpoints individually. "
+            "Public MCP discovery remains available at /mcp/server/."
+        ),
+    }
+
+
 # Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
@@ -225,19 +238,30 @@ DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/")
 
 X402_RESPONSE = {
     "402": {
-        "description": "Payment Required. Returns a PAYMENT-REQUIRED header with CAIP-compliant requirements.",
+        "description": "Payment Required. Returns a PAYMENT-REQUIRED header with an x402 PaymentRequired challenge.",
         "headers": {
             "PAYMENT-REQUIRED": {
-                "description": "Base64 encoded JSON array of payment requirements (network, recipient, amount).",
+                "description": "Base64 encoded x402 PaymentRequired object.",
                 "schema": {"type": "string"}
             }
         },
         "content": {
             "application/json": {
                 "example": {
+                    "x402Version": 2,
                     "error": "Payment Required",
                     "message": "This endpoint requires a payment of $0.002 USDC.",
                     "price_usdc": "0.002",
+                    "accepts": [
+                        {
+                            "scheme": "exact",
+                            "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                            "amount": "2000",
+                            "asset": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                            "payTo": "recipient-wallet",
+                            "maxTimeoutSeconds": 30,
+                        }
+                    ],
                     "networks": [
                         {"name": "Solana", "caip2": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"},
                         {"name": "Base", "caip2": "eip155:8453"}
@@ -247,6 +271,172 @@ X402_RESPONSE = {
         }
     }
 }
+
+
+X402_PROTOCOLS = [{"x402": {}}]
+X402_CRYPTO_PAYMENT_INFO = {
+    "x-payment-info": {
+        "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": str(settings.pricing.core_crypto),
+            "max": str(settings.pricing.extended_crypto),
+        },
+        "protocols": X402_PROTOCOLS,
+    }
+}
+X402_TRADFI_PAYMENT_INFO = {
+    "x-payment-info": {
+        "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": str(settings.pricing.tradfi),
+        },
+        "protocols": X402_PROTOCOLS,
+    }
+}
+X402_BATCH_PAYMENT_INFO = {
+    "x-payment-info": {
+        "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": str(settings.pricing.core_crypto),
+            "max": str(
+                max(settings.pricing.extended_crypto, settings.pricing.tradfi)
+                * Decimal(settings.server.max_batch_size)
+            ),
+        },
+        "protocols": X402_PROTOCOLS,
+    }
+}
+X402_WELL_KNOWN_RESOURCES = [
+    f"{PUBLIC_BASE_URL}/v1/vwap/BTC-USD",
+    f"{PUBLIC_BASE_URL}/v1/bidask/BTC-USD",
+    f"{PUBLIC_BASE_URL}/v1/fx/EURUSD",
+    f"{PUBLIC_BASE_URL}/v1/metal/XAUUSD",
+]
+
+
+def _x402_endpoint_description(path: str) -> str:
+    if path.startswith("/v1/vwap/"):
+        return "Real-time crypto VWAP market data from Blocksize Capital."
+    if path.startswith("/v1/bidask/"):
+        return "Real-time crypto bid/ask snapshot data from Blocksize Capital."
+    if path.startswith("/v1/fx/"):
+        return "Real-time FX market data from Blocksize Capital."
+    if path.startswith("/v1/metal/"):
+        return "Real-time precious metals market data from Blocksize Capital."
+    if path.startswith("/v1/batch"):
+        return "Batch real-time market data queries from Blocksize Capital."
+    if path.startswith("/v1/credits/purchase"):
+        return "Bulk wallet credit purchase for Blocksize Capital paid data."
+    return "Blocksize Capital x402-protected market data."
+
+
+def _x402_query_schema_for_request(request: Request) -> dict[str, Any]:
+    if request.url.path.startswith("/v1/batch"):
+        return {
+            "type": "object",
+            "properties": {
+                "reqs": {
+                    "type": "string",
+                    "description": "Comma-separated service:symbol items, for example vwap:BTCUSD,fx:EURUSD.",
+                }
+            },
+            "required": ["reqs"],
+            "additionalProperties": False,
+        }
+    if request.url.path.startswith("/v1/credits/purchase"):
+        return {
+            "type": "object",
+            "properties": {
+                "tier": {
+                    "type": "string",
+                    "enum": ["starter", "pro", "institutional"],
+                }
+            },
+            "required": ["tier"],
+            "additionalProperties": False,
+        }
+    return {"type": "object", "properties": {}, "additionalProperties": False}
+
+
+def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
+    query_schema = _x402_query_schema_for_request(request)
+    query_example: dict[str, Any] = {}
+    if "reqs" in query_schema.get("properties", {}):
+        query_example["reqs"] = "vwap:BTCUSD,fx:EURUSD"
+    if "tier" in query_schema.get("properties", {}):
+        query_example["tier"] = "starter"
+
+    output_example = {
+        "status": "ok",
+        "data": {},
+        "meta": {"provider": "Blocksize Capital"},
+    }
+    return {
+        "info": {
+            "input": {
+                "method": request.method.upper(),
+                "queryParams": query_example,
+            },
+            "output": output_example,
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "object",
+                    "properties": {"queryParams": query_schema},
+                },
+                "output": {
+                    "type": "object",
+                    "properties": {"example": output_example},
+                },
+            },
+        },
+    }
+
+
+def _x402_v2_accepts(payment_requirements: list[dict]) -> list[dict[str, Any]]:
+    accepts: list[dict[str, Any]] = []
+    for requirement in payment_requirements:
+        extra = requirement.get("extra")
+        accepts.append({
+            "scheme": str(requirement.get("scheme") or "exact"),
+            "network": str(requirement.get("network") or ""),
+            "amount": str(
+                requirement.get("amount")
+                or requirement.get("maxAmountRequired")
+                or "0"
+            ),
+            "asset": str(requirement.get("asset") or ""),
+            "payTo": str(requirement.get("payTo") or requirement.get("resource") or ""),
+            "maxTimeoutSeconds": int(requirement.get("maxTimeoutSeconds") or 60),
+            "extra": extra if isinstance(extra, dict) else {},
+        })
+    return accepts
+
+
+def _x402_payment_required(
+    request: Request,
+    payment_requirements: list[dict],
+) -> dict[str, Any]:
+    return {
+        "x402Version": 2,
+        "error": "Payment Required",
+        "resource": {
+            "url": str(request.url),
+            "description": _x402_endpoint_description(request.url.path),
+            "mimeType": "application/json",
+        },
+        "accepts": _x402_v2_accepts(payment_requirements),
+        "extensions": {"bazaar": _x402_bazaar_extension(request)},
+    }
+
+
+def _encode_payment_required(payment_required: dict[str, Any]) -> str:
+    return base64.b64encode(json.dumps(payment_required).encode()).decode()
 
 
 def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
@@ -413,6 +603,15 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
 def _get_price_for_request(request: Request) -> Decimal | None:
     """Determine the price for a given request."""
     path = request.url.path
+    paid_get_prefixes = (
+        "/v1/batch",
+        "/v1/vwap/",
+        "/v1/bidask/",
+        "/v1/fx/",
+        "/v1/metal/",
+    )
+    if path.startswith(paid_get_prefixes) and request.method.upper() not in {"GET", "HEAD"}:
+        return None
     
     # Handle Batch endpoint dynamically
     if path.startswith("/v1/batch"):
@@ -813,13 +1012,13 @@ async def x402_payment_middleware(request: Request, call_next):
     )
 
     if not payment_header:
-        requirements_b64 = base64.b64encode(
-            json.dumps(payment_reqs).encode()
-        ).decode()
+        payment_required = _x402_payment_required(request, payment_reqs)
+        requirements_b64 = _encode_payment_required(payment_required)
 
         return JSONResponse(
             status_code=402,
             content={
+                **payment_required,
                 "error": "Payment Required",
                 "message": (
                     f"This endpoint requires a payment of ${price} USDC. "
@@ -831,6 +1030,7 @@ async def x402_payment_middleware(request: Request, call_next):
                     {"name": "Solana", "caip2": settings.x402.solana_network},
                     {"name": "Base", "caip2": settings.x402.base_network},
                 ],
+                "legacy_requirements": payment_reqs,
             },
             headers={
                 "PAYMENT-REQUIRED": requirements_b64,
@@ -884,7 +1084,7 @@ async def x402_payment_middleware(request: Request, call_next):
 # Data Endpoints
 # ---------------------------------------------------------------------------
 
-@app.get("/v1/vwap/{pair}", responses=X402_RESPONSE)
+@app.get("/v1/vwap/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
 async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
     """Get real-time VWAP for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
@@ -902,7 +1102,7 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/bidask/{pair}", responses=X402_RESPONSE)
+@app.get("/v1/bidask/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
 async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
     """Get bid/ask snapshot for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
@@ -920,7 +1120,7 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/fx/{pair}", responses=X402_RESPONSE)
+@app.get("/v1/fx/{pair}", responses=X402_RESPONSE, openapi_extra=X402_TRADFI_PAYMENT_INFO)
 async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
     try:
@@ -936,7 +1136,7 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve FX for {pair}", details=str(e),
         ).model_dump())
 
-@app.get("/v1/metal/{ticker}", responses=X402_RESPONSE)
+@app.get("/v1/metal/{ticker}", responses=X402_RESPONSE, openapi_extra=X402_TRADFI_PAYMENT_INFO)
 async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
     """Get metal spot price. Cost: $0.005 USDC."""
     try:
@@ -953,7 +1153,7 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/batch", responses=X402_RESPONSE)
+@app.get("/v1/batch", responses=X402_RESPONSE, openapi_extra=X402_BATCH_PAYMENT_INFO)
 async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
     """
     Execute a batch of data queries.
@@ -1074,7 +1274,10 @@ async def get_credit_balance(request: Request, wallet: str):
     }
 
 @app.post("/v1/credits/purchase")
-async def purchase_credits_challenge(tier: str = Query(..., pattern="^(starter|pro|institutional)$")):
+async def purchase_credits_challenge(
+    request: Request,
+    tier: str = Query(..., pattern="^(starter|pro|institutional)$"),
+):
     """
     Triggers an x402 challenge for bulk credits.
     Tiers: starter ($0.90), pro ($8.00), institutional ($60.00)
@@ -1084,18 +1287,19 @@ async def purchase_credits_challenge(tier: str = Query(..., pattern="^(starter|p
     
     # Return 402 challenge
     requirements = settings.payment_requirements(price)
-    
-    payload = base64.b64encode(json.dumps(requirements).encode()).decode()
+    payment_required = _x402_payment_required(request, requirements)
+    payload = _encode_payment_required(payment_required)
     
     return JSONResponse(
         status_code=402,
         headers={"PAYMENT-REQUIRED": payload},
         content={
+            **payment_required,
             "error": "Payment Required",
             "message": f"Purchase {tier_data['credits']} credits for ${price} USDC.",
             "tier": tier,
             "credits_to_add": tier_data["credits"],
-            "networks": requirements
+            "legacy_requirements": requirements,
         }
     )
 

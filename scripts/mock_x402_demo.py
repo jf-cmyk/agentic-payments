@@ -21,8 +21,33 @@ import time
 import httpx
 
 
+def normalise_payment_requirements(decoded: object) -> list[dict]:
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
+        return []
+    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
+    requirements = []
+    for accept in decoded["accepts"]:
+        if not isinstance(accept, dict):
+            continue
+        requirements.append({
+            "scheme": accept.get("scheme", "exact"),
+            "network": accept.get("network", ""),
+            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
+            "resource": accept.get("payTo", ""),
+            "description": resource.get("description", "Blocksize Capital institutional market data"),
+            "mimeType": resource.get("mimeType", "application/json"),
+            "payTo": accept.get("payTo", ""),
+            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
+            "asset": accept.get("asset", ""),
+            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
+        })
+    return requirements
+
+
 def decode_requirements(header_value: str) -> list[dict]:
-    return json.loads(base64.b64decode(header_value))
+    return normalise_payment_requirements(json.loads(base64.b64decode(header_value)))
 
 
 def build_mock_signature(network: str) -> str:

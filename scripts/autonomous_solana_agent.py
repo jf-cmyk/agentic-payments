@@ -26,6 +26,32 @@ USDC_MINT = Pubkey.from_string("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 WALLET_FILE = "agent_wallet.json"
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
+
+def normalise_payment_requirements(decoded):
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
+        return []
+    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
+    requirements = []
+    for accept in decoded["accepts"]:
+        if not isinstance(accept, dict):
+            continue
+        requirements.append({
+            "scheme": accept.get("scheme", "exact"),
+            "network": accept.get("network", ""),
+            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
+            "resource": accept.get("payTo", ""),
+            "description": resource.get("description", "Blocksize Capital institutional market data"),
+            "mimeType": resource.get("mimeType", "application/json"),
+            "payTo": accept.get("payTo", ""),
+            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
+            "asset": accept.get("asset", ""),
+            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
+        })
+    return requirements
+
+
 # --------------------------------------------------------------------------------
 # WALLET MANAGEMENT
 # --------------------------------------------------------------------------------
@@ -204,7 +230,7 @@ async def run_agent_loop(base_url_input: str):
                 pay_to_address = ""
                 req_header = response.headers.get("PAYMENT-REQUIRED")
                 if req_header:
-                    decoded = json.loads(base64.b64decode(req_header))
+                    decoded = normalise_payment_requirements(json.loads(base64.b64decode(req_header)))
                     sol_req = next((r for r in decoded if "solana" in str(r.get("network", "")).lower()), None)
                     if sol_req:
                         pay_to_address = sol_req.get("payTo")

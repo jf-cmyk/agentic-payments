@@ -19,6 +19,31 @@ from solana.rpc.async_api import AsyncClient # type: ignore
 BASE_URL = "https://mcp.blocksize.info"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com" # Use Helius for production
 
+def normalise_payment_requirements(decoded):
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
+        return []
+    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
+    requirements = []
+    for accept in decoded["accepts"]:
+        if not isinstance(accept, dict):
+            continue
+        requirements.append({
+            "scheme": accept.get("scheme", "exact"),
+            "network": accept.get("network", ""),
+            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
+            "resource": accept.get("payTo", ""),
+            "description": resource.get("description", "Blocksize Capital institutional market data"),
+            "mimeType": resource.get("mimeType", "application/json"),
+            "payTo": accept.get("payTo", ""),
+            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
+            "asset": accept.get("asset", ""),
+            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
+        })
+    return requirements
+
+
 async def get_data_autonomously(endpoint: str):
     # 1. Load Identity
     try:
@@ -48,7 +73,7 @@ async def get_data_autonomously(endpoint: str):
                 print("❌ No payment instructions found.")
                 return
             
-            reqs = json.loads(base64.b64decode(req_header))
+            reqs = normalise_payment_requirements(json.loads(base64.b64decode(req_header)))
             # Find Solana requirement
             sol_req = next((r for r in reqs if "solana" in str(r.get("network")).lower()), None)
             
