@@ -72,6 +72,7 @@ logger = logging.getLogger("blocksize-mcp")
 
 mcp = FastMCP(
     "Blocksize Capital",
+    version=APP_VERSION,
     instructions=(
         "Institutional-grade multi-asset market data for AI agents. "
         "Access real-time VWAP, bid/ask spreads, FX, and metals across "

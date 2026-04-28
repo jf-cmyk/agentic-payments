@@ -29,6 +29,7 @@ from src.public_metadata import (
 
 public_mcp = FastMCP(
     "Blocksize Capital Remote Discovery",
+    version=APP_VERSION,
     instructions=(
         "Public discovery MCP for Blocksize Capital. Use these tools to find "
         "supported instruments, inspect pricing, read integration docs, and fetch "
