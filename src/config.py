@@ -163,7 +163,7 @@ class ServerSettings(BaseSettings):
 
     resource_server_port: int = Field(
         8402,
-        validation_alias=AliasChoices("RESOURCE_SERVER_PORT", "PORT"),
+        validation_alias=AliasChoices("PORT", "RESOURCE_SERVER_PORT"),
     )
     mcp_transport: str = Field("stdio", alias="MCP_TRANSPORT")
     mcp_server_port: int = Field(8403, alias="MCP_SERVER_PORT")

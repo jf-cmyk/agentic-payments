@@ -1277,10 +1277,11 @@ async def health_check() -> dict[str, Any]:
 def run_resource_server() -> None:
     """Start the resource server with uvicorn."""
     import uvicorn
+    port = int(os.environ.get("PORT", settings.server.resource_server_port))
     uvicorn.run(
         "src.resource_server:app",
         host="0.0.0.0",
-        port=settings.server.resource_server_port,
+        port=port,
         log_level=settings.server.log_level.lower(),
         proxy_headers=True,
         forwarded_allow_ips=settings.server.forwarded_allow_ips,
