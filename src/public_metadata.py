@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.6.1"
 
 
 def _normalized_url(env_var: str, default: str) -> str:

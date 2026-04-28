@@ -7,7 +7,7 @@
     "source": "gitlab"
   },
   "homepage": "https://mcp.blocksize.info/",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",

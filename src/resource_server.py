@@ -19,12 +19,16 @@ from __future__ import annotations
 
 import os
 import base64
+import binascii
 import json
 import logging
+import re
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Deque
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -34,7 +38,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
-from src.credit_manager import CreditManager, CREDIT_COSTS, BULK_TIERS
+from src.credit_manager import CreditManager, BULK_TIERS
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -83,8 +87,8 @@ async def lifespan(app: FastAPI):
     app.state.blocksize = BlocksizeClient()
     app.state.credits = CreditManager()
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
-    logger.info("Solana Wallet: %s", settings.x402.solana_wallet_address)
-    logger.info("Base Wallet: %s", settings.x402.evm_wallet_address)
+    logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
+    logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
         yield
     await app.state.blocksize.close()
@@ -115,8 +119,8 @@ remote MCP discovery surface for directory listings and client onboarding.
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=settings.server.cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE"],
 )
@@ -209,13 +213,12 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/credits/": None,  # Credit endpoints define their own x402 challenges
 }
 
-# Mapping asset types to credit costs
-PATH_TO_ASSET_TYPE = {
-    "/v1/vwap/": "core",
-    "/v1/bidask/": "core",
-    "/v1/fx/": "tradfi",
-    "/v1/metal/": "tradfi",
-}
+SUPPORTED_BATCH_SERVICES = {"vwap", "bidask", "fx", "metal"}
+QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "JPY", "BTC", "ETH")
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,32}$")
+WALLET_ID_RE = re.compile(r"^[A-Za-z0-9:._-]{20,128}$")
+EVM_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/")
 # ---------------------------------------------------------------------------
 # Documentation & Schemas
 # ---------------------------------------------------------------------------
@@ -246,6 +249,167 @@ X402_RESPONSE = {
 }
 
 
+def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
+    """Return an upstream-safe alphanumeric symbol."""
+    raw = value.strip()
+    if len(raw) > 64:
+        raise ValueError(f"{field_name} is too long")
+    clean = raw.replace("-", "").replace("/", "").replace("_", "").upper()
+    if not SYMBOL_RE.fullmatch(clean):
+        raise ValueError(f"Invalid {field_name}; use 2-32 letters or digits")
+    return clean
+
+
+def _parse_batch_reqs(reqs: str) -> list[tuple[str, str, str]]:
+    """Parse and validate batch requests as (service, clean_symbol, original)."""
+    raw_queries = [item.strip() for item in reqs.split(",") if item.strip()]
+    if not raw_queries:
+        raise ValueError("Batch request must include at least one service:symbol item")
+    if len(raw_queries) > settings.server.max_batch_size:
+        raise ValueError(
+            f"Batch request exceeds MAX_BATCH_SIZE={settings.server.max_batch_size}"
+        )
+
+    parsed: list[tuple[str, str, str]] = []
+    for raw_query in raw_queries:
+        if ":" not in raw_query:
+            raise ValueError("Batch items must use service:symbol format")
+        svc, ticker = raw_query.split(":", 1)
+        svc = svc.strip().lower()
+        if svc not in SUPPORTED_BATCH_SERVICES:
+            raise ValueError(f"Unsupported batch service: {svc}")
+        parsed.append((svc, _normalise_symbol(ticker, "batch symbol"), raw_query))
+
+    return parsed
+
+
+def _base_from_symbol(symbol: str) -> str:
+    """Extract a likely base asset from a compact pair symbol."""
+    for quote in QUOTE_SUFFIXES:
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return symbol[: -len(quote)]
+    return symbol[: len(symbol) // 2].upper()
+
+
+class InMemoryRateLimiter:
+    """Small fixed-window limiter for public discovery traffic."""
+
+    def __init__(self) -> None:
+        self._minute_hits: dict[str, Deque[float]] = defaultdict(deque)
+        self._day_hits: dict[str, Deque[float]] = defaultdict(deque)
+
+    def clear(self) -> None:
+        self._minute_hits.clear()
+        self._day_hits.clear()
+
+    @staticmethod
+    def _prune(hits: Deque[float], now: float, window_seconds: int) -> None:
+        cutoff = now - window_seconds
+        while hits and hits[0] <= cutoff:
+            hits.popleft()
+
+    @staticmethod
+    def _retry_after(hits: Deque[float], now: float, window_seconds: int) -> int:
+        if not hits:
+            return window_seconds
+        return max(1, int(hits[0] + window_seconds - now) + 1)
+
+    def check(
+        self,
+        key: str,
+        *,
+        per_minute: int,
+        per_day: int,
+        now: float | None = None,
+    ) -> tuple[bool, int | None, str | None]:
+        """Return whether the request is allowed, retry delay, and limit label."""
+        if per_minute <= 0 and per_day <= 0:
+            return True, None, None
+
+        now = now or time.time()
+        minute_hits = self._minute_hits[key]
+        day_hits = self._day_hits[key]
+
+        self._prune(minute_hits, now, 60)
+        self._prune(day_hits, now, 86_400)
+
+        if per_minute > 0 and len(minute_hits) >= per_minute:
+            return False, self._retry_after(minute_hits, now, 60), "minute"
+        if per_day > 0 and len(day_hits) >= per_day:
+            return False, self._retry_after(day_hits, now, 86_400), "day"
+
+        if per_minute > 0:
+            minute_hits.append(now)
+        if per_day > 0:
+            day_hits.append(now)
+        return True, None, None
+
+
+_DISCOVERY_RATE_LIMITER = InMemoryRateLimiter()
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client identifier for soft public discovery limits."""
+    return request.client.host if request.client else "unknown"
+
+
+def _is_discovery_rate_limited_path(path: str) -> bool:
+    """Limit public discovery calls without throttling docs, manifests, or paid routes."""
+    remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
+    return (
+        path == DISCOVERY_RATE_LIMIT_PATHS[0]
+        or path.startswith(DISCOVERY_RATE_LIMIT_PATHS[1])
+        or path == remote_mcp_path
+        or path.startswith(f"{remote_mcp_path}/")
+    )
+
+
+def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
+    """Return a 429 response when public discovery traffic exceeds fair-use limits."""
+    if not settings.server.discovery_rate_limit_enabled:
+        return None
+
+    path = request.url.path
+    if not _is_discovery_rate_limited_path(path):
+        return None
+
+    client_ip = _client_ip(request)
+    allowed, retry_after, limit_window = _DISCOVERY_RATE_LIMITER.check(
+        f"discovery:{client_ip}",
+        per_minute=settings.server.discovery_rate_limit_per_minute,
+        per_day=settings.server.discovery_rate_limit_per_day,
+    )
+    if allowed:
+        return None
+
+    retry_after = retry_after or 60
+    logger.warning(
+        "Discovery rate limit exceeded for %s on %s (%s limit)",
+        client_ip,
+        path,
+        limit_window,
+    )
+    return JSONResponse(
+        status_code=429,
+        headers={
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Policy": (
+                f"{settings.server.discovery_rate_limit_per_minute}/minute; "
+                f"{settings.server.discovery_rate_limit_per_day}/day"
+            ),
+        },
+        content={
+            "error": "Too Many Requests",
+            "message": (
+                "Free discovery traffic is temporarily rate limited. "
+                "Please retry later or use paid data routes for production traffic."
+            ),
+            "retry_after_seconds": retry_after,
+            "limit_window": limit_window,
+        },
+    )
+
+
 def _get_price_for_request(request: Request) -> Decimal | None:
     """Determine the price for a given request."""
     path = request.url.path
@@ -257,20 +421,13 @@ def _get_price_for_request(request: Request) -> Decimal | None:
             return None
         
         total = Decimal("0.0")
-        queries = reqs.split(",")
-        for q in queries:
-            if ":" not in q:
-                continue
-            svc, pair = q.split(":", 1)
-            # Find the mock path for this service to calculate price
-            mock_path = f"/v1/{svc}/{pair}"
-            
-            # Crypto dynamic pricing
-            if svc in ["vwap", "bidask"]:
-                base = pair.split("-")[0].upper() if "-" in pair else pair[:len(pair)//2].upper()
+        for svc, pair, _raw_query in _parse_batch_reqs(reqs):
+            if svc in {"vwap", "bidask"}:
+                base = _base_from_symbol(pair)
                 svc_price = settings.pricing.get_crypto_price(base)
                 total += svc_price
             else:
+                mock_path = f"/v1/{svc}/{pair}"
                 for prefix, price in ROUTE_PRICING.items():
                     if mock_path.startswith(prefix) and price is not None:
                         total += price
@@ -281,8 +438,8 @@ def _get_price_for_request(request: Request) -> Decimal | None:
     if path.startswith("/v1/vwap/") or path.startswith("/v1/bidask/"):
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:
-            pair = parts[3]
-            base = pair.split("-")[0].upper() if "-" in pair else pair[:len(pair)//2].upper()
+            pair = _normalise_symbol(parts[3], "pair")
+            base = _base_from_symbol(pair)
             return settings.pricing.get_crypto_price(base)
         return settings.pricing.core_crypto
 
@@ -296,29 +453,213 @@ def _get_price_for_request(request: Request) -> Decimal | None:
 
 _SEEN_TX_HASHES: set[str] = set()
 
-async def _verify_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
-    """Natively verify the transaction on the Solana or Base blockchain via RPC."""
+
+def _decode_payment_payload(payment_payload: str) -> dict[str, Any]:
+    """Decode and lightly validate the x402 proof header payload."""
+    if len(payment_payload) > 4096:
+        raise ValueError("Payment payload is too large")
     try:
-        decoded_str = base64.b64decode(payment_payload).decode()
-        payload = json.loads(decoded_str)
-        tx_hash = payload.get("proof")
-        network = payload.get("network", "solana")
+        decoded = base64.b64decode(payment_payload, validate=True).decode("utf-8")
+        payload = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Payment payload must be base64-encoded JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Payment payload must be a JSON object")
+    return payload
+
+
+def _network_kind(network: str) -> str | None:
+    network_lower = network.lower()
+    if "solana" in network_lower:
+        return "solana"
+    if "eip155" in network_lower or "base" in network_lower:
+        return "evm"
+    return None
+
+
+def _select_requirement(network: str, payment_requirements: list[dict]) -> dict[str, Any] | None:
+    """Find the payment requirement matching the proof network."""
+    kind = _network_kind(network)
+    for requirement in payment_requirements:
+        req_network = str(requirement.get("network", ""))
+        req_kind = _network_kind(req_network)
+        if kind and req_kind == kind:
+            return requirement
+        if network and network == req_network:
+            return requirement
+    return None
+
+
+def _requirement_amount_atomic(requirement: dict[str, Any]) -> int:
+    """Read the required amount as USDC atomic units."""
+    raw = requirement.get("maxAmountRequired")
+    if raw is None and "amount" in requirement:
+        return int(Decimal(str(requirement["amount"])) * Decimal("1000000"))
+    return int(Decimal(str(raw or "0")))
+
+
+def _requirement_recipient(requirement: dict[str, Any]) -> str:
+    """Read the configured recipient from an x402 requirement."""
+    return str(
+        requirement.get("payTo")
+        or requirement.get("recipient")
+        or requirement.get("resource")
+        or ""
+    )
+
+
+def _requirement_asset(requirement: dict[str, Any], fallback: str) -> str:
+    """Read the token mint/contract address from an x402 requirement."""
+    asset = str(requirement.get("asset") or "")
+    if "/" in asset:
+        return asset.rsplit("/", 1)[-1]
+    return fallback
+
+
+def _token_amount_atomic(balance: dict[str, Any]) -> int:
+    amount = balance.get("uiTokenAmount", {}).get("amount")
+    return int(amount or 0)
+
+
+def _solana_transfer_satisfies_requirement(
+    transaction: dict[str, Any],
+    requirement: dict[str, Any],
+) -> tuple[bool, str]:
+    """Validate a Solana USDC payment by recipient owner, mint, and net amount."""
+    meta = transaction.get("meta") or {}
+    expected_recipient = _requirement_recipient(requirement)
+    expected_mint = _requirement_asset(requirement, settings.x402.solana_usdc_address)
+    required_amount = _requirement_amount_atomic(requirement)
+
+    if not expected_recipient:
+        return False, "Solana payment recipient is not configured"
+    if required_amount <= 0:
+        return False, "Solana payment amount is not configured"
+
+    pre_balances = {
+        (item.get("accountIndex"), item.get("mint")): _token_amount_atomic(item)
+        for item in meta.get("preTokenBalances", [])
+    }
+
+    for post in meta.get("postTokenBalances", []):
+        if post.get("mint") != expected_mint:
+            continue
+        if post.get("owner") != expected_recipient:
+            continue
+        key = (post.get("accountIndex"), post.get("mint"))
+        delta = _token_amount_atomic(post) - pre_balances.get(key, 0)
+        if delta >= required_amount:
+            return True, "ok"
+
+    return (
+        False,
+        "No Solana USDC transfer matched the configured recipient and required amount",
+    )
+
+
+def _evm_transfer_satisfies_requirement(
+    receipt: dict[str, Any],
+    requirement: dict[str, Any],
+) -> tuple[bool, str]:
+    """Validate an EVM USDC Transfer log by contract, recipient, and amount."""
+    expected_recipient = _requirement_recipient(requirement).lower()
+    expected_token = _requirement_asset(requirement, settings.x402.base_usdc_address).lower()
+    required_amount = _requirement_amount_atomic(requirement)
+
+    if not expected_recipient.startswith("0x") or len(expected_recipient) != 42:
+        return False, "EVM payment recipient is not configured"
+    if required_amount <= 0:
+        return False, "EVM payment amount is not configured"
+
+    recipient_topic = "0x" + expected_recipient.removeprefix("0x").rjust(64, "0")
+    for log_item in receipt.get("logs", []):
+        if str(log_item.get("address", "")).lower() != expected_token:
+            continue
+        topics = [str(topic).lower() for topic in log_item.get("topics", [])]
+        if len(topics) < 3 or topics[0] != EVM_TRANSFER_TOPIC:
+            continue
+        if topics[2] != recipient_topic:
+            continue
+        try:
+            amount = int(str(log_item.get("data", "0x0")), 16)
+        except ValueError:
+            continue
+        if amount >= required_amount:
+            return True, "ok"
+
+    return False, "No Base USDC Transfer matched the configured recipient and required amount"
+
+
+def _transaction_is_recent(block_time: int | None) -> bool:
+    max_age = settings.server.x402_payment_max_age_seconds
+    if max_age <= 0 or not block_time:
+        return True
+    return time.time() - block_time <= max_age
+
+
+def _record_payment_use(
+    tx_hash: str,
+    network: str,
+    requirement: dict[str, Any],
+    credit_manager: CreditManager | None,
+    purpose: str,
+) -> tuple[bool, str]:
+    """Persist proof usage so a transaction cannot be replayed."""
+    if tx_hash in _SEEN_TX_HASHES:
+        return False, "Transaction hash has already been used"
+
+    amount_atomic = _requirement_amount_atomic(requirement)
+    recipient = _requirement_recipient(requirement)
+    if credit_manager and not credit_manager.record_payment_proof(
+        tx_hash=tx_hash,
+        network=network,
+        amount_atomic=amount_atomic,
+        recipient=recipient,
+        purpose=purpose,
+    ):
+        return False, "Transaction hash has already been used"
+
+    _SEEN_TX_HASHES.add(tx_hash)
+    return True, "ok"
+
+
+async def _verify_payment(
+    payment_payload: str,
+    payment_requirements: list[dict],
+    credit_manager: CreditManager | None = None,
+    purpose: str = "data",
+) -> dict:
+    """Verify an x402 payment against chain data, amount, token, and recipient."""
+    try:
+        payload = _decode_payment_payload(payment_payload)
+        tx_hash = str(payload.get("proof") or payload.get("tx_hash") or "").strip()
+        network = str(payload.get("network") or "solana").strip()
         
         if not tx_hash:
             return {"valid": False, "reason": "Missing tx_hash/proof in payload"}
-            
-        if tx_hash in _SEEN_TX_HASHES:
-            return {"valid": False, "reason": "Transaction hash has already been used (Replay Attack)"}
+
+        requirement = _select_requirement(network, payment_requirements)
+        if requirement is None:
+            return {"valid": False, "reason": f"No payment requirement configured for {network}"}
 
         allow_mock = os.getenv("X402_ALLOW_MOCK_PAYMENTS", "").lower() in {"1", "true", "yes"}
         if allow_mock and str(tx_hash).startswith(("mock_", "test_")):
-            _SEEN_TX_HASHES.add(tx_hash)
+            if requirement is None:
+                return {"valid": False, "reason": "Mock payment has no matching requirement"}
+            recorded, reason = _record_payment_use(
+                tx_hash,
+                network,
+                requirement,
+                credit_manager,
+                purpose,
+            )
+            if not recorded:
+                return {"valid": False, "reason": reason}
             logger.warning("Accepted mock x402 proof for local/demo mode only: %s", tx_hash)
             return {"valid": True, "mock": True}
             
         if "solana" in network:
-            # Use Helius as standard default to bypass rate-limiting and environment variable syncing delays
-            rpc_url = os.getenv("SOLANA_RPC_URL", "https://mainnet.helius-rpc.com/?api-key=2a2801c5-01ca-458f-9aaa-5aafc1886571")
+            rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
             logger.info(f"Verifying Solana payment via RPC: {rpc_url.split('?')[0]}")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(
@@ -343,9 +684,16 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
             meta = result.get("meta")
             if meta and meta.get("err") is not None:
                 return {"valid": False, "reason": f"Transaction reverted on chain: {meta['err']}"}
-                
+
+            if not _transaction_is_recent(result.get("blockTime")):
+                return {"valid": False, "reason": "Transaction is older than allowed payment window"}
+
+            matched, reason = _solana_transfer_satisfies_requirement(result, requirement)
+            if not matched:
+                return {"valid": False, "reason": reason}
+
         elif "eip155" in network or "base" in network:
-            rpc_url = "https://mainnet.base.org"
+            rpc_url = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(
                     rpc_url,
@@ -366,15 +714,29 @@ async def _verify_payment(payment_payload: str, payment_requirements: list[dict]
             status = result.get("status")
             if status not in ("0x1", 1):
                 return {"valid": False, "reason": f"EVM Transaction reverted on chain: status={status}"}
+
+            matched, reason = _evm_transfer_satisfies_requirement(result, requirement)
+            if not matched:
+                return {"valid": False, "reason": reason}
         
         else:
             return {"valid": False, "reason": f"Unsupported network: {network}"}
 
-        # Mark as used securely
-        _SEEN_TX_HASHES.add(tx_hash)
+        recorded, reason = _record_payment_use(
+            tx_hash,
+            network,
+            requirement,
+            credit_manager,
+            purpose,
+        )
+        if not recorded:
+            return {"valid": False, "reason": reason}
+
         logger.info("NATIVELY VERIFIED %s: %s", network, tx_hash)
         return {"valid": True}
         
+    except ValueError as e:
+        return {"valid": False, "reason": str(e)}
     except Exception as e:
         logger.error("Native RPC verification failed: %s", e)
         return {"valid": False, "reason": f"Native RPC failure: {str(e)}"}
@@ -396,30 +758,42 @@ async def x402_payment_middleware(request: Request, call_next):
     4. If present → verify → proceed or reject
     5. After response → settle payment
     """
+    discovery_limit = _discovery_rate_limit_response(request)
+    if discovery_limit is not None:
+        return discovery_limit
+
     path = request.url.path
-    price = _get_price_for_request(request)
+    try:
+        price = _get_price_for_request(request)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Bad Request", "message": str(e)},
+        )
 
     # Free endpoints pass through
     if price is None:
         return await call_next(request)
 
-    # 🚀 --- CREDIT DRAWDOWN CHECK --- 🚀
     wallet_header = request.headers.get("X-AGENT-WALLET")
     if wallet_header:
+        wallet_header = wallet_header.strip()
+        if not WALLET_ID_RE.fullmatch(wallet_header):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Bad Request",
+                    "message": "Invalid X-AGENT-WALLET header",
+                },
+            )
+
         mgr: CreditManager = request.app.state.credits
         client_ip = request.client.host if request.client else "unknown"
         
-        # 🎁 New Agent? Grant 50 credits automatically IF stake check and IP check pass
+        # New agents receive credits only after wallet stake/history and trial checks pass.
         await mgr.ensure_wallet_with_welcome_pack(wallet_header, client_ip)
-        
-        # Map path to credit cost type
-        asset_type = "core"
-        for prefix, a_type in PATH_TO_ASSET_TYPE.items():
-            if path.startswith(prefix):
-                asset_type = a_type
-                break
-        
-        credit_cost = CREDIT_COSTS.get(asset_type, 2.0)
+
+        credit_cost = float(price * Decimal("1000"))
         
         # Attempt to spend credits
         if mgr.spend_credits(wallet_header, credit_cost):
@@ -465,7 +839,12 @@ async def x402_payment_middleware(request: Request, call_next):
 
     # Verify the payment
     try:
-        verification = await _verify_payment(payment_header, payment_reqs)
+        verification = await _verify_payment(
+            payment_header,
+            payment_reqs,
+            request.app.state.credits,
+            purpose=f"{request.method} {path}",
+        )
         if not verification.get("valid", False):
             return JSONResponse(
                 status_code=402,
@@ -510,11 +889,13 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
     """Get real-time VWAP for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        clean = _normalise_symbol(pair, "pair")
         vwap_data = await client.get_vwap_latest(clean)
         resp = VWAPResponse(data=vwap_data).model_dump()
         resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Real-Time VWAP", "asset_class": "crypto"}
         return resp
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve VWAP for {pair}", details=str(e),
@@ -526,11 +907,13 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
     """Get bid/ask snapshot for a crypto pair. Cost: $0.002–$0.004 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        clean = _normalise_symbol(pair, "pair")
         bidask_data = await client.get_bidask_snapshot(clean)
         resp = BidAskResponse(data=bidask_data).model_dump()
         resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Bid/Ask Snapshot", "asset_class": "crypto"}
         return resp
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve bid/ask for {pair}", details=str(e),
@@ -542,10 +925,12 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        clean = pair.replace("-", "").replace("/", "").replace("_", "")
+        clean = _normalise_symbol(pair, "pair")
         data = await client.get_fx_rate(clean)
         resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "FX Rate", "asset_class": "fx"}}
         return resp
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve FX for {pair}", details=str(e),
@@ -556,10 +941,12 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
     """Get metal spot price. Cost: $0.005 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        clean = ticker.replace("-", "").replace("/", "").replace("_", "")
+        clean = _normalise_symbol(ticker, "ticker")
         data = await client.get_metal_price(clean)
         resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "Metal Price", "asset_class": "metal"}}
         return resp
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve metal for {ticker}", details=str(e),
@@ -575,7 +962,11 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
     """
     import asyncio
     
-    queries = reqs.split(",")
+    try:
+        queries = _parse_batch_reqs(reqs)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     results = []
     
     # We execute requests concurrently for extreme speed
@@ -603,17 +994,14 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
         except Exception as e:
             return {"status": "error", "error_code": "BATCH_EXECUTION_ERROR", "message": str(e)}
 
-    for q in queries:
-        if ":" not in q:
-            continue
-        svc, ticker = q.split(":", 1)
+    for svc, ticker, _raw_query in queries:
         tasks.append(_safe_fetch(svc, ticker))
         
     gathered_results = await asyncio.gather(*tasks)
     
-    for q, result in zip(queries, gathered_results):
+    for (_svc, _ticker, raw_query), result in zip(queries, gathered_results):
         results.append({
-            "request": q,
+            "request": raw_query,
             "response": result
         })
         
@@ -626,8 +1014,12 @@ async def batch_request(reqs: str, request: Request) -> dict[str, Any]:
 
 @app.get("/v1/search")
 async def search_pairs(
-    q: str = Query(..., description="Search query"),
-    asset_class: str = Query("all", description="Asset class filter"),
+    q: str = Query(..., min_length=1, max_length=64, description="Search query"),
+    asset_class: str = Query(
+        "all",
+        pattern="^(all|crypto|fx|metal)$",
+        description="Asset class filter",
+    ),
     request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     """Search instruments. FREE."""
@@ -691,10 +1083,7 @@ async def purchase_credits_challenge(tier: str = Query(..., pattern="^(starter|p
     price = Decimal(str(tier_data["price"]))
     
     # Return 402 challenge
-    requirements = [
-        {"network": "solana", "caip2": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "recipient": settings.x402.solana_wallet_address, "amount": str(price)},
-        {"network": "base", "caip2": "eip155:8453", "recipient": settings.x402.evm_wallet_address, "amount": str(price)}
-    ]
+    requirements = settings.payment_requirements(price)
     
     payload = base64.b64encode(json.dumps(requirements).encode()).decode()
     
@@ -721,20 +1110,20 @@ async def claim_credits(request: Request, payload: dict):
     
     if not all([tx_hash, tier, wallet]):
         raise HTTPException(status_code=400, detail="Missing tx_hash, tier, or wallet")
+    wallet = str(wallet).strip()
+    if not WALLET_ID_RE.fullmatch(wallet):
+        raise HTTPException(status_code=400, detail="Invalid wallet")
         
     tier_data = BULK_TIERS.get(tier)
     if not tier_data:
         raise HTTPException(status_code=400, detail="Invalid tier")
 
-    tier_data = BULK_TIERS.get(tier)
-    if not tier_data:
-        raise HTTPException(status_code=400, detail="Invalid tier")
-
     # Native RPC verification of the bulk payment
+    payment_reqs = settings.payment_requirements(Decimal(str(tier_data["price"])))
     verification = await _verify_payment(base64.b64encode(json.dumps({
         "proof": tx_hash,
         "network": network
-    }).encode()).decode(), [])
+    }).encode()).decode(), payment_reqs, mgr, purpose=f"credits:{tier}")
     
     if not verification.get("valid"):
         raise HTTPException(status_code=402, detail=f"Bulk payment verification failed: {verification.get('reason')}")
@@ -860,8 +1249,14 @@ async def health_check() -> dict[str, Any]:
         "version": APP_VERSION,
         "engine": "Shielded x402 Gateway (Iron Dome Active)",
         "networks": {
-            "primary": {"name": "Solana", "wallet": settings.x402.solana_wallet_address or "(not set)"},
-            "fallback": {"name": "Base", "wallet": settings.x402.evm_wallet_address or "(not set)"},
+            "primary": {
+                "name": "Solana",
+                "configured": bool(settings.x402.solana_wallet_address),
+            },
+            "fallback": {
+                "name": "Base",
+                "configured": bool(settings.x402.evm_wallet_address),
+            },
         },
         "pricing": settings.pricing_summary,
         "bulk_pricing": BULK_TIERS,
@@ -888,7 +1283,7 @@ def run_resource_server() -> None:
         port=settings.server.resource_server_port,
         log_level=settings.server.log_level.lower(),
         proxy_headers=True,
-        forwarded_allow_ips="*",
+        forwarded_allow_ips=settings.server.forwarded_allow_ips,
         reload=False,
     )
 

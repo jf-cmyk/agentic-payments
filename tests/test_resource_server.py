@@ -13,8 +13,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.resource_server import app
+from src.resource_server import (
+    _DISCOVERY_RATE_LIMITER,
+    EVM_TRANSFER_TOPIC,
+    _evm_transfer_satisfies_requirement,
+    _solana_transfer_satisfies_requirement,
+    _verify_payment,
+)
 from src.models import VWAPData, BidAskData
 from src.public_metadata import REPOSITORY_URL
+from src.config import settings
 
 
 @pytest.fixture
@@ -147,6 +155,131 @@ class TestPaymentGate:
     def test_health_does_not_require_payment(self, test_client):
         response = test_client.get("/health")
         assert response.status_code == 200
+
+    def test_batch_requires_total_payment(self, test_client):
+        response = test_client.get("/v1/batch?reqs=vwap:BTCUSD,fx:EURUSD")
+        assert response.status_code == 402
+        assert response.json()["price_usdc"] == "0.007"
+
+    def test_batch_rejects_excessive_items(self, test_client):
+        reqs = ",".join(f"vwap:BTC{i}USD" for i in range(settings.server.max_batch_size + 1))
+        response = test_client.get(f"/v1/batch?reqs={reqs}")
+        assert response.status_code == 400
+
+    def test_invalid_wallet_header_is_rejected(self, test_client):
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"X-AGENT-WALLET": "bad"},
+        )
+        assert response.status_code == 400
+
+
+class TestDiscoveryRateLimit:
+    def test_discovery_search_is_soft_capped_by_ip(self, test_client, monkeypatch):
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_enabled", True)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_minute", 2)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_day", 100)
+        _DISCOVERY_RATE_LIMITER.clear()
+
+        mock_client = AsyncMock()
+        mock_client.search_pairs = AsyncMock(return_value=[])
+        app.state.blocksize = mock_client
+
+        headers = {"X-Forwarded-For": "203.0.113.10"}
+        assert test_client.get("/v1/search?q=btc", headers=headers).status_code == 200
+        assert test_client.get("/v1/search?q=eth", headers=headers).status_code == 200
+
+        response = test_client.get("/v1/search?q=sol", headers=headers)
+
+        assert response.status_code == 429
+        assert response.headers["Retry-After"]
+        assert response.json()["limit_window"] == "minute"
+
+    def test_paid_routes_are_not_discovery_rate_limited(self, test_client, monkeypatch):
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_enabled", True)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_day", 1)
+        _DISCOVERY_RATE_LIMITER.clear()
+
+        headers = {"X-Forwarded-For": "203.0.113.11"}
+        first = test_client.get("/v1/vwap/btc-usd", headers=headers)
+        second = test_client.get("/v1/vwap/eth-usd", headers=headers)
+
+        assert first.status_code == 402
+        assert second.status_code == 402
+
+
+class TestNativePaymentValidation:
+    @pytest.mark.asyncio
+    async def test_verify_payment_rejects_invalid_payload(self):
+        requirement = {
+            "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "payTo": "11111111111111111111111111111111",
+            "maxAmountRequired": "1",
+            "asset": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        }
+        result = await _verify_payment("not-base64", [requirement])
+        assert result["valid"] is False
+
+    def test_solana_transfer_must_match_recipient_and_amount(self):
+        recipient = "So11111111111111111111111111111111111111112"
+        mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        requirement = {
+            "payTo": recipient,
+            "maxAmountRequired": "100",
+            "asset": f"solana:mainnet/{mint}",
+        }
+        transaction = {
+            "meta": {
+                "preTokenBalances": [
+                    {
+                        "accountIndex": 4,
+                        "mint": mint,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "50"},
+                    }
+                ],
+                "postTokenBalances": [
+                    {
+                        "accountIndex": 4,
+                        "mint": mint,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "175"},
+                    }
+                ],
+            }
+        }
+        assert _solana_transfer_satisfies_requirement(transaction, requirement)[0] is True
+
+        too_expensive = {**requirement, "maxAmountRequired": "200"}
+        assert _solana_transfer_satisfies_requirement(transaction, too_expensive)[0] is False
+
+    def test_evm_transfer_must_match_contract_recipient_and_amount(self):
+        recipient = "0x1111111111111111111111111111111111111111"
+        token = "0x2222222222222222222222222222222222222222"
+        recipient_topic = "0x" + recipient.removeprefix("0x").rjust(64, "0")
+        requirement = {
+            "payTo": recipient,
+            "maxAmountRequired": "5000",
+            "asset": f"eip155:8453/{token}",
+        }
+        receipt = {
+            "logs": [
+                {
+                    "address": token,
+                    "topics": [
+                        EVM_TRANSFER_TOPIC,
+                        "0x" + "0" * 64,
+                        recipient_topic,
+                    ],
+                    "data": hex(7000),
+                }
+            ]
+        }
+        assert _evm_transfer_satisfies_requirement(receipt, requirement)[0] is True
+
+        too_expensive = {**requirement, "maxAmountRequired": "8000"}
+        assert _evm_transfer_satisfies_requirement(receipt, too_expensive)[0] is False
 
 
 # ---------------------------------------------------------------------------

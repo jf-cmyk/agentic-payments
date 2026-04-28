@@ -1,6 +1,6 @@
 [project]
 name = "blocksize-mcp-x402"
-version = "0.6.0"
+version = "0.6.1"
 description = "Blocksize Capital MCP Server with x402 Micropayment Integration — Institutional-grade crypto market data for AI agents"
 readme = "README.md"
 requires-python = ">=3.11"

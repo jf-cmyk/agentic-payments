@@ -8,11 +8,10 @@ Dual-network payment: Solana (priority) + Base (fallback).
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from decimal import Decimal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -162,10 +161,29 @@ class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
     """Server runtime settings."""
 
-    resource_server_port: int = Field(8402, alias="RESOURCE_SERVER_PORT")
+    resource_server_port: int = Field(
+        8402,
+        validation_alias=AliasChoices("RESOURCE_SERVER_PORT", "PORT"),
+    )
     mcp_transport: str = Field("stdio", alias="MCP_TRANSPORT")
     mcp_server_port: int = Field(8403, alias="MCP_SERVER_PORT")
     log_level: str = Field("INFO", alias="LOG_LEVEL")
+    forwarded_allow_ips: str = Field("127.0.0.1", alias="FORWARDED_ALLOW_IPS")
+    cors_allow_origins: str = Field(
+        "https://mcp.blocksize.info,http://localhost:8402,http://127.0.0.1:8402",
+        alias="CORS_ALLOW_ORIGINS",
+    )
+    x402_payment_max_age_seconds: int = Field(900, alias="X402_PAYMENT_MAX_AGE_SECONDS")
+    max_batch_size: int = Field(20, alias="MAX_BATCH_SIZE")
+    discovery_rate_limit_enabled: bool = Field(True, alias="DISCOVERY_RATE_LIMIT_ENABLED")
+    discovery_rate_limit_per_minute: int = Field(60, alias="DISCOVERY_RATE_LIMIT_PER_MINUTE")
+    discovery_rate_limit_per_day: int = Field(1000, alias="DISCOVERY_RATE_LIMIT_PER_DAY")
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Return configured browser origins for CORS."""
+        origins = [origin.strip() for origin in self.cors_allow_origins.split(",")]
+        return [origin for origin in origins if origin]
 
 
 class Settings:
@@ -188,7 +206,7 @@ class Settings:
         Solana is listed first (preferred).
         """
         # Convert USDC amount to atomic units (6 decimals for both chains)
-        amount_atomic = str(int(price * Decimal("1_000_000")))
+        amount_atomic = str(int(price * Decimal("1000000")))
 
         requirements = []
 
@@ -235,12 +253,4 @@ class Settings:
         }
 
 
-try:
-    settings = Settings()
-except Exception as e:
-    import builtins
-    import os
-    builtins.print("====== CRASH ENV VARS DEBUG ======")
-    builtins.print(list(os.environ.keys()))
-    builtins.print("==================================")
-    raise e
+settings = Settings()

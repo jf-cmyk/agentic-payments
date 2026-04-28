@@ -2,7 +2,8 @@ import sqlite3
 import os
 import logging
 import httpx
-from datetime import datetime
+import hashlib
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,18 @@ class CreditManager:
                 ip_hash TEXT PRIMARY KEY,
                 address TEXT,
                 funding_address TEXT,
+                timestamp TIMESTAMP
+            )
+        ''')
+
+        # Persistent replay protection for paid data and credit-purchase proofs.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payment_proofs (
+                tx_hash TEXT PRIMARY KEY,
+                network TEXT NOT NULL,
+                amount_atomic INTEGER DEFAULT 0,
+                recipient TEXT DEFAULT '',
+                purpose TEXT DEFAULT '',
                 timestamp TIMESTAMP
             )
         ''')
@@ -98,19 +111,19 @@ class CreditManager:
                 sigs = data.get("result", [])
                 
                 count = len(sigs)
-                first_seen = datetime.utcnow()
+                first_seen = datetime.now(UTC)
                 if count > 0:
                     # Time of oldest signature in the batch
                     oldest_ts = sigs[-1].get("blockTime")
                     if oldest_ts:
-                        first_seen = datetime.utcfromtimestamp(oldest_ts)
+                        first_seen = datetime.fromtimestamp(oldest_ts, UTC)
                     
                     # Attempt to find funding source (very basic: last sig's sender)
                     # Note: Full trace is complex, using count/age as primary signals
                 
                 return {
                     "count": count,
-                    "age_hours": (datetime.utcnow() - first_seen).total_seconds() / 3600.0,
+                    "age_hours": (datetime.now(UTC) - first_seen).total_seconds() / 3600.0,
                     "signatures": sigs
                 }
         except Exception as e:
@@ -129,9 +142,16 @@ class CreditManager:
         cursor = conn.cursor()
         try:
             # 1. IP Check
-            cursor.execute("SELECT address FROM trial_history WHERE ip_hash = ?", (ip,))
+            ip_fingerprint = _fingerprint_ip(ip)
+            cursor.execute(
+                "SELECT address FROM trial_history WHERE ip_hash IN (?, ?)",
+                (ip_fingerprint, ip),
+            )
             if cursor.fetchone():
-                logger.warning(f"🚫 SYBIL DETECTED: IP {ip} attempted duplicate trial claim.")
+                logger.warning(
+                    "Duplicate trial claim blocked for IP fingerprint %s",
+                    ip_fingerprint[:12],
+                )
                 return 0.0
             
             # 2. Wallet Check (Internal)
@@ -156,22 +176,26 @@ class CreditManager:
                 cursor.execute('''
                     INSERT INTO wallets (address, balance_credits, last_updated)
                     VALUES (?, ?, ?)
-                ''', (address, welcome_credits, datetime.utcnow()))
+                ''', (address, welcome_credits, _utc_now()))
                 
                 # Record to Trial History
                 cursor.execute('''
                     INSERT INTO trial_history (ip_hash, address, timestamp)
                     VALUES (?, ?, ?)
-                ''', (ip, address, datetime.utcnow()))
+                ''', (ip_fingerprint, address, _utc_now()))
                 
                 # Log it
                 cursor.execute('''
                     INSERT INTO credit_purchases (tx_hash, address, amount_usdc, credits_added, timestamp)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, datetime.utcnow()))
+                ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, _utc_now()))
                 
                 conn.commit()
-                logger.info(f"🎁 SECURE TRIAL GRANTED: 50.0 credits to {address} (Age: {metadata['age_hours']:.1f}h)")
+                logger.info(
+                    "Secure trial granted: 50.0 credits to %s (wallet age %.1fh)",
+                    address,
+                    metadata["age_hours"],
+                )
                 return welcome_credits
             
             return row[0]
@@ -190,13 +214,13 @@ class CreditManager:
                 ON CONFLICT(address) DO UPDATE SET
                     balance_credits = balance_credits + excluded.balance_credits,
                     last_updated = excluded.last_updated
-            ''', (address, credits, datetime.utcnow()))
+            ''', (address, credits, _utc_now()))
             
             # Log purchase
             cursor.execute('''
                 INSERT INTO credit_purchases (tx_hash, address, amount_usdc, credits_added, timestamp)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (tx_hash, address, amount_usdc, credits, datetime.utcnow()))
+            ''', (tx_hash, address, amount_usdc, credits, _utc_now()))
             
             conn.commit()
             logger.info(f"Credited {credits} to {address} (TX: {tx_hash})")
@@ -212,21 +236,55 @@ class CreditManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (address,))
-            row = cursor.fetchone()
-            if not row or row[0] < credits:
-                return False
-            
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute('''
                 UPDATE wallets SET balance_credits = balance_credits - ?, last_updated = ?
-                WHERE address = ?
-            ''', (credits, datetime.utcnow(), address))
+                WHERE address = ? AND balance_credits >= ?
+            ''', (credits, _utc_now(), address, credits))
+
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return False
             
             conn.commit()
             return True
         except Exception as e:
             logger.error(f"Error spending credits for {address}: {e}")
             conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def record_payment_proof(
+        self,
+        tx_hash: str,
+        network: str,
+        amount_atomic: int,
+        recipient: str,
+        purpose: str,
+    ) -> bool:
+        """Persist a verified payment proof. Returns False for replayed proofs."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO payment_proofs (
+                    tx_hash, network, amount_atomic, recipient, purpose, timestamp
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                tx_hash,
+                network,
+                int(amount_atomic),
+                recipient,
+                purpose,
+                _utc_now(),
+            ))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            logger.warning("Duplicate payment proof rejected: %s", tx_hash)
             return False
         finally:
             conn.close()
@@ -246,3 +304,14 @@ BULK_TIERS = {
     "pro": {"price": 8.00, "credits": 10000.0},         # 20% discount
     "institutional": {"price": 60.00, "credits": 100000.0} # 40% discount
 }
+
+
+def _fingerprint_ip(ip: str) -> str:
+    """Hash client IPs before storing trial history."""
+    salt = os.environ.get("TRIAL_IP_HASH_SALT", "blocksize-agentic-payments")
+    return hashlib.sha256(f"{salt}:{ip}".encode("utf-8")).hexdigest()
+
+
+def _utc_now() -> str:
+    """Return an ISO-8601 UTC timestamp for SQLite storage."""
+    return datetime.now(UTC).isoformat()

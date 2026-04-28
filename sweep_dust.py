@@ -1,32 +1,67 @@
+"""Safe SOL sweep utility.
+
+Requires:
+  SWEEP_PRIVATE_KEY_BASE64 - base64-encoded 64-byte Solana keypair
+  SWEEP_TARGET_ADDRESS     - destination public key
+
+Optional:
+  SOLANA_RPC_URL
+  SWEEP_FEE_BUFFER_LAMPORTS
+"""
+
+from __future__ import annotations
+
 import asyncio
+import base64
+import os
+
 from solana.rpc.async_api import AsyncClient
+from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import TransferParams, transfer
-from solana.transaction import Transaction
 
-async def main():
-    old_bytes = [126, 3, 83, 75, 208, 170, 234, 86, 177, 172, 187, 140, 23, 87, 208, 79, 124, 254, 96, 250, 23, 119, 237, 93, 200, 2, 195, 96, 239, 169, 42, 124, 68, 125, 195, 2, 83, 234, 163, 68, 250, 23, 58, 184, 210, 181, 107, 240, 81, 83, 84, 25, 166, 146, 14, 109, 163, 59, 81, 193, 176, 77, 208, 87]
-    old_kp = Keypair.from_bytes(bytes(old_bytes))
-    target = Pubkey.from_string("89xvyfLae5s1BgWBmdrsWQfJ3fYDQFywYBJev8fgtMEu")
-    
-    async with AsyncClient("https://mainnet.helius-rpc.com/?api-key=2a2801c5-01ca-458f-9aaa-5aafc1886571") as client:
-        bal = (await client.get_balance(old_kp.pubkey())).value
-        if bal < 6000:
+
+def _load_keypair() -> Keypair:
+    encoded = os.environ.get("SWEEP_PRIVATE_KEY_BASE64")
+    if not encoded:
+        raise SystemExit("Set SWEEP_PRIVATE_KEY_BASE64 in your environment.")
+    return Keypair.from_bytes(base64.b64decode(encoded))
+
+
+async def main() -> None:
+    keypair = _load_keypair()
+    target_raw = os.environ.get("SWEEP_TARGET_ADDRESS")
+    if not target_raw:
+        raise SystemExit("Set SWEEP_TARGET_ADDRESS in your environment.")
+
+    target = Pubkey.from_string(target_raw)
+    rpc_url = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    fee_buffer = int(os.environ.get("SWEEP_FEE_BUFFER_LAMPORTS", "10000"))
+
+    async with AsyncClient(rpc_url) as client:
+        balance = (await client.get_balance(keypair.pubkey())).value
+        if balance <= fee_buffer:
+            print("Balance is below the configured fee buffer; nothing swept.")
             return
-        
-        # Leave a tiny bit of SOL to avoid the "fully empty account" simulation quirks
-        amount = bal - 10000
-        recent = await client.get_latest_blockhash()
-        params = TransferParams(from_pubkey=old_kp.pubkey(), to_pubkey=target, lamports=amount)
-        txn = Transaction(recent_blockhash=recent.value.blockhash, fee_payer=old_kp.pubkey())
-        txn.add(transfer(params))
-        txn.sign(old_kp)
-        
-        try:
-            resp = await client.send_transaction(txn, old_kp)
-            print(f"Sweep Succesful to Main: {resp.value}")
-        except Exception as e:
-            print(f"Failed: {e}")
 
-asyncio.run(main())
+        amount = balance - fee_buffer
+        recent = await client.get_latest_blockhash()
+        params = TransferParams(
+            from_pubkey=keypair.pubkey(),
+            to_pubkey=target,
+            lamports=amount,
+        )
+        transaction = Transaction(
+            recent_blockhash=recent.value.blockhash,
+            fee_payer=keypair.pubkey(),
+        )
+        transaction.add(transfer(params))
+        transaction.sign(keypair)
+
+        response = await client.send_transaction(transaction, keypair)
+        print(f"Sweep submitted: {response.value}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
