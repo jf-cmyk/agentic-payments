@@ -46,6 +46,10 @@ DATA_CATALOG_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Data_Catalog.pdf"
 USER_FLOW_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_User_Flow.pdf"
 
 CONTACT_EMAIL = "info@blocksize.capital"
+GLAMA_MAINTAINER_EMAIL = os.getenv(
+    "PUBLIC_GLAMA_MAINTAINER_EMAIL",
+    "jf@blocksize-capital.com",
+).strip()
 CONTACT_PHONE = "+49 (0)69 870 0990 80"
 
 DISCOVERABLE_SYMBOL_COUNT = 6_368

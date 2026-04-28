@@ -49,8 +49,8 @@ from src.models import (
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
-    CONTACT_EMAIL,
     DATA_CATALOG_URL,
+    GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
     MCP_MANIFEST_URL,
     MCP_REGISTRY_AUTH_CONTENT,
@@ -178,7 +178,7 @@ async def get_glama_well_known() -> dict[str, object]:
     """Serve the Glama connector claim file."""
     return {
         "$schema": "https://glama.ai/mcp/schemas/connector.json",
-        "maintainers": [{"email": CONTACT_EMAIL}],
+        "maintainers": [{"email": GLAMA_MAINTAINER_EMAIL}],
     }
 
 

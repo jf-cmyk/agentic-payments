@@ -21,7 +21,7 @@ from src.resource_server import (
     _verify_payment,
 )
 from src.models import VWAPData, BidAskData
-from src.public_metadata import REPOSITORY_URL
+from src.public_metadata import GLAMA_MAINTAINER_EMAIL, REPOSITORY_URL
 from src.config import settings
 
 
@@ -73,7 +73,7 @@ class TestPublicListingSurfaces:
     def test_well_known_claim_files_exist(self, test_client):
         glama = test_client.get("/.well-known/glama.json")
         assert glama.status_code == 200
-        assert glama.json()["maintainers"][0]["email"] == "info@blocksize.capital"
+        assert glama.json()["maintainers"][0]["email"] == GLAMA_MAINTAINER_EMAIL
 
         registry_auth = test_client.get("/.well-known/mcp-registry-auth")
         assert registry_auth.status_code == 200
