@@ -4,7 +4,6 @@
   "description": "Public remote MCP discovery server for Blocksize Capital. Free instrument discovery, pricing inspection, and documentation search for the paid x402 market data API.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
-  "repository": "https://gitlab.com/jfocke/agentic-payments",
   "license": "MIT",
   "category": "Finance",
   "mcp_manifest": "https://mcp.blocksize.info/mcp/manifest.json",

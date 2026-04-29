@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from src import public_metadata, resource_server
 from src.resource_server import app
 from src.resource_server import (
     _DISCOVERY_RATE_LIMITER,
@@ -21,8 +22,8 @@ from src.resource_server import (
     _verify_payment,
 )
 from src.models import VWAPData, BidAskData
-from src.public_metadata import GLAMA_MAINTAINER_EMAIL, REPOSITORY_URL
 from src.config import settings
+from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 
 
 @pytest.fixture
@@ -57,6 +58,7 @@ class TestPublicListingSurfaces:
         data = response.json()
         assert data["transport"]["type"] == "streamable-http"
         assert data["transport"]["url"].endswith("/mcp/server/")
+        assert "repository" not in data["links"]
 
     def test_public_remote_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/mcp/server")
@@ -67,13 +69,29 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "info.blocksize.mcp/agentic-payments"
-        assert data["repository"]["url"] == REPOSITORY_URL
+        assert "repository" not in data
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
+
+    def test_repository_metadata_can_still_be_enabled(self, test_client, monkeypatch):
+        repository_url = "https://example.com/blocksize/agentic-payments"
+        monkeypatch.setattr(public_metadata, "REPOSITORY_URL", repository_url)
+        monkeypatch.setattr(public_metadata, "REPOSITORY_SOURCE", "github")
+        monkeypatch.setattr(resource_server, "REPOSITORY_URL", repository_url)
+
+        server_json = test_client.get("/server.json").json()
+        manifest = test_client.get("/mcp/manifest.json").json()
+
+        assert server_json["repository"] == {
+            "url": repository_url,
+            "source": "github",
+        }
+        assert manifest["links"]["repository"] == repository_url
 
     def test_well_known_claim_files_exist(self, test_client):
         glama = test_client.get("/.well-known/glama.json")
         assert glama.status_code == 200
-        assert glama.json()["maintainers"][0]["email"] == GLAMA_MAINTAINER_EMAIL
+        maintainer = glama.json()["maintainers"][0]
+        assert maintainer["email"] == GLAMA_MAINTAINER_EMAIL
 
         registry_auth = test_client.get("/.well-known/mcp-registry-auth")
         assert registry_auth.status_code == 200
@@ -103,6 +121,15 @@ class TestPublicListingSurfaces:
         assert test_client.get("/privacy").status_code == 200
         assert test_client.get("/quickstart/remote-mcp").status_code == 200
         assert test_client.get("/prompt-examples").status_code == 200
+
+    def test_support_page_does_not_expose_direct_email_or_gitlab_repo(self, test_client):
+        response = test_client.get("/support")
+        assert response.status_code == 200
+        body = response.text
+        assert "https://blocksize.info/contact/" in body
+        assert "info@blocksize.capital" not in body
+        assert "gitlab.com/jfocke/agentic-payments" not in body
+        assert "GitLab repository" not in body
 
 
 # ---------------------------------------------------------------------------

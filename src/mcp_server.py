@@ -666,7 +666,7 @@ async def fetch(id: str) -> str:
 @mcp.resource("blocksize://info")
 async def server_info() -> str:
     """Blocksize Capital MCP server information and capabilities."""
-    return json.dumps({
+    payload = {
         "name": "Blocksize Capital MCP Server",
         "version": APP_VERSION,
         "description": (
@@ -703,9 +703,11 @@ async def server_info() -> str:
             "server_json": SERVER_JSON_URL,
             "agent_manual": AGENT_MANUAL_URL,
             "data_catalog": DATA_CATALOG_URL,
-            "repository": REPOSITORY_URL,
         },
-    }, indent=2)
+    }
+    if REPOSITORY_URL:
+        payload["links"]["repository"] = REPOSITORY_URL
+    return json.dumps(payload, indent=2)
 
 
 # ---------------------------------------------------------------------------

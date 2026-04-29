@@ -17,11 +17,8 @@ PUBLIC_BASE_URL = _normalized_url(
     "PUBLIC_BASE_URL",
     "https://mcp.blocksize.info",
 )
-REPOSITORY_URL = os.getenv(
-    "PUBLIC_REPOSITORY_URL",
-    "https://gitlab.com/jfocke/agentic-payments",
-)
-REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "gitlab")
+REPOSITORY_URL = os.getenv("PUBLIC_REPOSITORY_URL", "").strip()
+REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "git")
 
 REMOTE_MCP_PATH = "/mcp/server"
 REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
@@ -45,7 +42,6 @@ PRICING_GUIDE_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Pricing_Guide.pdf"
 DATA_CATALOG_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Data_Catalog.pdf"
 USER_FLOW_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_User_Flow.pdf"
 
-CONTACT_EMAIL = "info@blocksize.capital"
 GLAMA_MAINTAINER_EMAIL = os.getenv(
     "PUBLIC_GLAMA_MAINTAINER_EMAIL",
     "jf@blocksize-capital.com",
@@ -69,16 +65,12 @@ OFFICIAL_REGISTRY_NAME = os.getenv(
 
 def build_server_json() -> dict[str, object]:
     """Build the official MCP Registry metadata payload."""
-    return {
+    payload: dict[str, object] = {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
         "name": OFFICIAL_REGISTRY_NAME,
         "description": (
             "Public MCP discovery for Blocksize market data, pricing, and docs."
         ),
-        "repository": {
-            "url": REPOSITORY_URL,
-            "source": REPOSITORY_SOURCE,
-        },
         "homepage": f"{PUBLIC_BASE_URL}/",
         "version": APP_VERSION,
         "remotes": [
@@ -88,6 +80,12 @@ def build_server_json() -> dict[str, object]:
             }
         ],
     }
+    if REPOSITORY_URL:
+        payload["repository"] = {
+            "url": REPOSITORY_URL,
+            "source": REPOSITORY_SOURCE,
+        }
+    return payload
 
 
 STATIC_DOCUMENTS = {

@@ -38,7 +38,7 @@ What exists:
 
 - `server.json`
 - public Streamable HTTP endpoint
-- GitLab repository metadata
+- public repository metadata omitted by default
 
 What still requires approval:
 

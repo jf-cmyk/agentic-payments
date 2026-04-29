@@ -2,10 +2,6 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "info.blocksize.mcp/agentic-payments",
   "description": "Public MCP discovery for Blocksize market data, pricing, and docs.",
-  "repository": {
-    "url": "https://gitlab.com/jfocke/agentic-payments",
-    "source": "gitlab"
-  },
   "homepage": "https://mcp.blocksize.info/",
   "version": "0.6.1",
   "remotes": [

@@ -1357,7 +1357,7 @@ async def mcp_manifest():
     Model Context Protocol (MCP) Manifest.
     Provides listing metadata for the public remote discovery server.
     """
-    return {
+    manifest: dict[str, object] = {
         "mcp_version": "1.0",
         "name": "Blocksize Capital Remote Discovery",
         "description": (
@@ -1392,7 +1392,6 @@ async def mcp_manifest():
             "server_json": SERVER_JSON_URL,
             "glama_claim": GLAMA_WELL_KNOWN_URL,
             "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
-            "repository": REPOSITORY_URL,
         },
         "tools": [
             {
@@ -1440,6 +1439,11 @@ async def mcp_manifest():
             "payment_model": "x402 or wallet credits",
         },
     }
+    if REPOSITORY_URL:
+        links = manifest["links"]
+        if isinstance(links, dict):
+            links["repository"] = REPOSITORY_URL
+    return manifest
 
 
 # ---------------------------------------------------------------------------
