@@ -52,6 +52,8 @@ class TestHealthEndpoint:
 
     def test_anthropic_only_health_hides_payment_metadata(self, test_client, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+        monkeypatch.setenv("ANTHROPIC_AUTH_PROVIDER", "clerk")
+        monkeypatch.setenv("ANTHROPIC_ENABLE_BETA_TOKENS", "false")
         monkeypatch.setenv(
             "ANTHROPIC_MCP_PUBLIC_URL",
             "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp",
@@ -64,6 +66,9 @@ class TestHealthEndpoint:
         assert data["service"] == "blocksize-anthropic-mcp-beta"
         assert data["tool_surface"] == "read-only"
         assert data["mcp_url"].endswith("/anthropic/mcp")
+        assert data["auth_provider"] == "clerk"
+        assert data["beta_tokens_enabled"] is False
+        assert data["oauth_callback_url"].endswith("/anthropic/mcp/auth/callback")
         assert "pricing" not in data
         assert "bulk_pricing" not in data
 

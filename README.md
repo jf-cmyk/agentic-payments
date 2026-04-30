@@ -75,8 +75,9 @@ identity. The default allowance is 50 credits per user per UTC day and can be
 changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
 
 For local beta testing, set `ANTHROPIC_BETA_TOKENS` to a JSON object mapping
-random bearer tokens to user ids. For production, set `ANTHROPIC_AUTH_PROVIDER`
-to `clerk`, `auth0`, or `supabase` and configure the provider env vars in
+random bearer tokens to user ids. For public Claude custom connectors, set
+`ANTHROPIC_AUTH_PROVIDER=clerk`, keep `ANTHROPIC_ENABLE_BETA_TOKENS=false`, and
+configure the Clerk env vars in
 [.env.example](/Users/johannfocke/Documents/Antigravity/Agentic Payments/.env.example).
 
 ### 4. Advanced local MCP

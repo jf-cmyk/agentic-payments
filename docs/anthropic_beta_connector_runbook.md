@@ -1,4 +1,4 @@
-# Anthropic MCP Beta Connector Runbook
+# Anthropic MCP Connector Runbook
 
 This runbook covers the Anthropic-safe Blocksize MCP endpoint:
 
@@ -26,49 +26,65 @@ Ready now:
   - `get_metal_price`
 - Default daily limit of 50 credits per user per UTC day.
 - Beta-token authentication for private API testing.
-- OAuth provider hooks for Clerk, Auth0, or Supabase.
+- OAuth provider support for public Claude custom connectors.
 
-Not ready for wider Claude.ai custom-connector use until complete:
+Use Clerk for the first public launch. FastMCP's Clerk provider supports OAuth
+proxying with DCR/CIMD, which aligns with Claude's public connector flow.
 
-- Rotate out any pasted or shared beta tokens.
-- Configure a real OAuth provider so each Claude user has their own identity.
-- Confirm a persistent Railway volume or managed database if beta state must
-  survive container replacement.
+Before directory submission:
+
+- Configure Clerk OAuth and disable beta-token fallback.
+- Confirm a persistent Railway volume or managed database for entitlement state.
+- Prepare a fully populated test account for Anthropic reviewers.
+- Publish a short public help page or blog post for setup/support.
 
 ## Railway Variables
 
-Minimum beta deployment variables:
+Minimum public OAuth deployment variables:
 
 ```text
 ANTHROPIC_ONLY_MODE=true
 ANTHROPIC_DAILY_CREDITS=50
-ANTHROPIC_ENTITLEMENT_DB_PATH=anthropic_entitlements.db
+ANTHROPIC_ENTITLEMENT_DB_PATH=/data/anthropic_entitlements.db
 ANTHROPIC_MCP_PUBLIC_URL=https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp
-ANTHROPIC_AUTH_PROVIDER=none
-ANTHROPIC_BETA_TOKENS={"<random-token>":{"user_id":"johann-beta-001","email":"jf@blocksize-capital.com"}}
-```
-
-Use `ANTHROPIC_AUTH_PROVIDER=none` only for the closed beta-token phase. For
-Claude.ai custom connectors, use one OAuth provider:
-
-```text
 ANTHROPIC_AUTH_PROVIDER=clerk
+ANTHROPIC_ENABLE_BETA_TOKENS=false
+ANTHROPIC_OAUTH_REDIRECT_PATH=/auth/callback
+ANTHROPIC_OAUTH_JWT_SIGNING_KEY=<long-random-secret>
+ANTHROPIC_ALLOWED_CLIENT_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback,http://localhost:*,http://127.0.0.1:*
 CLERK_DOMAIN=<your-clerk-domain>
 CLERK_CLIENT_ID=<your-clerk-client-id>
-CLERK_CLIENT_SECRET=<your-clerk-client-secret-if-required>
+CLERK_CLIENT_SECRET=<your-clerk-client-secret>
+ANTHROPIC_BETA_TOKENS=
 ```
 
-or:
+Register this callback URL in the Clerk OAuth application:
+
+```text
+https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/auth/callback
+```
+
+If the public MCP URL changes, the Clerk callback must change with it. For
+example, using `https://mcp.blocksize.info/anthropic/mcp` requires:
+
+```text
+https://mcp.blocksize.info/anthropic/mcp/auth/callback
+```
+
+Auth0 is also supported if needed:
 
 ```text
 ANTHROPIC_AUTH_PROVIDER=auth0
+ANTHROPIC_ENABLE_BETA_TOKENS=false
 AUTH0_CONFIG_URL=https://<tenant>/.well-known/openid-configuration
 AUTH0_CLIENT_ID=<auth0-client-id>
 AUTH0_CLIENT_SECRET=<auth0-client-secret>
 AUTH0_AUDIENCE=<auth0-api-audience>
 ```
 
-or:
+Supabase is supported for private testing, but Clerk is preferred for the first
+public launch because Supabase's FastMCP provider warns about resource-specific
+audience validation limitations.
 
 ```text
 ANTHROPIC_AUTH_PROVIDER=supabase
@@ -101,6 +117,21 @@ Full beta-token check that spends up to 6 credits:
 BETA_TOKEN="<current-beta-token>" .venv/bin/python scripts/test_anthropic_mcp_connector.py --spend-live
 ```
 
+OAuth mode check:
+
+1. Open Claude and add the custom connector URL.
+2. Complete the Clerk consent flow.
+3. Ask Claude to call `get_credit_balance`.
+4. Ask Claude to call `get_vwap` for `BTCUSD`.
+5. Confirm `/health` reports:
+
+   ```text
+   auth_provider=clerk
+   beta_tokens_enabled=false
+   daily_credits=50
+   tool_surface=read-only
+   ```
+
 Expected behavior:
 
 - Tool discovery succeeds.
@@ -112,13 +143,13 @@ Expected behavior:
 
 ## Claude Connector Path
 
-For a quick Messages API integration, use the beta-token phase by passing the
-token as the MCP server `authorization_token`. Current Anthropic API examples
-should use the `anthropic-beta: mcp-client-2025-11-20` header.
+For a private Messages API integration, beta tokens can still be passed as the
+MCP server `authorization_token`. Current Anthropic API examples should use the
+`anthropic-beta: mcp-client-2025-11-20` header.
 
-For Claude.ai custom connectors, prefer OAuth:
+For Claude.ai custom connectors and public consumption, use OAuth:
 
-1. Configure Clerk, Auth0, or Supabase in Railway.
+1. Configure Clerk in Railway.
 2. Redeploy the beta service.
 3. Allow the Claude OAuth callback URL in the provider if the provider requires
    explicit callback allowlisting:
@@ -142,9 +173,10 @@ For Claude.ai custom connectors, prefer OAuth:
 
 Before adding more users:
 
+- Set `ANTHROPIC_AUTH_PROVIDER=clerk`.
+- Set `ANTHROPIC_ENABLE_BETA_TOKENS=false`.
 - Remove old beta tokens from `ANTHROPIC_BETA_TOKENS`.
-- Redeploy after token changes.
-- Verify old tokens fail.
+- Redeploy after auth changes.
+- Verify old tokens fail with `--expect-auth-fail`.
 - Keep `ANTHROPIC_DAILY_CREDITS=50`.
-- Decide whether the beta entitlement database can be ephemeral. If not, attach
-  a Railway volume or move entitlements to a managed database.
+- Attach a Railway volume at `/data` or move entitlements to a managed database.

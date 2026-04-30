@@ -70,6 +70,7 @@ from src.public_metadata import (
     USER_FLOW_URL,
     build_server_json,
 )
+from src import anthropic_auth
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
 from src.public_mcp_server import public_mcp
@@ -1491,6 +1492,8 @@ async def health_check() -> dict[str, Any]:
             ),
             "transport": "streamable-http",
             "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
+            "oauth_callback_url": anthropic_auth.oauth_callback_url(),
+            "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
             "tool_surface": "read-only",
             "tool_costs": ANTHROPIC_TOOL_COSTS,
