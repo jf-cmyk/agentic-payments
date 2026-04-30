@@ -69,7 +69,22 @@ async def test_vwap_spends_one_credit(monkeypatch):
 
     assert "VWAP [btc-usd]" in result
     assert "Credits remaining today: 1/2" in result
+    mock_client.get_vwap_latest.assert_awaited_once_with("BTCUSD")
     assert server._entitlements.status("user-1").credits_remaining == 1
+
+
+@pytest.mark.asyncio
+async def test_vwap_rejects_invalid_symbol_without_spending(monkeypatch):
+    monkeypatch.setattr(server.anthropic_auth, "resolve_anthropic_identity", _identity)
+    mock_client = AsyncMock()
+    server._client = mock_client
+
+    result = await server.anthropic_get_vwap("../bad")
+    parsed = json.loads(result)
+
+    assert parsed["error_code"] == "INVALID_SYMBOL"
+    assert server._entitlements.status("user-1").credits_remaining == 2
+    mock_client.get_vwap_latest.assert_not_called()
 
 
 @pytest.mark.asyncio

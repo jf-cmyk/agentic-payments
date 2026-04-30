@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Annotated, Awaitable, Callable, Literal, TypeVar
 
 from fastmcp import FastMCP
@@ -56,6 +57,7 @@ TOOL_COSTS = {
     "get_fx_rate": 2,
     "get_metal_price": 2,
 }
+SYMBOL_RE = re.compile(r"^[A-Z0-9.]{2,32}$")
 
 anthropic_mcp = FastMCP(
     "Blocksize Market Data",
@@ -106,6 +108,21 @@ def _credit_payload(status: CreditStatus) -> dict[str, object]:
         "credits_remaining": status.credits_remaining,
         "status": status.status,
     }
+
+
+def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
+    raw = value.strip()
+    if len(raw) > 64:
+        raise ValueError(f"{field_name} is too long")
+    clean = raw.replace("-", "").replace("/", "").replace("_", "").upper()
+    if (
+        not SYMBOL_RE.fullmatch(clean)
+        or clean.startswith(".")
+        or clean.endswith(".")
+        or ".." in clean
+    ):
+        raise ValueError(f"Invalid {field_name}; use 2-32 letters, digits, or dots")
+    return clean
 
 
 async def _with_credits(
@@ -260,8 +277,13 @@ async def anthropic_get_credit_balance() -> str:
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def anthropic_get_vwap(pair: PairValue) -> str:
+    try:
+        clean_pair = _normalise_symbol(pair, "pair")
+    except ValueError as e:
+        return _error_payload("INVALID_SYMBOL", str(e))
+
     async def call():
-        return await (await _get_client()).get_vwap_latest(pair)
+        return await (await _get_client()).get_vwap_latest(clean_pair)
 
     def render(data) -> str:
         response = VWAPResponse(data=data)
@@ -270,7 +292,7 @@ async def anthropic_get_vwap(pair: PairValue) -> str:
             f"{json.dumps(response.model_dump(), default=str, indent=2)}\n</details>"
         )
 
-    return await _with_credits("get_vwap", pair, call, render)
+    return await _with_credits("get_vwap", clean_pair, call, render)
 
 
 @anthropic_mcp.tool(
@@ -283,8 +305,13 @@ async def anthropic_get_vwap(pair: PairValue) -> str:
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def anthropic_get_bid_ask(pair: PairValue) -> str:
+    try:
+        clean_pair = _normalise_symbol(pair, "pair")
+    except ValueError as e:
+        return _error_payload("INVALID_SYMBOL", str(e))
+
     async def call():
-        return await (await _get_client()).get_bidask_snapshot(pair)
+        return await (await _get_client()).get_bidask_snapshot(clean_pair)
 
     def render(data) -> str:
         response = BidAskResponse(data=data)
@@ -293,7 +320,7 @@ async def anthropic_get_bid_ask(pair: PairValue) -> str:
             f"{json.dumps(response.model_dump(), default=str, indent=2)}\n</details>"
         )
 
-    return await _with_credits("get_bid_ask", pair, call, render)
+    return await _with_credits("get_bid_ask", clean_pair, call, render)
 
 
 @anthropic_mcp.tool(
@@ -306,8 +333,13 @@ async def anthropic_get_bid_ask(pair: PairValue) -> str:
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def anthropic_get_fx_rate(pair: PairValue) -> str:
+    try:
+        clean_pair = _normalise_symbol(pair, "pair")
+    except ValueError as e:
+        return _error_payload("INVALID_SYMBOL", str(e))
+
     async def call():
-        return await (await _get_client()).get_fx_rate(pair)
+        return await (await _get_client()).get_fx_rate(clean_pair)
 
     def render(data) -> str:
         return (
@@ -315,7 +347,7 @@ async def anthropic_get_fx_rate(pair: PairValue) -> str:
             f"{json.dumps(data.model_dump(), default=str, indent=2)}\n</details>"
         )
 
-    return await _with_credits("get_fx_rate", pair, call, render)
+    return await _with_credits("get_fx_rate", clean_pair, call, render)
 
 
 @anthropic_mcp.tool(
@@ -328,8 +360,13 @@ async def anthropic_get_fx_rate(pair: PairValue) -> str:
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def anthropic_get_metal_price(ticker: PairValue) -> str:
+    try:
+        clean_ticker = _normalise_symbol(ticker, "ticker")
+    except ValueError as e:
+        return _error_payload("INVALID_SYMBOL", str(e))
+
     async def call():
-        return await (await _get_client()).get_metal_price(ticker)
+        return await (await _get_client()).get_metal_price(clean_ticker)
 
     def render(data) -> str:
         return (
@@ -337,7 +374,7 @@ async def anthropic_get_metal_price(ticker: PairValue) -> str:
             f"{json.dumps(data.model_dump(), default=str, indent=2)}\n</details>"
         )
 
-    return await _with_credits("get_metal_price", ticker, call, render)
+    return await _with_credits("get_metal_price", clean_ticker, call, render)
 
 
 @anthropic_mcp.resource("blocksize://anthropic-info")
