@@ -70,6 +70,7 @@ from src.public_metadata import (
     USER_FLOW_URL,
     build_server_json,
 )
+from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
 from src.public_mcp_server import public_mcp
 
@@ -127,6 +128,27 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE"],
 )
+
+
+def _anthropic_only_mode() -> bool:
+    value = os.environ.get("ANTHROPIC_ONLY_MODE", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _anthropic_only_allowed_path(path: str) -> bool:
+    clean_path = path.rstrip("/") or "/"
+    return clean_path == "/health" or clean_path.startswith("/anthropic/mcp")
+
+
+def _anthropic_only_block_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={
+            "status": "error",
+            "error_code": "ANTHROPIC_ONLY_MODE",
+            "message": "This deployment exposes only the Anthropic-safe MCP endpoint.",
+        },
+    )
 
 # Serve the Developer Portal as the main landing page
 @app.get("/", include_in_schema=False)
@@ -961,6 +983,9 @@ async def x402_payment_middleware(request: Request, call_next):
     4. If present → verify → proceed or reject
     5. After response → settle payment
     """
+    if _anthropic_only_mode() and not _anthropic_only_allowed_path(request.url.path):
+        return _anthropic_only_block_response()
+
     discovery_limit = _discovery_rate_limit_response(request)
     if discovery_limit is not None:
         return discovery_limit
@@ -1455,6 +1480,22 @@ async def mcp_manifest():
 @app.get("/health")
 async def health_check() -> dict[str, Any]:
     """Health check — free."""
+    if _anthropic_only_mode():
+        return {
+            "status": "healthy",
+            "service": "blocksize-anthropic-mcp-beta",
+            "version": APP_VERSION,
+            "mcp_url": os.environ.get(
+                "ANTHROPIC_MCP_PUBLIC_URL",
+                f"{PUBLIC_BASE_URL.rstrip('/')}/anthropic/mcp",
+            ),
+            "transport": "streamable-http",
+            "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
+            "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
+            "tool_surface": "read-only",
+            "tool_costs": ANTHROPIC_TOOL_COSTS,
+        }
+
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",

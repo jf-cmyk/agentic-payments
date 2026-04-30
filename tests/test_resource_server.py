@@ -50,8 +50,38 @@ class TestHealthEndpoint:
         assert "networks" in data
         assert "links" in data
 
+    def test_anthropic_only_health_hides_payment_metadata(self, test_client, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+        monkeypatch.setenv(
+            "ANTHROPIC_MCP_PUBLIC_URL",
+            "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp",
+        )
+
+        response = test_client.get("/health")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["service"] == "blocksize-anthropic-mcp-beta"
+        assert data["tool_surface"] == "read-only"
+        assert data["mcp_url"].endswith("/anthropic/mcp")
+        assert "pricing" not in data
+        assert "bulk_pricing" not in data
+
 
 class TestPublicListingSurfaces:
+    def test_anthropic_only_mode_blocks_non_anthropic_surfaces(self, test_client, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+
+        paid_response = test_client.get("/v1/vwap/btc-usd")
+        public_mcp_response = test_client.get("/mcp/server")
+        anthropic_response = test_client.get("/anthropic/mcp")
+
+        assert paid_response.status_code == 404
+        assert paid_response.json()["error_code"] == "ANTHROPIC_ONLY_MODE"
+        assert public_mcp_response.status_code == 404
+        assert anthropic_response.status_code != 404
+        assert "PAYMENT-REQUIRED" not in anthropic_response.headers
+
     def test_manifest_exposes_remote_mcp_url(self, test_client):
         response = test_client.get("/mcp/manifest.json")
         assert response.status_code == 200

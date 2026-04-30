@@ -86,6 +86,7 @@ mcp = FastMCP(
 _client: BlocksizeClient | None = None
 READ_ONLY_TOOL_ANNOTATIONS = {
     "readOnlyHint": True,
+    "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": True,
 }

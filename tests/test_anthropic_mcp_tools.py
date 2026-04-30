@@ -30,6 +30,14 @@ def _identity():
     return AnthropicIdentity(user_id="user-1", email="user@example.com", source="test")
 
 
+def test_anthropic_tools_use_directory_safe_annotations():
+    annotations = server.READ_ONLY_TOOL_ANNOTATIONS
+
+    assert annotations["readOnlyHint"] is True
+    assert annotations["destructiveHint"] is False
+    assert annotations["idempotentHint"] is True
+
+
 @pytest.mark.asyncio
 async def test_live_tool_requires_identity():
     result = await server.anthropic_get_vwap("btc-usd")
