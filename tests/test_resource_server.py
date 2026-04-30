@@ -64,6 +64,11 @@ class TestPublicListingSurfaces:
         response = test_client.get("/mcp/server")
         assert response.status_code != 404
 
+    def test_anthropic_safe_mcp_endpoint_exists(self, test_client):
+        response = test_client.get("/anthropic/mcp")
+        assert response.status_code != 404
+        assert "PAYMENT-REQUIRED" not in response.headers
+
     def test_server_json_is_served(self, test_client):
         response = test_client.get("/server.json")
         assert response.status_code == 200

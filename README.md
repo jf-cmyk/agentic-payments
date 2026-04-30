@@ -4,11 +4,13 @@ Institutional-grade market data for AI agents, with two public integration layer
 
 - Public remote MCP discovery server: free symbol discovery, pricing inspection, and document search
 - Paid HTTP API: live market data protected by x402 settlement or wallet-credit drawdown
+- Anthropic-safe MCP beta: authenticated read-only market data with daily user credits
 
 ## Public URLs
 
 - Homepage: `https://mcp.blocksize.info/`
 - Remote MCP URL: `https://mcp.blocksize.info/mcp/server/`
+- Anthropic-safe MCP URL: `https://mcp.blocksize.info/anthropic/mcp/`
 - MCP manifest: `https://mcp.blocksize.info/mcp/manifest.json`
 - OpenAPI JSON: `https://mcp.blocksize.info/openapi.json`
 - Swagger UI: `https://mcp.blocksize.info/docs`
@@ -55,7 +57,29 @@ Payment modes:
 - x402 proof per request
 - Wallet-credit drawdown via `X-AGENT-WALLET`
 
-### 3. Advanced local MCP
+### 3. Anthropic-safe MCP beta
+
+The Anthropic-safe MCP surface is mounted at `/anthropic/mcp/` and exposes
+read-only tools only:
+
+- `search_pairs`
+- `list_instruments`
+- `get_credit_balance`
+- `get_vwap`
+- `get_bid_ask`
+- `get_fx_rate`
+- `get_metal_price`
+
+Live market data tools use server-side daily credits keyed to authenticated user
+identity. The default allowance is 50 credits per user per UTC day and can be
+changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
+
+For local beta testing, set `ANTHROPIC_BETA_TOKENS` to a JSON object mapping
+random bearer tokens to user ids. For production, set `ANTHROPIC_AUTH_PROVIDER`
+to `clerk`, `auth0`, or `supabase` and configure the provider env vars in
+[.env.example](/Users/johannfocke/Documents/Antigravity/Agentic Payments/.env.example).
+
+### 4. Advanced local MCP
 
 For builders who want the full tool surface inside a local MCP client, this repo also contains the advanced local MCP server in [src/mcp_server.py](/Users/johannfocke/Documents/Antigravity/Agentic Payments/src/mcp_server.py).
 

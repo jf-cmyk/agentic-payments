@@ -70,11 +70,13 @@ from src.public_metadata import (
     USER_FLOW_URL,
     build_server_json,
 )
+from src.anthropic_mcp_server import anthropic_mcp
 from src.public_mcp_server import public_mcp
 
 logger = logging.getLogger(__name__)
 DOCS_DIR = Path("docs")
 PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
+ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +92,8 @@ async def lifespan(app: FastAPI):
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
-        yield
+        async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
+            yield
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
 
@@ -205,6 +208,7 @@ async def get_x402_well_known() -> dict[str, object]:
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
 app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
+app.mount("/anthropic/mcp", ANTHROPIC_MCP_HTTP_APP, name="anthropic-mcp")
 
 
 # ---------------------------------------------------------------------------
