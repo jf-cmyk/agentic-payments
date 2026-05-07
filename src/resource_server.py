@@ -429,6 +429,11 @@ def _x402_v2_accepts(payment_requirements: list[dict]) -> list[dict[str, Any]]:
     accepts: list[dict[str, Any]] = []
     for requirement in payment_requirements:
         extra = requirement.get("extra")
+        fallback_asset = (
+            settings.x402.solana_usdc_address
+            if _network_kind(str(requirement.get("network", ""))) == "solana"
+            else settings.x402.base_usdc_address
+        )
         accepts.append({
             "scheme": str(requirement.get("scheme") or "exact"),
             "network": str(requirement.get("network") or ""),
@@ -437,12 +442,21 @@ def _x402_v2_accepts(payment_requirements: list[dict]) -> list[dict[str, Any]]:
                 or requirement.get("maxAmountRequired")
                 or "0"
             ),
-            "asset": str(requirement.get("asset") or ""),
+            "asset": _requirement_asset(requirement, fallback_asset),
             "payTo": str(requirement.get("payTo") or requirement.get("resource") or ""),
             "maxTimeoutSeconds": int(requirement.get("maxTimeoutSeconds") or 60),
             "extra": extra if isinstance(extra, dict) else {},
         })
     return accepts
+
+
+def _public_request_url(request: Request) -> str:
+    """Build the canonical public URL used inside payment challenges."""
+    base = PUBLIC_BASE_URL.rstrip("/")
+    path = request.url.path
+    query = request.url.query
+    url = f"{base}{path}"
+    return f"{url}?{query}" if query else url
 
 
 def _x402_payment_required(
@@ -453,7 +467,7 @@ def _x402_payment_required(
         "x402Version": 2,
         "error": "Payment Required",
         "resource": {
-            "url": str(request.url),
+            "url": _public_request_url(request),
             "description": _x402_endpoint_description(request.url.path),
             "mimeType": "application/json",
         },

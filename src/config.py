@@ -138,10 +138,8 @@ class PricingSettings(BaseSettings):
     Tiers:
       - Discovery:       FREE
       - Core Crypto:     $0.002 (top 250 by market cap)
-      - Extended & State: $0.004 (niche/long-tail + state snapshots)
-      - TradFi:          $0.005 (FX, metals, commodities)
-      - Equities:        $0.008 (US + Chinese stocks)
-      - Analytics:       $0.001 (30-min VWAP, 24-hr VWAP)
+      - Extended Crypto: $0.004 (niche/long-tail bid/ask and VWAP)
+      - TradFi:          $0.005 (currently enabled FX and metals)
     """
 
     core_crypto: Decimal = Field(Decimal("0.002"), alias="PRICE_CORE_CRYPTO")

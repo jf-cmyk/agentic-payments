@@ -2,6 +2,8 @@
 
 Prepared: 2026-04-21
 
+Updated: 2026-05-07 to add Pay.sh as a dedicated agent-paid API marketplace and registry surface.
+
 ## Why this matters
 
 The target list should not only be "companies that might like Blocksize." It should be anchored in the places where agents already discover tools, APIs, connectors, and paid capabilities. If Blocksize wants agentic payments to become the main revenue driver, then distribution has to follow the agent's native path to discovery.
@@ -57,7 +59,22 @@ Implication for Blocksize:
 - It matters because Blocksize can become a canonical "seller" example: financial market data that agents can buy per call.
 - This is strategically valuable even if volume is smaller today, because it aligns directly with revenue architecture.
 
-### 4. Agent infrastructure ecosystems
+### 4. Pay.sh API Catalog / pay-skills Registry
+
+Why it matters:
+
+- Pay.sh is a live catalog for pay-as-you-go APIs that agents and command-line workflows can discover and call.
+- It is built around the exact flow Blocksize wants to own: discover an API, inspect price and endpoint metadata, pay per request, and receive a response without account setup.
+- The `pay-skills` registry is open source and accepts provider listings through PRs once endpoints return valid Solana 402 challenges.
+- Pay.sh launched with Solana Foundation and Google Cloud visibility, making it a high-signal ecosystem surface rather than a small standalone directory.
+
+Implication for Blocksize:
+
+- Pay.sh should move into the highest-priority distribution plan, alongside x402 ecosystem outreach and MCP directories.
+- Blocksize should enter as `blocksize/market-data`, not as a generic crypto API, because the current catalog already includes crypto/onchain providers.
+- The near-term goal is a validated listing path and a Pay.sh-native demo command.
+
+### 5. Agent infrastructure ecosystems
 
 Examples:
 
@@ -80,7 +97,7 @@ Implication for Blocksize:
 - They are where an agent-paid data primitive can become a default tool inside real workflows.
 - These should stay high on the target list.
 
-### 5. Emerging premium content / publisher marketplaces
+### 6. Emerging premium content / publisher marketplaces
 
 Why it matters:
 
@@ -109,6 +126,7 @@ There is not one dominant "agent marketplace" yet. There are three layers:
    - QuickNode
 
 3. Monetization and protocol layers:
+   - Pay.sh / pay-skills
    - x402
    - Circle programmable payments
    - emerging publisher marketplaces
@@ -133,6 +151,7 @@ Why:
 
 ### Tier 2: Protocol and monetization leverage
 
+- Pay.sh / pay-skills registry
 - Coinbase Developer Platform / x402
 - Circle
 - Skyfire
@@ -141,6 +160,7 @@ Why:
 
 - These companies shape how agents pay, authenticate, and route value.
 - Winning here strengthens Blocksize's monetization credibility.
+- Pay.sh is also a direct discovery surface, so it deserves both protocol-partner and marketplace treatment.
 
 ### Tier 3: Connector and directory discovery
 
@@ -189,11 +209,12 @@ That means the best immediate target cluster is:
 3. Exa
 4. Dune
 5. Coinbase x402
-6. Circle
-7. Anthropic MCP directory path
-8. Alchemy
-9. QuickNode
-10. Skyfire
+6. Pay.sh / pay-skills
+7. Circle
+8. Anthropic MCP directory path
+9. Alchemy
+10. QuickNode
+11. Skyfire
 
 ## Immediate actions
 
@@ -205,6 +226,7 @@ That means the best immediate target cluster is:
 3. Prepare a Blocksize MCP directory listing strategy.
 4. Prepare a GPT Store discovery strategy, but do not treat it as the core monetization plan.
 5. Add a "where agents discover Blocksize" section to the GTM operating loop.
+6. Prepare and validate a Pay.sh registry listing draft for `blocksize/market-data`.
 
 ## Sources
 
@@ -221,3 +243,7 @@ That means the best immediate target cluster is:
 - Firecrawl site: https://www.firecrawl.dev/
 - Exa API: https://exa.ai/exa-api
 - Flipside docs: https://docs.flipsidecrypto.com/
+- Pay.sh: https://pay.sh/
+- Pay.sh docs overview: https://pay.sh/docs
+- Pay Skills registry: https://github.com/solana-foundation/pay-skills
+- Solana Foundation Pay.sh launch, published 2026-05-05: https://solana.com/uk/news/solana-foundation-launches-pay-sh-in-collaboration-with-google-cloud

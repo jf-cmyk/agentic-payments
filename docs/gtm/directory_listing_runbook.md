@@ -4,7 +4,7 @@ Prepared: 2026-04-21
 
 ## Goal
 
-Get Blocksize listed anywhere a public remote MCP server can be discovered without relying on direct outreach.
+Get Blocksize listed anywhere a public remote MCP server or agent-paid API can be discovered without relying on direct outreach.
 
 ## What is now implemented in the repo
 
@@ -84,7 +84,33 @@ What still requires approval:
 2. Wait for Glama to detect the claim file.
 3. Claim and enrich the connector listing.
 
-### 4. Anthropic Connectors Directory
+### 4. Pay.sh / pay-skills
+
+Status: promising, requires compatibility validation before PR submission
+
+Why it matters:
+
+- Pay.sh is a live catalog for agent-discoverable, pay-as-you-go APIs.
+- The `pay-skills` registry accepts provider entries via GitHub PR after local validation.
+- Pay.sh's provider model maps well to the paid HTTP API, not the public remote MCP discovery server.
+
+What exists:
+
+- Public HTTPS service URL at `https://mcp.blocksize.info`
+- OpenAPI JSON at `https://mcp.blocksize.info/openapi.json`
+- Paid x402-style endpoints for VWAP, bid/ask, FX, metals, and batch calls
+- Solana primary settlement in USDC
+- Draft positioning and `PAY.md` entry in [pay_sh_positioning_plan.md](pay_sh_positioning_plan.md)
+
+What still requires approval:
+
+1. Install or run the Pay.sh CLI.
+2. Validate one production sample endpoint with `pay catalog check`.
+3. Decide whether to use native Blocksize x402 responses or a Pay.sh gateway proxy.
+4. Open a `pay-skills` PR for `providers/blocksize/market-data/PAY.md`.
+5. Optionally submit the official Pay.sh API provider application.
+
+### 5. Anthropic Connectors Directory
 
 Status: artifacts prepared, submission should be treated as policy-risky
 
@@ -104,7 +130,7 @@ What still requires approval:
    - prompt examples
    - reviewer guidance
 
-### 5. OpenAI
+### 6. OpenAI
 
 Status: no public directory flow identified in current docs
 
@@ -140,6 +166,10 @@ Sign into Glama with the maintainer email and claim the connector.
 
 Decide whether to submit to Anthropic despite the current policy risk around financial flows.
 
+### Approval checkpoint F
+
+Allow Pay.sh CLI validation and, if successful, approve either a `pay-skills` registry PR or a Pay.sh provider application.
+
 ## Source notes
 
 - OpenAI docs support remote MCP in Developer Mode and describe `search` / `fetch` expectations for ChatGPT connectors and deep research.
@@ -148,3 +178,4 @@ Decide whether to submit to Anthropic despite the current policy risk around fin
 - Anthropic directory policy requires privacy, support, prompt examples, annotations, and a reviewer path.
 - Smithery docs say already-hosted Streamable HTTP servers can be published via the URL method.
 - Glama docs say ownership can be claimed by publishing `/.well-known/glama.json`.
+- Pay.sh docs and the `pay-skills` registry describe provider entries with service URLs, OpenAPI metadata, spend-aware usage notes, and Solana-compatible 402 validation.

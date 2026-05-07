@@ -72,6 +72,8 @@ Start with these because they combine strong fit with a clear agentic-payment na
 9. The Graph
 10. Alchemy
 
+Pay.sh / Solana Foundation should be added as an immediate overlay target because it is both a protocol partner and a live discovery surface for agent-paid APIs. Treat it as adjacent to Coinbase/x402 and Circle rather than waiting for a later generic directory-submission pass.
+
 ## Segment Messaging
 
 ### Agent Tooling Platforms
@@ -92,11 +94,13 @@ Best ask: "Which one premium query would you expose if an agent could pay for it
 
 ### Protocol And Payment Partners
 
-Accounts: Coinbase CDP/x402, Circle, Skyfire.
+Accounts: Pay.sh / Solana Foundation, Coinbase CDP/x402, Circle, Skyfire.
 
 Angle: "Blocksize can be a concrete financial-data seller use case for agentic payments: real data, clear per-call pricing, demoable 402 flow, and an institutional trust roadmap."
 
 Best ask: "What would make this a credible showcase or ecosystem integration?"
+
+Pay.sh-specific ask: "Would your team review whether Blocksize should be listed as `blocksize/market-data` in Pay.sh / pay-skills, and tell us what challenge-shape or provider metadata gaps to close before submission?"
 
 ### Compliance And Payments Ops
 
@@ -130,6 +134,8 @@ Best ask: "What control would you need before letting an agent pay for financial
 - Coinbase x402 flow details payment requirements and `PAYMENT-SIGNATURE`: https://docs.cdp.coinbase.com/x402/core-concepts/how-it-works
 - Coinbase x402 product page positions pay-per-use API and AI-agent payments: https://www.coinbase.com/developer-platform/products/x402/
 - Circle describes autonomous USDC payments using Circle Wallets and x402: https://www.circle.com/blog/autonomous-payments-using-circle-wallets-usdc-and-x402
+- Pay.sh is a Solana Foundation / Google Cloud agent API payment catalog launched on 2026-05-05: https://solana.com/uk/news/solana-foundation-launches-pay-sh-in-collaboration-with-google-cloud
+- Pay Skills registry describes provider entries and Solana-compatible 402 validation: https://github.com/solana-foundation/pay-skills
 - Dune docs describe programmatic API access, datasets, and MCP-ready analytics: https://docs.dune.com/api-reference/overview/introduction
 - Dune API/connectors page positions APIs and MCP access for onchain data: https://dune.com/apis-and-connectors/
 - Browserbase positions itself as a platform for agents to browse, search, fetch, and run cloud browsers: https://docs.browserbase.com/

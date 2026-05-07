@@ -74,11 +74,11 @@ def generate_catalog():
     pdf.chapter_title("Institutional Data Catalog")
     
     catalog = [
-        ("Crypto Market Data", "Core", "2.0 Credits", "BTC/USD, ETH/USD, SOL/USD, 4000+ pairs"),
-        ("Global Equities", "Enterprise", "8.0 Credits", "AAPL, TSLA, NVDA (US), 00700 (HK)"),
-        ("FX Spot Rates", "Standard", "4.0 Credits", "EUR/USD, GBP/USD, JPY/USD (120+ pairs)"),
-        ("Precious Metals", "Standard", "5.0 Credits", "XAU (Gold), XAG (Silver) vs USD/EUR"),
-        ("Global Commodities", "Extended", "6.0 Credits", "BRENT, WTI, NATGAS, COPPER")
+        ("Crypto VWAP", "Core", "2.0-4.0 Credits", "BTC/USD, ETH/USD, SOL/USD, and supported long-tail pairs"),
+        ("Crypto Bid/Ask", "Core", "2.0-4.0 Credits", "Shared bid/ask namespace for supported crypto symbols"),
+        ("FX Spot Rates", "Standard", "5.0 Credits", "Currently enabled FX pairs such as EUR/USD"),
+        ("Precious Metals", "Standard", "5.0 Credits", "XAU, XAG, XPT, XPD, and copper tickers"),
+        ("Discovery and Docs", "Free", "0 Credits", "Search, instrument lists, pricing, prompt examples, and support docs")
     ]
     
     for cat, tier, cost, symbols in catalog:
@@ -98,7 +98,7 @@ def generate_flow():
     pdf.body_text("1. Agent performs GET to /v1/vwap/BTC-USD.\n2. Server returns 402 Payment Required.\n3. Server provides 'Payment-Required' header with cost and destination wallet.\n4. Agent settles USDC via Solana/Base.\n5. Agent resubmits with 'Payment-Signature' containing TX Hash.")
     
     pdf.section_title("2. Deterministic Unlock")
-    pdf.body_text("Upon verification, the gateway unlocks the institutional payload for 24 hours for that specific wallet/symbol pair (unless using Credits).")
+    pdf.body_text("Upon verification, the gateway serves the paid JSON payload for that request and records the payment proof to prevent replay. Wallet credits can be used for lower-latency drawdown.")
     
     pdf.output("docs/pdf/Blocksize_User_Flow.pdf")
     print("Generated: Blocksize_User_Flow.pdf")

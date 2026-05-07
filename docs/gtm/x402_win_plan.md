@@ -2,6 +2,8 @@
 
 Prepared: 2026-04-21
 
+Updated: 2026-05-07 to add Pay.sh as a dedicated x402-native API catalog and distribution path.
+
 ## Goal
 
 Make Blocksize the default financial-data seller in the x402 ecosystem.
@@ -80,15 +82,17 @@ Win condition:
 
 ### 3. Win distribution inside x402-native channels
 
-There are three important x402 surfaces:
+There are four important x402 surfaces:
 
 1. Coinbase Developer Platform / x402 team
 2. x402 ecosystem listing and showcase surfaces
-3. builder channels such as docs, community, and partner references
+3. Pay.sh / pay-skills API catalog
+4. builder channels such as docs, community, and partner references
 
 Blocksize should aim for:
 
 - x402 ecosystem inclusion
+- Pay.sh listing as `blocksize/market-data`
 - direct Coinbase/x402 feedback on seller-side flow quality
 - references in conversations about paid data APIs
 - eventual showcase or case-study status
@@ -172,6 +176,7 @@ With this, Blocksize can become the trusted financial-data seller in the ecosyst
 
 ### Adjacent agent distribution
 
+- Pay.sh / pay-skills
 - Anthropic MCP / Connectors Directory
 - ChatGPT GPT Store / GPT distribution layer
 - Exa
@@ -197,12 +202,13 @@ With this, Blocksize can become the trusted financial-data seller in the ecosyst
 
 ### Week 2: ecosystem targeting
 
-- Prioritize outreach to Coinbase/x402, Circle, Skyfire, Browserbase, Exa, Nansen, and Anthropic connector distribution paths.
+- Prioritize outreach to Pay.sh, Coinbase/x402, Circle, Skyfire, Browserbase, Exa, Nansen, and Anthropic connector distribution paths.
 - Adjust message variants so they sound ecosystem-native, not generic B2B outreach.
 - Start using "seller-side x402 showcase" language consistently.
 
 ### Week 3: distribution path buildout
 
+- Validate and prepare the Pay.sh `blocksize/market-data` registry listing.
 - Prepare for Anthropic MCP directory submission path.
 - Prepare a ChatGPT distribution plan around GPT discovery and workflow entry points.
 - Map where Blocksize should appear as a paid data capability inside agent workflows.
@@ -221,6 +227,7 @@ With this, Blocksize can become the trusted financial-data seller in the ecosyst
 - Number of paid or mock-paid calls from agent workflows
 - Number of ecosystem references or introductions
 - Number of distribution paths opened:
+  - Pay.sh / pay-skills
   - x402 ecosystem
   - Anthropic MCP
   - ChatGPT GPT distribution
@@ -240,7 +247,7 @@ Blocksize wins the x402 ecosystem by combining:
 - the best financial-data seller story
 - the best economic demo
 - the easiest seller integration
-- visible distribution across x402, Anthropic MCP, and ChatGPT discovery surfaces
+- visible distribution across Pay.sh, x402, Anthropic MCP, and ChatGPT discovery surfaces
 - a trust roadmap strong enough for real autonomous finance use
 
 If Blocksize gets those five things right, it does not just "participate" in x402.

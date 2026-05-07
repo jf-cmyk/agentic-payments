@@ -95,18 +95,18 @@ All endpoints natively support the Model Context Protocol (MCP) or direct HTTP a
 ### 2.1 Asset Discovery (FREE)
 
 **Search Instruments**
-`GET /v1/search?q={query}&asset_class={all|crypto|equity}`
+`GET /v1/search?q={query}&asset_class={all|crypto|fx|metal}`
 Returns all matching instrument pairs based on string queries.
 
 **List Instruments by Service**
 `GET /v1/instruments/{service}`
-Where `{service}` is one of `vwap`, `bidask`, `equity`, or `fx`. Returns a definitive list of active trading pairs.
+Where `{service}` is one of `vwap`, `bidask`, `fx`, or `metal`. Returns a definitive list of active trading pairs or tickers.
 
 ### 2.2 Cryptocurrency Data (Dynamic Pricing)
 
 Prices fluctuate based on the capitalization and liquidity indexing requirements of the network requested. Top 250 assets default to **$0.002 USDC**. Niche and long-tail listings default to **$0.004 USDC**.
 
-**Real-Time VWAP, Bid/Ask, and State Price**
+**Real-Time VWAP and Bid/Ask**
 `GET /v1/vwap/{pair}`
 `GET /v1/bidask/{pair}`
 *Returns:* A consolidated top-of-book market depth snapshot across global liquidity pools.
@@ -115,27 +115,21 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 
 **Foreign Exchange (FX)**
 `GET /v1/fx/{pair}`
-*Returns:* Spot rates for 129 institutional pairings.
-*Example:* `/v1/fx/EUR-USD`
+*Returns:* Spot rates for currently enabled FX pairs.
+*Example:* `/v1/fx/EURUSD`
 
 **Metals**
 `GET /v1/metal/{ticker}`
 *Returns:* Spot rates for institutional stores of value.
-*Example:* `/v1/metal/XAU-USD` (Gold)
+*Example:* `/v1/metal/XAUUSD` (Gold)
 
-### 2.4 Equities ($0.008 USDC)
+### 2.4 Advanced Local MCP
 
-**Equities Snapshot**
-`GET /v1/equity/{ticker}`
-*Returns:* Market snapshot for 18,071 global stocks.
+Advanced local MCP workflows are available to approved collaborators. They are not part of the public remote MCP listing surface.
 
-### 2.5 MCP Analytics ($0.001 USDC)
+### 2.5 Not Offered
 
-Historical/time-series VWAP and state-price tools are available through MCP tooling where configured. They are not part of the current HTTP quickstart surface.
-
-### 2.6 Not Offered
-
-US Treasury rates and yield-curve endpoints have been intentionally removed from this portfolio.
+Equities, US Treasury rates, yield-curve endpoints, and broad commodities endpoints are not part of the current public HTTP quickstart surface.
 
 ---
 

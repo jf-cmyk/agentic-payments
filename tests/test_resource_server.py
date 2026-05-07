@@ -213,11 +213,13 @@ class TestPaymentGate:
         req_b64 = response.headers["PAYMENT-REQUIRED"]
         req_json = json.loads(base64.b64decode(req_b64))
         assert req_json["x402Version"] == 2
+        assert req_json["resource"]["url"].startswith("https://mcp.blocksize.info/")
         assert req_json["resource"]["url"].endswith("/v1/vwap/btc-usd")
         assert isinstance(req_json["accepts"], list)
         assert len(req_json["accepts"]) >= 1
         assert "payTo" in req_json["accepts"][0]
         assert "amount" in req_json["accepts"][0]
+        assert req_json["accepts"][0]["asset"] == settings.x402.solana_usdc_address
         assert req_json["accepts"][0]["scheme"] == "exact"
         assert "bazaar" in req_json["extensions"]
 

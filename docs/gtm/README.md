@@ -31,6 +31,8 @@ Approval received on 2026-04-21:
 | [outreach_sequences.md](outreach_sequences.md) | Draft email, DM, follow-up, and call agenda sequences |
 | [outreach_package/README.md](outreach_package/README.md) | Packaged first-batch outreach plan and handoff artifacts |
 | [protocol_partner_memo.md](protocol_partner_memo.md) | Protocol landscape and partnership priorities |
+| [pay_sh_positioning_plan.md](pay_sh_positioning_plan.md) | Pay.sh positioning, submission-readiness checks, and draft registry listing |
+| [pay_skills_submission/README.md](pay_skills_submission/README.md) | Local Pay.sh registry PR staging files and validation status |
 | [local_backlog.md](local_backlog.md) | Linear-ready backlog kept local until Linear details are approved |
 
 ## Operating cadence
