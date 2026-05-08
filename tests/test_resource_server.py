@@ -142,6 +142,7 @@ class TestPublicListingSurfaces:
         x402_data = x402.json()
         assert x402_data["version"] == 1
         assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
+        assert any(resource.endswith("/v1/bidask/AAPL") for resource in x402_data["resources"])
 
     def test_openapi_marks_paid_routes_for_x402_discovery(self, test_client):
         response = test_client.get("/openapi.json")
@@ -152,6 +153,9 @@ class TestPublicListingSurfaces:
         payment_info = vwap["x-payment-info"]
         assert payment_info["protocols"] == [{"x402": {}}]
         assert payment_info["price"]["mode"] == "dynamic"
+
+        bidask = data["paths"]["/v1/bidask/{pair}"]["get"]
+        assert bidask["x-payment-info"]["price"]["max"] == str(settings.pricing.equities)
 
         fx = data["paths"]["/v1/fx/{pair}"]["get"]
         assert fx["x-payment-info"]["price"]["amount"] == str(settings.pricing.tradfi)
@@ -184,6 +188,11 @@ class TestPaymentGate:
     def test_bidask_requires_payment(self, test_client):
         response = test_client.get("/v1/bidask/btc-usd")
         assert response.status_code == 402
+
+    def test_bidask_equity_ticker_uses_equity_price(self, test_client):
+        response = test_client.get("/v1/bidask/AAPL")
+        assert response.status_code == 402
+        assert response.json()["price_usdc"] == str(settings.pricing.equities)
 
     def test_unsupported_methods_are_not_payment_challenged(self, test_client):
         response = test_client.post("/v1/vwap/btc-usd")
@@ -241,6 +250,16 @@ class TestPaymentGate:
 
         response = test_client.get("/v1/search?q=btc")
         assert response.status_code == 200
+
+    def test_search_accepts_equity_filter(self, test_client):
+        mock_client = AsyncMock()
+        mock_client.search_pairs = AsyncMock(return_value=[])
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/search?q=AAPL&asset_class=equity")
+
+        assert response.status_code == 200
+        mock_client.search_pairs.assert_awaited_once_with("AAPL", "equity")
 
     def test_instruments_is_free(self, test_client):
         """Instruments endpoint should NOT require payment."""

@@ -113,8 +113,8 @@ class TestGetPricingInfoTool:
         assert "Core Crypto" in result
         assert "Extended Crypto" in result
         assert "TradFi" in result
+        assert "Equities" in result
         assert "rates" not in result.lower()
-        assert "Equities" not in result
         assert "Analytics" not in result
         assert "FREE" in result
         assert "Solana" in result

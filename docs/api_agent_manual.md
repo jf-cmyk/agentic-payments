@@ -95,21 +95,26 @@ All endpoints natively support the Model Context Protocol (MCP) or direct HTTP a
 ### 2.1 Asset Discovery (FREE)
 
 **Search Instruments**
-`GET /v1/search?q={query}&asset_class={all|crypto|fx|metal}`
+`GET /v1/search?q={query}&asset_class={all|crypto|equity|fx|metal}`
 Returns all matching instrument pairs based on string queries.
 
 **List Instruments by Service**
 `GET /v1/instruments/{service}`
 Where `{service}` is one of `vwap`, `bidask`, `fx`, or `metal`. Returns a definitive list of active trading pairs or tickers.
 
-### 2.2 Cryptocurrency Data (Dynamic Pricing)
+### 2.2 Crypto and Shared Bid/Ask Data (Dynamic Pricing)
 
 Prices fluctuate based on the capitalization and liquidity indexing requirements of the network requested. Top 250 assets default to **$0.002 USDC**. Niche and long-tail listings default to **$0.004 USDC**.
 
 **Real-Time VWAP and Bid/Ask**
 `GET /v1/vwap/{pair}`
 `GET /v1/bidask/{pair}`
-*Returns:* A consolidated top-of-book market depth snapshot across global liquidity pools.
+*Returns:* VWAP for crypto pairs and consolidated top-of-book bid/ask snapshots across the shared upstream namespace.
+
+Supported equity tickers are accessed through the same bid/ask route:
+`GET /v1/bidask/{ticker}`
+*Example:* `/v1/bidask/AAPL`
+*Price:* **$0.008 USDC** for supported equity tickers.
 
 ### 2.3 Traditional Finance ($0.005 USDC)
 
@@ -129,7 +134,7 @@ Advanced local MCP workflows are available to approved collaborators. They are n
 
 ### 2.5 Not Offered
 
-Equities, US Treasury rates, yield-curve endpoints, and broad commodities endpoints are not part of the current public HTTP quickstart surface.
+US Treasury rates, yield-curve endpoints, and broad commodities endpoints are not part of the current public HTTP quickstart surface.
 
 ---
 

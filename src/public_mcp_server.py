@@ -34,18 +34,19 @@ InstrumentSearchQuery = Annotated[
     Field(
         description=(
             "Symbol, ticker, asset, or pair to search for, such as BTC, BTC-USD, "
-            "ETH, EURUSD, or XAUUSD."
+            "ETH, AAPL, EURUSD, or XAUUSD."
         ),
         min_length=1,
         max_length=80,
     ),
 ]
 AssetClassFilter = Annotated[
-    Literal["all", "crypto", "fx", "metal"],
+    Literal["all", "crypto", "equity", "equities", "fx", "metal"],
     Field(
         description=(
             "Optional asset-class filter. Use all for the full catalog, crypto "
-            "for digital assets, fx for currency pairs, or metal for metals."
+            "for digital assets, equity/equities for supported stock tickers, "
+            "fx for currency pairs, or metal for metals."
         ),
     ),
 ]
@@ -98,7 +99,7 @@ public_mcp = FastMCP(
     name="search_pairs",
     title="Instrument Search",
     description=(
-        "Use this to discover supported crypto, FX, or metal symbols before "
+        "Use this to discover supported crypto, equity, FX, or metal symbols before "
         "using Blocksize's paid HTTP API. This is free and read-only."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,

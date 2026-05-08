@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from src.config import settings
+from src.config import TOP_250_CRYPTO, settings
 from src.models import (
     BidAskData,
     EquityData,
@@ -51,6 +51,7 @@ METAL_TICKERS = {
     "XPDUSD": "Palladium",
     "COPPERUSD": "Copper",
 }
+PAIR_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "JPY", "BTC", "ETH")
 
 
 class BlocksizeAPIError(Exception):
@@ -274,15 +275,15 @@ class BlocksizeClient:
         raise BlocksizeAPIError(-1, f"Unexpected response for state_price: {result}")
 
     # -----------------------------------------------------------------------
-    # Bid/Ask (Crypto)
+    # Bid/Ask (Shared Multi-Asset Namespace)
     # -----------------------------------------------------------------------
 
     async def get_bidask_snapshot(self, pair: str) -> BidAskData:
         """
-        Get the current best bid/ask snapshot for a crypto pair.
+        Get the current best bid/ask snapshot for a shared bid/ask symbol.
 
         Args:
-            pair: Trading pair identifier (e.g., 'btc-usd')
+            pair: Trading pair or ticker identifier (e.g., 'btc-usd', 'AAPL')
 
         Returns:
             BidAskData with bid, ask, spread, and metadata.
@@ -296,9 +297,11 @@ class BlocksizeClient:
                 # Find the specific pair in the massive returned list, or default to empty dict
                 item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
             
-            bid = float(item.get("agg_bid_price", item.get("bid", 0)))
-            ask = float(item.get("agg_ask_price", item.get("ask", 0)))
-            mid = float(item.get("agg_mid_price", item.get("mid", (bid + ask) / 2 if ask > 0 else 0)))
+            bid = _first_float(item, ("agg_bid_price", "bid", "bidPrice")) or 0.0
+            ask = _first_float(item, ("agg_ask_price", "ask", "askPrice")) or 0.0
+            mid = _first_float(item, ("agg_mid_price", "mid", "last", "price"))
+            if mid is None:
+                mid = (bid + ask) / 2 if ask > 0 else 0.0
             
             spread = ask - bid
             spread_pct = (spread / ask * 100) if ask > 0 else 0.0
@@ -317,7 +320,7 @@ class BlocksizeClient:
         raise BlocksizeAPIError(-1, f"Unexpected response for bidask_getSnapshot: {result}")
 
     async def list_bidask_instruments(self) -> list[str]:
-        """List all instruments available for bid/ask data."""
+        """List all instruments available in the shared bid/ask namespace."""
         result = await self._rpc_call("bidask_instruments")
         return self._extract_instrument_tickers(result)
 
@@ -466,18 +469,27 @@ class BlocksizeClient:
         Returns:
             List of matching PairInfo objects (max 50).
         """
-        from src.config import TOP_250_CRYPTO
+        asset_filter = asset_class.lower().strip()
+        if asset_filter == "equities":
+            asset_filter = "equity"
 
         query_lower = query.lower()
         matches: list[PairInfo] = []
+        bidask_entries: list[dict[str, str]] | None = None
+
+        async def _bidask_entries() -> list[dict[str, str]]:
+            nonlocal bidask_entries
+            if bidask_entries is None:
+                bidask_entries = await self._list_bidask_entries()
+            return bidask_entries
 
         # Search crypto instruments
-        if asset_class in ("all", "crypto"):
+        if asset_filter in ("all", "crypto"):
             try:
                 vwap_instruments = set(await self.list_vwap_instruments())
                 bidask_instruments = {
                     entry["ticker"]
-                    for entry in await self._list_bidask_entries()
+                    for entry in await _bidask_entries()
                     if not self._is_fx_entry(entry)
                     and not self._is_metal_entry(entry)
                     and not self._is_equity_like_entry(entry)
@@ -505,10 +517,38 @@ class BlocksizeClient:
             except BlocksizeAPIError:
                 logger.warning("Could not search crypto instruments")
 
-        # Search FX
-        if asset_class in ("all", "fx") and len(matches) < 50:
+        # Search equities in the shared bid/ask namespace.
+        if asset_filter in ("all", "equity") and len(matches) < 50:
             try:
-                fx_instruments = await self.list_fx_instruments()
+                equity_entries = [
+                    entry
+                    for entry in await _bidask_entries()
+                    if self._is_equity_like_entry(entry)
+                ]
+                for entry in sorted(equity_entries, key=lambda item: item["ticker"]):
+                    ticker = entry["ticker"]
+                    base = entry["base_currency"]
+                    searchable = f"{ticker} {base} {base.removesuffix('X')}".lower()
+                    if query_lower in searchable and len(matches) < 50:
+                        matches.append(PairInfo(
+                            pair=ticker,
+                            base_currency=base.removesuffix("X"),
+                            quote_currency=entry["quote_currency"],
+                            asset_class="equity",
+                            services=["bidask"],
+                            tier="equities",
+                        ))
+            except BlocksizeAPIError:
+                logger.warning("Could not search equity instruments")
+
+        # Search FX
+        if asset_filter in ("all", "fx") and len(matches) < 50:
+            try:
+                fx_instruments = sorted(
+                    entry["ticker"]
+                    for entry in await _bidask_entries()
+                    if self._is_fx_entry(entry)
+                )
                 for inst in fx_instruments:
                     if query_lower in inst.lower() and len(matches) < 50:
                         base, quote = _split_pair(inst)
@@ -524,7 +564,7 @@ class BlocksizeClient:
                 logger.warning("Could not search FX instruments")
 
         # Search metals
-        if asset_class in ("all", "metal") and len(matches) < 50:
+        if asset_filter in ("all", "metal") and len(matches) < 50:
             for inst in await self.list_metal_instruments():
                 if query_lower in inst.lower() and len(matches) < 50:
                     base, quote = _split_pair(inst)
@@ -563,6 +603,7 @@ class BlocksizeClient:
                     "ticker": ticker,
                     "base_currency": base,
                     "quote_currency": quote,
+                    "asset_class": "",
                 })
                 continue
 
@@ -583,10 +624,19 @@ class BlocksizeClient:
                 or item.get("quoteCurrency")
                 or _split_pair(ticker)[1]
             ).upper()
+            asset_class = str(
+                item.get("asset_class")
+                or item.get("assetClass")
+                or item.get("class")
+                or item.get("type")
+                or item.get("category")
+                or ""
+            ).lower()
             entries.append({
                 "ticker": ticker,
                 "base_currency": base,
                 "quote_currency": quote,
+                "asset_class": asset_class,
             })
 
         return entries
@@ -612,9 +662,21 @@ class BlocksizeClient:
     @staticmethod
     def _is_equity_like_entry(entry: dict[str, str]) -> bool:
         """Identify exchange-listed equity-like symbols in the shared bid/ask feed."""
+        asset_class = entry.get("asset_class", "").lower()
+        if asset_class in {"equity", "equities", "stock", "stocks"}:
+            return True
+
+        ticker = entry["ticker"]
+        base = entry["base_currency"]
+        quote = entry["quote_currency"]
         return (
-            entry["base_currency"].endswith("X")
-            and entry["quote_currency"] in {"USD", "USDT", "USDC"}
+            base.endswith("X")
+            and quote in {"USD", "USDT", "USDC"}
+        ) or (
+            ticker.isalpha()
+            and 1 <= len(ticker) <= 5
+            and ticker not in TOP_250_CRYPTO
+            and quote not in FIAT_CURRENCIES
         )
 
 
@@ -650,7 +712,11 @@ def _extract_quote(pair: str) -> str:
     for sep in ["-", "/", "_"]:
         if sep in pair:
             return pair.split(sep)[-1].upper()
-    return pair[-3:].upper() if len(pair) >= 6 else ""
+    clean = pair.upper()
+    for quote in PAIR_QUOTE_SUFFIXES:
+        if clean.endswith(quote) and len(clean) > len(quote):
+            return quote
+    return ""
 
 
 def _split_pair(pair: str) -> tuple[str, str]:
@@ -659,8 +725,14 @@ def _split_pair(pair: str) -> tuple[str, str]:
         if sep in pair:
             parts = pair.split(sep, 1)
             return parts[0].upper(), parts[1].upper()
+    clean = pair.upper()
+    quote = _extract_quote(clean)
+    if quote:
+        return clean[: -len(quote)], quote
+    if clean.isalpha() and 1 <= len(clean) <= 5 and clean not in TOP_250_CRYPTO:
+        return clean, ""
     mid = len(pair) // 2
-    return pair[:mid].upper(), pair[mid:].upper()
+    return clean[:mid], clean[mid:]
 
 
 def _safe_float(val: Any) -> float | None:
@@ -671,3 +743,12 @@ def _safe_float(val: Any) -> float | None:
         return float(val)
     except (ValueError, TypeError):
         return None
+
+
+def _first_float(item: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    """Return the first parseable numeric value from a response payload."""
+    for key in keys:
+        value = _safe_float(item.get(key))
+        if value is not None:
+            return value
+    return None

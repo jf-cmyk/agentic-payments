@@ -36,7 +36,7 @@ Short position:
 
 Catalog position:
 
-> Blocksize gives agents live crypto, FX, and metals market data through accountless pay-per-call HTTP endpoints. Use it when an agent needs priced, structured financial data without creating an API key, subscribing to a plan, or asking a human to provision access.
+> Blocksize gives agents live crypto, supported equity ticker, FX, and metals market data through accountless pay-per-call HTTP endpoints. Use it when an agent needs priced, structured financial data without creating an API key, subscribing to a plan, or asking a human to provision access.
 
 Differentiation:
 
@@ -166,8 +166,8 @@ This is a local draft for a future `providers/blocksize/market-data/PAY.md` entr
 ---
 name: market-data
 title: "Blocksize Market Data"
-description: "Agent-native institutional crypto, FX, and metals market data with x402-paid per-call endpoints and free discovery."
-use_case: "Use when an AI agent needs live market prices, VWAP, bid/ask snapshots, FX, metals, or compact data for financial workflows without creating an API account."
+description: "Agent-native institutional crypto, supported equity ticker, FX, and metals market data with x402-paid per-call endpoints and free discovery."
+use_case: "Use when an AI agent needs live market prices, VWAP, bid/ask snapshots, equity tickers, FX, metals, or compact data for financial workflows without creating an API account."
 category: finance
 service_url: https://mcp.blocksize.info
 openapi:

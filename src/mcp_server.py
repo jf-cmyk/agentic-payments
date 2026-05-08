@@ -7,12 +7,13 @@ Cursor, LangChain, etc.) can discover and call.
 
 Asset Classes:
   - Crypto:     Real-time VWAP and shared bid/ask snapshots
+  - Equities:   Supported tickers through the shared bid/ask namespace
   - FX:         Shared bid/ask snapshots where supported by the upstream key
   - Metals:     Gold, Silver, Platinum, Palladium, Copper
 
 Payment Model:
   Tiered pricing in USDC — settled on Solana (primary) or Base L2 (fallback).
-  Discovery tools are FREE. Data tools: $0.002–$0.005 per call.
+  Discovery tools are FREE. Data tools: $0.002–$0.008 per call.
 """
 
 from __future__ import annotations
@@ -75,8 +76,8 @@ mcp = FastMCP(
     version=APP_VERSION,
     instructions=(
         "Institutional-grade multi-asset market data for AI agents. "
-        "Access real-time VWAP, bid/ask spreads, FX, and metals across "
-        "thousands of discoverable symbols. "
+        "Access real-time VWAP, bid/ask spreads, equities, FX, and metals "
+        "across thousands of discoverable symbols. "
         "Outlier-filtered, decision-ready output. "
         "Pay per call via x402 (USDC on Solana or Base L2). "
         "No subscription required."
@@ -165,7 +166,7 @@ def _instrument_fetch_payload(pair_info) -> dict[str, object]:
 
 
 # ===========================================================================
-# CRYPTO TOOLS
+# PAID MARKET DATA TOOLS
 # ===========================================================================
 
 @mcp.tool(
@@ -219,23 +220,25 @@ async def get_vwap(pair: str) -> str:
 
 
 @mcp.tool(
-    title="Crypto Bid Ask Snapshot",
+    title="Bid Ask Snapshot",
     description=(
-        "Use this when you need the current bid, ask, and spread for one crypto "
-        "pair. Returns a single paid snapshot only; it does not stream quotes."
+        "Use this when you need the current bid, ask, and spread for one shared "
+        "bid/ask symbol, including crypto pairs and supported equity tickers. "
+        "Returns a single paid snapshot only; it does not stream quotes."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def get_bid_ask(pair: str) -> str:
     """
-    Get the current best bid/ask prices and spread for a crypto trading pair.
+    Get the current best bid/ask prices and spread for a shared bid/ask symbol.
 
     Returns real-time best bid, best ask, absolute spread, and spread percentage.
 
-    Cost: $0.002 USDC (top 250 crypto) or $0.004 USDC (niche crypto).
+    Cost: $0.002 USDC (top 250 crypto), $0.004 USDC (niche crypto),
+    or $0.008 USDC (supported equity tickers).
 
     Args:
-        pair: Trading pair identifier. Examples: 'btc-usd', 'eth-eur'.
+        pair: Trading pair or ticker identifier. Examples: 'btc-usd', 'eth-eur', 'AAPL'.
     """
     try:
         client = await _get_client()
@@ -358,7 +361,7 @@ async def get_metal_price(ticker: str) -> str:
 @mcp.tool(
     title="Instrument Search",
     description=(
-        "Use this to discover valid crypto, FX, or metal symbols before "
+        "Use this to discover valid crypto, equity, FX, or metal symbols before "
         "calling paid market data tools. This is free and does not return live prices."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
@@ -367,14 +370,14 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
     """
     Search through the currently enabled upstream symbols. FREE.
 
-    Searches crypto, FX, and metals. Returns matching pairs
+    Searches crypto, equities, FX, and metals. Returns matching pairs
     with their available data services and pricing tier.
 
     Cost: FREE — no payment required.
 
     Args:
-        query: Search term (e.g., 'btc', 'eurusd', 'xauusd').
-        asset_class: Filter by class. Options: 'all', 'crypto', 'fx', 'metal'.
+        query: Search term (e.g., 'btc', 'AAPL', 'eurusd', 'xauusd').
+        asset_class: Filter by class. Options: 'all', 'crypto', 'equity', 'fx', 'metal'.
                      Default: 'all'.
     """
     try:
@@ -516,7 +519,7 @@ async def get_pricing_info() -> str:
         "tiers": settings.pricing_summary,
         "coverage": {
             "rt_vwap_crypto": "6,362 enabled crypto pairs",
-            "shared_bidask_namespace": "2,365 enabled upstream symbols",
+            "shared_bidask_namespace": "2,365 enabled upstream symbols including supported equity tickers",
             "fx": "3 enabled FX pairs",
             "metals": "Gold, Silver, Platinum, Palladium, Copper",
             "dexs": "56 DEXs across 11 chains",
@@ -533,6 +536,7 @@ async def get_pricing_info() -> str:
         f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (high-liquidity VWAP pairs)\n"
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
+        f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)\n"
         f"High Consumption Agents: Subscriptions available at https://blocksize.info/crypto-market-data/#pricing"
     )
@@ -672,12 +676,12 @@ async def server_info() -> str:
         "version": APP_VERSION,
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
-            "Discovery across crypto, FX, and metals plus "
+            "Discovery across crypto, equities, FX, and metals plus "
             "paid HTTP market data access via x402. "
             "Pay per call via x402."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
-        "asset_classes": ["crypto", "fx", "metals"],
+        "asset_classes": ["crypto", "equities", "fx", "metals"],
         "tools": [
             "get_vwap", "get_bid_ask", "get_fx_rate", "get_metal_price",
             "search_pairs", "list_instruments", "get_pricing_info", "search", "fetch",

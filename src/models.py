@@ -7,6 +7,7 @@ exactly what they need for reasoning — no wasted tokens on raw arrays.
 
 Asset classes covered:
   - Crypto (RT VWAP, Bid/Ask)
+  - Equities (shared bid/ask tickers)
   - FX (129 currency pairs)
   - Metals (Gold, Silver, Platinum, Palladium, Copper)
 """
@@ -247,7 +248,7 @@ class PairInfo(BaseModel):
         default_factory=list,
         description="Available services, such as vwap and bidask",
     )
-    tier: str = Field("core", description="Pricing tier (core, extended, tradfi)")
+    tier: str = Field("core", description="Pricing tier (core, extended, tradfi, equities)")
 
 
 class PairSearchResponse(BaseModel):
@@ -259,7 +260,7 @@ class PairSearchResponse(BaseModel):
     pairs: list[PairInfo] = Field(..., description="Matching pairs (max 50)")
     meta: dict = Field(default_factory=lambda: {
         "provider": "Blocksize Capital",
-        "total_coverage": "Enabled symbols across crypto, FX, and metals",
+        "total_coverage": "Enabled symbols across crypto, equities, FX, and metals",
     })
 
 

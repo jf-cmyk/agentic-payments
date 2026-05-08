@@ -48,6 +48,7 @@ Free discovery endpoints:
 | Core crypto | $0.002 |
 | Extended crypto and shared bid/ask | $0.004 |
 | FX and metals | $0.005 |
+| Supported equity tickers via bid/ask | $0.008 |
 
 Bulk credit tiers are documented in the public pricing guide:
 

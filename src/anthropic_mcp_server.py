@@ -34,7 +34,7 @@ InstrumentSearchQuery = Annotated[
     ),
 ]
 AssetClassFilter = Annotated[
-    Literal["all", "crypto", "fx", "metal"],
+    Literal["all", "crypto", "equity", "equities", "fx", "metal"],
     Field(description="Optional asset class filter."),
 ]
 InstrumentService = Annotated[
@@ -187,8 +187,8 @@ async def _with_credits(
     name="search_pairs",
     title="Instrument Search",
     description=(
-        "Search supported Blocksize crypto, FX, and metal instruments by symbol "
-        "or asset name. This returns metadata only, not live prices."
+        "Search supported Blocksize crypto, equity, FX, and metal instruments by "
+        "symbol or asset name. This returns metadata only, not live prices."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )

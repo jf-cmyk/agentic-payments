@@ -141,7 +141,7 @@ paid-provider probe.
 - Normalized public x402 `accepts[].asset` to raw USDC mint/contract while
   preserving CAIP-style legacy requirements.
 - Staged Pay.sh provider entry and filtered sidecar OpenAPI.
-- Removed public docs claims for unsupported equities/AAPL/broad commodities.
+- Clarified that supported equity tickers route through the shared bid/ask endpoint, while broad commodities remain out of scope.
 - Corrected public API manual asset-class and service lists.
 - Corrected developer portal market coverage cards to match actual routes.
 - Regenerated public PDFs from the corrected generator.

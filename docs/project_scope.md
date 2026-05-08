@@ -14,12 +14,13 @@ The core system is deployed as a stateless, highly scalable cloud application on
 *   **FastMCP Server:** An agent-facing interface that exposes the API functionality as structured "tools" for LLMs running locally (e.g., Claude Desktop, Cursor).
 
 ## 3. Data Integration Scope
-The public HTTP surface currently exposes crypto, FX, and metals data, structured into tiered pricing brackets based on data density and processing requirements:
+The public HTTP surface currently exposes crypto, supported equity tickers, FX, and metals data, structured into tiered pricing brackets based on data density and processing requirements:
 
 *   **Discovery (FREE):** Asset lookup, instrument listing, and pricing summaries.
 *   **Core Crypto ($0.002):** Real-time VWAP and bid/ask spreads for high-liquidity cryptocurrency pairs.
 *   **Extended Crypto ($0.004):** VWAP and bid/ask data for long-tail and niche token pairs.
-*   **Traditional Finance ($0.005):** Currently enabled spot foreign exchange pairs and precious metals. Equities, broad commodities, rates, and Treasury endpoints are intentionally not offered in the current public HTTP surface.
+*   **Traditional Finance ($0.005):** Currently enabled spot foreign exchange pairs and precious metals.
+*   **Equities ($0.008):** Supported stock tickers through the shared `GET /v1/bidask/{ticker}` endpoint. Broad commodities, rates, and Treasury endpoints are intentionally not offered in the current public HTTP surface.
 
 ## 4. Financial & Settlement Architecture
 To support frictionless agentic purchasing, the infrastructure bypasses legacy banking rails:

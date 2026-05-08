@@ -140,6 +140,7 @@ class PricingSettings(BaseSettings):
       - Core Crypto:     $0.002 (top 250 by market cap)
       - Extended Crypto: $0.004 (niche/long-tail bid/ask and VWAP)
       - TradFi:          $0.005 (currently enabled FX and metals)
+      - Equities:        $0.008 (supported tickers via shared bid/ask)
     """
 
     core_crypto: Decimal = Field(Decimal("0.002"), alias="PRICE_CORE_CRYPTO")
@@ -248,6 +249,7 @@ class Settings:
             "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP for top crypto pairs"},
             "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "Bid/ask and long-tail crypto pairs"},
             "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX pairs and supported metal snapshots"},
+            "equities": {"price": f"${self.pricing.equities}", "includes": "Supported equity tickers via shared bid/ask"},
         }
 
 

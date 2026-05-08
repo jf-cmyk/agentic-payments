@@ -112,8 +112,8 @@ STATIC_DOCUMENTS = {
         "url": PRICING_GUIDE_URL,
         "keywords": ["pricing", "credits", "cost", "usdc", "x402"],
         "text": (
-            "Per-call pricing for crypto, FX, metals, and bulk credit tiers for "
-            "Blocksize Capital's paid HTTP market data API."
+            "Per-call pricing for crypto, supported equity tickers, FX, metals, "
+            "and bulk credit tiers for Blocksize Capital's paid HTTP market data API."
         ),
     },
     "manual": {

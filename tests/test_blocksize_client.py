@@ -96,6 +96,22 @@ class TestBidAskParsing:
         assert bidask.spread == 0.0
         assert bidask.spread_pct == 0.0
 
+    @pytest.mark.asyncio
+    async def test_get_bidask_snapshot_parses_equity_fields(self, client):
+        mock_result = {
+            "ticker": "AAPL",
+            "bidPrice": 181.4,
+            "askPrice": 181.6,
+            "last": 181.5,
+            "timestamp": "2026-04-19T20:00:00+00:00",
+        }
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
+            bidask = await client.get_bidask_snapshot("AAPL")
+        assert bidask.pair == "AAPL"
+        assert bidask.bid == 181.4
+        assert bidask.ask == 181.6
+        assert bidask.spread == pytest.approx(0.2)
+
 
 # ---------------------------------------------------------------------------
 # Equity Parsing
@@ -194,6 +210,22 @@ class TestPairSearch:
         assert "BTC-USD" in pair_names
 
     @pytest.mark.asyncio
+    async def test_search_pairs_includes_equities_from_bidask_namespace(self, client):
+        with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[
+                 {"ticker": "AAPL", "base_currency": "AAPL", "quote_currency": "", "asset_class": "equity"},
+                 {"ticker": "BTCUSD", "base_currency": "BTC", "quote_currency": "USD", "asset_class": ""},
+             ]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
+            results = await client.search_pairs("aapl", asset_class="equity")
+
+        assert len(results) == 1
+        assert results[0].pair == "AAPL"
+        assert results[0].asset_class == "equity"
+        assert results[0].services == ["bidask"]
+        assert results[0].tier == "equities"
+
+    @pytest.mark.asyncio
     async def test_search_pairs_no_match(self, client):
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["btc-usd"]), \
              patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \
@@ -256,3 +288,6 @@ class TestHelpers:
         base, quote = _split_pair("btcusd")
         assert base == "BTC"
         assert quote == "USD"
+
+    def test_split_pair_bare_equity_ticker(self):
+        assert _split_pair("AAPL") == ("AAPL", "")

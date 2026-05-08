@@ -36,8 +36,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
-from src.config import settings
+from src.blocksize_client import (
+    FIAT_CURRENCIES,
+    METAL_TICKERS,
+    BlocksizeAPIError,
+    BlocksizeClient,
+)
+from src.config import TOP_250_CRYPTO, settings
 from src.credit_manager import CreditManager, BULK_TIERS
 from src.models import (
     BidAskResponse,
@@ -312,6 +317,17 @@ X402_CRYPTO_PAYMENT_INFO = {
         "protocols": X402_PROTOCOLS,
     }
 }
+X402_BIDASK_PAYMENT_INFO = {
+    "x-payment-info": {
+        "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": str(settings.pricing.core_crypto),
+            "max": str(max(settings.pricing.extended_crypto, settings.pricing.equities)),
+        },
+        "protocols": X402_PROTOCOLS,
+    }
+}
 X402_TRADFI_PAYMENT_INFO = {
     "x-payment-info": {
         "price": {
@@ -329,7 +345,11 @@ X402_BATCH_PAYMENT_INFO = {
             "currency": "USD",
             "min": str(settings.pricing.core_crypto),
             "max": str(
-                max(settings.pricing.extended_crypto, settings.pricing.tradfi)
+                max(
+                    settings.pricing.extended_crypto,
+                    settings.pricing.tradfi,
+                    settings.pricing.equities,
+                )
                 * Decimal(settings.server.max_batch_size)
             ),
         },
@@ -339,6 +359,7 @@ X402_BATCH_PAYMENT_INFO = {
 X402_WELL_KNOWN_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/vwap/BTC-USD",
     f"{PUBLIC_BASE_URL}/v1/bidask/BTC-USD",
+    f"{PUBLIC_BASE_URL}/v1/bidask/AAPL",
     f"{PUBLIC_BASE_URL}/v1/fx/EURUSD",
     f"{PUBLIC_BASE_URL}/v1/metal/XAUUSD",
 ]
@@ -348,7 +369,7 @@ def _x402_endpoint_description(path: str) -> str:
     if path.startswith("/v1/vwap/"):
         return "Real-time crypto VWAP market data from Blocksize Capital."
     if path.startswith("/v1/bidask/"):
-        return "Real-time crypto bid/ask snapshot data from Blocksize Capital."
+        return "Real-time shared bid/ask snapshot data, including crypto pairs and supported equity tickers, from Blocksize Capital."
     if path.startswith("/v1/fx/"):
         return "Real-time FX market data from Blocksize Capital."
     if path.startswith("/v1/metal/"):
@@ -522,6 +543,36 @@ def _base_from_symbol(symbol: str) -> str:
     return symbol[: len(symbol) // 2].upper()
 
 
+def _quote_from_symbol(symbol: str) -> str:
+    """Extract a supported quote suffix from a compact symbol, when present."""
+    for quote in QUOTE_SUFFIXES:
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return quote
+    return ""
+
+
+def _looks_like_equity_bidask_symbol(symbol: str) -> bool:
+    """Heuristically identify equity tickers routed through /v1/bidask."""
+    clean = symbol.upper()
+    quote = _quote_from_symbol(clean)
+    base = clean[: -len(quote)] if quote else clean
+
+    if clean in METAL_TICKERS or base in FIAT_CURRENCIES:
+        return False
+
+    if quote in {"USD", "USDT", "USDC"}:
+        return base.endswith("X")
+
+    return clean.isalpha() and 1 <= len(clean) <= 5 and clean not in TOP_250_CRYPTO
+
+
+def _bidask_price_for_symbol(symbol: str) -> Decimal:
+    """Price shared bid/ask calls across crypto pairs and equity tickers."""
+    if _looks_like_equity_bidask_symbol(symbol):
+        return settings.pricing.equities
+    return settings.pricing.get_crypto_price(_base_from_symbol(symbol))
+
+
 class InMemoryRateLimiter:
     """Small fixed-window limiter for public discovery traffic."""
 
@@ -662,10 +713,12 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         
         total = Decimal("0.0")
         for svc, pair, _raw_query in _parse_batch_reqs(reqs):
-            if svc in {"vwap", "bidask"}:
+            if svc == "vwap":
                 base = _base_from_symbol(pair)
                 svc_price = settings.pricing.get_crypto_price(base)
                 total += svc_price
+            elif svc == "bidask":
+                total += _bidask_price_for_symbol(pair)
             else:
                 mock_path = f"/v1/{svc}/{pair}"
                 for prefix, price in ROUTE_PRICING.items():
@@ -679,6 +732,8 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         parts = path.rstrip("/").split("/")
         if len(parts) >= 4:
             pair = _normalise_symbol(parts[3], "pair")
+            if path.startswith("/v1/bidask/"):
+                return _bidask_price_for_symbol(pair)
             base = _base_from_symbol(pair)
             return settings.pricing.get_crypto_price(base)
         return settings.pricing.core_crypto
@@ -1146,15 +1201,15 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
-@app.get("/v1/bidask/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
+@app.get("/v1/bidask/{pair}", responses=X402_RESPONSE, openapi_extra=X402_BIDASK_PAYMENT_INFO)
 async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
-    """Get bid/ask snapshot for a crypto pair. Cost: $0.002–$0.004 USDC."""
+    """Get bid/ask snapshot for a shared symbol. Cost: $0.002–$0.008 USDC."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
         clean = _normalise_symbol(pair, "pair")
         bidask_data = await client.get_bidask_snapshot(clean)
         resp = BidAskResponse(data=bidask_data).model_dump()
-        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Bid/Ask Snapshot", "asset_class": "crypto"}
+        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Bid/Ask Snapshot", "asset_class": "multi_asset"}
         return resp
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1261,7 +1316,7 @@ async def search_pairs(
     q: str = Query(..., min_length=1, max_length=64, description="Search query"),
     asset_class: str = Query(
         "all",
-        pattern="^(all|crypto|fx|metal)$",
+        pattern="^(all|crypto|equity|equities|fx|metal)$",
         description="Asset class filter",
     ),
     request: Request = None,  # type: ignore[assignment]
@@ -1440,7 +1495,7 @@ async def mcp_manifest():
         "tools": [
             {
                 "name": "search_pairs",
-                "description": "Search supported crypto, FX, and metal symbols. Free and read-only.",
+                "description": "Search supported crypto, equity, FX, and metal symbols. Free and read-only.",
                 "parameters": {
                     "query": {"type": "string", "example": "BTC"},
                     "asset_class": {"type": "string", "example": "crypto"},
