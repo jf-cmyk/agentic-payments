@@ -254,6 +254,9 @@ async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
     }
 
 
+@app.get("/cursor/mcp/.well-known/openid-configuration", include_in_schema=False)
+@app.get("/.well-known/openid-configuration/cursor/mcp", include_in_schema=False)
+@app.get("/.well-known/oauth-authorization-server/cursor/mcp", include_in_schema=False)
 @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
 async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
     """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
