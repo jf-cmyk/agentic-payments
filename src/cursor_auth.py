@@ -10,6 +10,7 @@ from src.connector_auth import (
     beta_tokens_enabled_for,
     build_connector_auth_provider,
     oauth_callback_url_for,
+    oauth_scopes_for,
     resolve_connector_identity,
 )
 from src.public_metadata import PUBLIC_BASE_URL
@@ -21,6 +22,7 @@ DEFAULT_ALLOWED_CLIENT_REDIRECT_URIS = [
     "http://127.0.0.1:*",
     "cursor://*",
 ]
+DEFAULT_OAUTH_SCOPES = ["email", "profile"]
 
 
 def build_cursor_auth_provider():
@@ -30,6 +32,7 @@ def build_cursor_auth_provider():
         default_public_url=DEFAULT_PUBLIC_URL,
         default_allowed_client_redirect_uris=DEFAULT_ALLOWED_CLIENT_REDIRECT_URIS,
         service_label="Cursor MCP",
+        default_oauth_scopes=DEFAULT_OAUTH_SCOPES,
     )
 
 
@@ -50,6 +53,11 @@ def beta_tokens_enabled() -> bool:
 def oauth_callback_url() -> str:
     """Return the OAuth callback URL to register with the upstream provider."""
     return oauth_callback_url_for(PREFIX, DEFAULT_PUBLIC_URL)
+
+
+def oauth_scopes() -> list[str]:
+    """Return OAuth scopes advertised and requested for the Cursor connector."""
+    return oauth_scopes_for(PREFIX, DEFAULT_OAUTH_SCOPES)
 
 
 def _allowed_client_redirect_uris() -> list[str] | None:

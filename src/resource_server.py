@@ -249,7 +249,7 @@ async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
     return {
         "resource": f"{cursor_mcp_url}/",
         "authorization_servers": [cursor_mcp_url],
-        "scopes_supported": ["openid", "email", "profile"],
+        "scopes_supported": cursor_auth.oauth_scopes(),
         "bearer_methods_supported": ["header"],
     }
 
@@ -269,7 +269,7 @@ async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
         "authorization_endpoint": f"{cursor_mcp_url}/authorize",
         "token_endpoint": f"{cursor_mcp_url}/token",
         "registration_endpoint": f"{cursor_mcp_url}/register",
-        "scopes_supported": ["openid", "email", "profile"],
+        "scopes_supported": cursor_auth.oauth_scopes(),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": [

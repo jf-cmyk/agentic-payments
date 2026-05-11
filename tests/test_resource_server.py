@@ -116,7 +116,7 @@ class TestPublicListingSurfaces:
 
         assert data["resource"].endswith("/cursor/mcp/")
         assert data["authorization_servers"][0].endswith("/cursor/mcp")
-        assert data["scopes_supported"] == ["openid", "email", "profile"]
+        assert data["scopes_supported"] == ["email", "profile"]
         assert data["bearer_methods_supported"] == ["header"]
 
     def test_root_cursor_oauth_authorization_server_metadata(self, test_client):
@@ -128,7 +128,7 @@ class TestPublicListingSurfaces:
         assert data["authorization_endpoint"].endswith("/cursor/mcp/authorize")
         assert data["token_endpoint"].endswith("/cursor/mcp/token")
         assert data["registration_endpoint"].endswith("/cursor/mcp/register")
-        assert data["scopes_supported"] == ["openid", "email", "profile"]
+        assert data["scopes_supported"] == ["email", "profile"]
         assert data["code_challenge_methods_supported"] == ["S256"]
 
     @pytest.mark.parametrize(

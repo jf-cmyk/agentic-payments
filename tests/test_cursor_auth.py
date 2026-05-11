@@ -27,6 +27,18 @@ def test_cursor_redirect_allowlist_can_be_open_for_private_oauth_qa(monkeypatch)
     assert cursor_auth._allowed_client_redirect_uris() is None
 
 
+def test_cursor_oauth_scopes_default_to_clerk_dashboard_scopes(monkeypatch):
+    monkeypatch.delenv("CURSOR_OAUTH_SCOPES", raising=False)
+
+    assert cursor_auth.oauth_scopes() == ["email", "profile"]
+
+
+def test_cursor_oauth_scopes_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("CURSOR_OAUTH_SCOPES", "email profile public_metadata")
+
+    assert cursor_auth.oauth_scopes() == ["email", "profile", "public_metadata"]
+
+
 def test_cursor_beta_tokens_disabled_by_default_when_oauth_provider(monkeypatch):
     monkeypatch.setenv("CURSOR_AUTH_PROVIDER", "clerk")
     monkeypatch.delenv("CURSOR_ENABLE_BETA_TOKENS", raising=False)

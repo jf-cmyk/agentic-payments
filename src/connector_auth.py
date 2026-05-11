@@ -32,6 +32,7 @@ def build_connector_auth_provider(
     default_public_url: str,
     default_allowed_client_redirect_uris: list[str] | None,
     service_label: str,
+    default_oauth_scopes: list[str] | None = None,
 ):
     """Build a FastMCP OAuth provider for a named connector surface."""
     provider = _env(prefix, "AUTH_PROVIDER").strip().lower()
@@ -42,6 +43,10 @@ def build_connector_auth_provider(
         default_allowed_client_redirect_uris,
     )
     jwt_signing_key = _env(prefix, "OAUTH_JWT_SIGNING_KEY").strip() or None
+    oauth_scopes = oauth_scopes_for(
+        prefix,
+        default_oauth_scopes or ["openid", "email", "profile"],
+    )
 
     if provider in BETA_TOKEN_PROVIDERS:
         return None
@@ -64,6 +69,9 @@ def build_connector_auth_provider(
             allowed_client_redirect_uris=allowed_client_redirect_uris,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent="external",
+            required_scopes=oauth_scopes,
+            valid_scopes=oauth_scopes,
+            forward_resource=False,
         )
 
     if provider == "auth0":
@@ -160,6 +168,16 @@ def allowed_client_redirect_uris_for(
     if not raw:
         return default_allowed_client_redirect_uris
     return parse_string_list(raw, default_allowed_client_redirect_uris)
+
+
+def oauth_scopes_for(prefix: str, default_scopes: list[str]) -> list[str]:
+    raw = _env(prefix, "OAUTH_SCOPES").strip()
+    if not raw:
+        return default_scopes
+    if raw.startswith("["):
+        parsed = parse_string_list(raw, default_scopes)
+        return parsed or default_scopes
+    return [part.strip() for part in raw.replace(",", " ").split() if part.strip()]
 
 
 def parse_string_list(raw: str, fallback: list[str] | None) -> list[str] | None:
