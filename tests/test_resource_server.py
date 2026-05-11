@@ -109,6 +109,16 @@ class TestPublicListingSurfaces:
         assert response.status_code != 404
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    def test_root_cursor_oauth_protected_resource_metadata(self, test_client):
+        response = test_client.get("/.well-known/oauth-protected-resource/cursor/mcp/")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/cursor/mcp/")
+        assert data["authorization_servers"][0].endswith("/cursor/mcp")
+        assert data["scopes_supported"] == ["openid", "email", "profile"]
+        assert data["bearer_methods_supported"] == ["header"]
+
     def test_health_exposes_cursor_connector_metadata(self, test_client):
         response = test_client.get("/health")
         assert response.status_code == 200

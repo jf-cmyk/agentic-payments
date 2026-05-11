@@ -239,6 +239,21 @@ async def get_x402_well_known() -> dict[str, object]:
     }
 
 
+@app.get("/.well-known/oauth-protected-resource/cursor/mcp/", include_in_schema=False)
+async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
+    """Serve Cursor MCP OAuth protected-resource metadata at the challenged URL."""
+    cursor_mcp_url = os.environ.get(
+        "CURSOR_MCP_PUBLIC_URL",
+        f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
+    ).rstrip("/")
+    return {
+        "resource": f"{cursor_mcp_url}/",
+        "authorization_servers": [cursor_mcp_url],
+        "scopes_supported": ["openid", "email", "profile"],
+        "bearer_methods_supported": ["header"],
+    }
+
+
 # Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
