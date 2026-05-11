@@ -254,6 +254,30 @@ async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
     }
 
 
+@app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
+async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
+    """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
+    cursor_mcp_url = os.environ.get(
+        "CURSOR_MCP_PUBLIC_URL",
+        f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
+    ).rstrip("/")
+    return {
+        "issuer": cursor_mcp_url,
+        "authorization_endpoint": f"{cursor_mcp_url}/authorize",
+        "token_endpoint": f"{cursor_mcp_url}/token",
+        "registration_endpoint": f"{cursor_mcp_url}/register",
+        "scopes_supported": ["openid", "email", "profile"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "client_secret_basic",
+        ],
+        "code_challenge_methods_supported": ["S256"],
+        "client_id_metadata_document_supported": True,
+    }
+
+
 # Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")

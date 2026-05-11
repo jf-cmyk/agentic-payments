@@ -119,6 +119,18 @@ class TestPublicListingSurfaces:
         assert data["scopes_supported"] == ["openid", "email", "profile"]
         assert data["bearer_methods_supported"] == ["header"]
 
+    def test_root_cursor_oauth_authorization_server_metadata(self, test_client):
+        response = test_client.get("/.well-known/oauth-authorization-server")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["issuer"].endswith("/cursor/mcp")
+        assert data["authorization_endpoint"].endswith("/cursor/mcp/authorize")
+        assert data["token_endpoint"].endswith("/cursor/mcp/token")
+        assert data["registration_endpoint"].endswith("/cursor/mcp/register")
+        assert data["scopes_supported"] == ["openid", "email", "profile"]
+        assert data["code_challenge_methods_supported"] == ["S256"]
+
     def test_health_exposes_cursor_connector_metadata(self, test_client):
         response = test_client.get("/health")
         assert response.status_code == 200
