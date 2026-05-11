@@ -104,6 +104,22 @@ class TestPublicListingSurfaces:
         assert response.status_code != 404
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    def test_cursor_mcp_endpoint_exists(self, test_client):
+        response = test_client.get("/cursor/mcp")
+        assert response.status_code != 404
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    def test_health_exposes_cursor_connector_metadata(self, test_client):
+        response = test_client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        cursor = data["cursor_connector"]
+
+        assert cursor["mcp_url"].endswith("/cursor/mcp")
+        assert cursor["tool_surface"] == "read-only"
+        assert "get_vwap" in cursor["tool_costs"]
+        assert data["links"]["cursor_mcp"].endswith("/cursor/mcp/")
+
     def test_server_json_is_served(self, test_client):
         response = test_client.get("/server.json")
         assert response.status_code == 200

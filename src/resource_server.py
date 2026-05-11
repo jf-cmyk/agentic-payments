@@ -78,14 +78,18 @@ from src.public_metadata import (
     build_server_json,
 )
 from src import anthropic_auth
+from src import cursor_auth
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
+from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
+from src.cursor_mcp_server import cursor_mcp
 from src.public_mcp_server import public_mcp
 
 logger = logging.getLogger(__name__)
 DOCS_DIR = Path("docs")
 PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
+CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +106,8 @@ async def lifespan(app: FastAPI):
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
         async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
-            yield
+            async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
+                yield
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
 
@@ -239,6 +244,7 @@ app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
 app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
 app.mount("/anthropic/mcp", ANTHROPIC_MCP_HTTP_APP, name="anthropic-mcp")
+app.mount("/cursor/mcp", CURSOR_MCP_HTTP_APP, name="cursor-mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -1620,6 +1626,19 @@ async def health_check() -> dict[str, Any]:
             "server_json": SERVER_JSON_URL,
             "glama_claim": GLAMA_WELL_KNOWN_URL,
             "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
+            "cursor_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp/",
+            "cursor_oauth_callback": cursor_auth.oauth_callback_url(),
+        },
+        "cursor_connector": {
+            "mcp_url": os.environ.get(
+                "CURSOR_MCP_PUBLIC_URL",
+                f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
+            ),
+            "auth_provider": os.environ.get("CURSOR_AUTH_PROVIDER", "none"),
+            "oauth_callback_url": cursor_auth.oauth_callback_url(),
+            "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),
+            "tool_surface": "read-only",
+            "tool_costs": CURSOR_TOOL_COSTS,
         },
     }
 
