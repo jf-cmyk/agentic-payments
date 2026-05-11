@@ -245,7 +245,13 @@ class Settings:
     def pricing_summary(self) -> dict:
         """Return a human-readable pricing summary."""
         return {
-            "discovery": {"price": "FREE", "includes": "search_pairs, list_instruments, get_pricing_info"},
+            "discovery": {
+                "price": "FREE",
+                "includes": (
+                    "search_pairs, list_instruments, get_pricing_info, "
+                    "get_market_data_endpoint"
+                ),
+            },
             "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP for top crypto pairs"},
             "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "Bid/ask and long-tail crypto pairs"},
             "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX pairs and supported metal snapshots"},

@@ -40,6 +40,7 @@ Local public MCP tools exposed:
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
+- `get_market_data_endpoint`
 - `search`
 - `fetch`
 
@@ -65,7 +66,7 @@ Passed on `https://mcp.blocksize.info`:
 - `/mcp/manifest.json` returns 200.
 - `/privacy` and `/support` return 200.
 - `/mcp/server/` supports Streamable HTTP initialize.
-- Live public MCP `tools/list` returns the expected five read-only tools.
+- Live public MCP `tools/list` returns the expected read-only discovery tools.
 
 Live blockers:
 
@@ -84,7 +85,7 @@ Live blockers:
 Status: active, but needs optional metadata refresh.
 
 The registry API currently returns active entries for `info.blocksize.mcp/agentic-payments`,
-including version `0.6.1` as latest. The registry still shows repository metadata
+including version `0.6.2` as latest. The registry still shows repository metadata
 from a prior publish, while live `/server.json` now omits repository metadata by
 default. This is not a functionality blocker, but republish if the public
 registry listing should match the current privacy posture.

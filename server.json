@@ -1,9 +1,11 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "info.blocksize.mcp/agentic-payments",
-  "description": "Public MCP discovery for Blocksize market data, pricing, and docs.",
+  "title": "Blocksize Real Time Market Data",
+  "description": "Read-only MCP discovery for real-time crypto, equities, FX, metals, and x402 HTTP endpoints.",
   "homepage": "https://mcp.blocksize.info/",
-  "version": "0.6.1",
+  "websiteUrl": "https://mcp.blocksize.info/",
+  "version": "0.6.2",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",

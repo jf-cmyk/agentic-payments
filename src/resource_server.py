@@ -65,6 +65,8 @@ from src.public_metadata import (
     PRIVACY_POLICY_URL,
     PROMPT_EXAMPLES_URL,
     PUBLIC_BASE_URL,
+    PUBLIC_DESCRIPTION,
+    PUBLIC_DISPLAY_NAME,
     QUICKSTART_URL,
     REMOTE_MCP_PATH,
     REMOTE_MCP_URL,
@@ -106,12 +108,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Blocksize Capital Agentic Data Economy",
+    title=PUBLIC_DISPLAY_NAME,
     version=APP_VERSION,
     description=f"""
-Institutional-grade financial data gateway for autonomous AI agents.
-Supports x402 real-time payment settlement, bulk wallet credits, and a public
-remote MCP discovery surface for directory listings and client onboarding.
+Institutional-grade real-time market data gateway for autonomous AI agents.
+Supports x402 USDC settlement, wallet credits, and a public read-only remote
+MCP discovery surface for directory listings and client onboarding.
 
 ### Public Integration Surfaces
 - **Developer Portal**: [Homepage]({PUBLIC_BASE_URL}/)
@@ -1458,13 +1460,8 @@ async def mcp_manifest():
     """
     manifest: dict[str, object] = {
         "mcp_version": "1.0",
-        "name": "Blocksize Capital Remote Discovery",
-        "description": (
-            "Public remote MCP discovery server for Blocksize Capital. "
-            "Exposes free instrument discovery, pricing inspection, and "
-            "documentation search tools. Live market data remains available "
-            "through the x402-protected HTTP API."
-        ),
+        "name": PUBLIC_DISPLAY_NAME,
+        "description": PUBLIC_DESCRIPTION,
         "version": APP_VERSION,
         "transport": {
             "type": "streamable-http",
@@ -1495,7 +1492,10 @@ async def mcp_manifest():
         "tools": [
             {
                 "name": "search_pairs",
-                "description": "Search supported crypto, equity, FX, and metal symbols. Free and read-only.",
+                "description": (
+                    "Search supported crypto, equity, FX, and metal symbols. "
+                    "Returns catalog metadata only; free, read-only, and no live prices."
+                ),
                 "parameters": {
                     "query": {"type": "string", "example": "BTC"},
                     "asset_class": {"type": "string", "example": "crypto"},
@@ -1505,28 +1505,53 @@ async def mcp_manifest():
             },
             {
                 "name": "list_instruments",
-                "description": "List the supported instruments for a service such as vwap, bidask, fx, or metal. Free and read-only.",
+                "description": (
+                    "List supported instruments for one service such as vwap, bidask, fx, "
+                    "or metal. Free read-only catalog metadata."
+                ),
                 "parameters": {"service": {"type": "string", "example": "metal"}},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
                 "name": "get_pricing_info",
-                "description": "Inspect Blocksize pricing tiers, networks, and credit options. Free and read-only.",
+                "description": (
+                    "Inspect current per-call pricing, bulk credit tiers, and supported "
+                    "USDC settlement networks. Free and read-only; no payment is started."
+                ),
                 "parameters": {},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
+                "name": "get_market_data_endpoint",
+                "description": (
+                    "Build the exact x402-protected HTTP URL for one live market-data "
+                    "request. Free and read-only; does not fetch prices or charge a wallet."
+                ),
+                "parameters": {
+                    "service": {"type": "string", "example": "bidask"},
+                    "symbol": {"type": "string", "example": "AAPL"},
+                },
+                "payment": {"required": False},
+                "annotations": {"readOnlyHint": True, "idempotentHint": True},
+            },
+            {
                 "name": "search",
-                "description": "OpenAI-style document and catalog search across Blocksize docs and instrument metadata. Free and read-only.",
+                "description": (
+                    "Search Blocksize docs and instrument metadata. Returns ids for fetch; "
+                    "free, read-only, and no live prices."
+                ),
                 "parameters": {"query": {"type": "string", "example": "pricing"}},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
             {
                 "name": "fetch",
-                "description": "OpenAI-style document fetch for ids returned by search. Free and read-only.",
+                "description": (
+                    "Fetch one document or instrument guide by id. Free, read-only, and "
+                    "no account, credential, payment, or live-price side effects."
+                ),
                 "parameters": {"id": {"type": "string", "example": "doc:quickstart"}},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},

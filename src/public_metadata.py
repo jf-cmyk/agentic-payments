@@ -5,7 +5,16 @@ from __future__ import annotations
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.6.2"
+PUBLIC_DISPLAY_NAME = "Blocksize Real Time Market Data"
+PUBLIC_REGISTRY_DESCRIPTION = (
+    "Read-only MCP discovery for real-time crypto, equities, FX, metals, and x402 HTTP endpoints."
+)
+PUBLIC_DESCRIPTION = (
+    "Read-only MCP discovery for Blocksize real-time crypto, supported equity "
+    "ticker, FX, and metals market data. Use it to find instruments, inspect "
+    "pricing, read integration docs, and build x402-paid HTTP API requests."
+)
 
 
 def _normalized_url(env_var: str, default: str) -> str:
@@ -68,10 +77,10 @@ def build_server_json() -> dict[str, object]:
     payload: dict[str, object] = {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
         "name": OFFICIAL_REGISTRY_NAME,
-        "description": (
-            "Public MCP discovery for Blocksize market data, pricing, and docs."
-        ),
+        "title": PUBLIC_DISPLAY_NAME,
+        "description": PUBLIC_REGISTRY_DESCRIPTION,
         "homepage": f"{PUBLIC_BASE_URL}/",
+        "websiteUrl": f"{PUBLIC_BASE_URL}/",
         "version": APP_VERSION,
         "remotes": [
             {

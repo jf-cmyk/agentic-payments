@@ -14,6 +14,7 @@ from src.mcp_server import (
     get_fx_rate, get_metal_price,
     search_pairs, get_pricing_info, search, fetch,
 )
+from src.public_mcp_server import public_get_market_data_endpoint
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
     VWAPData, BidAskData, FXData,
@@ -168,3 +169,16 @@ class TestOpenAIStyleDiscoveryTools:
         parsed = json.loads(result)
         assert parsed["id"] == "instrument:crypto:btc-usd"
         assert "paid http api" in parsed["text"].lower()
+
+
+class TestPublicRemoteDiscoveryTools:
+    @pytest.mark.asyncio
+    async def test_market_data_endpoint_builder_returns_x402_url(self):
+        result = await public_get_market_data_endpoint("bidask", "AAPL")
+        parsed = json.loads(result)
+
+        assert parsed["status"] == "ok"
+        assert parsed["request"]["method"] == "GET"
+        assert parsed["request"]["url"].endswith("/v1/bidask/AAPL")
+        assert parsed["behavior"]["returns_live_data"] is False
+        assert parsed["behavior"]["starts_payment"] is False

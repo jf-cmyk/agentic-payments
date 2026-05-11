@@ -17,6 +17,7 @@ The public MCP server is read-only and exposes:
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
+- `get_market_data_endpoint`
 - `search`
 - `fetch`
 

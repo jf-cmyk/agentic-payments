@@ -532,7 +532,7 @@ async def get_pricing_info() -> str:
 
     summary = (
         "Blocksize Capital Pricing (USDC per call):\n"
-        f"  🆓 Discovery:      FREE (search, list, pricing)\n"
+        f"  🆓 Discovery:      FREE (search, list, pricing, endpoint builder)\n"
         f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (high-liquidity VWAP pairs)\n"
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"

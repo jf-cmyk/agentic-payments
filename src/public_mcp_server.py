@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
@@ -21,12 +22,16 @@ from src.public_metadata import (
     APP_VERSION,
     MCP_MANIFEST_URL,
     OPENAPI_URL,
+    PRICING_GUIDE_URL,
     PRIVACY_POLICY_URL,
     PROMPT_EXAMPLES_URL,
     PUBLIC_BASE_URL,
+    PUBLIC_DESCRIPTION,
+    PUBLIC_DISPLAY_NAME,
     QUICKSTART_URL,
     REMOTE_MCP_URL,
     SUPPORT_URL,
+    SWAGGER_URL,
 )
 
 InstrumentSearchQuery = Annotated[
@@ -37,6 +42,27 @@ InstrumentSearchQuery = Annotated[
             "ETH, AAPL, EURUSD, or XAUUSD."
         ),
         min_length=1,
+        max_length=80,
+    ),
+]
+LiveMarketDataService = Annotated[
+    Literal["vwap", "bidask", "fx", "metal"],
+    Field(
+        description=(
+            "Live HTTP data service to prepare: vwap for crypto VWAP, bidask for "
+            "crypto pairs or supported equity tickers, fx for currency pairs, or "
+            "metal for metals."
+        ),
+    ),
+]
+LiveMarketDataSymbol = Annotated[
+    str,
+    Field(
+        description=(
+            "Exact pair or ticker to use in the paid HTTP URL, such as BTC-USD, "
+            "AAPL, EURUSD, or XAUUSD. Use search_pairs first if unsure."
+        ),
+        min_length=2,
         max_length=80,
     ),
 ]
@@ -83,14 +109,13 @@ CatalogFetchId = Annotated[
 ]
 
 public_mcp = FastMCP(
-    "Blocksize Capital Remote Discovery",
+    PUBLIC_DISPLAY_NAME,
     version=APP_VERSION,
     instructions=(
-        "Public discovery MCP for Blocksize Capital. Use these tools to find "
-        "supported instruments, inspect pricing, read integration docs, and fetch "
-        "catalog metadata. This public remote server does not execute paid live "
-        "market data calls directly; paid HTTP data access remains available through "
-        "Blocksize's x402-protected REST API."
+        f"{PUBLIC_DESCRIPTION} This connector is read-only and free to inspect. "
+        "It never starts blockchain payments, stores credentials, or fetches paid "
+        "live prices directly; agents use the returned HTTPS URLs with the "
+        "x402-protected HTTP API when they are ready to purchase live data."
     ),
 )
 
@@ -99,8 +124,9 @@ public_mcp = FastMCP(
     name="search_pairs",
     title="Instrument Search",
     description=(
-        "Use this to discover supported crypto, equity, FX, or metal symbols before "
-        "using Blocksize's paid HTTP API. This is free and read-only."
+        "Discover supported symbols before using the paid HTTP API. Returns up to "
+        "50 catalog matches with asset class, available services, and pricing tier; "
+        "it is free, read-only, and never returns live prices or starts payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -116,8 +142,9 @@ async def public_search_pairs(
     name="list_instruments",
     title="Instrument List",
     description=(
-        "Use this to list supported instruments for one service such as vwap, bidask, "
-        "fx, or metal. This is free and read-only."
+        "List the supported instruments for one Blocksize service. This is free, "
+        "read-only catalog metadata; it does not fetch live prices, create accounts, "
+        "or start x402 payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -130,8 +157,9 @@ async def public_list_instruments(service: InstrumentService = "vwap") -> str:
     name="get_pricing_info",
     title="Pricing Information",
     description=(
-        "Use this to inspect the current free and paid tiers, supported settlement "
-        "networks, and credit options before using Blocksize's paid HTTP API."
+        "Inspect current per-call prices, bulk credit tiers, and supported Solana "
+        "and Base USDC settlement networks. This is free and read-only planning "
+        "metadata; it does not initiate payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -141,12 +169,71 @@ async def public_get_pricing_info() -> str:
 
 
 @public_mcp.tool(
+    name="get_market_data_endpoint",
+    title="Live Data Endpoint Builder",
+    description=(
+        "Build the exact x402-protected HTTP URL for one live market-data request. "
+        "Returns method, URL, service notes, pricing docs, and next steps; it is "
+        "read-only and does not fetch prices, charge a wallet, or submit payment."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def public_get_market_data_endpoint(
+    service: LiveMarketDataService,
+    symbol: LiveMarketDataSymbol,
+) -> str:
+    """Return the paid HTTP endpoint an agent should call for live data."""
+    clean_symbol = symbol.strip().upper()
+    encoded_symbol = quote(clean_symbol, safe="-_")
+    path = {
+        "vwap": f"/v1/vwap/{encoded_symbol}",
+        "bidask": f"/v1/bidask/{encoded_symbol}",
+        "fx": f"/v1/fx/{encoded_symbol}",
+        "metal": f"/v1/metal/{encoded_symbol}",
+    }[service]
+    notes = {
+        "vwap": "Crypto VWAP endpoint. Use search_pairs/list_instruments to confirm pair support.",
+        "bidask": "Shared bid/ask endpoint for crypto pairs and supported equity tickers.",
+        "fx": "FX spot endpoint for supported currency pairs.",
+        "metal": "Metals endpoint for supported precious/base metal tickers.",
+    }
+    return json.dumps(
+        {
+            "status": "ok",
+            "request": {
+                "method": "GET",
+                "url": f"{PUBLIC_BASE_URL}{path}",
+                "service": service,
+                "symbol": clean_symbol,
+            },
+            "behavior": {
+                "returns_live_data": False,
+                "starts_payment": False,
+                "side_effects": "none",
+                "next_step": (
+                    "Call the returned URL directly. Without payment it returns an HTTP 402 "
+                    "x402 challenge; after valid USDC settlement it returns JSON market data."
+                ),
+            },
+            "links": {
+                "pricing": PRICING_GUIDE_URL,
+                "openapi": OPENAPI_URL,
+                "swagger": SWAGGER_URL,
+                "quickstart": QUICKSTART_URL,
+            },
+            "notes": notes[service],
+        },
+        indent=2,
+    )
+
+
+@public_mcp.tool(
     name="search",
     title="Catalog Search",
     description=(
-        "Use this when a remote MCP client needs OpenAI-style search across "
-        "Blocksize docs and free catalog metadata. This does not return live "
-        "market prices."
+        "Search Blocksize documentation and catalog metadata by keyword. This "
+        "free read-only search returns document and instrument ids for fetch; it "
+        "does not return live prices or start payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -159,8 +246,9 @@ async def public_search(query: CatalogSearchQuery) -> str:
     name="fetch",
     title="Catalog Fetch",
     description=(
-        "Use this to fetch the full contents of a document or instrument guide "
-        "returned by search. This is read-only."
+        "Fetch one document or instrument guide returned by search. This is "
+        "free, read-only content retrieval with no account, credential, payment, "
+        "or live-price side effects."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -174,12 +262,9 @@ async def public_info() -> str:
     """Provide remote-discovery server metadata to MCP clients."""
     return json.dumps(
         {
-            "name": "Blocksize Capital Remote Discovery",
+            "name": PUBLIC_DISPLAY_NAME,
             "version": APP_VERSION,
-            "purpose": (
-                "Public, read-only discovery server for listing directories, "
-                "remote MCP clients, and installation workflows."
-            ),
+            "purpose": PUBLIC_DESCRIPTION,
             "links": {
                 "homepage": PUBLIC_BASE_URL,
                 "remote_mcp": REMOTE_MCP_URL,

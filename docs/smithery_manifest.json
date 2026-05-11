@@ -1,7 +1,7 @@
 {
-  "name": "Blocksize Capital Remote Discovery",
-  "version": "0.6.1",
-  "description": "Public remote MCP discovery server for Blocksize Capital. Free instrument discovery, pricing inspection, and documentation search for the paid x402 market data API.",
+  "name": "Blocksize Real Time Market Data",
+  "version": "0.6.2",
+  "description": "Read-only MCP discovery for Blocksize real-time crypto, supported equity ticker, FX, and metals market data. Find instruments, inspect pricing, read integration docs, and build x402-paid HTTP API requests.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
   "license": "MIT",

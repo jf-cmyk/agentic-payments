@@ -109,8 +109,18 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "info.blocksize.mcp/agentic-payments"
+        assert data["title"] == "Blocksize Real Time Market Data"
         assert "repository" not in data
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
+
+    def test_manifest_exposes_market_data_display_name_and_endpoint_builder(self, test_client):
+        response = test_client.get("/mcp/manifest.json")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["name"] == "Blocksize Real Time Market Data"
+        assert "real-time crypto" in data["description"]
+        assert any(tool["name"] == "get_market_data_endpoint" for tool in data["tools"])
 
     def test_repository_metadata_can_still_be_enabled(self, test_client, monkeypatch):
         repository_url = "https://example.com/blocksize/agentic-payments"
