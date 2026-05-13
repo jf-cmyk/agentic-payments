@@ -7,6 +7,15 @@ Updated: 2026-05-13
 Blocksize Market Data is live as a Claude-compatible remote MCP custom connector.
 It is not yet listed in Claude's Connectors Directory.
 
+An optional Claude Code/Cowork plugin wrapper is prepared in:
+
+```text
+claude-plugin/blocksize-market-data
+```
+
+Use the remote MCP connector submission for Claude-wide discovery. Use the
+plugin submission only for the complementary Claude Code/Cowork plugin track.
+
 Install URL for custom connector testing:
 
 ```text
@@ -76,10 +85,15 @@ Local and remote QA:
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
-# 125 passed
+# 127 passed
 
 .venv/bin/python scripts/test_anthropic_mcp_connector.py \
   --url https://mcp.blocksize.info/anthropic/mcp/ \
+  --expect-oauth-required
+# PASS oauth challenge required: status=401
+
+.venv/bin/python scripts/test_anthropic_mcp_connector.py \
+  --url https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/ \
   --expect-oauth-required
 # PASS oauth challenge required: status=401
 ```
@@ -117,6 +131,12 @@ These require access outside the repo/deploy shell.
 4. Submit the form.
    - Use `https://clau.de/mcp-directory-submission`.
    - Use the form answers below.
+
+5. Optional plugin submission.
+   - Validate `claude-plugin/blocksize-market-data`.
+   - Submit through `https://claude.ai/settings/plugins/submit` or
+     `https://platform.claude.com/plugins/submit`.
+   - Provide a public GitHub path or upload a zip of the plugin directory.
 
 ## Submission Form Answers
 
@@ -306,6 +326,37 @@ Launch readiness:
 ```text
 Production remote MCP endpoint is deployed. Public documentation, privacy, and
 support pages are live. OAuth metadata and 401 challenge behavior are verified.
-Claude custom-connector OAuth testing and MCP Inspector testing should be
-completed with the reviewer account before submitting the form.
+The standalone Claude beta service is also OAuth-protected and backed by a
+persistent /data entitlement volume. Claude custom-connector OAuth testing and
+MCP Inspector testing should be completed with the reviewer account before
+submitting the form.
+```
+
+## Optional Claude Plugin Track
+
+Plugin package:
+
+```text
+claude-plugin/blocksize-market-data
+```
+
+Plugin submission packet:
+
+```text
+docs/gtm/claude_plugin_submission/README.md
+```
+
+Plugin forms:
+
+```text
+https://claude.ai/settings/plugins/submit
+https://platform.claude.com/plugins/submit
+```
+
+Plugin positioning:
+
+```text
+This plugin wraps the Blocksize remote MCP connector with setup instructions and
+a market-data workflow skill for Claude Code and Cowork. It points to the same
+read-only OAuth-protected endpoint submitted to the Connectors Directory.
 ```

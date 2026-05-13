@@ -1,0 +1,20 @@
+{
+  "name": "blocksize-market-data",
+  "description": "Read-only Blocksize market-data workflows for Claude Code and Cowork.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Blocksize",
+    "email": "support@blocksize.info",
+    "url": "https://blocksize.info"
+  },
+  "homepage": "https://mcp.blocksize.info/claude-connector",
+  "repository": "https://github.com/jf-cmyk/agentic-payments",
+  "license": "MIT",
+  "keywords": [
+    "market-data",
+    "finance",
+    "mcp",
+    "claude",
+    "blocksize"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "blocksize-market-data": {
+    "type": "http",
+    "url": "https://mcp.blocksize.info/anthropic/mcp/"
+  }
+}

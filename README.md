@@ -128,6 +128,8 @@ python -m src.mcp_server
 - Official registry file: [server.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/server.json)
 - Smithery metadata: [docs/smithery_manifest.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/smithery_manifest.json)
 - Claude submission packet: [docs/gtm/claude_connector_submission.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/claude_connector_submission.md)
+- Claude plugin package: [claude-plugin/blocksize-market-data](/Users/johannfocke/Documents/Antigravity/Agentic Payments/claude-plugin/blocksize-market-data)
+- Claude plugin submission packet: [docs/gtm/claude_plugin_submission/README.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/claude_plugin_submission/README.md)
 - Internal submission runbook: [docs/gtm/directory_listing_runbook.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/directory_listing_runbook.md)
 
 ## License

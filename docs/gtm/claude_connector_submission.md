@@ -5,6 +5,11 @@ Prepared: 2026-05-13
 Current launch status and copy-ready submission answers now live in
 [claude_connector_launch_status.md](claude_connector_launch_status.md).
 
+The complementary Claude Code/Cowork plugin packet lives in
+[claude_plugin_submission/README.md](claude_plugin_submission/README.md). Submit
+the remote MCP connector first; the plugin is optional and should be submitted
+as a separate plugin directory entry.
+
 ## Goal
 
 Submit Blocksize Market Data as a Claude remote MCP connector while keeping the
@@ -206,8 +211,13 @@ mitigation is product separation:
   - `ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp`
 - [x] Register callback:
   - `https://mcp.blocksize.info/anthropic/mcp/auth/callback`
-- [ ] Confirm persistent entitlement storage path/volume for the main service.
+- [x] Confirm persistent entitlement storage path/volume for the main service.
+- [x] Confirm standalone Claude beta service uses OAuth and persistent
+  entitlement storage.
+- [x] Prepare optional Claude Code/Cowork plugin package:
+  - `claude-plugin/blocksize-market-data`
 - [ ] Create reviewer account and sample data access.
 - [ ] Run MCP Inspector against the production URL.
 - [ ] Test as a Claude custom connector.
 - [ ] Fill out Anthropic's MCP directory submission form.
+- [ ] Optional: validate and submit the plugin through Claude's plugin form.
