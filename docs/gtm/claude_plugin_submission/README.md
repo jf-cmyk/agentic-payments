@@ -37,6 +37,12 @@ Plugin source path:
 claude-plugin/blocksize-market-data
 ```
 
+Public source URL:
+
+```text
+https://gitlab.com/jfocke/agentic-payments/-/tree/main/claude-plugin/blocksize-market-data
+```
+
 Prepared upload archive:
 
 ```text
@@ -69,10 +75,10 @@ https://platform.claude.com/plugins/submit
 - Use this plugin for Claude Code and Cowork discovery.
 - Use the Connectors Directory form for Claude.ai/Desktop/mobile-wide remote MCP
   discovery.
-- If submitting by GitHub URL, the repository or plugin subdirectory must be
-  publicly accessible.
-- If GitHub publishing is not ready, upload a zip of
-  `claude-plugin/blocksize-market-data`.
+- If Anthropic requires a GitHub URL, sync this plugin path to the public GitHub
+  remote before using the GitHub option.
+- Until GitHub is synced, upload
+  `deliverables/blocksize-market-data-claude-plugin-0.1.0.zip`.
 - Run `claude plugin validate claude-plugin/blocksize-market-data` before plugin
   submission where the Claude CLI is available.
 

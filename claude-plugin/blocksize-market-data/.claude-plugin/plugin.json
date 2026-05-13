@@ -8,7 +8,7 @@
     "url": "https://blocksize.info"
   },
   "homepage": "https://mcp.blocksize.info/claude-connector",
-  "repository": "https://github.com/jf-cmyk/agentic-payments",
+  "repository": "https://gitlab.com/jfocke/agentic-payments/-/tree/main/claude-plugin/blocksize-market-data",
   "license": "MIT",
   "keywords": [
     "market-data",
