@@ -114,6 +114,18 @@ class TestPublicListingSurfaces:
         response = test_client.get("/mcp/server")
         assert response.status_code != 404
 
+    def test_root_favicons_exist_for_directory_crawlers(self, test_client):
+        ico_response = test_client.get("/favicon.ico")
+        svg_response = test_client.get("/favicon.svg")
+        touch_response = test_client.get("/apple-touch-icon.png")
+
+        assert ico_response.status_code == 200
+        assert "image/x-icon" in ico_response.headers["content-type"]
+        assert svg_response.status_code == 200
+        assert "image/svg+xml" in svg_response.headers["content-type"]
+        assert touch_response.status_code == 200
+        assert "image/png" in touch_response.headers["content-type"]
+
     def test_anthropic_safe_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/anthropic/mcp")
         assert response.status_code != 404

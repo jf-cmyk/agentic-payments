@@ -157,6 +157,9 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         "/prompt-examples",
         "/support",
         "/claude-connector",
+        "/favicon.ico",
+        "/favicon.svg",
+        "/apple-touch-icon.png",
         "/.well-known/oauth-authorization-server",
         "/.well-known/oauth-authorization-server/anthropic/mcp",
         "/.well-known/openid-configuration/anthropic/mcp",
@@ -183,6 +186,24 @@ async def get_portal():
     if portal_path.exists():
         return FileResponse(portal_path)
     raise HTTPException(status_code=404, detail="Developer Portal not found")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon_ico():
+    """Serve the root favicon for browser and directory crawlers."""
+    return FileResponse(DOCS_DIR / "assets" / "favicon.ico", media_type="image/x-icon")
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def get_favicon_svg():
+    """Serve the square Blocksize mark as an SVG favicon."""
+    return FileResponse(DOCS_DIR / "assets" / "logo-square.svg", media_type="image/svg+xml")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+async def get_apple_touch_icon():
+    """Serve the square Blocksize mark for touch icons."""
+    return FileResponse(DOCS_DIR / "assets" / "favicon.png", media_type="image/png")
 
 
 def _serve_doc(filename: str, description: str) -> FileResponse:
