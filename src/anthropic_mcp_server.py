@@ -8,7 +8,7 @@ from src.authenticated_mcp_server import (
     create_authenticated_market_data_mcp,
 )
 from src.blocksize_client import BlocksizeClient
-from src.entitlement_manager import EntitlementManager
+from src.entitlement_manager import EntitlementManager, connector_entitlement_manager
 from src.mcp_server import READ_ONLY_TOOL_ANNOTATIONS
 
 TOOL_COSTS = SHARED_TOOL_COSTS
@@ -41,7 +41,7 @@ async def _get_client() -> BlocksizeClient:
 def _get_entitlements() -> EntitlementManager:
     global _entitlements
     if _entitlements is None:
-        _entitlements = EntitlementManager()
+        _entitlements = connector_entitlement_manager("ANTHROPIC")
     return _entitlements
 
 

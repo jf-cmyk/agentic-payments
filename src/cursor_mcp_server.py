@@ -8,7 +8,12 @@ from src.authenticated_mcp_server import (
     create_authenticated_market_data_mcp,
 )
 from src.blocksize_client import BlocksizeClient
-from src.entitlement_manager import EntitlementManager
+from src.entitlement_manager import (
+    DEFAULT_DAILY_CREDITS,
+    DEFAULT_ENTITLEMENT_DB_PATH,
+    EntitlementManager,
+    connector_entitlement_manager,
+)
 
 TOOL_COSTS = SHARED_TOOL_COSTS
 
@@ -39,7 +44,11 @@ async def _get_client() -> BlocksizeClient:
 def _get_entitlements() -> EntitlementManager:
     global _entitlements
     if _entitlements is None:
-        _entitlements = EntitlementManager()
+        _entitlements = connector_entitlement_manager(
+            "CURSOR",
+            fallback_db_path=DEFAULT_ENTITLEMENT_DB_PATH,
+            fallback_daily_credits=DEFAULT_DAILY_CREDITS,
+        )
     return _entitlements
 
 

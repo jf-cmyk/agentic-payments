@@ -1,4 +1,4 @@
-"""Daily credit entitlements for the Anthropic-safe MCP surface."""
+"""Daily credit entitlements for authenticated MCP connector surfaces."""
 
 from __future__ import annotations
 
@@ -12,6 +12,25 @@ from pathlib import Path
 
 
 DEFAULT_DAILY_CREDITS = int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50"))
+DEFAULT_ENTITLEMENT_DB_PATH = "anthropic_entitlements.db"
+
+
+def connector_entitlement_manager(
+    prefix: str,
+    *,
+    fallback_db_path: str | Path = DEFAULT_ENTITLEMENT_DB_PATH,
+    fallback_daily_credits: int | None = None,
+) -> "EntitlementManager":
+    """Build a connector-specific entitlement manager from environment variables."""
+    prefix = prefix.upper()
+    db_path = os.environ.get(f"{prefix}_ENTITLEMENT_DB_PATH", str(fallback_db_path))
+    daily_credits = int(
+        os.environ.get(
+            f"{prefix}_DAILY_CREDITS",
+            str(fallback_daily_credits or DEFAULT_DAILY_CREDITS),
+        )
+    )
+    return EntitlementManager(db_path, default_daily_credits=daily_credits)
 
 
 @dataclass(frozen=True)
@@ -36,7 +55,7 @@ class EntitlementManager:
     ) -> None:
         self.db_path = str(db_path or os.environ.get(
             "ANTHROPIC_ENTITLEMENT_DB_PATH",
-            "anthropic_entitlements.db",
+            DEFAULT_ENTITLEMENT_DB_PATH,
         ))
         self.default_daily_credits = default_daily_credits
         self._init_db()

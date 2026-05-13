@@ -2,6 +2,9 @@
 
 Prepared: 2026-05-13
 
+Current launch status and copy-ready submission answers now live in
+[claude_connector_launch_status.md](claude_connector_launch_status.md).
+
 ## Goal
 
 Submit Blocksize Market Data as a Claude remote MCP connector while keeping the
@@ -196,15 +199,15 @@ mitigation is product separation:
 
 ## Finish-Line Checklist
 
-- Deploy the Anthropic OAuth metadata routes.
-- Configure OAuth provider for production:
+- [x] Deploy the Anthropic OAuth metadata routes.
+- [x] Configure OAuth provider for production:
   - `ANTHROPIC_AUTH_PROVIDER=clerk`
   - `ANTHROPIC_ENABLE_BETA_TOKENS=false`
   - `ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp`
-- Register callback:
+- [x] Register callback:
   - `https://mcp.blocksize.info/anthropic/mcp/auth/callback`
-- Attach persistent entitlement storage.
-- Create reviewer account and sample data access.
-- Run MCP Inspector against the production URL.
-- Test as a Claude custom connector.
-- Fill out Anthropic's MCP directory submission form.
+- [ ] Confirm persistent entitlement storage path/volume for the main service.
+- [ ] Create reviewer account and sample data access.
+- [ ] Run MCP Inspector against the production URL.
+- [ ] Test as a Claude custom connector.
+- [ ] Fill out Anthropic's MCP directory submission form.

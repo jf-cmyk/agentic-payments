@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.entitlement_manager import EntitlementManager
+from src.entitlement_manager import EntitlementManager, connector_entitlement_manager
 
 
 def test_daily_status_creates_default_allowance(tmp_path):
@@ -87,3 +87,37 @@ def test_set_daily_limit_supports_subscriber_overrides(tmp_path):
     assert status.daily_limit == 250
     assert status.credits_remaining == 250
     assert status.email == "subscriber@example.com"
+
+
+def test_connector_entitlement_manager_uses_prefix_specific_env(tmp_path, monkeypatch):
+    anthropic_db = tmp_path / "anthropic.db"
+    cursor_db = tmp_path / "cursor.db"
+    monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
+    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
+    monkeypatch.setenv("CURSOR_ENTITLEMENT_DB_PATH", str(cursor_db))
+    monkeypatch.setenv("CURSOR_DAILY_CREDITS", "25")
+
+    anthropic = connector_entitlement_manager("ANTHROPIC")
+    cursor = connector_entitlement_manager("CURSOR")
+
+    assert anthropic.db_path == str(anthropic_db)
+    assert anthropic.default_daily_credits == 75
+    assert cursor.db_path == str(cursor_db)
+    assert cursor.default_daily_credits == 25
+
+
+def test_cursor_fallback_does_not_follow_anthropic_db_path(tmp_path, monkeypatch):
+    anthropic_db = tmp_path / "anthropic.db"
+    monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
+    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
+    monkeypatch.delenv("CURSOR_ENTITLEMENT_DB_PATH", raising=False)
+    monkeypatch.delenv("CURSOR_DAILY_CREDITS", raising=False)
+
+    cursor = connector_entitlement_manager(
+        "CURSOR",
+        fallback_db_path="anthropic_entitlements.db",
+        fallback_daily_credits=50,
+    )
+
+    assert cursor.db_path == "anthropic_entitlements.db"
+    assert cursor.default_daily_credits == 50
