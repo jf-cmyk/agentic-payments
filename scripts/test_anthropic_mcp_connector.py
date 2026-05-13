@@ -70,13 +70,44 @@ async def _list_tools(client: Client) -> set[str]:
     return {tool.name for tool in tools}
 
 
+def _http_status_from_exception(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return int(status_code) if status_code is not None else None
+
+
 async def run_checks(
     url: str,
     token: str | None,
     spend_live: bool,
     expect_auth_fail: bool,
+    expect_oauth_required: bool,
 ) -> list[Check]:
     checks: list[Check] = []
+
+    if expect_oauth_required and not token:
+        try:
+            async with Client(url):
+                pass
+        except Exception as exc:
+            status_code = _http_status_from_exception(exc)
+            checks.append(
+                Check(
+                    "oauth challenge required",
+                    status_code == 401,
+                    f"status={status_code} error={_short(exc)}",
+                )
+            )
+            return checks
+
+        checks.append(
+            Check(
+                "oauth challenge required",
+                False,
+                "connected without OAuth; expected a 401 challenge",
+            )
+        )
+        return checks
 
     async with Client(url) as client:
         tool_names = await _list_tools(client)
@@ -257,12 +288,25 @@ def main() -> int:
         action="store_true",
         help="Treat the supplied token as rotated/invalid and assert live tools are blocked.",
     )
+    parser.add_argument(
+        "--expect-oauth-required",
+        action="store_true",
+        help="Assert the unauthenticated MCP transport returns a 401 OAuth challenge.",
+    )
     args = parser.parse_args()
 
     if args.expect_auth_fail and not args.token:
         parser.error("--expect-auth-fail requires --token, BETA_TOKEN, or ANTHROPIC_BETA_TOKEN")
 
-    checks = asyncio.run(run_checks(args.url, args.token, args.spend_live, args.expect_auth_fail))
+    checks = asyncio.run(
+        run_checks(
+            args.url,
+            args.token,
+            args.spend_live,
+            args.expect_auth_fail,
+            args.expect_oauth_required,
+        )
+    )
     for check in checks:
         mark = "PASS" if check.ok else "FAIL"
         print(f"{mark} {check.name}: {check.detail}")

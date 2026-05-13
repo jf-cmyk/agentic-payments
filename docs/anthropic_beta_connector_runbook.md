@@ -102,10 +102,10 @@ SUPABASE_PROJECT_URL=https://<project-ref>.supabase.co
 
 ## Smoke Tests
 
-Public no-auth check:
+Public OAuth challenge check:
 
 ```bash
-.venv/bin/python scripts/test_anthropic_mcp_connector.py
+.venv/bin/python scripts/test_anthropic_mcp_connector.py --expect-oauth-required
 ```
 
 Private beta-token check without spending live-data credits:

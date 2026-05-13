@@ -169,7 +169,7 @@ Required local or staging checks:
 Protocol checks:
 
 ```bash
-.venv/bin/python scripts/test_anthropic_mcp_connector.py --url https://mcp.blocksize.info/anthropic/mcp/
+.venv/bin/python scripts/test_anthropic_mcp_connector.py --url https://mcp.blocksize.info/anthropic/mcp/ --expect-oauth-required
 ```
 
 OAuth/manual checks:
