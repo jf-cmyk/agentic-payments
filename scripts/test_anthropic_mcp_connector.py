@@ -16,7 +16,7 @@ from typing import Any
 from fastmcp import Client
 
 
-DEFAULT_URL = "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/"
+DEFAULT_URL = "https://mcp.blocksize.info/anthropic/mcp/"
 EXPECTED_TOOLS = {
     "search_pairs",
     "list_instruments",

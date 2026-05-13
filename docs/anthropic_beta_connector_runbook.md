@@ -3,12 +3,12 @@
 This runbook covers the Anthropic-safe Blocksize MCP endpoint:
 
 ```text
-https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/
+https://mcp.blocksize.info/anthropic/mcp/
 ```
 
-The endpoint is intentionally separate from the main GitLab-backed production
-deployment. It reuses the same codebase and exposes only read-only market data
-tools with server-side daily credits.
+The same code can also run as a dedicated Anthropic-only Railway deployment
+using `ANTHROPIC_ONLY_MODE=true`. In both modes, it exposes only read-only
+market data tools with server-side daily credits.
 
 ## Current Readiness
 
@@ -16,6 +16,13 @@ Ready now:
 
 - Public HTTPS Railway endpoint.
 - Streamable HTTP MCP transport at `/anthropic/mcp/`.
+- Claude OAuth protected-resource metadata:
+  - `/.well-known/oauth-protected-resource/anthropic/mcp/`
+- Claude OAuth authorization-server metadata:
+  - `/.well-known/oauth-authorization-server/anthropic/mcp`
+  - `/.well-known/openid-configuration/anthropic/mcp`
+  - `/anthropic/mcp/.well-known/openid-configuration`
+- Claude connector documentation at `/claude-connector`.
 - Read-only tool surface:
   - `search_pairs`
   - `list_instruments`
@@ -36,7 +43,8 @@ Before directory submission:
 - Configure Clerk OAuth and disable beta-token fallback.
 - Confirm a persistent Railway volume or managed database for entitlement state.
 - Prepare a fully populated test account for Anthropic reviewers.
-- Publish a short public help page or blog post for setup/support.
+- Verify the public documentation, privacy, support, and prompt example pages.
+- Run MCP Inspector and a Claude custom connector test against production.
 
 ## Railway Variables
 
@@ -46,12 +54,13 @@ Minimum public OAuth deployment variables:
 ANTHROPIC_ONLY_MODE=true
 ANTHROPIC_DAILY_CREDITS=50
 ANTHROPIC_ENTITLEMENT_DB_PATH=/data/anthropic_entitlements.db
-ANTHROPIC_MCP_PUBLIC_URL=https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp
+ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp
 ANTHROPIC_AUTH_PROVIDER=clerk
 ANTHROPIC_ENABLE_BETA_TOKENS=false
 ANTHROPIC_OAUTH_REDIRECT_PATH=/auth/callback
 ANTHROPIC_OAUTH_JWT_SIGNING_KEY=<long-random-secret>
 ANTHROPIC_ALLOWED_CLIENT_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback,http://localhost:*,http://127.0.0.1:*
+ANTHROPIC_OAUTH_SCOPES=openid,email,profile
 CLERK_DOMAIN=<your-clerk-domain>
 CLERK_CLIENT_ID=<your-clerk-client-id>
 CLERK_CLIENT_SECRET=<your-clerk-client-secret>
@@ -61,7 +70,7 @@ ANTHROPIC_BETA_TOKENS=
 Register this callback URL in the Clerk OAuth application:
 
 ```text
-https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/auth/callback
+https://mcp.blocksize.info/anthropic/mcp/auth/callback
 ```
 
 If the public MCP URL changes, the Clerk callback must change with it. For
@@ -132,6 +141,14 @@ OAuth mode check:
    tool_surface=read-only
    ```
 
+Metadata checks:
+
+```bash
+curl -sS https://mcp.blocksize.info/.well-known/oauth-protected-resource/anthropic/mcp/
+curl -sS https://mcp.blocksize.info/.well-known/oauth-authorization-server/anthropic/mcp
+curl -sS https://mcp.blocksize.info/claude-connector
+```
+
 Expected behavior:
 
 - Tool discovery succeeds.
@@ -162,7 +179,7 @@ For Claude.ai custom connectors and public consumption, use OAuth:
 5. In Claude, add a custom connector using:
 
    ```text
-   https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/
+   https://mcp.blocksize.info/anthropic/mcp/
    ```
 
 6. Complete the OAuth connection flow in Claude.
@@ -180,3 +197,6 @@ Before adding more users:
 - Verify old tokens fail with `--expect-auth-fail`.
 - Keep `ANTHROPIC_DAILY_CREDITS=50`.
 - Attach a Railway volume at `/data` or move entitlements to a managed database.
+- Provide Anthropic reviewers with private test-account credentials.
+- Use [claude_connector_submission.md](gtm/claude_connector_submission.md) as the
+  submission packet.

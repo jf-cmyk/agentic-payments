@@ -56,7 +56,7 @@ class TestHealthEndpoint:
         monkeypatch.setenv("ANTHROPIC_ENABLE_BETA_TOKENS", "false")
         monkeypatch.setenv(
             "ANTHROPIC_MCP_PUBLIC_URL",
-            "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp",
+            "https://mcp.blocksize.info/anthropic/mcp",
         )
 
         response = test_client.get("/health")
@@ -69,6 +69,12 @@ class TestHealthEndpoint:
         assert data["auth_provider"] == "clerk"
         assert data["beta_tokens_enabled"] is False
         assert data["oauth_callback_url"].endswith("/anthropic/mcp/auth/callback")
+        assert data["oauth_protected_resource_metadata"].endswith(
+            "/.well-known/oauth-protected-resource/anthropic/mcp/"
+        )
+        assert data["oauth_authorization_server_metadata"].endswith(
+            "/.well-known/oauth-authorization-server/anthropic/mcp"
+        )
         assert "pricing" not in data
         assert "bulk_pricing" not in data
 
@@ -80,12 +86,21 @@ class TestPublicListingSurfaces:
         paid_response = test_client.get("/v1/vwap/btc-usd")
         public_mcp_response = test_client.get("/mcp/server")
         anthropic_response = test_client.get("/anthropic/mcp")
+        auth_metadata_response = test_client.get(
+            "/.well-known/oauth-authorization-server/anthropic/mcp"
+        )
+        support_response = test_client.get("/support")
+        prompt_examples_response = test_client.get("/prompt-examples")
 
         assert paid_response.status_code == 404
         assert paid_response.json()["error_code"] == "ANTHROPIC_ONLY_MODE"
         assert public_mcp_response.status_code == 404
         assert anthropic_response.status_code != 404
         assert "PAYMENT-REQUIRED" not in anthropic_response.headers
+        assert auth_metadata_response.status_code == 200
+        assert auth_metadata_response.json()["issuer"].endswith("/anthropic/mcp")
+        assert support_response.status_code == 200
+        assert prompt_examples_response.status_code == 200
 
     def test_manifest_exposes_remote_mcp_url(self, test_client):
         response = test_client.get("/mcp/manifest.json")
@@ -103,6 +118,51 @@ class TestPublicListingSurfaces:
         response = test_client.get("/anthropic/mcp")
         assert response.status_code != 404
         assert "PAYMENT-REQUIRED" not in response.headers
+
+    def test_root_anthropic_oauth_protected_resource_metadata(self, test_client):
+        response = test_client.get("/.well-known/oauth-protected-resource/anthropic/mcp/")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/anthropic/mcp/")
+        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+        assert data["scopes_supported"] == ["openid", "email", "profile"]
+        assert data["bearer_methods_supported"] == ["header"]
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-authorization-server/anthropic/mcp",
+            "/.well-known/openid-configuration/anthropic/mcp",
+            "/anthropic/mcp/.well-known/openid-configuration",
+        ],
+    )
+    def test_anthropic_oauth_authorization_server_metadata_aliases(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["issuer"].endswith("/anthropic/mcp")
+        assert data["registration_endpoint"].endswith("/anthropic/mcp/register")
+        assert data["scopes_supported"] == ["openid", "email", "profile"]
+
+    def test_root_oauth_authorization_server_metadata_switches_in_anthropic_only_mode(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+
+        response = test_client.get("/.well-known/oauth-authorization-server")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["issuer"].endswith("/anthropic/mcp")
+        assert data["authorization_endpoint"].endswith("/anthropic/mcp/authorize")
 
     def test_cursor_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/cursor/mcp")
@@ -161,6 +221,18 @@ class TestPublicListingSurfaces:
         assert cursor["tool_surface"] == "read-only"
         assert "get_vwap" in cursor["tool_costs"]
         assert data["links"]["cursor_mcp"].endswith("/cursor/mcp/")
+
+    def test_health_exposes_anthropic_connector_metadata(self, test_client):
+        response = test_client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        anthropic = data["anthropic_connector"]
+
+        assert anthropic["mcp_url"].endswith("/anthropic/mcp")
+        assert anthropic["tool_surface"] == "read-only"
+        assert "get_vwap" in anthropic["tool_costs"]
+        assert data["links"]["anthropic_mcp"].endswith("/anthropic/mcp/")
+        assert data["links"]["claude_connector"].endswith("/claude-connector")
 
     def test_server_json_is_served(self, test_client):
         response = test_client.get("/server.json")
@@ -231,6 +303,7 @@ class TestPublicListingSurfaces:
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200
         assert test_client.get("/privacy").status_code == 200
+        assert test_client.get("/claude-connector").status_code == 200
         assert test_client.get("/quickstart/remote-mcp").status_code == 200
         assert test_client.get("/prompt-examples").status_code == 200
 

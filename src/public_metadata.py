@@ -37,6 +37,7 @@ OPENAPI_URL = f"{PUBLIC_BASE_URL}/openapi.json"
 SWAGGER_URL = f"{PUBLIC_BASE_URL}/docs"
 
 QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/remote-mcp"
+CLAUDE_CONNECTOR_URL = f"{PUBLIC_BASE_URL}/claude-connector"
 PROMPT_EXAMPLES_URL = f"{PUBLIC_BASE_URL}/prompt-examples"
 PRIVACY_POLICY_URL = f"{PUBLIC_BASE_URL}/privacy"
 SUPPORT_URL = f"{PUBLIC_BASE_URL}/support"

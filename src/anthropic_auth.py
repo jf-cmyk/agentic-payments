@@ -14,6 +14,7 @@ from src.connector_auth import (
     identity_from_beta_token,
     load_beta_tokens,
     oauth_callback_url_for,
+    oauth_scopes_for,
     parse_string_list,
     resolve_connector_identity,
 )
@@ -26,6 +27,7 @@ DEFAULT_ALLOWED_CLIENT_REDIRECT_URIS = [
     "http://localhost:*",
     "http://127.0.0.1:*",
 ]
+DEFAULT_OAUTH_SCOPES = ["openid", "email", "profile"]
 
 
 def build_anthropic_auth_provider():
@@ -35,6 +37,7 @@ def build_anthropic_auth_provider():
         default_public_url=DEFAULT_PUBLIC_URL,
         default_allowed_client_redirect_uris=DEFAULT_ALLOWED_CLIENT_REDIRECT_URIS,
         service_label="Anthropic MCP",
+        default_oauth_scopes=DEFAULT_OAUTH_SCOPES,
     )
 
 
@@ -55,6 +58,11 @@ def beta_tokens_enabled() -> bool:
 def oauth_callback_url() -> str:
     """Return the OAuth callback URL to register with the upstream provider."""
     return oauth_callback_url_for(PREFIX, DEFAULT_PUBLIC_URL)
+
+
+def oauth_scopes() -> list[str]:
+    """Return OAuth scopes advertised and requested for the Claude connector."""
+    return oauth_scopes_for(PREFIX, DEFAULT_OAUTH_SCOPES)
 
 
 def _allowed_client_redirect_uris() -> list[str] | None:

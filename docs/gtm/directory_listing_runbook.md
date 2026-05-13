@@ -112,23 +112,34 @@ What still requires approval:
 
 ### 5. Anthropic Connectors Directory
 
-Status: artifacts prepared, submission should be treated as policy-risky
+Status: Claude-specific implementation is ready for OAuth deployment QA; final
+submission remains policy-sensitive because of the broader product's x402
+payment positioning.
 
 Why risky:
 
 - Anthropic's current MCP Directory Policy says MCP servers may not be used to transfer money, cryptocurrency, or other financial assets, or execute financial transactions on behalf of users.
 - The public remote MCP surface in this repo is now discovery-only, which reduces risk, but the overall product is still tightly tied to crypto-paid data access.
 
+What now exists:
+
+- Dedicated Claude remote MCP endpoint at `/anthropic/mcp/`
+- Claude OAuth metadata routes:
+  - `/.well-known/oauth-protected-resource/anthropic/mcp/`
+  - `/.well-known/oauth-authorization-server/anthropic/mcp`
+  - `/.well-known/openid-configuration/anthropic/mcp`
+- Public Claude connector page at `/claude-connector`
+- Submission packet at `docs/gtm/claude_connector_submission.md`
+- Tests covering Anthropic auth, safe tool behavior, metadata, and health output
+
 What still requires approval:
 
-1. Decide whether to submit despite the policy risk.
-2. If yes, fill out Anthropic's review form manually.
-3. Be ready to provide:
-   - remote MCP URL
-   - privacy policy
-   - support contact
-   - prompt examples
-   - reviewer guidance
+1. Configure production OAuth and disable beta-token fallback.
+2. Attach persistent entitlement storage.
+3. Create a fully populated Anthropic reviewer account.
+4. Test the production URL in MCP Inspector and Claude custom connectors.
+5. Decide whether to submit despite the policy risk.
+6. Fill out Anthropic's review form manually using the submission packet.
 
 ### 6. OpenAI
 

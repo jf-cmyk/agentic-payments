@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blocksize Claude Connector</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-alt: #f7f7f8;
+      --text: #111111;
+      --muted: #5b616e;
+      --border: #e5e7eb;
+      --accent: #285cdb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      width: min(940px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+    h1, h2 {
+      line-height: 1.15;
+      margin: 0;
+      letter-spacing: 0;
+    }
+    h1 { font-size: clamp(2rem, 6vw, 3rem); }
+    h2 { font-size: 1.35rem; margin-top: 40px; }
+    p, li { color: var(--muted); }
+    a { color: var(--accent); text-decoration: none; }
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.92rem;
+    }
+    pre {
+      margin: 16px 0 0;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: #111111;
+      color: #f4f4f5;
+    }
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .summary {
+      margin-top: 18px;
+      max-width: 780px;
+      font-size: 1.05rem;
+    }
+    .panel {
+      margin-top: 24px;
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-alt);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .item {
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .label {
+      display: block;
+      font-weight: 700;
+      color: var(--text);
+    }
+    ul { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="eyebrow">Claude remote MCP connector</span>
+    <h1>Blocksize Market Data for Claude</h1>
+    <p class="summary">
+      Blocksize Market Data connects Claude to a hosted Streamable HTTP MCP endpoint
+      for read-only market-data discovery, daily credit visibility, and live market
+      data snapshots. The Claude connector does not transfer money, execute wallet
+      transactions, submit payment proofs, or place trades.
+    </p>
+
+    <section class="panel">
+      <strong>Connector URL</strong>
+      <pre><code>https://mcp.blocksize.info/anthropic/mcp/</code></pre>
+    </section>
+
+    <h2>What Claude Can Use</h2>
+    <div class="grid">
+      <div class="item">
+        <span class="label">Discovery</span>
+        <p>Search supported crypto, equity, FX, and metals instruments before making live data calls.</p>
+      </div>
+      <div class="item">
+        <span class="label">Credits</span>
+        <p>Show the signed-in user's remaining Blocksize daily data credits.</p>
+      </div>
+      <div class="item">
+        <span class="label">Live data</span>
+        <p>Fetch read-only crypto VWAP, bid/ask, supported equity bid/ask, FX, and metal snapshots.</p>
+      </div>
+    </div>
+
+    <h2>MCP Tools</h2>
+    <ul>
+      <li><code>search_pairs</code>: Search supported instruments by symbol or asset name.</li>
+      <li><code>list_instruments</code>: List supported instruments for one Blocksize service namespace.</li>
+      <li><code>get_credit_balance</code>: Show remaining daily data credits for the signed-in user.</li>
+      <li><code>get_vwap</code>: Fetch a crypto VWAP snapshot for one supported pair.</li>
+      <li><code>get_bid_ask</code>: Fetch bid/ask data for one supported crypto pair or equity ticker.</li>
+      <li><code>get_fx_rate</code>: Fetch a supported FX pair snapshot.</li>
+      <li><code>get_metal_price</code>: Fetch a supported metal spot-price snapshot.</li>
+    </ul>
+
+    <h2>Authentication</h2>
+    <p>
+      Users sign in with Blocksize through OAuth. Live data calls spend included
+      server-side daily data credits. Discovery tools are available for instrument
+      lookup and metadata. OAuth metadata is available at:
+    </p>
+    <pre><code>https://mcp.blocksize.info/.well-known/oauth-protected-resource/anthropic/mcp/
+https://mcp.blocksize.info/.well-known/oauth-authorization-server/anthropic/mcp</code></pre>
+
+    <h2>Example Prompts</h2>
+    <ul>
+      <li>Search Blocksize for BTC market data instruments.</li>
+      <li>Get the latest BTC-USD VWAP from Blocksize.</li>
+      <li>Show my remaining Blocksize data credits.</li>
+      <li>Get the current EURUSD FX snapshot.</li>
+      <li>Get the latest XAUUSD metal price.</li>
+    </ul>
+
+    <h2>Review And Support Links</h2>
+    <ul>
+      <li><a href="https://mcp.blocksize.info/privacy">Privacy policy</a></li>
+      <li><a href="https://mcp.blocksize.info/support">Support and troubleshooting</a></li>
+      <li><a href="https://mcp.blocksize.info/prompt-examples">Prompt examples</a></li>
+      <li><a href="https://mcp.blocksize.info/health">Health endpoint</a></li>
+    </ul>
+  </main>
+</body>
+</html>

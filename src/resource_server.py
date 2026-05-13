@@ -54,6 +54,7 @@ from src.models import (
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
+    CLAUDE_CONNECTOR_URL,
     DATA_CATALOG_URL,
     GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
@@ -150,7 +151,18 @@ def _anthropic_only_mode() -> bool:
 
 def _anthropic_only_allowed_path(path: str) -> bool:
     clean_path = path.rstrip("/") or "/"
-    return clean_path == "/health" or clean_path.startswith("/anthropic/mcp")
+    allowed_exact_paths = {
+        "/health",
+        "/privacy",
+        "/prompt-examples",
+        "/support",
+        "/claude-connector",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-authorization-server/anthropic/mcp",
+        "/.well-known/openid-configuration/anthropic/mcp",
+        "/.well-known/oauth-protected-resource/anthropic/mcp",
+    }
+    return clean_path in allowed_exact_paths or clean_path.startswith("/anthropic/mcp")
 
 
 def _anthropic_only_block_response() -> JSONResponse:
@@ -205,6 +217,12 @@ async def get_support_page():
     return _serve_doc("support.html", "Support page")
 
 
+@app.get("/claude-connector", include_in_schema=False)
+async def get_claude_connector_page():
+    """Serve Claude connector setup and review documentation."""
+    return _serve_doc("claude_connector.html", "Claude connector page")
+
+
 @app.get("/server.json", include_in_schema=False)
 async def get_server_json():
     """Serve the official MCP Registry metadata file."""
@@ -239,37 +257,37 @@ async def get_x402_well_known() -> dict[str, object]:
     }
 
 
-@app.get("/.well-known/oauth-protected-resource/cursor/mcp/", include_in_schema=False)
-async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
-    """Serve Cursor MCP OAuth protected-resource metadata at the challenged URL."""
-    cursor_mcp_url = os.environ.get(
-        "CURSOR_MCP_PUBLIC_URL",
-        f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
+def _connector_mcp_url(env_var: str, default_path: str) -> str:
+    return os.environ.get(
+        env_var,
+        f"{PUBLIC_BASE_URL.rstrip('/')}{default_path}",
     ).rstrip("/")
+
+
+def _oauth_protected_resource_metadata(
+    *,
+    mcp_url: str,
+    scopes: list[str],
+) -> dict[str, object]:
     return {
-        "resource": f"{cursor_mcp_url}/",
-        "authorization_servers": [cursor_mcp_url],
-        "scopes_supported": cursor_auth.oauth_scopes(),
+        "resource": f"{mcp_url}/",
+        "authorization_servers": [mcp_url],
+        "scopes_supported": scopes,
         "bearer_methods_supported": ["header"],
     }
 
 
-@app.get("/cursor/mcp/.well-known/openid-configuration", include_in_schema=False)
-@app.get("/.well-known/openid-configuration/cursor/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-authorization-server/cursor/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
-async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
-    """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
-    cursor_mcp_url = os.environ.get(
-        "CURSOR_MCP_PUBLIC_URL",
-        f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
-    ).rstrip("/")
+def _oauth_authorization_server_metadata(
+    *,
+    mcp_url: str,
+    scopes: list[str],
+) -> dict[str, object]:
     return {
-        "issuer": cursor_mcp_url,
-        "authorization_endpoint": f"{cursor_mcp_url}/authorize",
-        "token_endpoint": f"{cursor_mcp_url}/token",
-        "registration_endpoint": f"{cursor_mcp_url}/register",
-        "scopes_supported": cursor_auth.oauth_scopes(),
+        "issuer": mcp_url,
+        "authorization_endpoint": f"{mcp_url}/authorize",
+        "token_endpoint": f"{mcp_url}/token",
+        "registration_endpoint": f"{mcp_url}/register",
+        "scopes_supported": scopes,
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": [
@@ -279,6 +297,68 @@ async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
         "code_challenge_methods_supported": ["S256"],
         "client_id_metadata_document_supported": True,
     }
+
+
+def _anthropic_mcp_url() -> str:
+    return _connector_mcp_url("ANTHROPIC_MCP_PUBLIC_URL", "/anthropic/mcp")
+
+
+def _cursor_mcp_url() -> str:
+    return _connector_mcp_url("CURSOR_MCP_PUBLIC_URL", "/cursor/mcp")
+
+
+@app.get("/.well-known/oauth-protected-resource/anthropic/mcp/", include_in_schema=False)
+async def get_anthropic_oauth_protected_resource_metadata() -> dict[str, object]:
+    """Serve Claude MCP OAuth protected-resource metadata at the challenged URL."""
+    return _oauth_protected_resource_metadata(
+        mcp_url=_anthropic_mcp_url(),
+        scopes=anthropic_auth.oauth_scopes(),
+    )
+
+
+@app.get("/.well-known/oauth-protected-resource/cursor/mcp/", include_in_schema=False)
+async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
+    """Serve Cursor MCP OAuth protected-resource metadata at the challenged URL."""
+    return _oauth_protected_resource_metadata(
+        mcp_url=_cursor_mcp_url(),
+        scopes=cursor_auth.oauth_scopes(),
+    )
+
+
+@app.get("/anthropic/mcp/.well-known/openid-configuration", include_in_schema=False)
+@app.get("/.well-known/openid-configuration/anthropic/mcp", include_in_schema=False)
+@app.get("/.well-known/oauth-authorization-server/anthropic/mcp", include_in_schema=False)
+async def get_anthropic_oauth_authorization_server_metadata() -> dict[str, object]:
+    """Serve Claude MCP OAuth server metadata for path-scoped discovery."""
+    return _oauth_authorization_server_metadata(
+        mcp_url=_anthropic_mcp_url(),
+        scopes=anthropic_auth.oauth_scopes(),
+    )
+
+
+@app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
+async def get_root_oauth_authorization_server_metadata() -> dict[str, object]:
+    """Serve root OAuth metadata for the active single-connector deployment."""
+    if _anthropic_only_mode():
+        return _oauth_authorization_server_metadata(
+            mcp_url=_anthropic_mcp_url(),
+            scopes=anthropic_auth.oauth_scopes(),
+        )
+    return _oauth_authorization_server_metadata(
+        mcp_url=_cursor_mcp_url(),
+        scopes=cursor_auth.oauth_scopes(),
+    )
+
+
+@app.get("/cursor/mcp/.well-known/openid-configuration", include_in_schema=False)
+@app.get("/.well-known/openid-configuration/cursor/mcp", include_in_schema=False)
+@app.get("/.well-known/oauth-authorization-server/cursor/mcp", include_in_schema=False)
+async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
+    """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
+    return _oauth_authorization_server_metadata(
+        mcp_url=_cursor_mcp_url(),
+        scopes=cursor_auth.oauth_scopes(),
+    )
 
 
 # Mount assets, PDFs, and the public remote MCP discovery server
@@ -1628,13 +1708,21 @@ async def health_check() -> dict[str, Any]:
             "status": "healthy",
             "service": "blocksize-anthropic-mcp-beta",
             "version": APP_VERSION,
-            "mcp_url": os.environ.get(
-                "ANTHROPIC_MCP_PUBLIC_URL",
-                f"{PUBLIC_BASE_URL.rstrip('/')}/anthropic/mcp",
-            ),
+            "mcp_url": _anthropic_mcp_url(),
             "transport": "streamable-http",
             "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
             "oauth_callback_url": anthropic_auth.oauth_callback_url(),
+            "oauth_protected_resource_metadata": (
+                f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
+                "oauth-protected-resource/anthropic/mcp/"
+            ),
+            "oauth_authorization_server_metadata": (
+                f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
+                "oauth-authorization-server/anthropic/mcp"
+            ),
+            "documentation": CLAUDE_CONNECTOR_URL,
+            "privacy_policy": PRIVACY_POLICY_URL,
+            "support": SUPPORT_URL,
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
             "tool_surface": "read-only",
@@ -1668,14 +1756,23 @@ async def health_check() -> dict[str, Any]:
             "server_json": SERVER_JSON_URL,
             "glama_claim": GLAMA_WELL_KNOWN_URL,
             "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
+            "anthropic_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/anthropic/mcp/",
+            "anthropic_oauth_callback": anthropic_auth.oauth_callback_url(),
+            "claude_connector": CLAUDE_CONNECTOR_URL,
             "cursor_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp/",
             "cursor_oauth_callback": cursor_auth.oauth_callback_url(),
         },
+        "anthropic_connector": {
+            "mcp_url": _anthropic_mcp_url(),
+            "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
+            "oauth_callback_url": anthropic_auth.oauth_callback_url(),
+            "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
+            "tool_surface": "read-only",
+            "tool_costs": ANTHROPIC_TOOL_COSTS,
+            "submission_docs": CLAUDE_CONNECTOR_URL,
+        },
         "cursor_connector": {
-            "mcp_url": os.environ.get(
-                "CURSOR_MCP_PUBLIC_URL",
-                f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp",
-            ),
+            "mcp_url": _cursor_mcp_url(),
             "auth_provider": os.environ.get("CURSOR_AUTH_PROVIDER", "none"),
             "oauth_callback_url": cursor_auth.oauth_callback_url(),
             "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),

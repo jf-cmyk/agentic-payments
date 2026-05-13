@@ -11,6 +11,7 @@ Institutional-grade market data for AI agents, with two public integration layer
 - Homepage: `https://mcp.blocksize.info/`
 - Remote MCP URL: `https://mcp.blocksize.info/mcp/server/`
 - Anthropic-safe MCP URL: `https://mcp.blocksize.info/anthropic/mcp/`
+- Claude connector docs: `https://mcp.blocksize.info/claude-connector`
 - MCP manifest: `https://mcp.blocksize.info/mcp/manifest.json`
 - OpenAPI JSON: `https://mcp.blocksize.info/openapi.json`
 - Swagger UI: `https://mcp.blocksize.info/docs`
@@ -79,6 +80,9 @@ random bearer tokens to user ids. For public Claude custom connectors, set
 `ANTHROPIC_AUTH_PROVIDER=clerk`, keep `ANTHROPIC_ENABLE_BETA_TOKENS=false`, and
 configure the Clerk env vars in
 [.env.example](/Users/johannfocke/Documents/Antigravity/Agentic Payments/.env.example).
+The Claude OAuth metadata endpoints are served at
+`/.well-known/oauth-protected-resource/anthropic/mcp/` and
+`/.well-known/oauth-authorization-server/anthropic/mcp`.
 
 ### 4. Advanced local MCP
 
@@ -123,6 +127,7 @@ python -m src.mcp_server
 
 - Official registry file: [server.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/server.json)
 - Smithery metadata: [docs/smithery_manifest.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/smithery_manifest.json)
+- Claude submission packet: [docs/gtm/claude_connector_submission.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/claude_connector_submission.md)
 - Internal submission runbook: [docs/gtm/directory_listing_runbook.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/directory_listing_runbook.md)
 
 ## License

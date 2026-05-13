@@ -100,13 +100,25 @@ def test_default_client_redirect_allowlist_is_claude_and_loopback(monkeypatch):
     ]
 
 
+def test_anthropic_oauth_scopes_default_to_openid_profile_email(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_OAUTH_SCOPES", raising=False)
+
+    assert anthropic_auth.oauth_scopes() == ["openid", "email", "profile"]
+
+
+def test_anthropic_oauth_scopes_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_OAUTH_SCOPES", "email,profile")
+
+    assert anthropic_auth.oauth_scopes() == ["email", "profile"]
+
+
 def test_oauth_callback_url_uses_mcp_public_url(monkeypatch):
     monkeypatch.setenv(
         "ANTHROPIC_MCP_PUBLIC_URL",
-        "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp",
+        "https://mcp.blocksize.info/anthropic/mcp",
     )
 
     assert (
         anthropic_auth.oauth_callback_url()
-        == "https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/auth/callback"
+        == "https://mcp.blocksize.info/anthropic/mcp/auth/callback"
     )
