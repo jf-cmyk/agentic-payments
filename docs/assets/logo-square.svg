@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 94 94" role="img" aria-labelledby="title desc">
+  <title id="title">Blocksize logo mark</title>
+  <desc id="desc">Square Blocksize geometric mark in black.</desc>
+  <rect width="94" height="94" fill="#ffffff"/>
+  <g fill="#111111">
+    <path d="M0 83.54h10.45V10.44h73.1V0H0v83.54ZM10.45 83.54V94H94V10.44H83.55v73.1H10.45Z"/>
+    <rect x="41.77" y="7.9" width="10.44" height="83.47"/>
+    <rect x="47.26" y="41.77" width="43.52" height="10.44"/>
+  </g>
+</svg>
