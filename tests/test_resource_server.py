@@ -127,12 +127,45 @@ class TestPublicListingSurfaces:
         assert "image/png" in touch_response.headers["content-type"]
 
     def test_anthropic_safe_mcp_endpoint_exists(self, test_client):
-        response = test_client.get("/anthropic/mcp")
+        response = test_client.get("/anthropic/mcp", follow_redirects=False)
         assert response.status_code != 404
+        assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
 
-    def test_root_anthropic_oauth_protected_resource_metadata(self, test_client):
-        response = test_client.get("/.well-known/oauth-protected-resource/anthropic/mcp/")
+    @pytest.mark.parametrize(
+        "mcp_path",
+        [
+            "/mcp/server",
+            "/anthropic/mcp",
+            "/cursor/mcp",
+        ],
+    )
+    def test_mcp_mount_roots_do_not_redirect_without_trailing_slash(
+        self,
+        test_client,
+        mcp_path,
+    ):
+        response = test_client.post(
+            mcp_path,
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code not in {307, 308}
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-protected-resource/anthropic/mcp",
+            "/.well-known/oauth-protected-resource/anthropic/mcp/",
+        ],
+    )
+    def test_root_anthropic_oauth_protected_resource_metadata(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path, follow_redirects=False)
         assert response.status_code == 200
         data = response.json()
 
@@ -162,12 +195,13 @@ class TestPublicListingSurfaces:
         assert data["registration_endpoint"].endswith("/anthropic/mcp/register")
         assert data["scopes_supported"] == ["openid", "email", "profile"]
 
-    def test_root_oauth_authorization_server_metadata_switches_in_anthropic_only_mode(
+    def test_root_oauth_authorization_server_metadata_defaults_to_anthropic(
         self,
         test_client,
         monkeypatch,
     ):
-        monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+        monkeypatch.delenv("ANTHROPIC_ONLY_MODE", raising=False)
+        monkeypatch.delenv("ROOT_OAUTH_CONNECTOR", raising=False)
 
         response = test_client.get("/.well-known/oauth-authorization-server")
         assert response.status_code == 200
@@ -176,13 +210,61 @@ class TestPublicListingSurfaces:
         assert data["issuer"].endswith("/anthropic/mcp")
         assert data["authorization_endpoint"].endswith("/anthropic/mcp/authorize")
 
+    def test_root_oauth_protected_resource_metadata_defaults_to_anthropic(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.delenv("ANTHROPIC_ONLY_MODE", raising=False)
+        monkeypatch.delenv("ROOT_OAUTH_CONNECTOR", raising=False)
+
+        response = test_client.get(
+            "/.well-known/oauth-protected-resource",
+            follow_redirects=False,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/anthropic/mcp/")
+        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+
+    def test_root_oauth_protected_resource_metadata_survives_anthropic_only_mode(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
+        monkeypatch.delenv("ROOT_OAUTH_CONNECTOR", raising=False)
+
+        response = test_client.get(
+            "/.well-known/oauth-protected-resource",
+            follow_redirects=False,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/anthropic/mcp/")
+        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+
     def test_cursor_mcp_endpoint_exists(self, test_client):
-        response = test_client.get("/cursor/mcp")
+        response = test_client.get("/cursor/mcp", follow_redirects=False)
         assert response.status_code != 404
+        assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
 
-    def test_root_cursor_oauth_protected_resource_metadata(self, test_client):
-        response = test_client.get("/.well-known/oauth-protected-resource/cursor/mcp/")
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-protected-resource/cursor/mcp",
+            "/.well-known/oauth-protected-resource/cursor/mcp/",
+        ],
+    )
+    def test_root_cursor_oauth_protected_resource_metadata(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path, follow_redirects=False)
         assert response.status_code == 200
         data = response.json()
 
@@ -191,7 +273,13 @@ class TestPublicListingSurfaces:
         assert data["scopes_supported"] == ["email", "profile"]
         assert data["bearer_methods_supported"] == ["header"]
 
-    def test_root_cursor_oauth_authorization_server_metadata(self, test_client):
+    def test_root_oauth_authorization_server_metadata_can_be_cursor_for_cursor_hosts(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ROOT_OAUTH_CONNECTOR", "cursor")
+
         response = test_client.get("/.well-known/oauth-authorization-server")
         assert response.status_code == 200
         data = response.json()
@@ -202,6 +290,24 @@ class TestPublicListingSurfaces:
         assert data["registration_endpoint"].endswith("/cursor/mcp/register")
         assert data["scopes_supported"] == ["email", "profile"]
         assert data["code_challenge_methods_supported"] == ["S256"]
+
+    def test_root_oauth_protected_resource_metadata_can_be_cursor_for_cursor_hosts(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ROOT_OAUTH_CONNECTOR", "cursor")
+
+        response = test_client.get(
+            "/.well-known/oauth-protected-resource",
+            follow_redirects=False,
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/cursor/mcp/")
+        assert data["authorization_servers"][0].endswith("/cursor/mcp")
+        assert data["scopes_supported"] == ["email", "profile"]
 
     @pytest.mark.parametrize(
         "metadata_path",
@@ -315,6 +421,11 @@ class TestPublicListingSurfaces:
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200
         assert test_client.get("/privacy").status_code == 200
+        terms_response = test_client.get("/terms", follow_redirects=False)
+        assert terms_response.status_code in {307, 308}
+        assert terms_response.headers["location"] == (
+            "https://blocksize.info/terms-conditions-data/"
+        )
         assert test_client.get("/claude-connector").status_code == 200
         assert test_client.get("/quickstart/remote-mcp").status_code == 200
         assert test_client.get("/prompt-examples").status_code == 200

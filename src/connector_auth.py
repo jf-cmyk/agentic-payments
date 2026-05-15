@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from fastmcp.server.auth import AccessToken
@@ -60,6 +61,12 @@ def build_connector_auth_provider(
             return None
         from fastmcp.server.auth.providers.clerk import ClerkProvider
 
+        client_storage = oauth_client_storage_for(
+            prefix,
+            jwt_signing_key=jwt_signing_key,
+            fallback_secret=client_secret,
+        )
+
         return ClerkProvider(
             domain=domain,
             client_id=client_id,
@@ -67,6 +74,7 @@ def build_connector_auth_provider(
             base_url=base_url,
             redirect_path=redirect_path,
             allowed_client_redirect_uris=allowed_client_redirect_uris,
+            client_storage=client_storage,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent="external",
             required_scopes=oauth_scopes,
@@ -88,6 +96,12 @@ def build_connector_auth_provider(
             return None
         from fastmcp.server.auth.providers.auth0 import Auth0Provider
 
+        client_storage = oauth_client_storage_for(
+            prefix,
+            jwt_signing_key=jwt_signing_key,
+            fallback_secret=client_secret,
+        )
+
         return Auth0Provider(
             config_url=config_url,
             client_id=client_id,
@@ -97,6 +111,7 @@ def build_connector_auth_provider(
             required_scopes=["openid", "email", "profile"],
             redirect_path=redirect_path,
             allowed_client_redirect_uris=allowed_client_redirect_uris,
+            client_storage=client_storage,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent="external",
         )
@@ -178,6 +193,63 @@ def oauth_scopes_for(prefix: str, default_scopes: list[str]) -> list[str]:
         parsed = parse_string_list(raw, default_scopes)
         return parsed or default_scopes
     return [part.strip() for part in raw.replace(",", " ").split() if part.strip()]
+
+
+def oauth_client_storage_for(
+    prefix: str,
+    *,
+    jwt_signing_key: str | bytes | None,
+    fallback_secret: str | None,
+) -> Any | None:
+    """Build a persistent encrypted OAuth store when a storage directory is configured."""
+    storage_dir_raw = _env(prefix, "OAUTH_STORAGE_DIR").strip()
+    if not storage_dir_raw:
+        return None
+
+    storage_secret = _env(prefix, "OAUTH_STORAGE_ENCRYPTION_KEY").strip()
+    if not storage_secret:
+        storage_secret = _secret_material(jwt_signing_key) or fallback_secret or ""
+    if not storage_secret:
+        logger.warning(
+            "%s_OAUTH_STORAGE_DIR is set but no storage encryption secret is available",
+            prefix,
+        )
+        return None
+
+    storage_dir = Path(storage_dir_raw).expanduser()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    from cryptography.fernet import Fernet
+    from fastmcp.server.auth.jwt_issuer import derive_jwt_key
+    from key_value.aio.stores.filetree import (
+        FileTreeStore,
+        FileTreeV1CollectionSanitizationStrategy,
+        FileTreeV1KeySanitizationStrategy,
+    )
+    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+
+    file_store = FileTreeStore(
+        data_directory=storage_dir,
+        key_sanitization_strategy=FileTreeV1KeySanitizationStrategy(storage_dir),
+        collection_sanitization_strategy=FileTreeV1CollectionSanitizationStrategy(storage_dir),
+    )
+    storage_encryption_key = derive_jwt_key(
+        high_entropy_material=storage_secret,
+        salt=f"{prefix.lower()}-oauth-storage-encryption-key",
+    )
+    return FernetEncryptionWrapper(
+        key_value=file_store,
+        fernet=Fernet(key=storage_encryption_key),
+        raise_on_decryption_error=False,
+    )
+
+
+def _secret_material(value: str | bytes | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.hex()
+    return value
 
 
 def parse_string_list(raw: str, fallback: list[str] | None) -> list[str] | None:

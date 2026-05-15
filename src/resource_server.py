@@ -33,7 +33,7 @@ from typing import Any, Deque
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.blocksize_client import (
@@ -93,6 +93,25 @@ ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
 
 
+class _SlashlessMountEndpoint:
+    """Forward mount-root requests into a mounted app without a slash redirect."""
+
+    def __init__(self, mounted_app: Any, mount_path: str) -> None:
+        self.mounted_app = mounted_app
+        self.mount_path = mount_path.rstrip("/")
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        root_path = scope.get("root_path", "")
+        mounted_root_path = f"{root_path}{self.mount_path}"
+        child_scope = dict(scope)
+        child_scope["app_root_path"] = scope.get("app_root_path", root_path)
+        child_scope["root_path"] = mounted_root_path
+        child_scope["path"] = f"{mounted_root_path}/"
+        if "raw_path" in child_scope:
+            child_scope["raw_path"] = child_scope["path"].encode()
+        await self.mounted_app(child_scope, receive, send)
+
+
 # ---------------------------------------------------------------------------
 # Application Lifecycle
 # ---------------------------------------------------------------------------
@@ -149,6 +168,20 @@ def _anthropic_only_mode() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _root_oauth_connector() -> str:
+    """Choose the connector advertised by the root OAuth metadata endpoint."""
+    value = os.environ.get("ROOT_OAUTH_CONNECTOR", "anthropic").strip().lower()
+    if value in {"anthropic", "claude"}:
+        return "anthropic"
+    if value == "cursor":
+        return "cursor"
+    logger.warning(
+        "Invalid ROOT_OAUTH_CONNECTOR=%r; defaulting root OAuth metadata to Anthropic",
+        value,
+    )
+    return "anthropic"
+
+
 def _anthropic_only_allowed_path(path: str) -> bool:
     clean_path = path.rstrip("/") or "/"
     allowed_exact_paths = {
@@ -161,6 +194,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         "/favicon.svg",
         "/apple-touch-icon.png",
         "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
         "/.well-known/oauth-authorization-server/anthropic/mcp",
         "/.well-known/openid-configuration/anthropic/mcp",
         "/.well-known/oauth-protected-resource/anthropic/mcp",
@@ -188,19 +222,19 @@ async def get_portal():
     raise HTTPException(status_code=404, detail="Developer Portal not found")
 
 
-@app.get("/favicon.ico", include_in_schema=False)
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 async def get_favicon_ico():
     """Serve the root favicon for browser and directory crawlers."""
     return FileResponse(DOCS_DIR / "assets" / "favicon.ico", media_type="image/x-icon")
 
 
-@app.get("/favicon.svg", include_in_schema=False)
+@app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
 async def get_favicon_svg():
     """Serve the square Blocksize mark as an SVG favicon."""
     return FileResponse(DOCS_DIR / "assets" / "logo-square.svg", media_type="image/svg+xml")
 
 
-@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.api_route("/apple-touch-icon.png", methods=["GET", "HEAD"], include_in_schema=False)
 async def get_apple_touch_icon():
     """Serve the square Blocksize mark for touch icons."""
     return FileResponse(DOCS_DIR / "assets" / "favicon.png", media_type="image/png")
@@ -236,6 +270,12 @@ async def get_privacy_policy():
 async def get_support_page():
     """Serve the support and troubleshooting page."""
     return _serve_doc("support.html", "Support page")
+
+
+@app.get("/terms", include_in_schema=False)
+async def get_terms_page():
+    """Send reviewers to the published Blocksize data terms."""
+    return RedirectResponse("https://blocksize.info/terms-conditions-data/")
 
 
 @app.get("/claude-connector", include_in_schema=False)
@@ -328,6 +368,7 @@ def _cursor_mcp_url() -> str:
     return _connector_mcp_url("CURSOR_MCP_PUBLIC_URL", "/cursor/mcp")
 
 
+@app.get("/.well-known/oauth-protected-resource/anthropic/mcp", include_in_schema=False)
 @app.get("/.well-known/oauth-protected-resource/anthropic/mcp/", include_in_schema=False)
 async def get_anthropic_oauth_protected_resource_metadata() -> dict[str, object]:
     """Serve Claude MCP OAuth protected-resource metadata at the challenged URL."""
@@ -337,6 +378,21 @@ async def get_anthropic_oauth_protected_resource_metadata() -> dict[str, object]
     )
 
 
+@app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
+async def get_root_oauth_protected_resource_metadata() -> dict[str, object]:
+    """Serve root protected-resource metadata for clients that ignore path scope."""
+    if _anthropic_only_mode() or _root_oauth_connector() == "anthropic":
+        return _oauth_protected_resource_metadata(
+            mcp_url=_anthropic_mcp_url(),
+            scopes=anthropic_auth.oauth_scopes(),
+        )
+    return _oauth_protected_resource_metadata(
+        mcp_url=_cursor_mcp_url(),
+        scopes=cursor_auth.oauth_scopes(),
+    )
+
+
+@app.get("/.well-known/oauth-protected-resource/cursor/mcp", include_in_schema=False)
 @app.get("/.well-known/oauth-protected-resource/cursor/mcp/", include_in_schema=False)
 async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
     """Serve Cursor MCP OAuth protected-resource metadata at the challenged URL."""
@@ -359,8 +415,8 @@ async def get_anthropic_oauth_authorization_server_metadata() -> dict[str, objec
 
 @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
 async def get_root_oauth_authorization_server_metadata() -> dict[str, object]:
-    """Serve root OAuth metadata for the active single-connector deployment."""
-    if _anthropic_only_mode():
+    """Serve root OAuth metadata for clients that ignore path-scoped discovery."""
+    if _anthropic_only_mode() or _root_oauth_connector() == "anthropic":
         return _oauth_authorization_server_metadata(
             mcp_url=_anthropic_mcp_url(),
             scopes=anthropic_auth.oauth_scopes(),
@@ -385,8 +441,23 @@ async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
 # Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
+app.add_route(
+    REMOTE_MCP_PATH.rstrip("/"),
+    _SlashlessMountEndpoint(PUBLIC_MCP_HTTP_APP, REMOTE_MCP_PATH),
+    include_in_schema=False,
+)
 app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
+app.add_route(
+    "/anthropic/mcp",
+    _SlashlessMountEndpoint(ANTHROPIC_MCP_HTTP_APP, "/anthropic/mcp"),
+    include_in_schema=False,
+)
 app.mount("/anthropic/mcp", ANTHROPIC_MCP_HTTP_APP, name="anthropic-mcp")
+app.add_route(
+    "/cursor/mcp",
+    _SlashlessMountEndpoint(CURSOR_MCP_HTTP_APP, "/cursor/mcp"),
+    include_in_schema=False,
+)
 app.mount("/cursor/mcp", CURSOR_MCP_HTTP_APP, name="cursor-mcp")
 
 

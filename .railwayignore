@@ -1,0 +1,12 @@
+.git/
+.env
+.venv/
+__pycache__/
+*.pyc
+*.db
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+deliverables/
+blocksize-cursor-plugin/
+mcp-registry-key.pem
