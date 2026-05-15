@@ -597,16 +597,22 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
     }
 
 
-def _x402_v2_accepts(payment_requirements: list[dict]) -> list[dict[str, Any]]:
+def _x402_v2_accepts(
+    payment_requirements: list[dict],
+    resource_url: str | None = None,
+) -> list[dict[str, Any]]:
     accepts: list[dict[str, Any]] = []
     for requirement in payment_requirements:
         extra = requirement.get("extra")
+        accept_extra = dict(extra) if isinstance(extra, dict) else {}
+        if resource_url:
+            accept_extra["resource"] = resource_url
         fallback_asset = (
             settings.x402.solana_usdc_address
             if _network_kind(str(requirement.get("network", ""))) == "solana"
             else settings.x402.base_usdc_address
         )
-        accepts.append({
+        accept = {
             "scheme": str(requirement.get("scheme") or "exact"),
             "network": str(requirement.get("network") or ""),
             "amount": str(
@@ -617,8 +623,11 @@ def _x402_v2_accepts(payment_requirements: list[dict]) -> list[dict[str, Any]]:
             "asset": _requirement_asset(requirement, fallback_asset),
             "payTo": str(requirement.get("payTo") or requirement.get("resource") or ""),
             "maxTimeoutSeconds": int(requirement.get("maxTimeoutSeconds") or 60),
-            "extra": extra if isinstance(extra, dict) else {},
-        })
+            "extra": accept_extra,
+        }
+        if resource_url:
+            accept["resource"] = resource_url
+        accepts.append(accept)
     return accepts
 
 
@@ -635,15 +644,16 @@ def _x402_payment_required(
     request: Request,
     payment_requirements: list[dict],
 ) -> dict[str, Any]:
+    resource_url = _public_request_url(request)
     return {
         "x402Version": 2,
         "error": "Payment Required",
         "resource": {
-            "url": _public_request_url(request),
+            "url": resource_url,
             "description": _x402_endpoint_description(request.url.path),
             "mimeType": "application/json",
         },
-        "accepts": _x402_v2_accepts(payment_requirements),
+        "accepts": _x402_v2_accepts(payment_requirements, resource_url),
         "extensions": {"bazaar": _x402_bazaar_extension(request)},
     }
 

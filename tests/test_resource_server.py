@@ -377,12 +377,15 @@ class TestPaymentGate:
         assert req_json["x402Version"] == 2
         assert req_json["resource"]["url"].startswith("https://mcp.blocksize.info/")
         assert req_json["resource"]["url"].endswith("/v1/vwap/btc-usd")
+        resource_url = req_json["resource"]["url"]
         assert isinstance(req_json["accepts"], list)
         assert len(req_json["accepts"]) >= 1
         assert "payTo" in req_json["accepts"][0]
         assert "amount" in req_json["accepts"][0]
         assert req_json["accepts"][0]["asset"] == settings.x402.solana_usdc_address
         assert req_json["accepts"][0]["scheme"] == "exact"
+        assert req_json["accepts"][0]["resource"] == resource_url
+        assert req_json["accepts"][0]["extra"]["resource"] == resource_url
         assert "bazaar" in req_json["extensions"]
 
     def test_402_body_contains_price(self, test_client):
@@ -392,6 +395,8 @@ class TestPaymentGate:
         assert "price_usdc" in data
         assert "networks" in data
         assert "accepts" in data
+        assert data["accepts"][0]["resource"] == data["resource"]["url"]
+        assert data["accepts"][0]["extra"]["resource"] == data["resource"]["url"]
         assert "legacy_requirements" in data
 
     def test_search_is_free(self, test_client):
