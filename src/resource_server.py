@@ -168,6 +168,8 @@ X402_EXPOSE_HEADERS = "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE"
 
 def _apply_x402_cors_headers(request: Request, response: JSONResponse) -> JSONResponse:
     """Expose payment challenge details on early paid-route responses."""
+    response.headers.setdefault("Cache-Control", "no-store")
+
     origin = request.headers.get("origin")
     if not origin:
         return response

@@ -482,6 +482,7 @@ class TestPaymentGate:
     def test_402_includes_payment_required_header(self, test_client):
         response = test_client.get("/v1/vwap/btc-usd")
         assert "PAYMENT-REQUIRED" in response.headers
+        assert response.headers["Cache-Control"] == "no-store"
 
         req_b64 = response.headers["PAYMENT-REQUIRED"]
         req_json = json.loads(base64.b64decode(req_b64))
