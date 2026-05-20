@@ -499,6 +499,31 @@ class TestPaymentGate:
         assert req_json["accepts"][0]["extra"]["resource"] == resource_url
         assert "bazaar" in req_json["extensions"]
 
+    def test_402_exposes_payment_challenge_to_allowed_browser_origin(self, test_client):
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"Origin": "https://mcp.blocksize.info"},
+        )
+
+        assert response.status_code == 402
+        assert response.headers["Access-Control-Allow-Origin"] == "https://mcp.blocksize.info"
+        assert "Origin" in response.headers["Vary"]
+        assert "PAYMENT-REQUIRED" in response.headers
+        exposed = response.headers["Access-Control-Expose-Headers"].lower()
+        assert "payment-required" in exposed
+        assert "payment-response" in exposed
+        assert "x-payment-response" in exposed
+
+    def test_402_does_not_open_cors_for_unconfigured_origin(self, test_client):
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"Origin": "https://example.invalid"},
+        )
+
+        assert response.status_code == 402
+        assert "Access-Control-Allow-Origin" not in response.headers
+        assert "PAYMENT-REQUIRED" in response.headers
+
     def test_402_body_contains_price(self, test_client):
         response = test_client.get("/v1/vwap/btc-usd")
         data = response.json()
@@ -691,6 +716,32 @@ class TestDataEndpoints:
         data = response.json()
         assert data["data"]["pair"] == "btc-usd"
         assert data["data"]["vwap"] == 95432.50
+
+    def test_vwap_endpoint_accepts_x_payment_header(self, test_client):
+        mock_vwap = VWAPData(
+            pair="btc-usd",
+            vwap=95432.50,
+            timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            currency="USD",
+        )
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
+        app.state.blocksize = mock_client
+
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={
+                "X-PAYMENT": "mock_sig",
+                "Origin": "https://mcp.blocksize.info",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Access-Control-Allow-Origin"] == "https://mcp.blocksize.info"
+        exposed = response.headers["Access-Control-Expose-Headers"].lower()
+        assert "x-payment-response" in exposed
+        assert "PAYMENT-RESPONSE" in response.headers
+        assert "X-PAYMENT-RESPONSE" in response.headers
 
     def test_bidask_endpoint(self, test_client):
         mock_bidask = BidAskData(pair="btc-usd", bid=95400.0, ask=95450.0, spread=50.0, spread_pct=0.0524, timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc))

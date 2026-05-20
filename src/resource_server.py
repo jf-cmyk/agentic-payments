@@ -159,8 +159,36 @@ app.add_middleware(
     allow_origins=settings.server.cors_origins,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE"],
+    expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE", "X-PAYMENT-RESPONSE"],
 )
+
+
+X402_EXPOSE_HEADERS = "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE"
+
+
+def _apply_x402_cors_headers(request: Request, response: JSONResponse) -> JSONResponse:
+    """Expose payment challenge details on early paid-route responses."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return response
+
+    allowed_origins = settings.server.cors_origins
+    if "*" in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    elif origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        return response
+
+    response.headers["Access-Control-Expose-Headers"] = X402_EXPOSE_HEADERS
+    vary = response.headers.get("Vary")
+    if vary:
+        vary_items = {item.strip().lower() for item in vary.split(",")}
+        if "origin" not in vary_items:
+            response.headers["Vary"] = f"{vary}, Origin"
+    else:
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 def _anthropic_only_mode() -> bool:
@@ -1296,9 +1324,12 @@ async def x402_payment_middleware(request: Request, call_next):
     try:
         price = _get_price_for_request(request)
     except ValueError as e:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Bad Request", "message": str(e)},
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=400,
+                content={"error": "Bad Request", "message": str(e)},
+            ),
         )
 
     # Free endpoints pass through
@@ -1309,12 +1340,15 @@ async def x402_payment_middleware(request: Request, call_next):
     if wallet_header:
         wallet_header = wallet_header.strip()
         if not WALLET_ID_RE.fullmatch(wallet_header):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Bad Request",
-                    "message": "Invalid X-AGENT-WALLET header",
-                },
+            return _apply_x402_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "Bad Request",
+                        "message": "Invalid X-AGENT-WALLET header",
+                    },
+                ),
             )
 
         mgr: CreditManager = request.app.state.credits
@@ -1336,36 +1370,40 @@ async def x402_payment_middleware(request: Request, call_next):
     # Build multi-network payment requirements
     payment_reqs = settings.payment_requirements(price)
 
-    # Check for payment signature
+    # Check for x402 payment proof. X-PAYMENT is the standard retry header;
+    # PAYMENT-SIGNATURE is retained for existing Blocksize demo clients.
     payment_header = (
-        request.headers.get("PAYMENT-SIGNATURE")
-        or request.headers.get("payment-signature")
+        request.headers.get("X-PAYMENT")
+        or request.headers.get("PAYMENT-SIGNATURE")
     )
 
     if not payment_header:
         payment_required = _x402_payment_required(request, payment_reqs)
         requirements_b64 = _encode_payment_required(payment_required)
 
-        return JSONResponse(
-            status_code=402,
-            content={
-                **payment_required,
-                "error": "Payment Required",
-                "message": (
-                    f"This endpoint requires a payment of ${price} USDC. "
-                    f"Send a signed x402 payment in the PAYMENT-SIGNATURE header. "
-                    f"Accepted networks: Solana (preferred), Base L2."
-                ),
-                "price_usdc": str(price),
-                "networks": [
-                    {"name": "Solana", "caip2": settings.x402.solana_network},
-                    {"name": "Base", "caip2": settings.x402.base_network},
-                ],
-                "legacy_requirements": payment_reqs,
-            },
-            headers={
-                "PAYMENT-REQUIRED": requirements_b64,
-            },
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=402,
+                content={
+                    **payment_required,
+                    "error": "Payment Required",
+                    "message": (
+                        f"This endpoint requires a payment of ${price} USDC. "
+                        f"Send a signed x402 payment in the X-PAYMENT header. "
+                        f"Accepted networks: Solana (preferred), Base L2."
+                    ),
+                    "price_usdc": str(price),
+                    "networks": [
+                        {"name": "Solana", "caip2": settings.x402.solana_network},
+                        {"name": "Base", "caip2": settings.x402.base_network},
+                    ],
+                    "legacy_requirements": payment_reqs,
+                },
+                headers={
+                    "PAYMENT-REQUIRED": requirements_b64,
+                },
+            ),
         )
 
     # Verify the payment
@@ -1377,22 +1415,28 @@ async def x402_payment_middleware(request: Request, call_next):
             purpose=f"{request.method} {path}",
         )
         if not verification.get("valid", False):
-            return JSONResponse(
-                status_code=402,
-                content={
-                    "error": "Payment Invalid",
-                    "message": "Payment verification failed.",
-                    "details": verification.get("reason", "Unknown"),
-                },
+            return _apply_x402_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=402,
+                    content={
+                        "error": "Payment Invalid",
+                        "message": "Payment verification failed.",
+                        "details": verification.get("reason", "Unknown"),
+                    },
+                ),
             )
     except httpx.HTTPError as e:
         logger.error("Facilitator verification failed: %s", e)
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": "Payment Verification Unavailable",
-                "message": "Could not reach payment facilitator.",
-            },
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=502,
+                content={
+                    "error": "Payment Verification Unavailable",
+                    "message": "Could not reach payment facilitator.",
+                },
+            ),
         )
 
     # Payment verified — serve the request
@@ -1404,6 +1448,7 @@ async def x402_payment_middleware(request: Request, call_next):
         if settlement.get("success"):
             settlement_b64 = base64.b64encode(json.dumps(settlement).encode()).decode()
             response.headers["PAYMENT-RESPONSE"] = settlement_b64
+            response.headers["X-PAYMENT-RESPONSE"] = settlement_b64
             logger.info("Payment settled: %s USDC for %s", price, path)
     except httpx.HTTPError as e:
         logger.error("Payment settlement failed: %s", e)
