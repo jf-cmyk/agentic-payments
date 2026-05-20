@@ -14,4 +14,12 @@ deploy_production:
   before_script:
     - npm install -g @railway/cli
   script:
-    - railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME"
+    - |
+      for attempt in 1 2 3; do
+        railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME" && exit 0
+        status=$?
+        if [ "$attempt" = "3" ]; then
+          exit "$status"
+        fi
+        sleep $((attempt * 20))
+      done
