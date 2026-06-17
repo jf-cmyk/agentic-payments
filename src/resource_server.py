@@ -461,7 +461,10 @@ async def get_portal():
     """Serve the institutional developer portal."""
     portal_path = DOCS_DIR / "developer_portal.html"
     if portal_path.exists():
-        return FileResponse(portal_path)
+        return FileResponse(
+            portal_path,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     raise HTTPException(status_code=404, detail="Developer Portal not found")
 
 

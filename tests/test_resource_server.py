@@ -441,6 +441,7 @@ class TestPublicListingSurfaces:
     def test_crawler_and_ai_reader_files_are_served(self, test_client):
         portal_head = test_client.head("/")
         assert portal_head.status_code == 200
+        assert portal_head.headers["cache-control"] == "no-store, max-age=0"
 
         robots = test_client.get("/robots.txt")
         assert robots.status_code == 200
