@@ -419,7 +419,7 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "info.blocksize.mcp/agentic-payments"
-        assert data["title"] == "Blocksize Real Time Market Data"
+        assert data["title"] == "Blocksize Agentic Market Intelligence"
         assert "repository" not in data
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
 
@@ -428,8 +428,9 @@ class TestPublicListingSurfaces:
         assert response.status_code == 200
         data = response.json()
 
-        assert data["name"] == "Blocksize Real Time Market Data"
-        assert "real-time crypto" in data["description"]
+        assert data["name"] == "Blocksize Agentic Market Intelligence"
+        assert "state prices" in data["description"]
+        assert "trader indicator packages" in data["description"]
         assert data["links"]["llms_txt"].endswith("/llms.txt")
         assert data["links"]["sitemap"].endswith("/sitemap.xml")
         assert data["links"]["data_packages_json"].endswith("/data-packages.json")
@@ -459,13 +460,17 @@ class TestPublicListingSurfaces:
         assert "<loc>https://mcp.blocksize.info/real-time-price-data-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/mcp-market-data-server</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/price-data-api-examples</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/state-price-api</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/trader-alpha-pack-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/openapi.json</loc>" in sitemap.text
 
         llms = test_client.get("/llms.txt")
         assert llms.status_code == 200
-        assert "Blocksize Real-Time Price Data for AI Agents" in llms.text
+        assert "Blocksize Agentic Market Intelligence for AI Agents" in llms.text
         assert "Remote MCP discovery server" in llms.text
         assert "real-time price data API" in llms.text
+        assert "AMM state price API" in llms.text
+        assert "trader alpha signal API" in llms.text
         assert "Data packages JSON" in llms.text
         assert "Crypto VWAP API" in llms.text
         assert "Real-Time Price Data API" in llms.text

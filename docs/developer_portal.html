@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blocksize Real-Time Price Data API | MCP Market Data for AI Agents</title>
+  <title>Blocksize Agentic Market Intelligence | MCP Market Data for AI Agents</title>
   <meta
     name="description"
-    content="Find real-time price data for AI agents: Blocksize provides crypto VWAP, bid/ask, FX, and metals market data packages through remote MCP discovery and x402-paid HTTP APIs."
+    content="Find live market data and decision-ready agent workflows: Blocksize provides crypto VWAP, bid/ask, AMM state prices, VWAP windows, market briefs, macro snapshots, and trader indicators through remote MCP discovery and x402-paid HTTP APIs."
   />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <meta name="author" content="Blocksize Capital GmbH" />
   <meta
     name="keywords"
-    content="real-time price data API, market data API, AI agent price data, MCP market data, x402 market data, crypto VWAP API, bid ask API, FX price API, metals price API, Blocksize market data packages"
+    content="market intelligence API, market data API, AI agent price data, MCP market data, x402 market data, crypto VWAP API, AMM state price API, 30 minute VWAP API, 24 hour fixed VWAP API, token quality indicator API, trader alpha signal API"
   />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -34,7 +34,7 @@
   <meta property="og:title" content="Blocksize Real-Time Price Data API for AI Agents" />
   <meta
     property="og:description"
-    content="Discover and buy live crypto, bid/ask, FX, and metals price data packages through Blocksize remote MCP discovery and x402-paid HTTP APIs."
+    content="Discover and buy live market data, state prices, VWAP windows, market briefs, macro snapshots, and trader-ready indicators through Blocksize remote MCP discovery and x402-paid HTTP APIs."
   />
   <meta property="og:image" content="https://mcp.blocksize.info/assets/logo.png" />
   <meta property="og:image:alt" content="Blocksize real-time market data for AI agents" />
@@ -44,7 +44,7 @@
   <meta name="twitter:title" content="Blocksize Real-Time Price Data API for AI Agents" />
   <meta
     name="twitter:description"
-    content="Remote MCP discovery plus x402-paid HTTP market data packages for crypto VWAP, bid/ask, FX, and metals."
+    content="Remote MCP discovery plus x402-paid HTTP market intelligence packages for crypto VWAP, bid/ask, state prices, VWAP windows, briefs, macro snapshots, and trader indicators."
   />
   <meta name="twitter:image" content="https://mcp.blocksize.info/assets/logo.png" />
   <script type="application/ld+json">
@@ -72,15 +72,15 @@
           "applicationCategory": "DeveloperApplication",
           "operatingSystem": "Cross-platform",
           "url": "https://mcp.blocksize.info/",
-          "description": "Remote MCP discovery and x402-paid live market data endpoints for AI agents.",
+          "description": "Remote MCP discovery and x402-paid live market data, state price, VWAP-window, receipt, market brief, macro snapshot, and trader indicator endpoints for AI agents.",
           "softwareHelp": "https://mcp.blocksize.info/quickstart/remote-mcp",
           "codeRepository": "https://gitlab.com/jfocke/agentic-payments"
         },
         {
           "@type": "WebSite",
-          "name": "Blocksize Real-Time Price Data API",
+          "name": "Blocksize Agentic Market Intelligence API",
           "url": "https://mcp.blocksize.info/",
-          "description": "Canonical discovery page for Blocksize live price data, market data packages, remote MCP metadata, OpenAPI documentation, and x402-paid HTTP endpoints.",
+          "description": "Canonical discovery page for Blocksize live market data, state prices, VWAP windows, agent workflow products, remote MCP metadata, OpenAPI documentation, and x402-paid HTTP endpoints.",
           "potentialAction": {
             "@type": "SearchAction",
             "target": "https://mcp.blocksize.info/v1/search?q={search_term_string}",
@@ -92,7 +92,7 @@
           "name": "Blocksize x402 Market Data API",
           "url": "https://mcp.blocksize.info/openapi.json",
           "documentation": "https://mcp.blocksize.info/docs",
-          "description": "Paid HTTP API for real-time crypto VWAP, bid/ask snapshots, FX rates, metals prices, and batch market data requests.",
+          "description": "Paid HTTP API for real-time crypto VWAP, bid/ask snapshots, AMM state prices, 30-minute closes, 24h fixed VWAP, FX rates, metals prices, market briefs, macro snapshots, price receipts, and trader indicators.",
           "provider": {
             "@type": "Organization",
             "name": "Blocksize Capital GmbH"
@@ -100,9 +100,9 @@
         },
         {
           "@type": "Dataset",
-          "name": "Blocksize Real-Time Price Data Packages",
+          "name": "Blocksize Agentic Market Intelligence Packages",
           "url": "https://mcp.blocksize.info/",
-          "description": "Live price data packages for AI agents covering crypto VWAP, crypto and equity bid/ask snapshots, FX rates, and metals spot prices.",
+          "description": "Live market intelligence packages for AI agents covering crypto VWAP, bid/ask snapshots, AMM state prices, 30-minute closes, 24h fixed VWAP, FX, metals, briefs, receipts, macro snapshots, and trader indicators.",
           "keywords": [
             "real-time price data",
             "market data API",
@@ -110,6 +110,15 @@
             "MCP market data",
             "crypto VWAP",
             "bid ask data",
+            "AMM state price",
+            "30 minute VWAP",
+            "24 hour fixed VWAP",
+            "agent market brief",
+            "pre trade check",
+            "price receipt",
+            "token quality indicator",
+            "state divergence indicator",
+            "trader alpha signals",
             "FX rates",
             "metals prices",
             "x402 paid API"
@@ -131,7 +140,11 @@
           "itemListElement": [
             {"@type": "Offer", "name": "Core Crypto VWAP Price Data", "price": "0.002", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
             {"@type": "Offer", "name": "Extended Crypto and Bid/Ask Price Data", "price": "0.004", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
-            {"@type": "Offer", "name": "FX and Metals Price Data", "price": "0.005", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"}
+            {"@type": "Offer", "name": "State Price, 30m VWAP, and 24h Fixed VWAP", "price": "0.002", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
+            {"@type": "Offer", "name": "FX and Metals Price Data", "price": "0.005", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
+            {"@type": "Offer", "name": "Agent Market Brief", "price": "0.25", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/agent-market-brief-api"},
+            {"@type": "Offer", "name": "Multi-Asset Macro Snapshot", "price": "1.00", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/multi-asset-macro-snapshot-api"},
+            {"@type": "Offer", "name": "Trader Alpha Signal Pack", "price": "2.50", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/trader-alpha-pack-api"}
           ]
         },
         {
@@ -139,26 +152,26 @@
           "mainEntity": [
             {
               "@type": "Question",
-              "name": "Where can AI agents find Blocksize price data?",
+              "name": "Where can AI agents find Blocksize market intelligence?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Agents can start with the public remote MCP server at https://mcp.blocksize.info/mcp/server/ to discover symbols, pricing, docs, and paid endpoint URLs."
+                "text": "Agents can start with the public remote MCP server at https://mcp.blocksize.info/mcp/server/ to discover symbols, pricing, docs, readiness checks, and paid endpoint URLs."
               }
             },
             {
               "@type": "Question",
-              "name": "What market data packages does Blocksize provide?",
+              "name": "What market intelligence packages does Blocksize provide?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Blocksize provides crypto VWAP, crypto and supported equity bid/ask, FX, metals, batch market data, and free discovery/documentation packages."
+                "text": "Blocksize provides crypto VWAP, bid/ask, FX, metals, AMM state prices, 30-minute closes, 24h fixed VWAP, market briefs, pre-trade checks, audit-grade price receipts, macro snapshots, token quality indicators, state divergence indicators, Solana token briefs, trader alpha packs, batch market data, and free discovery/documentation packages."
               }
             },
             {
               "@type": "Question",
-              "name": "How do agents access live production price data?",
+              "name": "How do agents access live production data?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Live production price data is available through x402-paid HTTP endpoints or wallet-credit drawdown documented in the OpenAPI schema."
+                "text": "Live production data is available through x402-paid HTTP endpoints or wallet-credit drawdown documented in the OpenAPI schema. New eligible users, wallets, and authenticated agents can start with 50 live data credits."
               }
             }
           ]
@@ -1409,30 +1422,32 @@
     <div class="container">
       <div class="hero-grid">
         <div>
-          <span class="hero-label">REAL-TIME PRICE DATA + AGENT DISCOVERY</span>
-          <h1>Real-Time Price <span>Data API</span></h1>
+          <span class="hero-label">LIVE DATA + AGENT-NATIVE MARKET INTELLIGENCE</span>
+          <h1>Market Intelligence <span>for AI Agents</span></h1>
           <p class="hero-sub">
-            Blocksize Capital gives AI agents and builders live crypto, bid/ask,
-            FX, and metals price data through a public remote MCP discovery server
+            Blocksize Capital gives AI agents and builders live crypto VWAP,
+            bid/ask, AMM state prices, VWAP windows, market briefs, macro
+            snapshots, and trader-ready indicators through public MCP discovery
             and x402-protected HTTP APIs.
           </p>
           <p class="hero-copy">
             Use the public MCP surface to discover symbols, inspect pricing, fetch integration docs,
-            and choose the right data package. Route live production quotes, VWAP, bid/ask,
-            FX, and metals through the paid HTTP API or the advanced local MCP setup.
+            check feed readiness, and choose the right product. Route live production
+            quotes, 24h fixed VWAP, 30m closes, state prices, receipts, checks, and
+            signal packages through the paid HTTP API or the advanced local MCP setup.
           </p>
           <div class="hero-stats">
             <div>
-              <span class="stat-value">+7000</span>
-              <span class="stat-label">Discoverable Symbols</span>
+              <span class="stat-value">213</span>
+              <span class="stat-label">Cached State Symbols</span>
             </div>
             <div>
               <span class="stat-value">$0.002</span>
               <span class="stat-label">Minimum Cost / Call</span>
             </div>
             <div>
-              <span class="stat-value">HTTP</span>
-              <span class="stat-label">Streamable Remote MCP</span>
+              <span class="stat-value">Ready</span>
+              <span class="stat-label">24h VWAP Cache</span>
             </div>
             <div>
               <span class="stat-value">2</span>
@@ -1440,7 +1455,8 @@
             </div>
           </div>
           <div class="hero-actions">
-            <a href="/docs" class="btn-nav">Open Price Data API</a>
+            <a href="/docs" class="btn-nav">Open Market Data API</a>
+            <a href="/v1/cache/status" class="btn-nav btn-ghost">Live Feed Status</a>
             <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav btn-arrow btn-ghost">
               View Subscriptions
               <svg width="31" height="31" viewBox="0 0 31 31" fill="none" aria-hidden="true">
@@ -1474,12 +1490,13 @@
           <span>Welcome Credits</span>
         </div>
         <div class="welcome-copy">
-          <h2>Eligible agent wallets can start with live-data credits.</h2>
+          <h2>Start with 50 live data credits.</h2>
           <p>
-            New agent wallets using the credit path can receive 50 welcome credits automatically,
-            then graduate into x402 settlement or prepaid drawdown credits as usage scales.
+            Eligible users, wallets, and authenticated agents can try live data,
+            market briefs, macro snapshots, pre-trade checks, receipts, and trader
+            indicators before upgrading to x402 settlement or prepaid drawdown credits.
           </p>
-          <code class="welcome-code">Header: X-AGENT-WALLET</code>
+          <code class="welcome-code">Headers: X-AGENT-ID, X-AGENT-WALLET, X-USER-ID</code>
           <p class="welcome-note">Eligibility checks protect the trial from abuse; free discovery remains available through the public remote MCP server.</p>
         </div>
       </div>
@@ -1581,10 +1598,10 @@
         </div>
         <div class="surface-card">
           <strong>Paid HTTP API</strong>
-          <h3>Live production market data</h3>
+          <h3>Live production market intelligence</h3>
           <p>
-            x402 or wallet-credit access to live market data endpoints for crypto,
-            FX, metals, and batch requests.
+            x402 or wallet-credit access to live data endpoints for crypto, FX, metals,
+            state prices, VWAP windows, briefs, receipts, checks, and trader indicators.
           </p>
           <code>/openapi.json</code>
         </div>
@@ -1611,6 +1628,11 @@
           <span class="endpoint">GET /v1/vwap/{pair}<br>GET /v1/bidask/{pair}</span>
         </div>
         <div class="catalog-item">
+          <h3>State Prices and VWAP Windows</h3>
+          <p>Cache-backed AMM state prices, 30-minute closing VWAP, and 24-hour fixed VWAP for trader workflows.</p>
+          <span class="endpoint">GET /v1/state/{pair}<br>GET /v1/vwap30m/{pair}<br>GET /v1/vwap24h/{pair}</span>
+        </div>
+        <div class="catalog-item">
           <h3>FX</h3>
           <p>Spot snapshots for the currently enabled foreign exchange pairs.</p>
           <span class="endpoint">GET /v1/fx/{pair}</span>
@@ -1621,9 +1643,9 @@
           <span class="endpoint">GET /v1/metal/{ticker}</span>
         </div>
         <div class="catalog-item">
-          <h3>Discovery and Docs</h3>
-          <p>Free symbol search, service listings, pricing info, and OpenAI-style document search.</p>
-          <span class="endpoint">MCP tools: search_pairs, list_instruments, search, fetch</span>
+          <h3>Agent Workflow Products</h3>
+          <p>Market briefs, pre-trade checks, audit receipts, macro snapshots, and trader signal packages.</p>
+          <span class="endpoint">POST /v1/briefs/market<br>POST /v1/signals/trader-alpha-pack</span>
         </div>
       </div>
     </div>
@@ -1631,36 +1653,48 @@
 
   <section id="data-packages" style="background: var(--white-heading);">
     <div class="container">
-      <h2>Price Data <span>Packages</span></h2>
+      <h2>Market Intelligence <span>Packages</span></h2>
       <p style="max-width: 55rem;">
-        Blocksize packages live market data for agent routing, research workflows, autonomous
-        execution checks, and applications that need fresh price context without opening an
-        API account first.
+        Raw market data remains the foundation. Blocksize packages live prices, AMM state,
+        VWAP windows, provenance, receipts, macro context, and trader indicators into
+        decision-ready agent workflows.
       </p>
       <div class="surface-grid">
         <div class="surface-card">
-          <strong>Crypto VWAP Package</strong>
-          <h3>Real-time crypto price data</h3>
-          <p>Institutional VWAP snapshots for enabled pairs including BTCUSD, ETHUSD, SOLUSD, and extended crypto assets.</p>
-          <code>GET /v1/vwap/{pair}</code>
+          <strong>Raw Market Data</strong>
+          <h3>VWAP, bid/ask, FX, and metals</h3>
+          <p>Fast live price routes for agents that already know the exact market data they need.</p>
+          <code>GET /v1/vwap/{pair} · GET /v1/bidask/{pair}</code>
         </div>
         <div class="surface-card">
-          <strong>Bid/Ask Package</strong>
-          <h3>Market depth snapshots</h3>
-          <p>Bid and ask price data for supported crypto and equity symbols where agents need current executable context.</p>
-          <code>GET /v1/bidask/{pair}</code>
+          <strong>State + VWAP Windows</strong>
+          <h3>Cache-backed trader context</h3>
+          <p>State prices, 30-minute closes, and 24-hour fixed VWAP are kept ready for symbols in the live cache.</p>
+          <code>GET /v1/state/{pair} · GET /v1/vwap24h/{pair}</code>
         </div>
         <div class="surface-card">
-          <strong>FX and Metals Package</strong>
-          <h3>TradFi reference prices</h3>
-          <p>Spot FX and metals prices for workflows that need currency conversion, commodities context, or portfolio checks.</p>
-          <code>GET /v1/fx/{pair} · GET /v1/metal/{ticker}</code>
+          <strong>Agent Briefs and Receipts</strong>
+          <h3>Decision-ready evidence</h3>
+          <p>Briefs, checks, and audit-grade receipts package prices with methodology, inputs, and provenance.</p>
+          <code>POST /v1/briefs/market · POST /v1/receipts/price</code>
+        </div>
+        <div class="surface-card">
+          <strong>Trader Indicators</strong>
+          <h3>Alpha-style support metrics</h3>
+          <p>Token quality, state divergence, Solana token briefs, and alpha packs combine Blocksize price feeds into reusable signals.</p>
+          <code>POST /v1/indicators/token-quality · POST /v1/signals/trader-alpha-pack</code>
+        </div>
+        <div class="surface-card">
+          <strong>Readiness Checks</strong>
+          <h3>Know before spending credits</h3>
+          <p>Agents can check whether state, 30-minute, and 24-hour cache coverage is ready before making paid calls.</p>
+          <code>GET /v1/cache/status · POST /v1/capabilities/check</code>
         </div>
         <div class="surface-card">
           <strong>Agent Discovery Package</strong>
           <h3>Free search and citation layer</h3>
           <p>Remote MCP tools and public files that help ChatGPT, Claude, Cursor, search engines, and crawlers identify the right data route.</p>
-          <code>/mcp/server/ · /llms.txt · /server.json</code>
+          <code>/mcp/server/ · /llms.txt · /data-packages.json</code>
         </div>
       </div>
     </div>
@@ -1678,12 +1712,12 @@
         <div class="step">
           <span class="step-num">02</span>
           <h3>Choose Path</h3>
-          <p>For live production data, move from discovery into the paid HTTP API or the advanced local MCP setup.</p>
+          <p>Use <code>/v1/cache/status</code> and <code>/v1/capabilities/check</code>, then choose raw endpoints or packaged workflow products.</p>
         </div>
         <div class="step">
           <span class="step-num">03</span>
           <h3>Settle</h3>
-          <p>Use wallet credits or x402 payment proofs on Solana or Base for live market data calls. Eligible new agent wallets can receive 50 welcome credits automatically when using the <code>X-AGENT-WALLET</code> credit path.</p>
+          <p>Use starter credits, wallet credits, or x402 payment proofs on Solana or Base. Eligible users, wallets, and authenticated agents can start with 50 live data credits.</p>
         </div>
         <div class="step">
           <span class="step-num">04</span>
@@ -1720,6 +1754,21 @@
             <td>FX and Metals</td>
             <td class="price-bold">$0.005</td>
             <td>EURUSD, GBPUSD, XAUUSD</td>
+          </tr>
+          <tr>
+            <td>State and VWAP Windows</td>
+            <td class="price-bold">1 credit</td>
+            <td>MSOLUSD state price, SOLUSD 30m VWAP, BTCUSD 24h VWAP</td>
+          </tr>
+          <tr>
+            <td>Agent Workflow Products</td>
+            <td class="price-bold">5-25 credits</td>
+            <td>market brief, pre-trade sanity check, price receipt, macro snapshot</td>
+          </tr>
+          <tr>
+            <td>Trader Indicators</td>
+            <td class="price-bold">10-25 credits</td>
+            <td>token quality, state divergence, Solana token brief, trader alpha pack</td>
           </tr>
         </tbody>
       </table>
@@ -1786,7 +1835,7 @@
         <a href="/prompt-examples" class="resource-card">
           <div>
             <h4>Prompt Examples</h4>
-            <p>Reviewer-friendly prompts for discovery, pricing inspection, and integration handoff.</p>
+            <p>Reviewer-friendly prompts for feed readiness, market briefs, state price checks, and integration handoff.</p>
           </div>
           <span class="arrow">→</span>
         </a>
@@ -1807,7 +1856,7 @@
         <a href="/docs" class="resource-card">
           <div>
             <h4>Swagger UI</h4>
-            <p>Interactive documentation for the paid HTTP market data API.</p>
+            <p>Interactive documentation for raw data, readiness checks, receipts, briefs, macro snapshots, and indicators.</p>
           </div>
           <span class="arrow">→</span>
         </a>
@@ -1828,7 +1877,7 @@
         <a href="/llms.txt" class="resource-card">
           <div>
             <h4>AI Reader Brief</h4>
-            <p>Plain-text handoff for AI models, crawlers, and agent workflows looking for Blocksize price data.</p>
+            <p>Plain-text handoff for AI models, crawlers, and agent workflows looking for Blocksize market intelligence.</p>
           </div>
           <span class="arrow">→</span>
         </a>
@@ -1842,7 +1891,7 @@
         <a href="pdf/Blocksize_Data_Catalog.pdf" class="resource-card">
           <div>
             <h4>Data Catalog</h4>
-            <p>Package-level coverage reference for crypto, bid/ask, FX, metals, and discovery data.</p>
+            <p>Package-level coverage reference for raw prices, state prices, VWAP windows, and workflow products.</p>
           </div>
           <span class="arrow">→</span>
         </a>
