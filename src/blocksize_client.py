@@ -4,22 +4,26 @@ Blocksize Capital API client.
 The deployed Agentic Payments gateway currently uses JSON-RPC 2.0 over HTTP.
 It does not maintain websocket subscriptions itself.
 
-Verified upstream methods for the deployed key:
+Verified upstream HTTP methods for the deployed key:
   - vwap_latest
   - vwap_instruments
   - bidask_getSnapshot
   - bidask_instruments
+  - state_instruments
+  - state_pool
+  - closingprice_list
+  - closingprice_trades
 
-The wider Blocksize platform documentation discusses websocket transport and
-subscription-style notifications in general, but this repo's integration path
-is request/response over HTTP POST.
+The public docs expose 24-hour fixed VWAP and aggregate state subscriptions
+over websocket. Those are handled by src.blocksize_stream_cache.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -208,18 +212,53 @@ class BlocksizeClient:
         Returns:
             VWAP30MinData with 30-minute aggregated VWAP.
         """
-        result = await self._rpc_call("vwap_30min_latest", {"ticker": ticker})
+        clean = _normalize_ticker(ticker)
+        quote = _extract_quote(clean)
+        base = clean[: -len(quote)] if quote and len(clean) > len(quote) else clean
+        if not quote:
+            quote = "USD"
+        result = await self._rpc_call(
+            "closingprice_list",
+            {"ts": _latest_completed_30m_ms(), "quote": quote},
+        )
 
-        if isinstance(result, dict):
-            return VWAP30MinData(
-                ticker=result.get("ticker", ticker),
-                vwap=float(result.get("price", result.get("vwap", 0))),
-                quote_currency=result.get("quote", result.get("quote_currency", "EUR")),
-                timestamp=_parse_timestamp(result.get("timestamp", result.get("ts"))),
-                source="blocksize",
+        if isinstance(result, dict) and isinstance(result.get("prices"), list):
+            match = next(
+                (
+                    item
+                    for item in result["prices"]
+                    if isinstance(item, dict)
+                    and str(item.get("base", "")).upper() == base
+                    and str(item.get("quote", "")).upper() == quote
+                ),
+                None,
             )
+            if match:
+                return VWAP30MinData(
+                    ticker=base,
+                    vwap=float(match.get("price", 0)),
+                    quote_currency=quote,
+                    timestamp=_parse_timestamp(match.get("timestamp", match.get("ts"))),
+                    source="blocksize",
+                )
+            raise BlocksizeAPIError(-32000, f"closingprice_list did not include {base}{quote}")
 
-        raise BlocksizeAPIError(-1, f"Unexpected response for vwap_30min: {result}")
+        raise BlocksizeAPIError(-1, f"Unexpected response for closingprice_list: {result}")
+
+    async def get_vwap_30min_trades(self, ticker: str, *, limit: int = 25) -> list[dict[str, Any]]:
+        """Return trade evidence for the latest completed 30-minute close."""
+        clean = _normalize_ticker(ticker)
+        quote = _extract_quote(clean)
+        base = clean[: -len(quote)] if quote and len(clean) > len(quote) else clean
+        if not quote:
+            quote = "USD"
+        result = await self._rpc_call(
+            "closingprice_trades",
+            {"base": base, "quote": quote, "ts": _latest_completed_30m_ms()},
+        )
+        if isinstance(result, dict) and isinstance(result.get("prices"), list):
+            return [item for item in result["prices"][:limit] if isinstance(item, dict)]
+        raise BlocksizeAPIError(-1, f"Unexpected response for closingprice_trades: {result}")
 
     # -----------------------------------------------------------------------
     # 24-Hour VWAP / Closing Price (Crypto)
@@ -235,7 +274,16 @@ class BlocksizeClient:
         Returns:
             VWAP24HrData with 24-hour closing VWAP and volume.
         """
-        result = await self._rpc_call("vwap_24h_latest", {"ticker": pair})
+        try:
+            result = await self._rpc_call("vwap_24h_latest", {"ticker": pair})
+        except BlocksizeAPIError as exc:
+            if exc.code == -32601:
+                raise BlocksizeAPIError(
+                    -32004,
+                    "24-hour fixed VWAP is websocket-only in the public docs; enable "
+                    "the Blocksize stream cache for HTTP reads.",
+                ) from exc
+            raise
 
         if isinstance(result, dict):
             return VWAP24HrData(
@@ -252,9 +300,37 @@ class BlocksizeClient:
     # State Price (Crypto)
     # -----------------------------------------------------------------------
 
+    async def get_state_pool(
+        self,
+        *,
+        network: str,
+        pool: str,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the documented HTTP AMM state snapshot for a pool."""
+        params: dict[str, Any] = {"network": network, "pool": pool}
+        if symbol:
+            params["symbol"] = symbol
+        result = await self._rpc_call("state_pool", params)
+        if isinstance(result, dict) and isinstance(result.get("state"), dict):
+            state = result["state"]
+            state.setdefault("network", network)
+            state.setdefault("pool", pool)
+            if symbol:
+                state.setdefault("symbol", symbol)
+            return state
+        if isinstance(result, dict):
+            return result
+        raise BlocksizeAPIError(-1, f"Unexpected response for state_pool: {result}")
+
     async def get_state_price(self, pair: str) -> StatePriceData:
         """
         Get the state/reference price for a crypto pair.
+
+        The documented HTTP state path is pool-level (`state_pool`), not a
+        ticker-level `state_price_latest` method. We resolve the requested
+        symbol through `state_instruments`, call available pools, and derive a
+        weighted state price where possible.
 
         Args:
             pair: Trading pair identifier
@@ -262,17 +338,130 @@ class BlocksizeClient:
         Returns:
             StatePriceData with the reference/settlement price.
         """
-        result = await self._rpc_call("state_price_latest", {"ticker": pair})
+        pool_error: BlocksizeAPIError | None = None
+        try:
+            return await self._get_state_price_from_pools(pair)
+        except BlocksizeAPIError as exc:
+            pool_error = exc
+            if exc.code not in {-32000, -32601, -32602, -32603, -1}:
+                raise
+
+        method_candidates = [
+            os.getenv("BLOCKSIZE_STATE_PRICE_METHOD", "").strip(),
+            "state_price_latest",
+            "state_latest",
+            "state_getLatest",
+            "state_get_latest",
+            "state_price",
+            "state_getPrice",
+            "state_get_price",
+            "reference_price_latest",
+            "reference_latest",
+            "reference_price",
+        ]
+        last_method_not_found: BlocksizeAPIError | None = None
+        result: Any = None
+        for method in [item for item in method_candidates if item]:
+            try:
+                result = await self._rpc_call(method, {"ticker": pair})
+                break
+            except BlocksizeAPIError as exc:
+                if exc.code == -32601:
+                    last_method_not_found = exc
+                    continue
+                raise
+        else:
+            if last_method_not_found:
+                raise pool_error or last_method_not_found
+            raise BlocksizeAPIError(-32601, "No state/reference price RPC method configured")
 
         if isinstance(result, dict):
+            state_payload = result.get("state") or result.get("price") or result.get("state_price") or result
+            if isinstance(state_payload, dict):
+                result = state_payload
+            price = _first_float(result, ("price", "state_price", "reference_price", "value", "mid"))
+            if price is None:
+                raise BlocksizeAPIError(-1, f"State price response did not include a price field: {result}")
             return StatePriceData(
                 pair=result.get("ticker", pair),
-                price=float(result.get("price", 0)),
-                timestamp=_parse_timestamp(result.get("timestamp")),
+                price=price,
+                timestamp=_parse_timestamp(result.get("timestamp", result.get("ts"))),
                 source="blocksize",
             )
 
         raise BlocksizeAPIError(-1, f"Unexpected response for state_price: {result}")
+
+    async def _get_state_price_from_pools(self, pair: str) -> StatePriceData:
+        clean = _normalize_ticker(pair)
+        instruments = await self.list_state_instruments()
+        matches = _matching_state_instruments(clean, instruments)
+        if not matches:
+            raise BlocksizeAPIError(
+                -32000,
+                f"No state_instruments pool coverage for {clean}",
+            )
+
+        pool_states: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for instrument in matches:
+            symbol = str(instrument.get("symbol") or clean).upper()
+            pools = instrument.get("pools") if isinstance(instrument.get("pools"), list) else []
+            for pool in pools:
+                if not isinstance(pool, dict) or not pool.get("network") or not pool.get("address"):
+                    continue
+                try:
+                    state = await self.get_state_pool(
+                        network=str(pool["network"]),
+                        pool=str(pool["address"]),
+                        symbol=symbol,
+                    )
+                except BlocksizeAPIError as exc:
+                    errors.append(f"{symbol}:{pool.get('network')}:{exc.code}:{exc.message}")
+                    continue
+                if _first_float(state, ("state_price_usd", "price", "state_price", "state")) is not None:
+                    pool_states.append(state)
+
+        if not pool_states:
+            detail = "; ".join(errors[:3]) if errors else "no pools returned a usable price"
+            raise BlocksizeAPIError(
+                -32000,
+                f"No usable state_pool price for {clean}: {detail}",
+            )
+
+        weighted_sum = 0.0
+        weight_sum = 0.0
+        unweighted: list[float] = []
+        latest_ts: Any = None
+        for state in pool_states:
+            price = _first_float(state, ("state_price_usd", "price", "state_price", "state"))
+            if price is None:
+                continue
+            unweighted.append(price)
+            weight = _first_float(state, ("weight",))
+            if weight is not None and weight > 0:
+                weighted_sum += price * weight
+                weight_sum += weight
+            latest_ts = state.get("block_time") or state.get("timestamp") or state.get("ts") or latest_ts
+
+        if not unweighted:
+            raise BlocksizeAPIError(-1, f"state_pool responses did not include a price field for {clean}")
+
+        price = weighted_sum / weight_sum if weight_sum else sum(unweighted) / len(unweighted)
+        return StatePriceData(
+            pair=clean,
+            price=price,
+            timestamp=_parse_timestamp(latest_ts),
+            source="blocksize",
+        )
+
+    async def list_state_instruments(self) -> list[dict[str, Any]]:
+        """List available state-data instruments and their pool/network metadata."""
+        result = await self._rpc_call("state_instruments")
+        if isinstance(result, dict) and isinstance(result.get("instruments"), list):
+            return result["instruments"]
+        if isinstance(result, list):
+            return result
+        return []
 
     # -----------------------------------------------------------------------
     # Bid/Ask (Shared Multi-Asset Namespace)
@@ -733,6 +922,36 @@ def _split_pair(pair: str) -> tuple[str, str]:
         return clean, ""
     mid = len(pair) // 2
     return clean[:mid], clean[mid:]
+
+
+def _normalize_ticker(ticker: str) -> str:
+    """Normalize ticker strings to Blocksize's compact uppercase form."""
+    return ticker.replace("-", "").replace("/", "").replace("_", "").upper()
+
+
+def _latest_completed_30m_ms() -> int:
+    """Return the latest completed UTC 30-minute boundary in milliseconds."""
+    now = datetime.now(timezone.utc)
+    minute = 30 if now.minute >= 30 else 0
+    boundary = now.replace(minute=minute, second=0, microsecond=0)
+    if boundary >= now:
+        boundary = boundary - timedelta(minutes=30)
+    return int(boundary.timestamp() * 1000)
+
+
+def _matching_state_instruments(symbol: str, instruments: list[Any]) -> list[dict[str, Any]]:
+    """Find state instruments that are exact or common stable-quote variants."""
+    clean = _normalize_ticker(symbol)
+    base, _quote = _split_pair(clean)
+    target_symbols = {clean, f"{base}USD", f"{base}USDC", f"{base}USDT"}
+    matches: list[dict[str, Any]] = []
+    for item in instruments:
+        if not isinstance(item, dict):
+            continue
+        item_symbol = str(item.get("symbol") or "").upper()
+        if item_symbol in target_symbols:
+            matches.append(item)
+    return matches
 
 
 def _safe_float(val: Any) -> float | None:

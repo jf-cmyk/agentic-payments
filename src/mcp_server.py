@@ -26,6 +26,7 @@ from fastmcp import FastMCP
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
+from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -39,6 +40,7 @@ from src.public_metadata import (
     DATA_CATALOG_URL,
     DISCOVERABLE_SYMBOL_COUNT,
     INSTRUMENT_COUNTS,
+    MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
     OPENAPI_URL,
     PRIVACY_POLICY_URL,
@@ -517,6 +519,43 @@ async def get_pricing_info() -> str:
             },
         },
         "tiers": settings.pricing_summary,
+        "starter_allowance": {
+            "positioning": "Start with 50 live data credits",
+            "allowance_credits": STARTER_CREDIT_ALLOWANCE,
+            "applies_to": (
+                "raw VWAP, bid/ask, FX, metals, batch calls, market briefs, "
+                "pre-trade checks, audit receipts, macro snapshots, and provenance"
+            ),
+            "not_free_forever": True,
+            "upgrade_path": "x402 payment or prepaid credit top-ups",
+        },
+        "credit_costs": CREDIT_COSTS,
+        "premium_workflow_products": {
+            "agent_market_brief": {
+                "credit_cost": CREDIT_COSTS["market_brief"],
+                "recommended_paid_price_usdc": "0.25-0.50",
+            },
+            "pre_trade_sanity_check": {
+                "credit_cost": CREDIT_COSTS["pre_trade_check"],
+                "recommended_paid_price_usdc": "0.10-0.25",
+            },
+            "audit_grade_price_receipt": {
+                "credit_cost": CREDIT_COSTS["audit_receipt"],
+                "recommended_paid_price_usdc": "0.25-0.75",
+            },
+            "multi_asset_macro_snapshot": {
+                "credit_cost": CREDIT_COSTS["macro_snapshot"],
+                "recommended_paid_price_usdc": "1.00-2.50",
+            },
+            "agent_data_provenance": {
+                "credit_cost": CREDIT_COSTS["provenance_lookup"],
+                "recommended_paid_price_usdc": "free with prior paid or credited call",
+            },
+            "spend_controlled_market_monitor": {
+                "credit_cost": CREDIT_COSTS["market_brief"],
+                "recommended_paid_price_usdc": "0.25",
+            },
+        },
         "coverage": {
             "rt_vwap_crypto": "6,362 enabled crypto pairs",
             "shared_bidask_namespace": "2,365 enabled upstream symbols including supported equity tickers",
@@ -526,7 +565,7 @@ async def get_pricing_info() -> str:
         },
         "competitive_note": (
             "An agent making 10,000 VWAP calls/month pays ~$20 vs. Pyth Pro $2,000+/month. "
-            "Pure pay-per-use, or explore traditional flat-rate subscriptions for high consumption agents at https://blocksize.info/crypto-market-data/#pricing."
+            f"Pure pay-per-use, or explore traditional flat-rate subscriptions for high consumption agents at {MAIN_WEBSITE_PRICING_URL}."
         ),
     }
 
@@ -537,8 +576,12 @@ async def get_pricing_info() -> str:
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
         f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
+        f"  Starter Credits:  Start with {STARTER_CREDIT_ALLOWANCE:g} live data credits "
+        "(not free forever)\n"
+        "  Premium workflows: market brief 10 credits, pre-trade check 5, "
+        "audit receipt 10, macro snapshot 25, monitor evaluate 10\n"
         f"\nPayment: Solana (primary) or Base L2 (fallback)\n"
-        f"High Consumption Agents: Subscriptions available at https://blocksize.info/crypto-market-data/#pricing"
+        f"High Consumption Agents: Subscriptions available at {MAIN_WEBSITE_PRICING_URL}"
     )
 
     details = json.dumps(pricing, indent=2, default=str)
@@ -585,6 +628,19 @@ async def search(query: str) -> str:
         instrument_matches = await client.search_pairs(query, "all")
         for match in instrument_matches[:10]:
             results.append(_instrument_search_result(match))
+
+        for fallback_id in ("doc:quickstart", "doc:pricing"):
+            doc = get_static_document(fallback_id)
+            if doc is None:
+                continue
+            results.append(
+                {
+                    "id": doc["id"],
+                    "title": doc["title"],
+                    "url": doc["url"],
+                    "metadata": doc["metadata"],
+                }
+            )
 
         deduped: list[dict[str, object]] = []
         seen_ids: set[str] = set()

@@ -17,6 +17,7 @@ from src.mcp_server import (
     search as search_catalog,
     search_pairs as search_local_pairs,
 )
+from src.observability import record_usage_event
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
@@ -32,6 +33,7 @@ from src.public_metadata import (
     REMOTE_MCP_URL,
     SUPPORT_URL,
     SWAGGER_URL,
+    build_data_packages_json,
 )
 
 InstrumentSearchQuery = Annotated[
@@ -46,12 +48,13 @@ InstrumentSearchQuery = Annotated[
     ),
 ]
 LiveMarketDataService = Annotated[
-    Literal["vwap", "bidask", "fx", "metal"],
+    Literal["vwap", "bidask", "state", "vwap30m", "vwap24h", "fx", "metal"],
     Field(
         description=(
             "Live HTTP data service to prepare: vwap for crypto VWAP, bidask for "
-            "crypto pairs or supported equity tickers, fx for currency pairs, or "
-            "metal for metals."
+            "crypto pairs or supported equity tickers, state for AMM state price, "
+            "vwap30m for latest completed 30-minute close, vwap24h for fixed "
+            "24-hour VWAP from the stream cache, fx for currency pairs, or metal for metals."
         ),
     ),
 ]
@@ -107,6 +110,20 @@ CatalogFetchId = Annotated[
         max_length=160,
     ),
 ]
+PremiumWorkflowProduct = Annotated[
+    Literal[
+        "agent_market_brief",
+        "pre_trade_sanity_check",
+        "audit_grade_price_receipt",
+        "multi_asset_macro_snapshot",
+        "spend_controlled_market_monitor",
+        "token_market_quality_indicator",
+        "state_divergence_indicator",
+        "solana_token_brief",
+        "trader_alpha_pack",
+    ],
+    Field(description="Premium Blocksize workflow product to prepare."),
+]
 
 public_mcp = FastMCP(
     PUBLIC_DISPLAY_NAME,
@@ -135,6 +152,13 @@ async def public_search_pairs(
     asset_class: AssetClassFilter = "all",
 ) -> str:
     """Search supported instruments on the public remote MCP surface."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="search_pairs",
+        subject=query,
+        asset_class=asset_class,
+    )
     return await search_local_pairs(query, asset_class)
 
 
@@ -150,6 +174,12 @@ async def public_search_pairs(
 )
 async def public_list_instruments(service: InstrumentService = "vwap") -> str:
     """List supported instruments on the public remote MCP surface."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="list_instruments",
+        subject=service,
+    )
     return await list_local_instruments(service)
 
 
@@ -165,7 +195,197 @@ async def public_list_instruments(service: InstrumentService = "vwap") -> str:
 )
 async def public_get_pricing_info() -> str:
     """Return pricing guidance for public discovery clients."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="get_pricing_info",
+    )
     return await get_local_pricing_info()
+
+
+@public_mcp.tool(
+    name="get_product_catalog",
+    title="Product Catalog",
+    description=(
+        "Inspect Blocksize raw data and premium agent-native workflow products, "
+        "including starter-credit positioning, credit costs, suggested paid "
+        "prices, endpoint templates, and upgrade path. This is free and read-only."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def public_get_product_catalog() -> str:
+    """Return product catalog guidance for agents and listing surfaces."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="get_product_catalog",
+    )
+    return json.dumps(build_data_packages_json(), indent=2)
+
+
+@public_mcp.tool(
+    name="get_workflow_endpoint",
+    title="Premium Workflow Endpoint Builder",
+    description=(
+        "Build the exact paid HTTP endpoint, method, starter-credit cost, and "
+        "example body for a premium Blocksize workflow. This is free and "
+        "read-only; it does not fetch live data, charge credits, or start x402."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
+    """Return the paid HTTP endpoint and example body for a premium workflow."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="get_workflow_endpoint",
+        subject=product,
+    )
+    catalog: dict[str, dict[str, object]] = {
+        "agent_market_brief": {
+            "path": "/v1/briefs/market",
+            "credit_cost": 10,
+            "paid_price_usdc": "0.25",
+            "example_body": {"symbols": ["BTCUSD", "ETHUSD"], "intent": "portfolio_update"},
+        },
+        "pre_trade_sanity_check": {
+            "path": "/v1/checks/pre-trade",
+            "credit_cost": 5,
+            "paid_price_usdc": "0.10",
+            "example_body": {
+                "symbol": "BTCUSD",
+                "side": "buy",
+                "notional_usd": 2500,
+                "reference_price": 67250.12,
+                "max_spread_bps": 25,
+            },
+        },
+        "audit_grade_price_receipt": {
+            "path": "/v1/receipts/price",
+            "credit_cost": 10,
+            "paid_price_usdc": "0.25",
+            "example_body": {
+                "service": "vwap",
+                "symbol": "BTCUSD",
+                "purpose": "treasury_rebalance_reference",
+            },
+        },
+        "multi_asset_macro_snapshot": {
+            "path": "/v1/snapshots/macro",
+            "credit_cost": 25,
+            "paid_price_usdc": "1.00",
+            "example_body": {"universe": ["BTCUSD", "ETHUSD", "EURUSD", "XAUUSD"]},
+        },
+        "spend_controlled_market_monitor": {
+            "path": "/v1/monitors/evaluate",
+            "credit_cost": 10,
+            "paid_price_usdc": "0.25",
+            "example_body": {
+                "symbols": ["BTCUSD", "ETHUSD"],
+                "rules": [{"metric": "spread_bps", "operator": ">", "value": 50}],
+                "max_credits": 20,
+            },
+        },
+        "token_market_quality_indicator": {
+            "path": "/v1/indicators/token-quality",
+            "credit_cost": 15,
+            "paid_price_usdc": "0.50",
+            "example_body": {
+                "symbol": "SOLUSD",
+                "include_state_coverage": True,
+                "include_state_price": False,
+                "include_windows": False,
+                "max_spread_bps": 50,
+                "max_state_divergence_bps": 75,
+            },
+        },
+        "state_divergence_indicator": {
+            "path": "/v1/indicators/state-divergence",
+            "credit_cost": 15,
+            "paid_price_usdc": "0.50",
+            "example_body": {
+                "symbol": "MSOLUSD",
+                "max_divergence_bps": 75,
+            },
+        },
+        "solana_token_brief": {
+            "path": "/v1/signals/solana-token-brief",
+            "credit_cost": 25,
+            "paid_price_usdc": "1.00",
+            "example_body": {
+                "symbols": ["SOLUSD", "JUPUSD", "PYTHUSD", "MSOLUSD"],
+                "include_state_coverage": True,
+                "include_state_price": False,
+                "include_windows": False,
+            },
+        },
+        "trader_alpha_pack": {
+            "path": "/v1/signals/trader-alpha-pack",
+            "credit_cost": 50,
+            "paid_price_usdc": "2.50",
+            "example_body": {
+                "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD"],
+                "include_state_coverage": True,
+                "include_state_price": False,
+                "include_windows": False,
+            },
+        },
+    }
+    item = catalog[product]
+    return json.dumps(
+        {
+            "status": "ok",
+            "product": product,
+            "request": {
+                "method": "POST",
+                "url": f"{PUBLIC_BASE_URL}{item['path']}",
+                "example_body": item["example_body"],
+            },
+            "readiness_check": {
+                "method": "POST",
+                "url": f"{PUBLIC_BASE_URL}/v1/capabilities/check",
+                "example_body": {
+                    "product": product,
+                    **(
+                        {"symbols": item["example_body"].get("symbols")}
+                        if isinstance(item["example_body"], dict)
+                        and item["example_body"].get("symbols")
+                        else {"symbol": item["example_body"].get("symbol", "SOLUSD")}
+                        if isinstance(item["example_body"], dict)
+                        else {"symbol": "SOLUSD"}
+                    ),
+                    "optional_feeds": {
+                        "state_coverage": False,
+                        "state_price": False,
+                        "vwap_windows": False,
+                    },
+                },
+                "cost": "free",
+                "purpose": "Verify required and optional feed coverage before spending credits on the paid workflow.",
+            },
+            "pricing": {
+                "starter_credit_cost": item["credit_cost"],
+                "paid_price_usdc": item["paid_price_usdc"],
+                "starter_positioning": "Start with 50 live data credits",
+                "upgrade_path": "x402 payment or prepaid credit top-ups",
+            },
+            "behavior": {
+                "returns_live_data": False,
+                "starts_payment": False,
+                "side_effects": "none",
+                "next_step": (
+                    "Call the returned HTTP endpoint with a starter-credit identity "
+                    "header, or without credits to receive an x402 payment challenge."
+                ),
+            },
+            "links": {
+                "openapi": OPENAPI_URL,
+                "swagger": SWAGGER_URL,
+                "quickstart": QUICKSTART_URL,
+            },
+        },
+        indent=2,
+    )
 
 
 @public_mcp.tool(
@@ -183,17 +403,30 @@ async def public_get_market_data_endpoint(
     symbol: LiveMarketDataSymbol,
 ) -> str:
     """Return the paid HTTP endpoint an agent should call for live data."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="get_market_data_endpoint",
+        subject=symbol.strip().upper(),
+        asset_class=service,
+    )
     clean_symbol = symbol.strip().upper()
     encoded_symbol = quote(clean_symbol, safe="-_")
     path = {
         "vwap": f"/v1/vwap/{encoded_symbol}",
         "bidask": f"/v1/bidask/{encoded_symbol}",
+        "state": f"/v1/state/{encoded_symbol}",
+        "vwap30m": f"/v1/vwap30m/{encoded_symbol}",
+        "vwap24h": f"/v1/vwap24h/{encoded_symbol}",
         "fx": f"/v1/fx/{encoded_symbol}",
         "metal": f"/v1/metal/{encoded_symbol}",
     }[service]
     notes = {
         "vwap": "Crypto VWAP endpoint. Use search_pairs/list_instruments to confirm pair support.",
         "bidask": "Shared bid/ask endpoint for crypto pairs and supported equity tickers.",
+        "state": "Pool-derived AMM state price endpoint. Use state-covered symbols such as MSOLUSD, JUPSOLUSD, or WSTETHUSD.",
+        "vwap30m": "Latest completed 30-minute close endpoint backed by Blocksize closingprice_list; include_trades=true adds closingprice_trades evidence.",
+        "vwap24h": "24-hour fixed VWAP endpoint backed by the Blocksize fixedvwap_subscribe websocket cache.",
         "fx": "FX spot endpoint for supported currency pairs.",
         "metal": "Metals endpoint for supported precious/base metal tickers.",
     }
@@ -239,6 +472,12 @@ async def public_get_market_data_endpoint(
 )
 async def public_search(query: CatalogSearchQuery) -> str:
     """Search docs and catalog entries in a document-oriented shape."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="search",
+        subject=query,
+    )
     return await search_catalog(query)
 
 
@@ -254,6 +493,12 @@ async def public_search(query: CatalogSearchQuery) -> str:
 )
 async def public_fetch(id: CatalogFetchId) -> str:
     """Fetch one documentation or instrument payload."""
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name="fetch",
+        subject=id,
+    )
     return await fetch_catalog(id)
 
 
@@ -279,6 +524,7 @@ async def public_info() -> str:
             "paid_data_access": {
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,
+                "starter_allowance": "Start with 50 live data credits, then upgrade through x402 payment or prepaid credit top-ups.",
                 "notes": (
                     "Live paid market data is exposed through the x402-protected HTTP "
                     "API and advanced local MCP setup, not this public remote server."

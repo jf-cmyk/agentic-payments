@@ -3,14 +3,183 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blocksize — Agentic Market Data for AI Agents</title>
+  <title>Blocksize Real-Time Price Data API | MCP Market Data for AI Agents</title>
   <meta
     name="description"
-    content="Blocksize Capital provides agent-native market data with a public remote MCP discovery server and x402-paid HTTP market data endpoints."
+    content="Find real-time price data for AI agents: Blocksize provides crypto VWAP, bid/ask, FX, and metals market data packages through remote MCP discovery and x402-paid HTTP APIs."
+  />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="author" content="Blocksize Capital GmbH" />
+  <meta
+    name="keywords"
+    content="real-time price data API, market data API, AI agent price data, MCP market data, x402 market data, crypto VWAP API, bid ask API, FX price API, metals price API, Blocksize market data packages"
   />
   <link rel="icon" href="/favicon.ico" sizes="any" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="canonical" href="https://mcp.blocksize.info/" />
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+  <link rel="alternate" type="text/plain" title="AI Reader Brief" href="/llms.txt" />
+  <link rel="alternate" type="application/json" title="MCP Manifest" href="/mcp/manifest.json" />
+  <link rel="alternate" type="application/json" title="MCP Registry Metadata" href="/server.json" />
+  <link rel="alternate" type="application/json" title="OpenAPI JSON" href="/openapi.json" />
+  <link rel="preload" as="image" href="/assets/listings/mcp-registry.svg" />
+  <link rel="preload" as="image" href="/assets/listings/glama.svg" />
+  <link rel="preload" as="image" href="/assets/listings/smithery.ico" />
+  <link rel="preload" as="image" href="/assets/listings/pay-sh.ico" />
+  <link rel="preload" as="image" href="/assets/listings/x402scan.png" />
+  <link rel="preload" as="image" href="/assets/listings/github.png" />
+  <link rel="preload" as="image" href="/assets/listings/gitlab.png" />
+  <link rel="preload" as="image" href="/assets/listings/awesome-mcp.svg" />
+  <meta property="og:title" content="Blocksize Real-Time Price Data API for AI Agents" />
+  <meta
+    property="og:description"
+    content="Discover and buy live crypto, bid/ask, FX, and metals price data packages through Blocksize remote MCP discovery and x402-paid HTTP APIs."
+  />
+  <meta property="og:image" content="https://mcp.blocksize.info/assets/logo.png" />
+  <meta property="og:image:alt" content="Blocksize real-time market data for AI agents" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://mcp.blocksize.info/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Blocksize Real-Time Price Data API for AI Agents" />
+  <meta
+    name="twitter:description"
+    content="Remote MCP discovery plus x402-paid HTTP market data packages for crypto VWAP, bid/ask, FX, and metals."
+  />
+  <meta name="twitter:image" content="https://mcp.blocksize.info/assets/logo.png" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "name": "Blocksize Capital GmbH",
+          "url": "https://blocksize.info/",
+          "logo": "https://mcp.blocksize.info/assets/logo.png",
+          "sameAs": [
+            "https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments",
+            "https://smithery.ai/servers/blocksize/agentic-payments?capability=tools",
+            "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize",
+            "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp",
+            "https://gitlab.com/jfocke/agentic-payments",
+            "https://pay.sh/services/blocksize/market-data",
+            "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66"
+          ]
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "Blocksize Agentic Market Data MCP",
+          "applicationCategory": "DeveloperApplication",
+          "operatingSystem": "Cross-platform",
+          "url": "https://mcp.blocksize.info/",
+          "description": "Remote MCP discovery and x402-paid live market data endpoints for AI agents.",
+          "softwareHelp": "https://mcp.blocksize.info/quickstart/remote-mcp",
+          "codeRepository": "https://gitlab.com/jfocke/agentic-payments"
+        },
+        {
+          "@type": "WebSite",
+          "name": "Blocksize Real-Time Price Data API",
+          "url": "https://mcp.blocksize.info/",
+          "description": "Canonical discovery page for Blocksize live price data, market data packages, remote MCP metadata, OpenAPI documentation, and x402-paid HTTP endpoints.",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://mcp.blocksize.info/v1/search?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebAPI",
+          "name": "Blocksize x402 Market Data API",
+          "url": "https://mcp.blocksize.info/openapi.json",
+          "documentation": "https://mcp.blocksize.info/docs",
+          "description": "Paid HTTP API for real-time crypto VWAP, bid/ask snapshots, FX rates, metals prices, and batch market data requests.",
+          "provider": {
+            "@type": "Organization",
+            "name": "Blocksize Capital GmbH"
+          }
+        },
+        {
+          "@type": "Dataset",
+          "name": "Blocksize Real-Time Price Data Packages",
+          "url": "https://mcp.blocksize.info/",
+          "description": "Live price data packages for AI agents covering crypto VWAP, crypto and equity bid/ask snapshots, FX rates, and metals spot prices.",
+          "keywords": [
+            "real-time price data",
+            "market data API",
+            "AI agent price data",
+            "MCP market data",
+            "crypto VWAP",
+            "bid ask data",
+            "FX rates",
+            "metals prices",
+            "x402 paid API"
+          ],
+          "creator": {
+            "@type": "Organization",
+            "name": "Blocksize Capital GmbH"
+          },
+          "distribution": [
+            {"@type": "DataDownload", "name": "OpenAPI JSON", "contentUrl": "https://mcp.blocksize.info/openapi.json", "encodingFormat": "application/json"},
+            {"@type": "DataDownload", "name": "MCP Manifest", "contentUrl": "https://mcp.blocksize.info/mcp/manifest.json", "encodingFormat": "application/json"},
+            {"@type": "DataDownload", "name": "AI Reader Brief", "contentUrl": "https://mcp.blocksize.info/llms.txt", "encodingFormat": "text/plain"},
+            {"@type": "DataDownload", "name": "Data Catalog PDF", "contentUrl": "https://mcp.blocksize.info/pdf/Blocksize_Data_Catalog.pdf", "encodingFormat": "application/pdf"}
+          ]
+        },
+        {
+          "@type": "OfferCatalog",
+          "name": "Blocksize Market Data Packages",
+          "itemListElement": [
+            {"@type": "Offer", "name": "Core Crypto VWAP Price Data", "price": "0.002", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
+            {"@type": "Offer", "name": "Extended Crypto and Bid/Ask Price Data", "price": "0.004", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"},
+            {"@type": "Offer", "name": "FX and Metals Price Data", "price": "0.005", "priceCurrency": "USD", "url": "https://mcp.blocksize.info/docs"}
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Where can AI agents find Blocksize price data?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Agents can start with the public remote MCP server at https://mcp.blocksize.info/mcp/server/ to discover symbols, pricing, docs, and paid endpoint URLs."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "What market data packages does Blocksize provide?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Blocksize provides crypto VWAP, crypto and supported equity bid/ask, FX, metals, batch market data, and free discovery/documentation packages."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How do agents access live production price data?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Live production price data is available through x402-paid HTTP endpoints or wallet-credit drawdown documented in the OpenAPI schema."
+              }
+            }
+          ]
+        },
+        {
+          "@type": "ItemList",
+          "name": "Blocksize MCP listing and repository links",
+          "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Official MCP Registry Blocksize listing", "url": "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize"},
+            {"@type": "ListItem", "position": 2, "name": "Glama Blocksize MCP connector", "url": "https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments"},
+            {"@type": "ListItem", "position": 3, "name": "Smithery Blocksize agentic-payments server", "url": "https://smithery.ai/servers/blocksize/agentic-payments?capability=tools"},
+            {"@type": "ListItem", "position": 4, "name": "Pay.sh Blocksize market-data service listing", "url": "https://pay.sh/services/blocksize/market-data"},
+            {"@type": "ListItem", "position": 5, "name": "x402scan Blocksize server listing", "url": "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66"},
+            {"@type": "ListItem", "position": 6, "name": "Blocksize Agentic Payments MCP GitHub repository", "url": "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp"},
+            {"@type": "ListItem", "position": 7, "name": "Blocksize Agentic Payments GitLab repository", "url": "https://gitlab.com/jfocke/agentic-payments"},
+            {"@type": "ListItem", "position": 8, "name": "Awesome MCP Servers Blocksize submission", "url": "https://github.com/punkpeye/awesome-mcp-servers/pull/7790"}
+          ]
+        }
+      ]
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <style>
     @font-face {
@@ -78,6 +247,7 @@
       color: var(--paragraph);
       font-family: "Hind", Arial, Helvetica, sans-serif;
       line-height: 1.6;
+      overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
     }
 
@@ -253,6 +423,17 @@
     .dropdown-left {
       padding: 1.35rem;
     }
+    .dropdown-groups {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.1rem;
+    }
+    .dropdown-groups.single {
+      grid-template-columns: 1fr;
+    }
+    .dropdown-groups.single .dropdown-links {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .dropdown-kicker {
       font-family: "Roboto", monospace;
       font-size: 0.72rem;
@@ -263,7 +444,7 @@
     }
     .dropdown-links {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: 1fr;
       gap: 0.45rem;
       margin: 0;
       list-style: none;
@@ -550,6 +731,109 @@
       color: var(--light-heading);
     }
 
+    .listing-panel {
+      margin-top: 1rem;
+      border: 1px solid var(--border);
+      background: #fff;
+      overflow: hidden;
+    }
+    .listing-copy {
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+      gap: 1rem;
+      align-items: end;
+      padding: 1.35rem 1.6rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .listing-copy > *,
+    .listing-copy h2,
+    .listing-copy p,
+    .listing-copy code {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .listing-kicker {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-family: "Roboto", monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--purple);
+    }
+    .listing-copy h2 {
+      margin-bottom: 0;
+      font-size: clamp(1.45rem, 2.2vw, 2.05rem);
+    }
+    .listing-copy p {
+      margin: 0;
+      max-width: 48rem;
+      font-size: 0.98rem;
+    }
+    .listing-marquee {
+      position: relative;
+      overflow: hidden;
+      contain: layout paint;
+      height: 8.3rem;
+      mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+    }
+    .listing-track {
+      position: absolute;
+      top: 1rem;
+      left: 0;
+      display: flex;
+      width: max-content;
+      gap: 0.8rem;
+      animation: listings-slide 38s linear infinite;
+    }
+    .listing-marquee:hover .listing-track {
+      animation-play-state: paused;
+    }
+    .listing-link {
+      width: 14.5rem;
+      min-height: 6.25rem;
+      display: grid;
+      grid-template-columns: 3.25rem minmax(0, 1fr);
+      gap: 0.85rem;
+      align-items: center;
+      flex: 0 0 auto;
+      padding: 0.9rem;
+      border: 1px solid var(--border);
+      background: var(--off-white);
+      color: var(--paragraph);
+      text-decoration: none;
+    }
+    .listing-link:hover {
+      border-color: var(--heading);
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+    .listing-logo {
+      width: 3.25rem;
+      height: 3.25rem;
+      display: block;
+      object-fit: contain;
+      padding: 0.25rem;
+      border-radius: 0.45rem;
+      background: #fff;
+    }
+    .listing-name {
+      display: block;
+      color: var(--heading);
+      font-weight: 800;
+      line-height: 1.15;
+    }
+    .listing-detail {
+      display: block;
+      margin-top: 0.25rem;
+      color: var(--light-paragraph);
+      font-size: 0.82rem;
+      line-height: 1.25;
+    }
+    @keyframes listings-slide {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
     .surface-grid,
     .catalog-grid,
     .resource-grid,
@@ -703,6 +987,10 @@
         grid-template-columns: 1fr;
         align-items: start;
       }
+      .listing-copy {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
       .dropdown-panel {
         gap: 1.5rem;
       }
@@ -740,12 +1028,117 @@
       nav.is-mobile-open .mobile-menu {
         display: block;
       }
+      .mobile-open-icon,
+      .mobile-close-icon {
+        display: block;
+      }
+      .mobile-close-icon,
+      nav.is-mobile-open .mobile-open-icon {
+        display: none;
+      }
+      nav.is-mobile-open .mobile-close-icon {
+        display: block;
+      }
+      .mobile-nav-list {
+        margin: 0;
+        list-style: none;
+      }
+      .mobile-nav-item {
+        margin: 0;
+        list-style: none;
+      }
+      .mobile-dropdown-toggle {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.8rem 0;
+        background: transparent;
+        border: 0;
+        color: var(--paragraph);
+        font-family: inherit;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .mobile-nav-item.is-open .nav-chevron {
+        transform: rotate(180deg);
+      }
+      .mobile-dropdown-menu {
+        display: none;
+        margin: 0.35rem -4vw 0.9rem;
+        background: var(--off-white);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .mobile-nav-item.is-open .mobile-dropdown-menu {
+        display: block;
+      }
+      .mobile-dropdown-inner {
+        padding: 1rem 4vw 1.1rem;
+      }
+      .mobile-dropdown-groups {
+        display: grid;
+        gap: 1.1rem;
+      }
+      .mobile-dropdown-kicker {
+        font-family: "Roboto", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--light-heading);
+        margin: 0 0 0.45rem;
+      }
+      .mobile-dropdown-links {
+        display: grid;
+        gap: 0.15rem;
+      }
       .mobile-menu a {
         display: block;
         color: var(--paragraph) !important;
         text-decoration: none;
         font-weight: 500;
         padding: 0.7rem 0;
+      }
+      .mobile-dropdown-links a {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.55rem 0;
+        font-weight: 400;
+      }
+      .mobile-dropdown-promo {
+        margin-top: 1rem;
+        padding: 1.25rem 4vw;
+        background: #000;
+        color: #fff;
+      }
+      .mobile-dropdown-promo .promo-kicker {
+        margin: 0 0 0.6rem;
+        color: rgba(255, 255, 255, 0.75);
+        font-family: "Almarena Neue", sans-serif;
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .mobile-dropdown-promo .promo-title {
+        margin: 0 0 1rem;
+        color: #fff;
+        font-family: "Almarena Neue", sans-serif;
+        font-size: 1.35rem;
+        line-height: 1.15;
+      }
+      .mobile-dropdown-promo .btn-nav {
+        min-height: 44px;
+        padding: 0.72rem 1.1rem 0.58rem;
+      }
+      .mobile-menu-actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding-top: 0.8rem;
       }
       .mobile-menu .mobile-action {
         display: inline-flex;
@@ -758,29 +1151,21 @@
         color: #fff !important;
         font-weight: 700;
       }
-      .dropdown-panel {
-        position: static;
-        width: 100%;
-        min-width: 280px;
-        grid-template-columns: 1fr;
-        margin-top: 0.75rem;
-        opacity: 1;
-        visibility: visible;
-        transform: none;
-        display: none;
-      }
-      .nav-item.is-open .dropdown-panel {
-        display: grid;
-      }
-      .dropdown-links {
-        grid-template-columns: 1fr;
-      }
       .hero { padding: 7.75rem 0 4rem; }
       .hero h1 { font-size: 2.55rem; }
       h2 { font-size: 2.2rem; }
       .container { padding: 0; }
       .catalog-grid { grid-template-columns: 1fr; }
       .hero-actions .btn-nav { width: 100%; }
+      .listing-link {
+        width: 13rem;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .listing-track {
+        animation: none;
+      }
     }
   </style>
 </head>
@@ -792,37 +1177,6 @@
         <ul class="nav-links">
           <li class="nav-item">
             <button class="nav-trigger" type="button" aria-expanded="false">
-              Protocols
-              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
-              </svg>
-            </button>
-            <div class="dropdown-panel">
-              <div class="dropdown-left">
-                <div class="dropdown-kicker">Supported Protocols</div>
-                <div class="dropdown-links">
-                  <a href="https://blocksize.info/staking/protocols/solana/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/bd5db846-d176-4899-92a8-2526e27c1c10" alt="" class="protocol-icon" loading="lazy">Solana</a>
-                  <a href="https://blocksize.info/staking/protocols/chainlink/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/54e79626-bd99-40ae-829c-1fb555ef9f51" alt="" class="protocol-icon" loading="lazy">Chainlink</a>
-                  <a href="https://blocksize.info/staking/protocols/polygon/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8423b7b4-6962-42bd-9459-7df403dc7cfe" alt="" class="protocol-icon" loading="lazy">Polygon</a>
-                  <a href="https://blocksize.info/staking/protocols/pyth/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3bd2ee79-41df-4afc-a093-6f89f26e6e77" alt="" class="protocol-icon" loading="lazy">Pyth</a>
-                  <a href="https://blocksize.info/staking/protocols/redstone/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/36a91a45-9e92-45b9-afc1-8109165ae84c" alt="" class="protocol-icon" loading="lazy">Redstone</a>
-                  <a href="https://blocksize.info/staking/protocols/supra/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/d8010f0b-6847-46d3-8bf3-c7e87242a20d" alt="" class="protocol-icon" loading="lazy">Supra</a>
-                  <a href="https://blocksize.info/staking/protocols/eigenlayer/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b9ddf559-142e-4302-a9ad-738a5b69f4c4" alt="" class="protocol-icon" loading="lazy">Eigenlayer</a>
-                </div>
-              </div>
-              <div class="dropdown-right">
-                <div>
-                  <div class="promo-kicker">For Blockchain Foundations</div>
-                  <div class="promo-title">Looking for a validator that meets your standards?</div>
-                  <p>Let&apos;s build a secure DeFi ecosystem together.</p>
-                </div>
-                <a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer" class="btn-nav">Run With Us</a>
-              </div>
-            </div>
-          </li>
-          <li class="nav-item"><a href="https://blocksize.info/staking/" target="_blank" rel="noreferrer">Staking</a></li>
-          <li class="nav-item">
-            <button class="nav-trigger" type="button" aria-expanded="false">
               Crypto Data
               <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                 <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -830,12 +1184,24 @@
             </button>
             <div class="dropdown-panel">
               <div class="dropdown-left">
-                <div class="dropdown-kicker">Crypto Data for Individuals and Enterprises</div>
-                <div class="dropdown-links">
-                  <a href="https://blocksize.info/crypto-market-data/" target="_blank" rel="noreferrer">Crypto Data</a>
-                  <a href="https://matrix.blocksize.capital/api-docs" target="_blank" rel="noreferrer">API Docs</a>
-                  <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer">Pricing</a>
-                  <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer">Login</a>
+                <div class="dropdown-groups">
+                  <div class="dropdown-group">
+                    <div class="dropdown-kicker">Real-Time Data</div>
+                    <div class="dropdown-links">
+                      <a href="https://blocksize.info/crypto-market-data/developer/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/0ac885be-0c43-4ce7-ac53-2351b1c0e7bf" alt="" class="protocol-icon" loading="lazy">For Developer</a>
+                      <a href="https://blocksize.info/crypto-market-data/startups/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/05dcdebb-5e83-46e8-b9a6-ba2c4c0521a6" alt="" class="protocol-icon" loading="lazy">For Startups</a>
+                      <a href="https://blocksize.info/crypto-market-data/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8b598b15-d075-4627-8f8e-8db4939b9e89" alt="" class="protocol-icon" loading="lazy">For Business</a>
+                      <a href="https://blocksize.info/crypto-market-data/oracles/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3e365585-89f2-419b-ae5a-14cee9c4fd38" alt="" class="protocol-icon" loading="lazy">For Oracles</a>
+                    </div>
+                  </div>
+                  <div class="dropdown-group">
+                    <div class="dropdown-kicker">Quick Access</div>
+                    <div class="dropdown-links">
+                      <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/2cf3028b-facf-41bc-8904-5701bc0e222d" alt="" class="protocol-icon" loading="lazy">Pricing</a>
+                      <a href="https://matrix.blocksize.capital/api-docs" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/2035855e-e27a-4bb0-ba0f-326841f391df" alt="" class="protocol-icon" loading="lazy">API Docs</a>
+                      <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/ec119a40-9e8b-4cb6-939f-18792ce329f6" alt="" class="protocol-icon" loading="lazy">Login</a>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="dropdown-right">
@@ -843,7 +1209,45 @@
                   <div class="promo-kicker">Free Trial</div>
                   <div class="promo-title">Easily create an API key to test our aggregated crypto data 14 days for free.</div>
                 </div>
-                <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="btn-nav">Start Free Trial</a>
+                <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="btn-nav">Get Access</a>
+              </div>
+            </div>
+          </li>
+          <li class="nav-item">
+            <button class="nav-trigger" type="button" aria-expanded="false">
+              Protocols
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+            <div class="dropdown-panel">
+              <div class="dropdown-left">
+                <div class="dropdown-groups">
+                  <div class="dropdown-group">
+                    <div class="dropdown-kicker">Publisher</div>
+                    <div class="dropdown-links">
+                      <a href="https://blocksize.info/staking/protocols/chainlink/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/54e79626-bd99-40ae-829c-1fb555ef9f51" alt="" class="protocol-icon" loading="lazy">Chainlink</a>
+                      <a href="https://blocksize.info/staking/protocols/pyth/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3bd2ee79-41df-4afc-a093-6f89f26e6e77" alt="" class="protocol-icon" loading="lazy">Pyth</a>
+                      <a href="https://blocksize.info/staking/protocols/redstone/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/36a91a45-9e92-45b9-afc1-8109165ae84c" alt="" class="protocol-icon" loading="lazy">Redstone</a>
+                      <a href="https://blocksize.info/staking/protocols/supra/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/d8010f0b-6847-46d3-8bf3-c7e87242a20d" alt="" class="protocol-icon" loading="lazy">Supra</a>
+                    </div>
+                  </div>
+                  <div class="dropdown-group">
+                    <div class="dropdown-kicker">Validator</div>
+                    <div class="dropdown-links">
+                      <a href="https://blocksize.info/staking/protocols/solana/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/bd5db846-d176-4899-92a8-2526e27c1c10" alt="" class="protocol-icon" loading="lazy">Solana</a>
+                      <a href="https://blocksize.info/staking/protocols/polygon/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8423b7b4-6962-42bd-9459-7df403dc7cfe" alt="" class="protocol-icon" loading="lazy">Polygon</a>
+                      <a href="https://blocksize.info/staking/protocols/eigenlayer/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b9ddf559-142e-4302-a9ad-738a5b69f4c4" alt="" class="protocol-icon" loading="lazy">Eigenlayer</a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="dropdown-right">
+                <div>
+                  <div class="promo-kicker">For Blockchain Foundations</div>
+                  <div class="promo-title">Looking for a publisher that meets your standards? Let&apos;s build a secure DeFi ecosystem together.</div>
+                </div>
+                <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav">Run With Us</a>
               </div>
             </div>
           </li>
@@ -856,27 +1260,30 @@
             </button>
             <div class="dropdown-panel align-right">
               <div class="dropdown-left">
-                <div class="dropdown-kicker">About Blocksize</div>
-                <div class="dropdown-links">
-                  <a href="https://blocksize.info/company/about-us/" target="_blank" rel="noreferrer">About Us</a>
-                  <a href="https://blocksize.info/career/" target="_blank" rel="noreferrer">Career</a>
-                  <a href="https://blocksize.info/blog/" target="_blank" rel="noreferrer">Blog</a>
-                  <a href="https://blocksize.info/media/" target="_blank" rel="noreferrer">Media</a>
+                <div class="dropdown-groups single">
+                  <div class="dropdown-group">
+                    <div class="dropdown-kicker">About Blocksize</div>
+                    <div class="dropdown-links">
+                      <a href="https://blocksize.info/company/about-us/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/f7159a5e-f6c0-4293-bd34-c936aba95c9f" alt="" class="protocol-icon" loading="lazy">About Us</a>
+                      <a href="https://blocksize.info/career/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b03eb827-51ea-44ca-8b5d-7e651c25f0c1" alt="" class="protocol-icon" loading="lazy">Career</a>
+                      <a href="https://blocksize.info/blog/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/58468ccf-53e6-4d87-b0c2-b8c7e72c2d0b" alt="" class="protocol-icon" loading="lazy">Blog</a>
+                      <a href="https://blocksize.info/media/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8c735802-7bed-48c0-8787-a436574048eb" alt="" class="protocol-icon" loading="lazy">Media</a>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="dropdown-right">
                 <div>
-                  <div class="promo-kicker">Blocksize Capital</div>
-                  <div class="promo-title">Infrastructure for institutional staking and market data.</div>
-                  <p>Explore our company, team, and research.</p>
+                  <div class="promo-kicker">Institutional Staking</div>
+                  <div class="promo-title">Non-custodial staking solutions with individual staking fees, slashing insurance and SLAs available.</div>
                 </div>
-                <a href="https://blocksize.info/company/about-us/" target="_blank" rel="noreferrer" class="btn-nav">More About Us</a>
+                <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav">Get an Offer</a>
               </div>
             </div>
           </li>
         </ul>
         <div class="nav-actions">
-          <a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer" class="nav-action-link">Contact</a>
+          <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="nav-action-link">Contact</a>
           <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="nav-action-button">Data Free-Trial</a>
         </div>
         <button class="mobile-menu-toggle" type="button" aria-label="Toggle mobile menu" aria-expanded="false">
@@ -885,15 +1292,115 @@
             <path d="M3 6H21" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
             <path d="M3 18H21" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           </svg>
+          <svg class="mobile-close-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M18 6L6 18" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M6 6L18 18" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
         </button>
       </div>
       <div class="mobile-menu" aria-hidden="true">
-        <a href="https://blocksize.info/staking/protocols/" target="_blank" rel="noreferrer">Protocols</a>
-        <a href="https://blocksize.info/staking/" target="_blank" rel="noreferrer">Staking</a>
-        <a href="https://blocksize.info/crypto-market-data/" target="_blank" rel="noreferrer">Crypto Data</a>
-        <a href="https://blocksize.info/company/about-us/" target="_blank" rel="noreferrer">Company</a>
-        <a href="https://blocksize.info/contact/" target="_blank" rel="noreferrer">Contact</a>
-        <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="mobile-action">Data Free-Trial</a>
+        <ul class="mobile-nav-list">
+          <li class="mobile-nav-item">
+            <button class="mobile-dropdown-toggle" type="button" aria-expanded="false">
+              <span>Crypto Data</span>
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+            <div class="mobile-dropdown-menu">
+              <div class="mobile-dropdown-inner">
+                <div class="mobile-dropdown-groups">
+                  <div>
+                    <p class="mobile-dropdown-kicker">Real-Time Data</p>
+                    <div class="mobile-dropdown-links">
+                      <a href="https://blocksize.info/crypto-market-data/developer/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/0ac885be-0c43-4ce7-ac53-2351b1c0e7bf" alt="" class="protocol-icon" loading="lazy">For Developer</a>
+                      <a href="https://blocksize.info/crypto-market-data/startups/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/05dcdebb-5e83-46e8-b9a6-ba2c4c0521a6" alt="" class="protocol-icon" loading="lazy">For Startups</a>
+                      <a href="https://blocksize.info/crypto-market-data/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8b598b15-d075-4627-8f8e-8db4939b9e89" alt="" class="protocol-icon" loading="lazy">For Business</a>
+                      <a href="https://blocksize.info/crypto-market-data/oracles/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3e365585-89f2-419b-ae5a-14cee9c4fd38" alt="" class="protocol-icon" loading="lazy">For Oracles</a>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="mobile-dropdown-kicker">Quick Access</p>
+                    <div class="mobile-dropdown-links">
+                      <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/2cf3028b-facf-41bc-8904-5701bc0e222d" alt="" class="protocol-icon" loading="lazy">Pricing</a>
+                      <a href="https://matrix.blocksize.capital/api-docs" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/2035855e-e27a-4bb0-ba0f-326841f391df" alt="" class="protocol-icon" loading="lazy">API Docs</a>
+                      <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/ec119a40-9e8b-4cb6-939f-18792ce329f6" alt="" class="protocol-icon" loading="lazy">Login</a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="mobile-dropdown-promo">
+                <p class="promo-kicker">Free Trial</p>
+                <p class="promo-title">Easily create an API key to test our aggregated crypto data 14 days for free.</p>
+                <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="btn-nav">Get Access</a>
+              </div>
+            </div>
+          </li>
+          <li class="mobile-nav-item">
+            <button class="mobile-dropdown-toggle" type="button" aria-expanded="false">
+              <span>Protocols</span>
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+            <div class="mobile-dropdown-menu">
+              <div class="mobile-dropdown-inner">
+                <div class="mobile-dropdown-groups">
+                  <div>
+                    <p class="mobile-dropdown-kicker">Publisher</p>
+                    <div class="mobile-dropdown-links">
+                      <a href="https://blocksize.info/staking/protocols/chainlink/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/54e79626-bd99-40ae-829c-1fb555ef9f51" alt="" class="protocol-icon" loading="lazy">Chainlink</a>
+                      <a href="https://blocksize.info/staking/protocols/pyth/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/3bd2ee79-41df-4afc-a093-6f89f26e6e77" alt="" class="protocol-icon" loading="lazy">Pyth</a>
+                      <a href="https://blocksize.info/staking/protocols/redstone/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/36a91a45-9e92-45b9-afc1-8109165ae84c" alt="" class="protocol-icon" loading="lazy">Redstone</a>
+                      <a href="https://blocksize.info/staking/protocols/supra/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/d8010f0b-6847-46d3-8bf3-c7e87242a20d" alt="" class="protocol-icon" loading="lazy">Supra</a>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="mobile-dropdown-kicker">Validator</p>
+                    <div class="mobile-dropdown-links">
+                      <a href="https://blocksize.info/staking/protocols/solana/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/bd5db846-d176-4899-92a8-2526e27c1c10" alt="" class="protocol-icon" loading="lazy">Solana</a>
+                      <a href="https://blocksize.info/staking/protocols/polygon/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8423b7b4-6962-42bd-9459-7df403dc7cfe" alt="" class="protocol-icon" loading="lazy">Polygon</a>
+                      <a href="https://blocksize.info/staking/protocols/eigenlayer/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b9ddf559-142e-4302-a9ad-738a5b69f4c4" alt="" class="protocol-icon" loading="lazy">Eigenlayer</a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="mobile-dropdown-promo">
+                <p class="promo-kicker">For Blockchain Foundations</p>
+                <p class="promo-title">Looking for a publisher that meets your standards? Let&apos;s build a secure DeFi ecosystem together.</p>
+                <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav">Run With Us</a>
+              </div>
+            </div>
+          </li>
+          <li class="mobile-nav-item">
+            <button class="mobile-dropdown-toggle" type="button" aria-expanded="false">
+              <span>Company</span>
+              <svg class="nav-chevron" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M5 7.5L10 12.5L15 7.5" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+            <div class="mobile-dropdown-menu">
+              <div class="mobile-dropdown-inner">
+                <p class="mobile-dropdown-kicker">About Blocksize</p>
+                <div class="mobile-dropdown-links">
+                  <a href="https://blocksize.info/company/about-us/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/f7159a5e-f6c0-4293-bd34-c936aba95c9f" alt="" class="protocol-icon" loading="lazy">About Us</a>
+                  <a href="https://blocksize.info/career/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/b03eb827-51ea-44ca-8b5d-7e651c25f0c1" alt="" class="protocol-icon" loading="lazy">Career</a>
+                  <a href="https://blocksize.info/blog/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/58468ccf-53e6-4d87-b0c2-b8c7e72c2d0b" alt="" class="protocol-icon" loading="lazy">Blog</a>
+                  <a href="https://blocksize.info/media/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer"><img src="https://blocksize.directus.app/assets/8c735802-7bed-48c0-8787-a436574048eb" alt="" class="protocol-icon" loading="lazy">Media</a>
+                </div>
+              </div>
+              <div class="mobile-dropdown-promo">
+                <p class="promo-kicker">Institutional Staking</p>
+                <p class="promo-title">Non-custodial staking solutions with individual staking fees, slashing insurance and SLAs available.</p>
+                <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav">Get an Offer</a>
+              </div>
+            </div>
+          </li>
+        </ul>
+        <div class="mobile-menu-actions">
+          <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer">Contact</a>
+          <a href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer" class="mobile-action">Data Free-Trial</a>
+        </div>
       </div>
     </div>
   </nav>
@@ -902,16 +1409,17 @@
     <div class="container">
       <div class="hero-grid">
         <div>
-          <span class="hero-label">PUBLIC DISCOVERY + PAID MARKET DATA</span>
-          <h1>Agentic Market <span>Data</span></h1>
+          <span class="hero-label">REAL-TIME PRICE DATA + AGENT DISCOVERY</span>
+          <h1>Real-Time Price <span>Data API</span></h1>
           <p class="hero-sub">
-            Blocksize Capital gives agent builders a public remote MCP discovery server and
-            x402-protected HTTP market data for live paid access.
+            Blocksize Capital gives AI agents and builders live crypto, bid/ask,
+            FX, and metals price data through a public remote MCP discovery server
+            and x402-protected HTTP APIs.
           </p>
           <p class="hero-copy">
-            Use the public MCP surface to discover symbols, inspect pricing, and fetch integration docs.
-            Route live production quotes, VWAP, FX, and metals through the paid HTTP API
-            or the advanced local MCP setup.
+            Use the public MCP surface to discover symbols, inspect pricing, fetch integration docs,
+            and choose the right data package. Route live production quotes, VWAP, bid/ask,
+            FX, and metals through the paid HTTP API or the advanced local MCP setup.
           </p>
           <div class="hero-stats">
             <div>
@@ -932,8 +1440,8 @@
             </div>
           </div>
           <div class="hero-actions">
-            <a href="/docs" class="btn-nav">Open API Docs</a>
-            <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav btn-arrow btn-ghost">
+            <a href="/docs" class="btn-nav">Open Price Data API</a>
+            <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav btn-arrow btn-ghost">
               View Subscriptions
               <svg width="31" height="31" viewBox="0 0 31 31" fill="none" aria-hidden="true">
                 <path d="M9.04175 21.9582L21.9584 9.0415"></path>
@@ -949,7 +1457,7 @@
           <span class="url">https://mcp.blocksize.info/mcp/server/</span>
           <p>
             Read-only discovery tools for ChatGPT Developer Mode, Cursor, Claude MCP clients,
-            Smithery, Glama, and official registry listings.
+            Smithery, Glama, official registry listings, and AI systems looking for price data.
           </p>
           <span class="mode">Listing-safe discovery mode</span>
           <img src="assets/agent_demo.gif" alt="Blocksize discovery demo" />
@@ -973,6 +1481,87 @@
           </p>
           <code class="welcome-code">Header: X-AGENT-WALLET</code>
           <p class="welcome-note">Eligibility checks protect the trial from abuse; free discovery remains available through the public remote MCP server.</p>
+        </div>
+      </div>
+      <div class="listing-panel" aria-labelledby="listing-title">
+        <div class="listing-copy">
+          <div>
+            <span class="listing-kicker">Listed across agent registries</span>
+            <h2 id="listing-title">Find Blocksize MCP where builders discover AI-agent tools.</h2>
+          </div>
+          <p>
+            Blocksize Agentic Market Data is published across MCP registries, agent marketplaces,
+            payment catalogs, and public source repositories so crawlers and developers can verify
+            the same remote MCP endpoint: <code>https://mcp.blocksize.info/mcp/server/</code>.
+          </p>
+        </div>
+        <div class="listing-marquee" aria-label="Blocksize MCP listings and source repositories">
+          <div class="listing-track">
+            <a class="listing-link" href="https://registry.modelcontextprotocol.io/v0/servers?search=blocksize" target="_blank" rel="noreferrer" aria-label="Official MCP Registry Blocksize listing">
+              <img class="listing-logo" src="assets/listings/mcp-registry.svg" alt="Official MCP Registry logo" loading="eager" />
+              <span><span class="listing-name">Official MCP Registry</span><span class="listing-detail">Active remote server record</span></span>
+            </a>
+            <a class="listing-link" href="https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments" target="_blank" rel="noreferrer" aria-label="Glama Blocksize MCP connector listing">
+              <img class="listing-logo" src="assets/listings/glama.svg" alt="Glama logo" loading="eager" />
+              <span><span class="listing-name">Glama</span><span class="listing-detail">Verified MCP connector</span></span>
+            </a>
+            <a class="listing-link" href="https://smithery.ai/servers/blocksize/agentic-payments?capability=tools" target="_blank" rel="noreferrer" aria-label="Smithery Blocksize MCP server listing">
+              <img class="listing-logo" src="assets/listings/smithery.ico" alt="Smithery logo" loading="eager" />
+              <span><span class="listing-name">Smithery</span><span class="listing-detail">Hosted tool directory listing</span></span>
+            </a>
+            <a class="listing-link" href="https://pay.sh/services/blocksize/market-data" target="_blank" rel="noreferrer" aria-label="Pay.sh Blocksize market data service listing">
+              <img class="listing-logo" src="assets/listings/pay-sh.ico" alt="Pay.sh logo" loading="eager" />
+              <span><span class="listing-name">Pay.sh</span><span class="listing-detail">Blocksize market-data service</span></span>
+            </a>
+            <a class="listing-link" href="https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66" target="_blank" rel="noreferrer" aria-label="x402scan Blocksize server listing">
+              <img class="listing-logo" src="assets/listings/x402scan.png" alt="x402scan logo" loading="eager" />
+              <span><span class="listing-name">x402scan</span><span class="listing-detail">x402 server listing</span></span>
+            </a>
+            <a class="listing-link" href="https://github.com/jf-cmyk/blocksize-agentic-payments-mcp" target="_blank" rel="noreferrer" aria-label="Blocksize Agentic Payments MCP GitHub repository">
+              <img class="listing-logo" src="assets/listings/github.png" alt="GitHub logo" loading="eager" />
+              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">MCP package for community lists</span></span>
+            </a>
+            <a class="listing-link" href="https://gitlab.com/jfocke/agentic-payments" target="_blank" rel="noreferrer" aria-label="Blocksize Agentic Payments GitLab repository">
+              <img class="listing-logo" src="assets/listings/gitlab.png" alt="GitLab logo" loading="eager" />
+              <span><span class="listing-name">GitLab Repo</span><span class="listing-detail">Primary source repository</span></span>
+            </a>
+            <a class="listing-link" href="https://github.com/punkpeye/awesome-mcp-servers/pull/7790" target="_blank" rel="noreferrer" aria-label="Awesome MCP Servers Blocksize submission pull request">
+              <img class="listing-logo" src="assets/listings/awesome-mcp.svg" alt="Awesome MCP Servers logo" loading="eager" />
+              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community submission PR</span></span>
+            </a>
+            <a class="listing-link" href="https://registry.modelcontextprotocol.io/v0/servers?search=blocksize" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/mcp-registry.svg" alt="" loading="eager" />
+              <span><span class="listing-name">Official MCP Registry</span><span class="listing-detail">Active remote server record</span></span>
+            </a>
+            <a class="listing-link" href="https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/glama.svg" alt="" loading="eager" />
+              <span><span class="listing-name">Glama</span><span class="listing-detail">Verified MCP connector</span></span>
+            </a>
+            <a class="listing-link" href="https://smithery.ai/servers/blocksize/agentic-payments?capability=tools" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/smithery.ico" alt="" loading="eager" />
+              <span><span class="listing-name">Smithery</span><span class="listing-detail">Hosted tool directory listing</span></span>
+            </a>
+            <a class="listing-link" href="https://pay.sh/services/blocksize/market-data" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/pay-sh.ico" alt="" loading="eager" />
+              <span><span class="listing-name">Pay.sh</span><span class="listing-detail">Blocksize market-data service</span></span>
+            </a>
+            <a class="listing-link" href="https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/x402scan.png" alt="" loading="eager" />
+              <span><span class="listing-name">x402scan</span><span class="listing-detail">x402 server listing</span></span>
+            </a>
+            <a class="listing-link" href="https://github.com/jf-cmyk/blocksize-agentic-payments-mcp" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/github.png" alt="" loading="eager" />
+              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">MCP package for community lists</span></span>
+            </a>
+            <a class="listing-link" href="https://gitlab.com/jfocke/agentic-payments" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/gitlab.png" alt="" loading="eager" />
+              <span><span class="listing-name">GitLab Repo</span><span class="listing-detail">Primary source repository</span></span>
+            </a>
+            <a class="listing-link" href="https://github.com/punkpeye/awesome-mcp-servers/pull/7790" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+              <img class="listing-logo" src="assets/listings/awesome-mcp.svg" alt="" loading="eager" />
+              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community submission PR</span></span>
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -1040,7 +1629,44 @@
     </div>
   </section>
 
-  <section style="background: var(--white-heading);">
+  <section id="data-packages" style="background: var(--white-heading);">
+    <div class="container">
+      <h2>Price Data <span>Packages</span></h2>
+      <p style="max-width: 55rem;">
+        Blocksize packages live market data for agent routing, research workflows, autonomous
+        execution checks, and applications that need fresh price context without opening an
+        API account first.
+      </p>
+      <div class="surface-grid">
+        <div class="surface-card">
+          <strong>Crypto VWAP Package</strong>
+          <h3>Real-time crypto price data</h3>
+          <p>Institutional VWAP snapshots for enabled pairs including BTCUSD, ETHUSD, SOLUSD, and extended crypto assets.</p>
+          <code>GET /v1/vwap/{pair}</code>
+        </div>
+        <div class="surface-card">
+          <strong>Bid/Ask Package</strong>
+          <h3>Market depth snapshots</h3>
+          <p>Bid and ask price data for supported crypto and equity symbols where agents need current executable context.</p>
+          <code>GET /v1/bidask/{pair}</code>
+        </div>
+        <div class="surface-card">
+          <strong>FX and Metals Package</strong>
+          <h3>TradFi reference prices</h3>
+          <p>Spot FX and metals prices for workflows that need currency conversion, commodities context, or portfolio checks.</p>
+          <code>GET /v1/fx/{pair} · GET /v1/metal/{ticker}</code>
+        </div>
+        <div class="surface-card">
+          <strong>Agent Discovery Package</strong>
+          <h3>Free search and citation layer</h3>
+          <p>Remote MCP tools and public files that help ChatGPT, Claude, Cursor, search engines, and crawlers identify the right data route.</p>
+          <code>/mcp/server/ · /llms.txt · /server.json</code>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <div class="container">
       <h2>Agent <span>Flow</span></h2>
       <div class="flow-steps">
@@ -1141,7 +1767,7 @@
           <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Enterprise Subscriptions</h3>
           <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
         </div>
-        <a href="https://blocksize.info/crypto-market-data/#pricing" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">View Subscriptions</a>
+        <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">View Subscriptions</a>
       </div>
     </div>
   </section>
@@ -1199,6 +1825,27 @@
           </div>
           <span class="arrow">→</span>
         </a>
+        <a href="/llms.txt" class="resource-card">
+          <div>
+            <h4>AI Reader Brief</h4>
+            <p>Plain-text handoff for AI models, crawlers, and agent workflows looking for Blocksize price data.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="/sitemap.xml" class="resource-card">
+          <div>
+            <h4>Sitemap</h4>
+            <p>Canonical index of public discovery, API, registry, and data-package documentation URLs.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
+        <a href="pdf/Blocksize_Data_Catalog.pdf" class="resource-card">
+          <div>
+            <h4>Data Catalog</h4>
+            <p>Package-level coverage reference for crypto, bid/ask, FX, metals, and discovery data.</p>
+          </div>
+          <span class="arrow">→</span>
+        </a>
         <a href="pdf/Blocksize_Agent_Manual.pdf" class="resource-card">
           <div>
             <h4>Agent Integration Guide</h4>
@@ -1222,6 +1869,8 @@
         <div>
           <p style="font-weight: 700; color: var(--text); margin-bottom: 0.8rem;">Listing Surface</p>
           <p>Remote MCP: <span class="status-active">Streamable HTTP</span></p>
+          <p>AI Reader Brief: <span class="status-active">Ready</span></p>
+          <p>Sitemap and Robots: <span class="status-active">Ready</span></p>
           <p>Glama Claim File: <span class="status-active">Ready</span></p>
           <p>Official Registry Metadata: <span class="status-active">Ready</span></p>
           <p>Support and Privacy Pages: <span class="status-active">Ready</span></p>
@@ -1232,7 +1881,7 @@
           <p>Base L2: <span class="status-active">Verified</span></p>
           <p>x402 Settlement Flow: <span class="status-active">Active</span></p>
           <p style="margin-top: 1rem;">
-            <a href="https://blocksize.info" target="_blank">Visit blocksize.info</a><br>
+            <a href="https://blocksize.info/?utm_source=agentic-widget&utm_medium=ai" target="_blank">Visit blocksize.info</a><br>
             <a href="https://blocksize.info/terms-conditions-data/" target="_blank">Data Usage Policy</a>
           </p>
         </div>
@@ -1242,6 +1891,7 @@
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       const navItems = Array.from(document.querySelectorAll(".nav-item"));
+      const mobileNavItems = Array.from(document.querySelectorAll(".mobile-nav-item"));
       const nav = document.querySelector("nav");
       const mobileToggle = document.querySelector(".mobile-menu-toggle");
       const mobileMenu = document.querySelector(".mobile-menu");
@@ -1253,11 +1903,19 @@
           if (trigger) trigger.setAttribute("aria-expanded", "false");
         });
       };
+      const closeMobileDropdowns = () => {
+        mobileNavItems.forEach((item) => {
+          item.classList.remove("is-open");
+          const trigger = item.querySelector(".mobile-dropdown-toggle");
+          if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+      };
       const closeMobileMenu = () => {
         if (!nav || !mobileToggle || !mobileMenu) return;
         nav.classList.remove("is-mobile-open");
         mobileToggle.setAttribute("aria-expanded", "false");
         mobileMenu.setAttribute("aria-hidden", "true");
+        closeMobileDropdowns();
       };
 
       navItems.forEach((item) => {
@@ -1275,11 +1933,28 @@
         });
       });
 
+      mobileNavItems.forEach((item) => {
+        const trigger = item.querySelector(".mobile-dropdown-toggle");
+        if (!trigger) return;
+
+        trigger.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const wasOpen = item.classList.contains("is-open");
+          closeMenus();
+          closeMobileDropdowns();
+          if (!wasOpen) {
+            item.classList.add("is-open");
+            trigger.setAttribute("aria-expanded", "true");
+          }
+        });
+      });
+
       if (nav && mobileToggle && mobileMenu) {
         mobileToggle.addEventListener("click", (event) => {
           event.stopPropagation();
           closeMenus();
           const willOpen = !nav.classList.contains("is-mobile-open");
+          closeMobileDropdowns();
           nav.classList.toggle("is-mobile-open", willOpen);
           mobileToggle.setAttribute("aria-expanded", String(willOpen));
           mobileMenu.setAttribute("aria-hidden", String(!willOpen));

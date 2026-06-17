@@ -72,6 +72,103 @@ class TestVWAPParsing:
             with pytest.raises(BlocksizeAPIError, match="Not found"):
                 await client.get_vwap_latest("nonexistent-pair")
 
+    @pytest.mark.asyncio
+    async def test_get_vwap_30min_uses_closingprice_list(self, client):
+        mock_result = {
+            "prices": [
+                {"base": "BTC", "quote": "USD", "price": "66800.0", "ts": 1713567600000},
+                {"base": "SOL", "quote": "USD", "price": "75.25", "ts": 1713567600000},
+            ]
+        }
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result) as rpc:
+            vwap = await client.get_vwap_30min("SOL")
+
+        assert rpc.await_args.args[0] == "closingprice_list"
+        assert rpc.await_args.args[1]["quote"] == "USD"
+        assert vwap.ticker == "SOL"
+        assert vwap.vwap == 75.25
+
+    @pytest.mark.asyncio
+    async def test_get_vwap_24hr_requires_stream_cache_when_http_method_missing(self, client):
+        with patch.object(
+            client,
+            "_rpc_call",
+            new_callable=AsyncMock,
+            side_effect=BlocksizeAPIError(-32601, "method not found"),
+        ):
+            with pytest.raises(BlocksizeAPIError, match="stream cache"):
+                await client.get_vwap_24hr("BTCUSD")
+
+    @pytest.mark.asyncio
+    async def test_get_vwap_30min_trades_uses_closingprice_trades(self, client):
+        mock_result = {
+            "prices": [
+                {"base": "SOL", "quote": "USD", "exchange": "COINBASE", "price": "75", "size": "10", "ts": 1},
+            ]
+        }
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result) as rpc:
+            trades = await client.get_vwap_30min_trades("SOLUSD")
+
+        assert rpc.await_args.args[0] == "closingprice_trades"
+        assert rpc.await_args.args[1]["base"] == "SOL"
+        assert trades[0]["exchange"] == "COINBASE"
+
+
+# ---------------------------------------------------------------------------
+# State Pool Parsing
+# ---------------------------------------------------------------------------
+
+class TestStatePoolParsing:
+    @pytest.mark.asyncio
+    async def test_get_state_price_derives_weighted_price_from_state_pools(self, client):
+        async def rpc_side_effect(method, params=None):
+            if method == "state_instruments":
+                return {
+                    "instruments": [
+                        {
+                            "symbol": "MSOLUSD",
+                            "pools": [
+                                {"network": "solana", "address": "pool-1"},
+                                {"network": "solana", "address": "pool-2"},
+                            ],
+                        }
+                    ]
+                }
+            if method == "state_pool" and params["pool"] == "pool-1":
+                return {
+                    "state": {
+                        "state_price_usd": "200.0",
+                        "weight": "0.25",
+                        "block_time": 1713567600,
+                    }
+                }
+            if method == "state_pool" and params["pool"] == "pool-2":
+                return {
+                    "state": {
+                        "state_price_usd": "220.0",
+                        "weight": "0.75",
+                        "block_time": 1713567601,
+                    }
+                }
+            raise AssertionError(f"unexpected RPC call {method} {params}")
+
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, side_effect=rpc_side_effect):
+            state_price = await client.get_state_price("MSOLUSD")
+
+        assert state_price.pair == "MSOLUSD"
+        assert state_price.price == pytest.approx(215.0)
+
+    @pytest.mark.asyncio
+    async def test_get_state_price_reports_missing_pool_coverage(self, client):
+        async def rpc_side_effect(method, params=None):
+            if method == "state_instruments":
+                return {"instruments": [{"symbol": "MSOLUSD", "pools": []}]}
+            raise BlocksizeAPIError(-32601, "method not found")
+
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, side_effect=rpc_side_effect):
+            with pytest.raises(BlocksizeAPIError, match="No state_instruments pool coverage"):
+                await client.get_state_price("SOLUSD")
+
 
 # ---------------------------------------------------------------------------
 # Bid/Ask Parsing

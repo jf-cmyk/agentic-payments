@@ -21,8 +21,18 @@ from src.resource_server import (
     _solana_transfer_satisfies_requirement,
     _verify_payment,
 )
-from src.models import VWAPData, BidAskData
+from src.models import (
+    BidAskData,
+    FXData,
+    MetalData,
+    StatePriceData,
+    VWAP24HrData,
+    VWAP30MinData,
+    VWAPData,
+)
+from src.observability import UsageEventStore, configure_global_store
 from src.config import settings
+from src.credit_manager import CreditManager
 from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 
 
@@ -31,6 +41,16 @@ def test_client():
     """Create a FastAPI test client."""
     with TestClient(app) as client:
         yield client
+
+
+@pytest.fixture
+def observability_store(tmp_path, monkeypatch):
+    """Route observability writes into a per-test SQLite database."""
+    store = UsageEventStore(tmp_path / "usage_events.db")
+    monkeypatch.setattr(resource_server, "OBSERVABILITY", store)
+    configure_global_store(store)
+    yield store
+    configure_global_store(None)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +68,13 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert "pricing" in data
         assert "networks" in data
+
+    def test_cache_status_is_free(self, test_client):
+        response = test_client.get("/v1/cache/status")
+        data = response.json()
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert "vwap24h" in data["feeds"]
         assert "links" in data
 
     def test_anthropic_only_health_hides_payment_metadata(self, test_client, monkeypatch):
@@ -77,6 +104,41 @@ class TestHealthEndpoint:
         )
         assert "pricing" not in data
         assert "bulk_pricing" not in data
+
+
+class TestSecurityHeaders:
+    def test_free_response_includes_browser_security_headers(self, test_client):
+        response = test_client.get("/health")
+
+        assert response.headers["Strict-Transport-Security"] == (
+            "max-age=31536000; includeSubDomains"
+        )
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert response.headers["Permissions-Policy"] == (
+            "camera=(), microphone=(), geolocation=()"
+        )
+
+    def test_402_response_keeps_payment_and_security_headers(self, test_client):
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"Origin": "https://mcp.blocksize.info"},
+        )
+
+        assert response.status_code == 402
+        assert response.headers["Strict-Transport-Security"] == (
+            "max-age=31536000; includeSubDomains"
+        )
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert response.headers["Permissions-Policy"] == (
+            "camera=(), microphone=(), geolocation=()"
+        )
+        assert "PAYMENT-REQUIRED" in response.headers
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.headers["Access-Control-Allow-Origin"] == "https://mcp.blocksize.info"
+        exposed = response.headers["Access-Control-Expose-Headers"].lower()
+        assert "payment-required" in exposed
 
 
 class TestPublicListingSurfaces:
@@ -368,7 +430,94 @@ class TestPublicListingSurfaces:
 
         assert data["name"] == "Blocksize Real Time Market Data"
         assert "real-time crypto" in data["description"]
+        assert data["links"]["llms_txt"].endswith("/llms.txt")
+        assert data["links"]["sitemap"].endswith("/sitemap.xml")
+        assert data["links"]["data_packages_json"].endswith("/data-packages.json")
+        assert data["capabilities"]["ai_reader_brief"].endswith("/llms.txt")
+        assert data["capabilities"]["data_package_catalog"].endswith("/data-packages.json")
         assert any(tool["name"] == "get_market_data_endpoint" for tool in data["tools"])
+
+    def test_crawler_and_ai_reader_files_are_served(self, test_client):
+        portal_head = test_client.head("/")
+        assert portal_head.status_code == 200
+
+        robots = test_client.get("/robots.txt")
+        assert robots.status_code == 200
+        assert "Sitemap: https://mcp.blocksize.info/sitemap.xml" in robots.text
+        assert "Allow: /llms.txt" in robots.text
+        assert "Allow: /data-packages.json" in robots.text
+        assert "Allow: /og/" in robots.text
+
+        sitemap = test_client.get("/sitemap.xml")
+        assert sitemap.status_code == 200
+        assert "application/xml" in sitemap.headers["content-type"]
+        assert "<loc>https://mcp.blocksize.info/</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/llms.txt</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/data-packages.json</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/market-data-api-for-ai-agents</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/crypto-vwap-api</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/real-time-price-data-api</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/mcp-market-data-server</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/price-data-api-examples</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/openapi.json</loc>" in sitemap.text
+
+        llms = test_client.get("/llms.txt")
+        assert llms.status_code == 200
+        assert "Blocksize Real-Time Price Data for AI Agents" in llms.text
+        assert "Remote MCP discovery server" in llms.text
+        assert "real-time price data API" in llms.text
+        assert "Data packages JSON" in llms.text
+        assert "Crypto VWAP API" in llms.text
+        assert "Real-Time Price Data API" in llms.text
+        assert "MCP Market Data Server" in llms.text
+
+    def test_data_package_catalog_and_intent_pages_are_served(self, test_client):
+        catalog = test_client.get("/data-packages.json")
+        assert catalog.status_code == 200
+        data = catalog.json()
+        assert data["canonical_url"].endswith("/data-packages.json")
+        assert data["remote_mcp_server"].endswith("/mcp/server/")
+        assert any(page["url"].endswith("/real-time-price-data-api") for page in data["intent_pages"])
+        assert any(package["id"] == "crypto-vwap" for package in data["packages"])
+        assert any(package["endpoint_template"] == "/v1/bidask/{pair}" for package in data["packages"])
+        assert any(package["request_examples"] for package in data["packages"])
+        assert data["indexing_submission"]["google_search_console"]["submit_sitemap"].endswith("/sitemap.xml")
+        assert any(
+            url.endswith("/mcp-market-data-server")
+            for url in data["indexing_submission"]["bing_webmaster_tools"]["request_indexing"]
+        )
+
+        catalog_head = test_client.head("/data-packages.json")
+        assert catalog_head.status_code == 200
+
+        agent_page = test_client.get("/market-data-api-for-ai-agents")
+        assert agent_page.status_code == 200
+        assert "Market Data API for AI Agents" in agent_page.text
+        assert "/data-packages.json" in agent_page.text
+        assert "application/ld+json" in agent_page.text
+
+        vwap_page = test_client.get("/crypto-vwap-api")
+        assert vwap_page.status_code == 200
+        assert "Crypto VWAP API" in vwap_page.text
+        assert "/v1/vwap/{pair}" in vwap_page.text
+        assert "canonical" in vwap_page.text
+
+        price_data_page = test_client.get("/real-time-price-data-api")
+        assert price_data_page.status_code == 200
+        assert "Real-Time Price Data API" in price_data_page.text
+        assert "BreadcrumbList" in price_data_page.text
+        assert "WebAPI" in price_data_page.text
+        assert "Examples agents can execute" in price_data_page.text
+        assert "Which package should I use?" in price_data_page.text
+        assert "/og/real-time-price-data-api.svg" in price_data_page.text
+
+        examples_page = test_client.head("/price-data-api-examples")
+        assert examples_page.status_code == 200
+
+        og_image = test_client.get("/og/crypto-vwap-api.svg")
+        assert og_image.status_code == 200
+        assert "image/svg+xml" in og_image.headers["content-type"]
+        assert "Crypto VWAP API" in og_image.text
 
     def test_repository_metadata_can_still_be_enabled(self, test_client, monkeypatch):
         repository_url = "https://example.com/blocksize/agentic-payments"
@@ -434,7 +583,7 @@ class TestPublicListingSurfaces:
         response = test_client.get("/support")
         assert response.status_code == 200
         body = response.text
-        assert "https://blocksize.info/contact/" in body
+        assert "https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" in body
         assert "info@blocksize.capital" not in body
         assert "gitlab.com/jfocke/agentic-payments" not in body
         assert "GitLab repository" not in body
@@ -463,9 +612,13 @@ class TestPaymentGate:
         assert response.status_code == 405
         assert "PAYMENT-REQUIRED" not in response.headers
 
-    def test_state_is_not_offered(self, test_client):
-        response = test_client.get("/v1/state/btc-usd")
-        assert response.status_code == 404
+    def test_state_requires_payment(self, test_client):
+        response = test_client.get("/v1/state/MSOLUSD")
+        assert response.status_code == 402
+
+    def test_vwap_windows_require_payment(self, test_client):
+        assert test_client.get("/v1/vwap30m/SOLUSD").status_code == 402
+        assert test_client.get("/v1/vwap24h/BTCUSD").status_code == 402
 
     def test_fx_requires_payment(self, test_client):
         response = test_client.get("/v1/fx/eurusd")
@@ -530,6 +683,8 @@ class TestPaymentGate:
         data = response.json()
         assert data["x402Version"] == 2
         assert "price_usdc" in data
+        assert data["starter_credits"]["positioning"] == "Start with 50 live data credits"
+        assert data["starter_credits"]["allowance_credits"] == 50.0
         assert "networks" in data
         assert "accepts" in data
         assert data["accepts"][0]["resource"] == data["resource"]["url"]
@@ -586,6 +741,14 @@ class TestPaymentGate:
         )
         assert response.status_code == 400
 
+    def test_products_catalog_is_free(self, test_client):
+        response = test_client.get("/v1/products")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["starter_allowance"]["positioning"] == "Start with 50 live data credits"
+        assert data["credit_costs"]["market_brief"] == 10.0
+
 
 class TestDiscoveryRateLimit:
     def test_discovery_search_is_soft_capped_by_ip(self, test_client, monkeypatch):
@@ -620,6 +783,175 @@ class TestDiscoveryRateLimit:
 
         assert first.status_code == 402
         assert second.status_code == 402
+
+
+class TestObservabilityDashboard:
+    def test_registry_and_payment_challenges_are_summarized(
+        self,
+        observability_store,
+        test_client,
+    ):
+        registry_response = test_client.get("/server.json")
+        challenge_response = test_client.get("/v1/vwap/btc-usd")
+
+        assert registry_response.status_code == 200
+        assert challenge_response.status_code == 402
+
+        stats_response = test_client.get("/internal/observability/stats?days=1")
+        assert stats_response.status_code == 200
+        stats = stats_response.json()
+
+        assert stats["event_counts"]["registry_request"] == 1
+        assert stats["event_counts"]["payment_required"] == 1
+        assert stats["overview"]["registry_requests"] == 1
+        assert stats["overview"]["total_http_requests"] == 2
+        assert stats["registry_mix"]["/server.json"] == 1
+        assert stats["overview"]["most_used_service"] == "vwap"
+        assert stats["service_mix"]["vwap"] == 1
+        assert stats["top_subjects"]["BTC-USD"] == 1
+        assert stats["data_called"][0]["service"] == "vwap"
+        assert stats["data_called"][0]["subject"] == "BTC-USD"
+        assert stats["data_called"][0]["payment_prompted"] is True
+        assert stats["data_called"][0]["prompt_price_usdc"] == float(settings.pricing.core_crypto)
+        assert stats["data_called"][0]["latest_outcome"] == "Prompted to pay; no data returned"
+        assert stats["data_called"][0]["last_seen"]
+        assert stats["origin_mix"]
+
+    def test_registry_sources_identify_listing_channels(
+        self,
+        observability_store,
+        test_client,
+    ):
+        glama_response = test_client.get("/.well-known/glama.json")
+        pay_response = test_client.get(
+            "/server.json",
+            headers={"Referer": "https://pay.sh/catalog/blocksize"},
+        )
+        smithery_response = test_client.get(
+            "/server.json",
+            headers={"Referer": "https://smithery.ai/server/blocksize"},
+        )
+
+        assert glama_response.status_code == 200
+        assert pay_response.status_code == 200
+        assert smithery_response.status_code == 200
+
+        stats = observability_store.summarize(days=1)
+        assert stats["registry_source_mix"]["Glama"] == 1
+        assert stats["registry_source_mix"]["Pay.sh"] == 1
+        assert stats["registry_source_mix"]["Smithery"] == 1
+        assert stats["registry_mix"]["/.well-known/glama.json"] == 1
+        assert stats["registry_mix"]["/server.json"] == 2
+        assert stats["timeline"][0]["registry_sources"]["Glama"] == 1
+        assert stats["timeline"][0]["registry_sources"]["Pay.sh"] == 1
+        assert stats["timeline"][0]["registry_sources"]["Smithery"] == 1
+
+    def test_stats_include_smithery_external_context(
+        self,
+        observability_store,
+        test_client,
+    ):
+        response = test_client.get("/internal/observability/stats?days=1")
+
+        assert response.status_code == 200
+        smithery = response.json()["external_sources"]["smithery"]
+        assert smithery["name"] == "Smithery"
+        assert smithery["performance_url"].startswith("https://smithery.ai/")
+        assert smithery["hosted_mcp_endpoint"].startswith("https://agentic-payments--blocksize")
+        assert smithery["metrics_ingestion_configured"] is False
+        assert smithery["status"] == "not_ingested"
+
+    def test_paid_success_records_revenue_and_paid_call(
+        self,
+        observability_store,
+        test_client,
+    ):
+        mock_vwap = VWAPData(
+            pair="btc-usd",
+            vwap=95432.50,
+            timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            currency="USD",
+        )
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
+        app.state.blocksize = mock_client
+
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={"valid": True, "network": "solana"},
+        ), patch(
+            "src.resource_server._settle_payment",
+            new_callable=AsyncMock,
+            return_value={"success": True},
+        ):
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"X-PAYMENT": "mock_sig"},
+            )
+
+        assert response.status_code == 200
+        stats = observability_store.summarize(days=1)
+        assert stats["event_counts"]["payment_proof_submitted"] == 1
+        assert stats["event_counts"]["payment_verified"] == 1
+        assert stats["overview"]["paid_calls"] == 1
+        assert stats["overview"]["estimated_revenue_usdc"] == float(settings.pricing.core_crypto)
+        assert stats["paid_endpoint_mix"]["/v1/vwap/{pair}"] == 1
+        assert stats["service_mix"]["vwap"] == 1
+        assert stats["data_called"][0]["paid_successes"] == 1
+        assert stats["data_called"][0]["revenue_usdc"] == float(settings.pricing.core_crypto)
+        assert stats["data_called"][0]["latest_outcome"] == "Data returned after payment or credits"
+
+    def test_dashboard_token_can_protect_internal_stats(
+        self,
+        observability_store,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "observability_dashboard_token", "secret")
+
+        login_response = test_client.get("/internal/observability")
+        assert login_response.status_code == 401
+        assert "Internal Observability" in login_response.text
+        assert "Open Dashboard" in login_response.text
+
+        dashboard_response = test_client.get("/internal/observability?token=secret")
+        assert dashboard_response.status_code == 200
+        assert "Product Usage Command Center" in dashboard_response.text
+        assert "observability_token" in dashboard_response.headers["set-cookie"]
+
+        stats_response = test_client.get(
+            "/internal/observability/stats",
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert stats_response.status_code == 200
+
+        cookie_stats_response = test_client.get("/internal/observability/stats")
+        assert cookie_stats_response.status_code == 200
+
+    def test_command_center_subpage_serves_improved_dashboard(
+        self,
+        observability_store,
+        test_client,
+    ):
+        response = test_client.get("/internal/observability/command-center")
+
+        assert response.status_code == 200
+        assert "Product Usage Command Center" in response.text
+        assert "Called Data Detail" in response.text
+        assert "Recent Event Trace" in response.text
+        assert "Glama" in response.text
+        assert "Pay.sh" in response.text
+        assert "MCP Registry" in response.text
+        assert "Smithery" in response.text
+        assert "Awesome MCP" in response.text
+        assert "Smithery Hosted Activity" in response.text
+        assert "renderSmitherySource" in response.text
+        assert "registrySourceWatchlist" in response.text
+        assert 'id="timeline-dates"' in response.text
+        assert "timelineTip" in response.text
+        assert "data-tip" in response.text
+        assert "Token not configured" in response.text
 
 
 class TestNativePaymentValidation:
@@ -717,6 +1049,564 @@ class TestDataEndpoints:
         data = response.json()
         assert data["data"]["pair"] == "btc-usd"
         assert data["data"]["vwap"] == 95432.50
+
+    def test_vwap_endpoint_uses_starter_credits(self, test_client, tmp_path):
+        mock_vwap = VWAPData(
+            pair="btc-usd",
+            vwap=95432.50,
+            timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            currency="USD",
+        )
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={
+                "X-AGENT-ID": "agent-starter-12345678",
+                "X-DEVICE-ID": "device-starter-12345678",
+                "X-SESSION-ID": "session-starter-12345678",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["X-Blocksize-Credit-Mode"] == "starter-allowance"
+        assert response.headers["X-Blocksize-Credits-Spent"] == "1.0"
+        assert response.headers["X-Blocksize-Credits-Remaining"] == "49.0"
+        data = response.json()
+        assert data["meta"]["credits"]["credit_cost"] == 1.0
+        assert data["meta"]["credits"]["credits_remaining"] == 49.0
+
+    def test_state_endpoint_uses_state_pool_and_starter_credits(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_state_price = AsyncMock(
+            return_value=StatePriceData(
+                pair="MSOLUSD",
+                price=91.9,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.get(
+            "/v1/state/MSOLUSD",
+            headers={"X-AGENT-ID": "agent-state-raw-12345678"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["pair"] == "MSOLUSD"
+        assert data["data"]["price"] == 91.9
+        assert data["meta"]["credits"]["credit_cost"] == 1.0
+        assert data["meta"]["upstream_methods"] == ["state_instruments", "state_pool"]
+
+    def test_vwap30m_endpoint_uses_closingprice_and_starter_credits(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_30min = AsyncMock(
+            return_value=VWAP30MinData(
+                ticker="SOL",
+                vwap=75.27,
+                quote_currency="USD",
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.get(
+            "/v1/vwap30m/SOLUSD",
+            headers={"X-AGENT-ID": "agent-vwap30m-raw-12345678"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["ticker"] == "SOL"
+        assert data["data"]["vwap"] == 75.27
+        assert data["methodology"]["upstream_method"] == "closingprice_list"
+        assert data["meta"]["credits"]["credit_cost"] == 1.0
+
+    def test_vwap24h_endpoint_returns_stream_cache_value(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_cache = AsyncMock()
+        mock_cache.enabled = True
+        mock_cache.get_vwap_24h = AsyncMock(
+            return_value=VWAP24HrData(
+                pair="BTCUSD",
+                vwap=66800.0,
+                volume=1234.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                source="blocksize:fixedvwap_subscribe_cache",
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.stream_cache = mock_cache
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.get(
+            "/v1/vwap24h/BTCUSD",
+            headers={"X-AGENT-ID": "agent-vwap24h-raw-12345678"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["data"]["vwap"] == 66800.0
+        assert data["methodology"]["fallback"] is False
+        assert data["methodology"]["upstream_method"] == "fixedvwap_subscribe"
+        assert data["meta"]["credits"]["credit_cost"] == 1.0
+
+    def test_agent_market_brief_uses_starter_credits(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95432.50,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/briefs/market",
+            headers={"X-AGENT-ID": "agent-brief-12345678"},
+            json={"symbols": ["BTCUSD"], "intent": "demo"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "agent_market_brief"
+        assert data["credit_cost"] == 10.0
+        assert data["meta"]["credits"]["credits_remaining"] == 40.0
+        assert data["provenance"]["receipt_id"].startswith("rcpt_")
+        assert data["instruments"][0]["symbol"] == "BTCUSD"
+
+    def test_pre_trade_sanity_check_returns_decision(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_bidask_snapshot = AsyncMock(
+            return_value=BidAskData(
+                pair="btc-usd",
+                bid=95400.0,
+                ask=95450.0,
+                spread=50.0,
+                spread_pct=0.0524,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/checks/pre-trade",
+            headers={"X-AGENT-ID": "agent-check-12345678"},
+            json={
+                "symbol": "BTCUSD",
+                "side": "buy",
+                "notional_usd": 2500,
+                "reference_price": 95425.0,
+                "max_spread_bps": 10,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "pre_trade_sanity_check"
+        assert data["credit_cost"] == 5.0
+        assert data["decision"] in {"pass", "caution", "block"}
+        assert data["market"]["service"] == "bidask"
+        assert data["meta"]["credits"]["credits_remaining"] == 45.0
+
+    def test_audit_receipt_can_be_looked_up_for_free(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95432.50,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        receipt_response = test_client.post(
+            "/v1/receipts/price",
+            headers={"X-AGENT-ID": "agent-receipt-12345678"},
+            json={"service": "vwap", "symbol": "BTCUSD", "purpose": "test"},
+        )
+
+        assert receipt_response.status_code == 200
+        receipt_id = receipt_response.json()["receipt"]["receipt_id"]
+
+        lookup_response = test_client.get(f"/v1/provenance/{receipt_id}")
+
+        assert lookup_response.status_code == 200
+        data = lookup_response.json()
+        assert data["product"] == "agent_data_provenance"
+        assert data["credit_cost"] == 0.0
+        assert data["receipt"]["receipt_id"] == receipt_id
+
+    def test_macro_snapshot_supports_multi_asset_package(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95432.50,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        mock_client.get_fx_rate = AsyncMock(
+            return_value=FXData(
+                pair="EURUSD",
+                base_currency="EUR",
+                quote_currency="USD",
+                bid=1.08,
+                ask=1.081,
+                mid=1.0805,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_metal_price = AsyncMock(
+            return_value=MetalData(
+                ticker="XAUUSD",
+                name="Gold",
+                price=2350.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/snapshots/macro",
+            headers={"X-AGENT-ID": "agent-macro-12345678"},
+            json={"universe": ["BTCUSD", "EURUSD", "XAUUSD"]},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "multi_asset_macro_snapshot"
+        assert data["credit_cost"] == 25.0
+        assert len(data["assets"]) == 3
+        assert data["meta"]["credits"]["credits_remaining"] == 25.0
+
+    def test_token_quality_indicator_uses_price_state_and_vwap_windows(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="sol-usd",
+                vwap=150.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        mock_client.get_bidask_snapshot = AsyncMock(
+            return_value=BidAskData(
+                pair="sol-usd",
+                bid=149.95,
+                ask=150.05,
+                spread=0.10,
+                spread_pct=0.0667,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_state_price = AsyncMock(
+            return_value=StatePriceData(
+                pair="sol-usd",
+                price=149.90,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_vwap_30min = AsyncMock(
+            return_value=VWAP30MinData(
+                ticker="SOL",
+                vwap=149.80,
+                quote_currency="USD",
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_vwap_24hr = AsyncMock(
+            return_value=VWAP24HrData(
+                pair="sol-usd",
+                vwap=148.75,
+                volume=1234567,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.list_state_instruments = AsyncMock(
+            return_value=[
+                {
+                    "symbol": "SOLUSD",
+                    "pools": [
+                        {"network": "solana", "address": "pool-1"},
+                        {"network": "ethereum", "address": "pool-2"},
+                    ],
+                }
+            ]
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/indicators/token-quality",
+            headers={"X-AGENT-ID": "agent-token-quality-12345678"},
+            json={
+                "symbol": "SOLUSD",
+                "include_state_coverage": True,
+                "include_state_price": True,
+                "include_windows": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "token_market_quality_indicator"
+        assert data["credit_cost"] == 15.0
+        assert data["indicator"]["symbol"] == "SOLUSD"
+        assert data["indicator"]["metrics"]["state_divergence_bps"] == pytest.approx(6.6711, rel=1e-3)
+        assert data["indicator"]["coverage"]["status"] == "full"
+        assert data["indicator"]["metrics"]["state_solana_pool_count"] == 1
+        assert data["meta"]["credits"]["credits_remaining"] == 35.0
+
+    def test_state_divergence_indicator_returns_signed_basis(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="sol-usd",
+                vwap=150.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        mock_client.get_bidask_snapshot = AsyncMock(
+            return_value=BidAskData(
+                pair="sol-usd",
+                bid=149.9,
+                ask=150.1,
+                spread=0.2,
+                spread_pct=0.1333,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_state_price = AsyncMock(
+            return_value=StatePriceData(
+                pair="sol-usd",
+                price=149.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.list_state_instruments = AsyncMock(return_value=[{"symbol": "SOLUSD", "pools": []}])
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/indicators/state-divergence",
+            headers={"X-AGENT-ID": "agent-state-divergence-12345678"},
+            json={"symbol": "SOLUSD", "max_divergence_bps": 50},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "state_divergence_indicator"
+        assert data["credit_cost"] == 15.0
+        assert data["state"]["label"] == "alert"
+        assert data["basis"]["vwap_vs_state_bps"] == pytest.approx(67.114, rel=1e-3)
+        assert data["meta"]["credits"]["credits_remaining"] == 35.0
+
+    def test_solana_token_brief_reports_supported_and_unsupported_symbols(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            side_effect=[
+                VWAPData(
+                    pair="sol-usd",
+                    vwap=150.0,
+                    timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                    currency="USD",
+                ),
+                resource_server.BlocksizeAPIError(-32000, "Unsupported ticker"),
+            ]
+        )
+        mock_client.get_bidask_snapshot = AsyncMock(
+            side_effect=[
+                BidAskData(
+                    pair="sol-usd",
+                    bid=149.95,
+                    ask=150.05,
+                    spread=0.10,
+                    spread_pct=0.0667,
+                    timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                ),
+                resource_server.BlocksizeAPIError(-32000, "Unsupported ticker"),
+            ]
+        )
+        mock_client.get_state_price = AsyncMock(side_effect=resource_server.BlocksizeAPIError(-32000, "State unavailable"))
+        mock_client.get_vwap_30min = AsyncMock(side_effect=resource_server.BlocksizeAPIError(-32000, "30m unavailable"))
+        mock_client.get_vwap_24hr = AsyncMock(side_effect=resource_server.BlocksizeAPIError(-32000, "24h unavailable"))
+        mock_client.list_state_instruments = AsyncMock(
+            return_value=[{"symbol": "SOLUSD", "pools": [{"network": "solana", "address": "pool-1"}]}]
+        )
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/signals/solana-token-brief",
+            headers={"X-AGENT-ID": "agent-solana-brief-12345678"},
+            json={"symbols": ["SOLUSD", "UNKNOWNUSD"]},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "solana_token_brief"
+        assert data["credit_cost"] == 25.0
+        assert data["summary"]["coverage_status"] == "partial"
+        assert data["tokens"][1]["status"] == "unsupported_or_unavailable"
+        assert data["meta"]["credits"]["credits_remaining"] == 25.0
+
+    def test_trader_alpha_pack_can_spend_full_starter_allowance(self, test_client, tmp_path):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95432.50,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        mock_client.get_bidask_snapshot = AsyncMock(
+            return_value=BidAskData(
+                pair="btc-usd",
+                bid=95400.0,
+                ask=95450.0,
+                spread=50.0,
+                spread_pct=0.0524,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_state_price = AsyncMock(
+            return_value=StatePriceData(
+                pair="btc-usd",
+                price=95430.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_vwap_30min = AsyncMock(
+            return_value=VWAP30MinData(
+                ticker="BTC",
+                vwap=95300.0,
+                quote_currency="USD",
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.get_vwap_24hr = AsyncMock(
+            return_value=VWAP24HrData(
+                pair="btc-usd",
+                vwap=94900.0,
+                volume=1234,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        mock_client.list_state_instruments = AsyncMock(return_value=[{"symbol": "BTCUSD", "pools": []}])
+        app.state.blocksize = mock_client
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+
+        response = test_client.post(
+            "/v1/signals/trader-alpha-pack",
+            headers={"X-AGENT-ID": "agent-alpha-pack-12345678"},
+            json={"watchlist": ["BTCUSD"], "include_state_price": True, "include_windows": True},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["product"] == "trader_alpha_pack"
+        assert data["credit_cost"] == 50.0
+        assert data["summary"]["best_quality_symbol"] == "BTCUSD"
+        assert data["meta"]["credits"]["credits_remaining"] == 0.0
+
+    def test_capability_check_reports_ready_and_optional_state_coverage(self, test_client):
+        mock_client = AsyncMock()
+        mock_client.list_vwap_instruments = AsyncMock(return_value=["SOLUSD", "PYTHUSD"])
+        mock_client.list_bidask_instruments = AsyncMock(return_value=["SOLUSD", "PYTHUSD"])
+        mock_client.list_state_instruments = AsyncMock(
+            return_value=[
+                {"symbol": "PYTHUSD", "pools": [{"network": "solana", "address": "pool-1"}]},
+                {"symbol": "SOLVBTCUSD", "pools": [{"network": "solana", "address": "not-sol"}]},
+            ]
+        )
+        app.state.blocksize = mock_client
+
+        response = test_client.post(
+            "/v1/capabilities/check",
+            json={
+                "product": "solana_token_brief",
+                "symbols": ["SOLUSD", "PYTHUSD"],
+                "include_state_coverage": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ready"] is True
+        sol, pyth = data["symbols"]
+        assert sol["symbol"] == "SOLUSD"
+        assert sol["optional_feeds"]["state_instruments"]["available"] is False
+        assert sol["optional_feeds"]["state_instruments"]["coverage"]["matched_count"] == 0
+        assert pyth["symbol"] == "PYTHUSD"
+        assert pyth["optional_feeds"]["state_instruments"]["available"] is True
+        assert pyth["optional_feeds"]["state_instruments"]["coverage"]["solana_pool_count"] == 1
+        assert data["opt_in_policy"]["optional_default_off"]
+
+    def test_capability_check_marks_state_divergence_not_ready_without_state_pool_coverage(self, test_client):
+        mock_client = AsyncMock()
+        mock_client.list_vwap_instruments = AsyncMock(return_value=["SOLUSD"])
+        mock_client.list_bidask_instruments = AsyncMock(return_value=["SOLUSD"])
+        mock_client.list_state_instruments = AsyncMock(return_value=[])
+        app.state.blocksize = mock_client
+
+        response = test_client.post(
+            "/v1/capabilities/check",
+            json={"product": "state_divergence_indicator", "symbol": "SOLUSD"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ready"] is False
+        assert data["symbols"][0]["missing_required"] == ["state_pool"]
+        assert data["symbols"][0]["required_feeds"]["state_pool"]["available"] is False
+
+    def test_capability_check_marks_state_divergence_ready_with_state_pool_coverage(self, test_client):
+        mock_client = AsyncMock()
+        mock_client.list_vwap_instruments = AsyncMock(return_value=["MSOLUSD"])
+        mock_client.list_bidask_instruments = AsyncMock(return_value=["MSOLUSD"])
+        mock_client.list_state_instruments = AsyncMock(
+            return_value=[{"symbol": "MSOLUSD", "pools": [{"network": "solana", "address": "pool-1"}]}]
+        )
+        app.state.blocksize = mock_client
+
+        response = test_client.post(
+            "/v1/capabilities/check",
+            json={"product": "state_divergence_indicator", "symbol": "MSOLUSD"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ready"] is True
+        assert data["symbols"][0]["missing_required"] == []
+        assert data["symbols"][0]["required_feeds"]["state_pool"]["available"] is True
+
+    def test_premium_route_402_includes_starter_credit_cost(self, test_client):
+        response = test_client.post(
+            "/v1/briefs/market",
+            json={"symbols": ["BTCUSD"]},
+        )
+
+        assert response.status_code == 402
+        data = response.json()
+        assert data["price_usdc"] == "0.25"
+        assert data["starter_credits"]["credit_cost"] == 10.0
 
     def test_vwap_endpoint_accepts_x_payment_header(self, test_client):
         mock_vwap = VWAPData(

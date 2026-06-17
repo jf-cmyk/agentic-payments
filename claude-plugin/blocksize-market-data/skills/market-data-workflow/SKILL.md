@@ -1,5 +1,5 @@
 ---
-description: Use when the user wants Blocksize market data in Claude Code or Cowork, including instrument lookup, daily credit checks, crypto VWAP, bid/ask snapshots, FX rates, or metal prices.
+description: Use when the user wants Blocksize market data in Claude Code or Cowork, including instrument lookup, starter credit checks, crypto VWAP, bid/ask snapshots, FX rates, or metal prices.
 ---
 
 # Blocksize Market Data Workflow
@@ -15,7 +15,7 @@ transaction execution.
 2. Use `list_instruments` when the user asks what a Blocksize service namespace
    supports.
 3. Use `get_credit_balance` before live-data calls if the user asks about
-   remaining allowance or if several paid snapshot calls are likely.
+   remaining starter allowance or if several paid snapshot calls are likely.
 4. Use the narrowest live-data tool that matches the requested asset class:
    `get_vwap` for crypto VWAP, `get_bid_ask` for crypto or supported equities,
    `get_fx_rate` for FX, and `get_metal_price` for metals.

@@ -10,8 +10,8 @@ The plugin references this public OAuth-protected MCP endpoint:
 https://mcp.blocksize.info/anthropic/mcp/
 ```
 
-The connector is read-only. It can search supported instruments, inspect daily
-data credits, and retrieve market-data snapshots. It cannot place trades,
+The connector is read-only. It can search supported instruments, inspect starter
+live-data credits, and retrieve market-data snapshots. It cannot place trades,
 execute wallet transactions, transfer funds, submit wallet signatures, or submit
 x402 payment proofs.
 
@@ -30,7 +30,7 @@ The hosted MCP endpoint exposes these read-only tools:
 | --- | --- |
 | `search_pairs` | Search supported crypto, equity, FX, and metal instruments. |
 | `list_instruments` | List supported instruments for a Blocksize service namespace. |
-| `get_credit_balance` | Show the signed-in user's remaining daily data credits. |
+| `get_credit_balance` | Show the signed-in user's remaining starter live-data credits. |
 | `get_vwap` | Fetch a crypto VWAP snapshot for one supported pair. |
 | `get_bid_ask` | Fetch bid/ask data for one supported crypto pair or equity ticker. |
 | `get_fx_rate` | Fetch a supported FX pair snapshot. |
@@ -84,6 +84,8 @@ Get the latest XAUUSD metal price.
 This plugin and the Claude MCP connector are separate from Blocksize's x402 paid
 HTTP API. The Claude surface does not expose payment proof submission, wallet
 operations, credit purchases, order placement, or account mutation tools.
+Eligible users start with 50 live data credits; production usage upgrades
+through Blocksize x402 payment or prepaid credits outside Claude.
 
 ## Links
 

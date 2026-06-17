@@ -3,9 +3,25 @@ import os
 import logging
 import httpx
 import hashlib
+import json
 from datetime import UTC, datetime
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+STARTER_CREDIT_ALLOWANCE = float(os.environ.get("STARTER_CREDIT_ALLOWANCE", "50"))
+
+
+@dataclass(frozen=True)
+class StarterAllowanceResult:
+    subject: str
+    subject_type: str
+    balance_credits: float
+    granted_credits: float
+    eligible: bool
+    reason: str
+
 
 class CreditManager:
     def __init__(self, db_path: str = "credits.db"):
@@ -47,6 +63,12 @@ class CreditManager:
             )
         ''')
 
+        self._ensure_trial_column(cursor, "subject_hash", "TEXT")
+        self._ensure_trial_column(cursor, "subject_type", "TEXT DEFAULT 'wallet'")
+        self._ensure_trial_column(cursor, "device_hash", "TEXT")
+        self._ensure_trial_column(cursor, "session_hash", "TEXT")
+        self._ensure_trial_column(cursor, "user_agent_hash", "TEXT")
+
         # Persistent replay protection for paid data and credit-purchase proofs.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS payment_proofs (
@@ -58,9 +80,26 @@ class CreditManager:
                 timestamp TIMESTAMP
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS price_receipts (
+                receipt_id TEXT PRIMARY KEY,
+                product TEXT NOT NULL,
+                subject TEXT DEFAULT '',
+                payload_json TEXT NOT NULL,
+                created_at TIMESTAMP
+            )
+        ''')
         
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def _ensure_trial_column(cursor: sqlite3.Cursor, column: str, ddl_type: str) -> None:
+        cursor.execute("PRAGMA table_info(trial_history)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE trial_history ADD COLUMN {column} {ddl_type}")
 
     def get_balance(self, address: str) -> float:
         """Get the current credit balance for a wallet."""
@@ -138,67 +177,175 @@ class CreditManager:
         3. Verify Wallet History (>24h age OR >5 transactions).
         4. Verify Funding Ancestry (Ensure source isn't an existing trial claimer).
         """
+        result = await self.ensure_starter_allowance(
+            subject=address,
+            subject_type="wallet",
+            ip=ip,
+            require_wallet_history=True,
+        )
+        return result.balance_credits if result.eligible else 0.0
+
+    async def ensure_starter_allowance(
+        self,
+        *,
+        subject: str,
+        subject_type: str,
+        ip: str,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        user_agent: str | None = None,
+        require_wallet_history: bool = False,
+    ) -> StarterAllowanceResult:
+        """
+        Grant the universal starter allowance once per eligible subject.
+
+        The ledger still stores balances in the wallets table for compatibility,
+        but subject may be a wallet, authenticated user id, agent id, device id,
+        or session id. Trial history stores salted fingerprints for abuse checks.
+        """
+        clean_subject = subject.strip()
+        clean_subject_type = subject_type.strip().lower() or "subject"
+        if not clean_subject:
+            return StarterAllowanceResult("", clean_subject_type, 0.0, 0.0, False, "missing_subject")
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            # 1. IP Check
             ip_fingerprint = _fingerprint_ip(ip)
+            subject_hash = _fingerprint_value(clean_subject, "starter-subject")
+            device_hash = _fingerprint_value(device_id, "starter-device") if device_id else None
+            session_hash = _fingerprint_value(session_id, "starter-session") if session_id else None
+            user_agent_hash = _fingerprint_value(user_agent, "starter-user-agent") if user_agent else None
+
             cursor.execute(
-                "SELECT address FROM trial_history WHERE ip_hash IN (?, ?)",
-                (ip_fingerprint, ip),
+                """
+                SELECT address FROM trial_history
+                WHERE ip_hash IN (?, ?)
+                   OR subject_hash = ?
+                   OR (? IS NOT NULL AND device_hash = ?)
+                   OR (? IS NOT NULL AND session_hash = ?)
+                """,
+                (
+                    ip_fingerprint,
+                    ip,
+                    subject_hash,
+                    device_hash,
+                    device_hash,
+                    session_hash,
+                    session_hash,
+                ),
             )
             if cursor.fetchone():
                 logger.warning(
-                    "Duplicate trial claim blocked for IP fingerprint %s",
+                    "Duplicate starter allowance claim blocked for IP fingerprint %s",
                     ip_fingerprint[:12],
                 )
-                return 0.0
+                return StarterAllowanceResult(
+                    clean_subject,
+                    clean_subject_type,
+                    self.get_balance(clean_subject),
+                    0.0,
+                    False,
+                    "duplicate_trial_fingerprint",
+                )
             
-            # 2. Wallet Check (Internal)
-            cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (address,))
+            cursor.execute("SELECT balance_credits FROM wallets WHERE address = ?", (clean_subject,))
             row = cursor.fetchone()
             
             if row is None:
-                # 3. Stake & History Check
-                sol_balance = await self._get_solana_balance(address)
-                metadata = await self._get_wallet_metadata(address)
-                
-                if sol_balance < 0.1:
-                    logger.warning(f"⚠️ LOW STAKE: Wallet {address} has only {sol_balance} SOL. Denied.")
-                    return 0.0
-                
-                if metadata["age_hours"] < 24 and metadata["count"] < 5:
-                    logger.warning(f"⚠️ FRESH WALLET: {address} is only {metadata['age_hours']:.1f}h old with {metadata['count']} txs. Denied.")
-                    return 0.0
+                metadata = {"age_hours": None, "count": None}
+                if require_wallet_history:
+                    sol_balance = await self._get_solana_balance(clean_subject)
+                    metadata = await self._get_wallet_metadata(clean_subject)
 
-                # 4. Success! Grant Welcome Pack.
-                welcome_credits = 50.0
+                    if sol_balance < 0.1:
+                        logger.warning(
+                            "LOW STAKE: Wallet %s has only %.4f SOL. Denied.",
+                            clean_subject,
+                            sol_balance,
+                        )
+                        return StarterAllowanceResult(
+                            clean_subject,
+                            clean_subject_type,
+                            0.0,
+                            0.0,
+                            False,
+                            "wallet_stake_too_low",
+                        )
+
+                    if metadata["age_hours"] < 24 and metadata["count"] < 5:
+                        logger.warning(
+                            "FRESH WALLET: %s is only %.1fh old with %s txs. Denied.",
+                            clean_subject,
+                            metadata["age_hours"],
+                            metadata["count"],
+                        )
+                        return StarterAllowanceResult(
+                            clean_subject,
+                            clean_subject_type,
+                            0.0,
+                            0.0,
+                            False,
+                            "wallet_history_too_fresh",
+                        )
+
                 cursor.execute('''
                     INSERT INTO wallets (address, balance_credits, last_updated)
                     VALUES (?, ?, ?)
-                ''', (address, welcome_credits, _utc_now()))
+                ''', (clean_subject, STARTER_CREDIT_ALLOWANCE, _utc_now()))
                 
-                # Record to Trial History
                 cursor.execute('''
-                    INSERT INTO trial_history (ip_hash, address, timestamp)
-                    VALUES (?, ?, ?)
-                ''', (ip_fingerprint, address, _utc_now()))
+                    INSERT INTO trial_history (
+                        ip_hash, address, subject_hash, subject_type, device_hash,
+                        session_hash, user_agent_hash, timestamp
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ip_fingerprint,
+                    clean_subject,
+                    subject_hash,
+                    clean_subject_type,
+                    device_hash,
+                    session_hash,
+                    user_agent_hash,
+                    _utc_now(),
+                ))
                 
-                # Log it
                 cursor.execute('''
                     INSERT INTO credit_purchases (tx_hash, address, amount_usdc, credits_added, timestamp)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (f"WELCOME_{address[:8]}", address, 0.0, welcome_credits, _utc_now()))
+                ''', (
+                    f"STARTER_{subject_hash[:16]}",
+                    clean_subject,
+                    0.0,
+                    STARTER_CREDIT_ALLOWANCE,
+                    _utc_now(),
+                ))
                 
                 conn.commit()
                 logger.info(
-                    "Secure trial granted: 50.0 credits to %s (wallet age %.1fh)",
-                    address,
-                    metadata["age_hours"],
+                    "Starter allowance granted: %.1f credits to %s:%s",
+                    STARTER_CREDIT_ALLOWANCE,
+                    clean_subject_type,
+                    clean_subject,
                 )
-                return welcome_credits
+                return StarterAllowanceResult(
+                    clean_subject,
+                    clean_subject_type,
+                    STARTER_CREDIT_ALLOWANCE,
+                    STARTER_CREDIT_ALLOWANCE,
+                    True,
+                    "starter_allowance_granted",
+                )
             
-            return row[0]
+            return StarterAllowanceResult(
+                clean_subject,
+                clean_subject_type,
+                float(row[0]),
+                0.0,
+                True,
+                "existing_balance",
+            )
         finally:
             conn.close()
 
@@ -289,13 +436,71 @@ class CreditManager:
         finally:
             conn.close()
 
-# Credit Unit: 1 Credit = $0.001 market value
-# Costs in Credits
+    def store_price_receipt(
+        self,
+        *,
+        receipt_id: str,
+        product: str,
+        subject: str,
+        payload: dict,
+    ) -> None:
+        """Persist an audit/provenance receipt payload for later lookup."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                '''
+                INSERT OR REPLACE INTO price_receipts (
+                    receipt_id, product, subject, payload_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ''',
+                (
+                    receipt_id,
+                    product,
+                    subject,
+                    json.dumps(payload, default=str, sort_keys=True),
+                    _utc_now(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_price_receipt(self, receipt_id: str) -> dict | None:
+        """Return a stored receipt payload by id."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT payload_json FROM price_receipts WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(row[0])
+        finally:
+            conn.close()
+
+# Starter-credit product costs. x402 prices stay in USDC separately.
 CREDIT_COSTS = {
-    "core": 2.0,       # $0.002
-    "extended": 4.0,   # $0.004
-    "tradfi": 5.0,     # $0.005
-    "equities": 8.0,   # $0.008
+    "raw_vwap": 1.0,
+    "raw_bidask": 1.0,
+    "raw_state": 1.0,
+    "raw_vwap_30m": 1.0,
+    "raw_vwap_24h": 1.0,
+    "fx": 2.0,
+    "metals": 2.0,
+    "market_brief": 10.0,
+    "pre_trade_check": 5.0,
+    "audit_receipt": 10.0,
+    "macro_snapshot": 25.0,
+    "token_quality_indicator": 15.0,
+    "state_divergence_indicator": 15.0,
+    "solana_token_brief": 25.0,
+    "trader_alpha_pack": 50.0,
+    "provenance_lookup": 0.0,
 }
 
 # Bulk Tier Credits
@@ -310,6 +515,12 @@ def _fingerprint_ip(ip: str) -> str:
     """Hash client IPs before storing trial history."""
     salt = os.environ.get("TRIAL_IP_HASH_SALT", "blocksize-agentic-payments")
     return hashlib.sha256(f"{salt}:{ip}".encode("utf-8")).hexdigest()
+
+
+def _fingerprint_value(value: str, namespace: str) -> str:
+    """Hash trial identifiers before storage."""
+    salt = os.environ.get("TRIAL_IP_HASH_SALT", "blocksize-agentic-payments")
+    return hashlib.sha256(f"{salt}:{namespace}:{value}".encode("utf-8")).hexdigest()
 
 
 def _utc_now() -> str:

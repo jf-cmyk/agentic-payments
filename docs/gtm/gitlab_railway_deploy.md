@@ -28,6 +28,18 @@ railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONM
 
 In Railway, keep the current service and environment. Create a project token for the environment that should receive GitLab deployments, then copy the project id, environment name, and service name into GitLab CI/CD variables.
 
+For the stream-backed market-data products, set these variables on every
+Railway service that runs `python -m src.resource_server`:
+
+```text
+BLOCKSIZE_STREAM_CACHE_ENABLED=true
+BLOCKSIZE_24H_CACHE_TICKERS=BTCUSD,ETHUSD,SOLUSD,JUPUSD,PYTHUSD
+BLOCKSIZE_STATE_CACHE_MODE=all
+BLOCKSIZE_STATE_CACHE_MAX_TICKERS=250
+BLOCKSIZE_STREAM_CACHE_TTL_SECONDS=3600
+BLOCKSIZE_STREAM_CACHE_RECONNECT_SECONDS=5
+```
+
 ## Cutover checklist
 
 1. Add the GitLab variables.

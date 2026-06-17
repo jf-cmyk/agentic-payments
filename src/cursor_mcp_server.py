@@ -1,4 +1,4 @@
-"""Cursor remote MCP server with Clerk signup and daily user credits."""
+"""Cursor remote MCP server with Clerk signup and starter user credits."""
 
 from __future__ import annotations
 
@@ -60,9 +60,10 @@ _bundle = create_authenticated_market_data_mcp(
     mcp_name="Blocksize Market Data for Cursor",
     instructions=(
         "Read-only Blocksize Capital market data for Cursor. Sign in with "
-        "Blocksize through Clerk to use server-side daily credits for live "
-        "market data. This connector never executes wallet transactions or "
-        "submits x402 payment proofs from Cursor."
+        "Blocksize through Clerk to use the 50-credit starter live-data "
+        "allowance. Production usage can upgrade through x402 payment or "
+        "prepaid credits outside Cursor. This connector never executes wallet "
+        "transactions or submits x402 payment proofs from Cursor."
     ),
     auth_provider=cursor_auth.build_cursor_auth_provider(),
     resolve_identity=_resolve_identity,

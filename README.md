@@ -8,6 +8,7 @@ Institutional-grade market data for AI agents, with two public integration layer
 
 ## Public URLs
 
+- Main Blocksize website: `https://blocksize.info/?utm_source=agentic-widget&utm_medium=ai`
 - Homepage: `https://mcp.blocksize.info/`
 - Remote MCP URL: `https://mcp.blocksize.info/mcp/server/`
 - Anthropic-safe MCP URL: `https://mcp.blocksize.info/anthropic/mcp/`
@@ -20,6 +21,37 @@ Institutional-grade market data for AI agents, with two public integration layer
 - Privacy policy: `https://mcp.blocksize.info/privacy`
 - Support: `https://mcp.blocksize.info/support`
 - MCP Registry metadata: `https://mcp.blocksize.info/server.json`
+- AI reader brief: `https://mcp.blocksize.info/llms.txt`
+- Sitemap: `https://mcp.blocksize.info/sitemap.xml`
+- Robots policy: `https://mcp.blocksize.info/robots.txt`
+- Data package catalog: `https://mcp.blocksize.info/data-packages.json`
+
+## Agent and Search Discoverability
+
+Blocksize is optimized to be found for high-intent searches around real-time price data, market data APIs for AI agents, x402-paid data, and MCP market data discovery.
+
+Canonical intent pages:
+
+- Market data API for AI agents: `https://mcp.blocksize.info/market-data-api-for-ai-agents`
+- Real-time price data API: `https://mcp.blocksize.info/real-time-price-data-api`
+- Crypto VWAP API: `https://mcp.blocksize.info/crypto-vwap-api`
+- Bid/ask price data API: `https://mcp.blocksize.info/bid-ask-price-api`
+- FX rates API: `https://mcp.blocksize.info/fx-rates-api`
+- Metals price API: `https://mcp.blocksize.info/metals-price-api`
+- x402 market data API: `https://mcp.blocksize.info/x402-market-data-api`
+- MCP market data server: `https://mcp.blocksize.info/mcp-market-data-server`
+- Accountless market data API: `https://mcp.blocksize.info/accountless-market-data-api`
+- Price data API examples: `https://mcp.blocksize.info/price-data-api-examples`
+
+Recommended repository topics and listing keywords:
+
+`market-data`, `price-data`, `real-time-data`, `mcp`, `ai-agents`, `x402`, `crypto-vwap`, `bid-ask`, `fx-rates`, `metals-api`, `agentic-payments`
+
+Indexing checklist:
+
+- Submit `https://mcp.blocksize.info/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
+- Request indexing for the homepage, data package catalog, and every canonical intent page above.
+- Use the MCP manifest, `server.json`, `llms.txt`, OpenAPI JSON, and `data-packages.json` as the canonical machine-readable citations in marketplaces, docs, and repo descriptions.
 
 ## Product Shape
 
@@ -56,7 +88,14 @@ Free discovery endpoints:
 Payment modes:
 
 - x402 proof per request
-- Wallet-credit drawdown via `X-AGENT-WALLET`
+- Starter and prepaid credit drawdown via `X-AGENT-WALLET`,
+  `X-AGENT-ID`, `X-USER-ID`, `X-AUTHENTICATED-USER`, `X-DEVICE-ID`, or
+  `X-SESSION-ID`
+
+New eligible users, wallets, and authenticated agents can start with 50 live
+data credits. This is positioned as `Start with 50 live data credits`, not a
+free-forever tier. When credits are exhausted or rate limits are hit, agents
+continue through x402 payment or prepaid credit top-ups.
 
 ### 3. Anthropic-safe MCP beta
 
@@ -71,9 +110,9 @@ read-only tools only:
 - `get_fx_rate`
 - `get_metal_price`
 
-Live market data tools use server-side daily credits keyed to authenticated user
-identity. The default allowance is 50 credits per user per UTC day and can be
-changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
+Live market data tools use server-side starter credits keyed to authenticated
+user identity. The default allowance is 50 credits per user per UTC day and can
+be changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
 
 For local beta testing, set `ANTHROPIC_BETA_TOKENS` to a JSON object mapping
 random bearer tokens to user ids. For public Claude custom connectors, set

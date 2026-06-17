@@ -53,8 +53,9 @@ _bundle = create_authenticated_market_data_mcp(
     mcp_name="Blocksize Market Data",
     instructions=(
         "Read-only Blocksize Capital market data for Claude. The connector uses "
-        "server-side daily credits for live market data access. It exposes only "
-        "safe, read-only data and metadata tools."
+        "a 50-credit starter live-data allowance for market data access, then "
+        "points production usage to x402 payment or prepaid credits. It exposes "
+        "only safe, read-only data and metadata tools."
     ),
     auth_provider=anthropic_auth.build_anthropic_auth_provider(),
     resolve_identity=_resolve_identity,

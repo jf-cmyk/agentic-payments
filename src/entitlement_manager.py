@@ -1,4 +1,4 @@
-"""Daily credit entitlements for authenticated MCP connector surfaces."""
+"""Starter credit entitlements for authenticated MCP connector surfaces."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class CreditStatus:
 
 
 class EntitlementManager:
-    """Server-side daily quota ledger keyed by authenticated user identity."""
+    """Server-side starter credit ledger keyed by authenticated user identity."""
 
     def __init__(
         self,
@@ -160,22 +160,30 @@ class EntitlementManager:
         *,
         usage_date: str | None = None,
     ) -> CreditStatus:
-        """Return the user's current daily quota state, creating rows as needed."""
+        """Return the user's current starter credit state, creating rows as needed."""
         usage_date = usage_date or _today()
         with self._connection() as conn:
             self._ensure_user(conn, user_id, email)
             self._ensure_daily_usage(conn, user_id, usage_date)
-            row = conn.execute(
+            user_row = conn.execute(
                 """
-                SELECT u.email, u.daily_limit, u.status, du.credits_spent
+                SELECT email, daily_limit, status
                 FROM users u
-                JOIN daily_usage du ON du.user_id = u.user_id
-                WHERE u.user_id = ? AND du.usage_date = ?
+                WHERE u.user_id = ?
                 """,
-                (user_id, usage_date),
+                (user_id,),
+            ).fetchone()
+            spent_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(credits_spent), 0)
+                FROM daily_usage
+                WHERE user_id = ?
+                """,
+                (user_id,),
             ).fetchone()
 
-        stored_email, daily_limit, status, credits_spent = row
+        stored_email, daily_limit, status = user_row
+        credits_spent = spent_row[0]
         remaining = max(0, int(daily_limit) - int(credits_spent))
         return CreditStatus(
             user_id=user_id,
@@ -197,7 +205,7 @@ class EntitlementManager:
         subject: str = "",
         usage_date: str | None = None,
     ) -> tuple[bool, CreditStatus]:
-        """Atomically spend daily credits if the user has enough remaining."""
+        """Atomically spend starter credits if the user has enough remaining."""
         if amount < 0:
             raise ValueError("amount must be non-negative")
         usage_date = usage_date or _today()
@@ -207,25 +215,42 @@ class EntitlementManager:
             self._ensure_user(conn, user_id, email)
             self._ensure_daily_usage(conn, user_id, usage_date)
 
-            row = conn.execute(
+            user_row = conn.execute(
                 """
-                SELECT u.email, u.daily_limit, u.status, du.credits_spent
+                SELECT email, daily_limit, status
                 FROM users u
-                JOIN daily_usage du ON du.user_id = u.user_id
-                WHERE u.user_id = ? AND du.usage_date = ?
+                WHERE u.user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            spent_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(credits_spent), 0)
+                FROM daily_usage
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            date_spent_row = conn.execute(
+                """
+                SELECT credits_spent
+                FROM daily_usage
+                WHERE user_id = ? AND usage_date = ?
                 """,
                 (user_id, usage_date),
             ).fetchone()
-            stored_email, daily_limit, status, credits_spent = row
+            stored_email, daily_limit, status = user_row
+            lifetime_spent = int(spent_row[0])
+            date_spent = int(date_spent_row[0])
 
             if status != "active":
-                remaining = max(0, int(daily_limit) - int(credits_spent))
+                remaining = max(0, int(daily_limit) - lifetime_spent)
                 credit_status = CreditStatus(
                     user_id=user_id,
                     email=stored_email,
                     date=usage_date,
                     daily_limit=int(daily_limit),
-                    credits_spent=int(credits_spent),
+                    credits_spent=lifetime_spent,
                     credits_remaining=remaining,
                     status=status,
                 )
@@ -241,14 +266,14 @@ class EntitlementManager:
                 )
                 return False, credit_status
 
-            remaining_before = int(daily_limit) - int(credits_spent)
+            remaining_before = int(daily_limit) - lifetime_spent
             if remaining_before < amount:
                 credit_status = CreditStatus(
                     user_id=user_id,
                     email=stored_email,
                     date=usage_date,
                     daily_limit=int(daily_limit),
-                    credits_spent=int(credits_spent),
+                    credits_spent=lifetime_spent,
                     credits_remaining=max(0, remaining_before),
                     status=status,
                 )
@@ -264,16 +289,17 @@ class EntitlementManager:
                 )
                 return False, credit_status
 
-            new_spent = int(credits_spent) + amount
+            new_lifetime_spent = lifetime_spent + amount
+            new_date_spent = date_spent + amount
             conn.execute(
                 """
                 UPDATE daily_usage
                 SET credits_spent = ?, updated_at = ?
                 WHERE user_id = ? AND usage_date = ?
                 """,
-                (new_spent, _utc_now(), user_id, usage_date),
+                (new_date_spent, _utc_now(), user_id, usage_date),
             )
-            remaining_after = int(daily_limit) - new_spent
+            remaining_after = int(daily_limit) - new_lifetime_spent
             self._record_event(
                 conn,
                 user_id,
@@ -290,7 +316,7 @@ class EntitlementManager:
             email=stored_email,
             date=usage_date,
             daily_limit=int(daily_limit),
-            credits_spent=new_spent,
+            credits_spent=new_lifetime_spent,
             credits_remaining=remaining_after,
             status=status,
         )
@@ -333,7 +359,16 @@ class EntitlementManager:
                 """,
                 (new_spent, _utc_now(), user_id, usage_date),
             )
-            remaining = int(daily_limit) - new_spent
+            spent_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(credits_spent), 0)
+                FROM daily_usage
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            lifetime_spent = int(spent_row[0])
+            remaining = int(daily_limit) - lifetime_spent
             self._record_event(
                 conn,
                 user_id,
@@ -350,7 +385,7 @@ class EntitlementManager:
             email=stored_email,
             date=usage_date,
             daily_limit=int(daily_limit),
-            credits_spent=new_spent,
+            credits_spent=lifetime_spent,
             credits_remaining=remaining,
             status=status,
         )

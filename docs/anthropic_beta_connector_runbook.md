@@ -52,6 +52,7 @@ Minimum public OAuth deployment variables:
 
 ```text
 ANTHROPIC_ONLY_MODE=true
+ROOT_OAUTH_CONNECTOR=anthropic
 ANTHROPIC_DAILY_CREDITS=50
 ANTHROPIC_ENTITLEMENT_DB_PATH=/data/anthropic_entitlements.db
 ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp
@@ -79,6 +80,16 @@ example, using `https://mcp.blocksize.info/anthropic/mcp` requires:
 ```text
 https://mcp.blocksize.info/anthropic/mcp/auth/callback
 ```
+
+Using the standalone beta host requires registering that host's callback too:
+
+```text
+https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/auth/callback
+```
+
+For the shared production host, keep `ROOT_OAUTH_CONNECTOR=anthropic` so Claude
+custom connectors that fall back to root OAuth metadata still receive the
+Anthropic MCP issuer instead of the Cursor issuer.
 
 Auth0 is also supported if needed:
 

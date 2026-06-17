@@ -15,6 +15,10 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _csv_list(value: str) -> list[str]:
+    return [item.strip().upper() for item in value.split(",") if item.strip()]
+
+
 # ---------------------------------------------------------------------------
 # Top 250 crypto by market cap — classified as "core" tier
 # Agents pay $0.002/call for these; long-tail pays $0.004/call
@@ -70,6 +74,19 @@ class BlocksizeSettings(BaseSettings):
         "https://data.blocksize.capital/marketdata/v1",
         alias="BLOCKSIZE_BASE_URL",
     )
+    stream_cache_enabled: bool = Field(False, alias="BLOCKSIZE_STREAM_CACHE_ENABLED")
+    stream_cache_ttl_seconds: int = Field(3600, alias="BLOCKSIZE_STREAM_CACHE_TTL_SECONDS")
+    stream_cache_reconnect_seconds: float = Field(5.0, alias="BLOCKSIZE_STREAM_CACHE_RECONNECT_SECONDS")
+    vwap24h_cache_tickers: str = Field(
+        "BTCUSD,ETHUSD,SOLUSD,JUPUSD,PYTHUSD",
+        alias="BLOCKSIZE_24H_CACHE_TICKERS",
+    )
+    state_cache_tickers: str = Field(
+        "MSOLUSD,JUPSOLUSD,WSTETHETH,WSTETHUSD",
+        alias="BLOCKSIZE_STATE_CACHE_TICKERS",
+    )
+    state_cache_mode: str = Field("configured", alias="BLOCKSIZE_STATE_CACHE_MODE")
+    state_cache_max_tickers: int = Field(250, alias="BLOCKSIZE_STATE_CACHE_MAX_TICKERS")
 
     @property
     def rest_url(self) -> str:
@@ -77,7 +94,20 @@ class BlocksizeSettings(BaseSettings):
 
     @property
     def ws_url(self) -> str:
-        return f"{self.base_url}/ws"
+        base = self.base_url
+        if base.startswith("https://"):
+            base = "wss://" + base[len("https://"):]
+        elif base.startswith("http://"):
+            base = "ws://" + base[len("http://"):]
+        return f"{base}/ws"
+
+    @property
+    def fixed_vwap_ticker_list(self) -> list[str]:
+        return _csv_list(self.vwap24h_cache_tickers)
+
+    @property
+    def state_cache_ticker_list(self) -> list[str]:
+        return _csv_list(self.state_cache_tickers)
 
 
 class X402Settings(BaseSettings):
@@ -177,6 +207,9 @@ class ServerSettings(BaseSettings):
     discovery_rate_limit_enabled: bool = Field(True, alias="DISCOVERY_RATE_LIMIT_ENABLED")
     discovery_rate_limit_per_minute: int = Field(60, alias="DISCOVERY_RATE_LIMIT_PER_MINUTE")
     discovery_rate_limit_per_day: int = Field(1000, alias="DISCOVERY_RATE_LIMIT_PER_DAY")
+    observability_enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
+    observability_db_path: str = Field("usage_events.db", alias="OBSERVABILITY_DB_PATH")
+    observability_dashboard_token: str = Field("", alias="OBSERVABILITY_DASHBOARD_TOKEN")
 
     @property
     def cors_origins(self) -> list[str]:

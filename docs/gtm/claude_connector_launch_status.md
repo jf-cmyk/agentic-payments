@@ -76,7 +76,7 @@ Isolation checks:
 
 ```text
 GET /server.json -> unchanged MCP Registry metadata
-GET /.well-known/oauth-authorization-server -> Cursor issuer outside ANTHROPIC_ONLY_MODE
+GET /.well-known/oauth-authorization-server -> Anthropic MCP issuer for Claude fallback discovery
 GET /.well-known/oauth-protected-resource/cursor/mcp/ -> Cursor metadata unchanged
 GET /openapi.json -> 200 for Pay.sh/OpenAPI consumers
 ```
@@ -122,6 +122,11 @@ These require access outside the repo/deploy shell.
    - Complete Clerk OAuth.
    - Enable the connector in a chat.
    - Exercise every tool listed below.
+   - Before testing, confirm root OAuth discovery returns the Anthropic issuer:
+     `GET https://mcp.blocksize.info/.well-known/oauth-authorization-server`
+     should report `issuer=https://mcp.blocksize.info/anthropic/mcp`.
+   - Confirm Clerk allows the callback:
+     `https://mcp.blocksize.info/anthropic/mcp/auth/callback`.
 
 3. Test in MCP Inspector.
    - Use the production MCP URL.
@@ -262,6 +267,31 @@ Logo:
 
 ```text
 https://mcp.blocksize.info/assets/logo.png
+```
+
+Screenshot upload:
+
+```text
+Upload these real Claude.ai PNG screenshots captured after connecting the live
+Blocksize MCP custom connector:
+
+deliverables/claude_screenshots/claude_blocksize_01_btc_instruments.png
+deliverables/claude_screenshots/claude_blocksize_02_remaining_credits.png
+deliverables/claude_screenshots/claude_blocksize_03_btc_usd_vwap.png
+deliverables/claude_screenshots/claude_blocksize_04_eurusd_fx.png
+deliverables/claude_screenshots/claude_blocksize_05_xauusd_metal.png
+```
+
+Link to Promotional Materials:
+
+```text
+https://mcp.blocksize.info/claude-connector
+```
+
+Local promotional packet:
+
+```text
+deliverables/claude_promotional_materials/
 ```
 
 Tools:

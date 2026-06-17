@@ -153,6 +153,43 @@ Get the current EURUSD FX snapshot.
 Get the latest XAUUSD metal price.
 ```
 
+## Screenshots and Promotional Materials
+
+Screenshot upload:
+
+```text
+Upload these real Claude.ai PNG screenshots captured after connecting the live
+Blocksize MCP custom connector:
+
+deliverables/claude_screenshots/claude_blocksize_01_btc_instruments.png
+deliverables/claude_screenshots/claude_blocksize_02_remaining_credits.png
+deliverables/claude_screenshots/claude_blocksize_03_btc_usd_vwap.png
+deliverables/claude_screenshots/claude_blocksize_04_eurusd_fx.png
+deliverables/claude_screenshots/claude_blocksize_05_xauusd_metal.png
+```
+
+Link to Promotional Materials:
+
+```text
+https://mcp.blocksize.info/claude-connector
+```
+
+Local promotional packet:
+
+```text
+deliverables/claude_promotional_materials/
+```
+
+Suggested promotional prompt/screenshot pairs:
+
+```text
+1. Search Blocksize for BTC market data instruments.
+2. Show my remaining Blocksize data credits.
+3. Get the latest BTC-USD VWAP from Blocksize.
+4. Get the current EURUSD FX snapshot.
+5. Get the latest XAUUSD metal price.
+```
+
 ## Reviewer Test Account
 
 Create a Blocksize reviewer account before submission:
@@ -209,7 +246,8 @@ mitigation is product separation:
   - `ANTHROPIC_AUTH_PROVIDER=clerk`
   - `ANTHROPIC_ENABLE_BETA_TOKENS=false`
   - `ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp`
-- [x] Register callback:
+  - `ROOT_OAUTH_CONNECTOR=anthropic`
+- [ ] Confirm Clerk OAuth app callback allowlist:
   - `https://mcp.blocksize.info/anthropic/mcp/auth/callback`
 - [x] Confirm persistent entitlement storage path/volume for the main service.
 - [x] Confirm standalone Claude beta service uses OAuth and persistent
@@ -219,5 +257,7 @@ mitigation is product separation:
 - [ ] Create reviewer account and sample data access.
 - [ ] Run MCP Inspector against the production URL.
 - [ ] Test as a Claude custom connector.
+- [ ] Capture 3-5 real Claude.ai response-area PNG screenshots after connecting
+      the MCP, or leave screenshot upload blank and use the promotional link.
 - [ ] Fill out Anthropic's MCP directory submission form.
 - [ ] Optional: validate and submit the plugin through Claude's plugin form.

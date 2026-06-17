@@ -22,7 +22,8 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
-from src.public_metadata import APP_VERSION, PUBLIC_BASE_URL
+from src.observability import fingerprint, record_usage_event
+from src.public_metadata import APP_VERSION, MAIN_WEBSITE_PRICING_URL, PUBLIC_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def create_authenticated_market_data_mcp(
         instructions=instructions,
         auth=auth_provider,
     )
+    observability_surface = f"{client_label.lower()}_mcp"
 
     def error_payload(error_code: str, message: str, details: str | None = None) -> str:
         return json.dumps(
@@ -111,6 +113,15 @@ def create_authenticated_market_data_mcp(
         return {
             "user_id": status.user_id,
             "email": status.email,
+            "date": status.date,
+            "daily_limit": status.daily_limit,
+            "credits_spent": status.credits_spent,
+            "credits_remaining": status.credits_remaining,
+            "status": status.status,
+        }
+
+    def telemetry_credit_payload(status: CreditStatus) -> dict[str, object]:
+        return {
             "date": status.date,
             "daily_limit": status.daily_limit,
             "credits_spent": status.credits_spent,
@@ -138,8 +149,22 @@ def create_authenticated_market_data_mcp(
         call: Callable[[], Awaitable[T]],
         render: Callable[[T], str],
     ) -> str:
+        record_usage_event(
+            "mcp_tool_call",
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            metadata={"credit_cost": TOOL_COSTS[tool_name]},
+        )
         identity = resolve_identity()
         if identity is None:
+            record_usage_event(
+                "mcp_auth_failed",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                reason="missing_identity",
+            )
             return error_payload(
                 "AUTH_REQUIRED",
                 "Connect with an authenticated Blocksize account to use live market data.",
@@ -155,15 +180,32 @@ def create_authenticated_market_data_mcp(
             subject=subject,
         )
         if not ok:
+            record_usage_event(
+                "mcp_credit_drawdown_failed",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                wallet_hash=fingerprint(identity.user_id),
+                reason="daily_credit_limit_reached",
+                metadata=telemetry_credit_payload(status),
+            )
             return error_payload(
                 "DAILY_CREDIT_LIMIT_REACHED",
                 (
-                    "Daily Blocksize credit limit reached. Credits reset daily. "
-                    f"Upgrade your Blocksize account outside {client_label} to "
-                    "increase this allowance."
+                    "Blocksize starter live-data credits are exhausted for this "
+                    "allowance window. Upgrade outside the connector with x402 "
+                    "payment or prepaid credits to continue production usage."
                 ),
                 json.dumps(credit_payload(status)),
             )
+        record_usage_event(
+            "mcp_credit_drawdown_success",
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            wallet_hash=fingerprint(identity.user_id),
+            metadata=telemetry_credit_payload(status),
+        )
 
         try:
             result = await call()
@@ -174,6 +216,14 @@ def create_authenticated_market_data_mcp(
                 cost,
                 tool_name=tool_name,
                 subject=subject,
+            )
+            record_usage_event(
+                "mcp_tool_error",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                wallet_hash=fingerprint(identity.user_id),
+                reason="blocksize_api_error",
             )
             return error_payload(
                 "BLOCKSIZE_API_ERROR",
@@ -188,6 +238,14 @@ def create_authenticated_market_data_mcp(
                 subject=subject,
             )
             logger.error("Unexpected error in %s(%s): %s", tool_name, subject, e, exc_info=True)
+            record_usage_event(
+                "mcp_tool_error",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                wallet_hash=fingerprint(identity.user_id),
+                reason="internal_error",
+            )
             return error_payload(
                 "INTERNAL_ERROR",
                 f"Error retrieving data for '{subject}'",
@@ -197,7 +255,8 @@ def create_authenticated_market_data_mcp(
         current = entitlements.status(identity.user_id, identity.email)
         return (
             f"{rendered}\n\n"
-            f"Credits remaining today: {current.credits_remaining}/{current.daily_limit}"
+            f"Starter credits remaining: {current.credits_remaining}/{current.daily_limit} "
+            f"(Credits remaining today: {current.credits_remaining}/{current.daily_limit})"
         )
 
     @mcp.tool(
@@ -213,6 +272,13 @@ def create_authenticated_market_data_mcp(
         query: InstrumentSearchQuery,
         asset_class: AssetClassFilter = "all",
     ) -> str:
+        record_usage_event(
+            "mcp_tool_call",
+            surface=observability_surface,
+            tool_name="search_pairs",
+            subject=query,
+            asset_class=asset_class,
+        )
         try:
             client = await get_client()
             pairs = await client.search_pairs(query, asset_class)
@@ -242,6 +308,12 @@ def create_authenticated_market_data_mcp(
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
     async def list_instruments(service: InstrumentService = "vwap") -> str:
+        record_usage_event(
+            "mcp_tool_call",
+            surface=observability_surface,
+            tool_name="list_instruments",
+            subject=service,
+        )
         try:
             client = await get_client()
             if service == "vwap":
@@ -284,17 +356,35 @@ def create_authenticated_market_data_mcp(
     @mcp.tool(
         name="get_credit_balance",
         title="Credit Balance",
-        description="Show the authenticated user's remaining Blocksize daily data credits.",
+        description="Show the authenticated user's remaining Blocksize starter live-data credits.",
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
     async def get_credit_balance() -> str:
+        record_usage_event(
+            "mcp_tool_call",
+            surface=observability_surface,
+            tool_name="get_credit_balance",
+        )
         identity = resolve_identity()
         if identity is None:
+            record_usage_event(
+                "mcp_auth_failed",
+                surface=observability_surface,
+                tool_name="get_credit_balance",
+                reason="missing_identity",
+            )
             return error_payload(
                 "AUTH_REQUIRED",
-                "Connect with an authenticated Blocksize account to view daily credits.",
+                "Connect with an authenticated Blocksize account to view starter credits.",
             )
         status = get_entitlements().status(identity.user_id, identity.email)
+        record_usage_event(
+            "mcp_credit_balance_viewed",
+            surface=observability_surface,
+            tool_name="get_credit_balance",
+            wallet_hash=fingerprint(identity.user_id),
+            metadata=telemetry_credit_payload(status),
+        )
         return json.dumps({"status": "ok", "credits": credit_payload(status)}, indent=2)
 
     @mcp.tool(
@@ -410,15 +500,21 @@ def create_authenticated_market_data_mcp(
                 "name": mcp_name,
                 "version": APP_VERSION,
                 "purpose": f"Read-only market data connector for {client_label}.",
+                "starter_allowance": {
+                    "positioning": "Start with 50 live data credits",
+                    "allowance_credits": get_entitlements().default_daily_credits,
+                    "not_free_forever": True,
+                },
                 "daily_default_credits": get_entitlements().default_daily_credits,
                 "tool_costs": TOOL_COSTS,
                 "subscription_note": (
-                    "Higher daily allowances are managed by Blocksize account "
-                    "entitlements outside this MCP connector."
+                    "After starter credits are exhausted, production usage should "
+                    "move to x402 payment, prepaid credit top-ups, or Blocksize "
+                    "account entitlements outside this MCP connector."
                 ),
                 "links": {
                     "homepage": PUBLIC_BASE_URL,
-                    "subscription": "https://blocksize.info/crypto-market-data/#pricing",
+                    "subscription": MAIN_WEBSITE_PRICING_URL,
                 },
             },
             indent=2,

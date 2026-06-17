@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.entitlement_manager import EntitlementManager, connector_entitlement_manager
 
 
-def test_daily_status_creates_default_allowance(tmp_path):
+def test_starter_status_creates_default_allowance(tmp_path):
     manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=50)
 
     status = manager.status("user-1", "user@example.com", usage_date="2026-04-29")
@@ -14,7 +14,7 @@ def test_daily_status_creates_default_allowance(tmp_path):
     assert status.email == "user@example.com"
 
 
-def test_spend_is_atomic_and_caps_daily_usage(tmp_path):
+def test_spend_is_atomic_and_caps_starter_usage(tmp_path):
     manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=3)
 
     ok, status = manager.spend(
@@ -39,7 +39,7 @@ def test_spend_is_atomic_and_caps_daily_usage(tmp_path):
     assert status.credits_remaining == 1
 
 
-def test_usage_resets_by_day(tmp_path):
+def test_starter_usage_does_not_reset_by_day(tmp_path):
     manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=3)
 
     manager.spend(
@@ -54,7 +54,8 @@ def test_usage_resets_by_day(tmp_path):
     next_day = manager.status("user-1", usage_date="2026-04-30")
 
     assert same_day.credits_remaining == 0
-    assert next_day.credits_remaining == 3
+    assert next_day.credits_remaining == 0
+    assert next_day.credits_spent == 3
 
 
 def test_refund_restores_credits(tmp_path):
