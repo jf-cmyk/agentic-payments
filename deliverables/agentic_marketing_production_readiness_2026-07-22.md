@@ -4,7 +4,8 @@ Date: 2026-07-22
 Production service: `Blocksize-Real-Time-Market-Data-MCP`
 Production URL: `https://mcp.blocksize.info`
 Observed production version: `0.6.2`
-Observed Railway deployment: `0fe773b2-32bf-4dfd-ae19-192af968a7b3` (`SUCCESS`, deployed 2026-06-25)
+Release commit: `9434e02147988c9f287c4a27a50576770bf0d0a3`
+Railway deployment: `86f02bdc-c782-42e6-bc16-b66391420313` (`SUCCESS`, deployed 2026-07-22)
 
 ## Currently live and functioning
 
@@ -14,10 +15,14 @@ Observed Railway deployment: `0fe773b2-32bf-4dfd-ae19-192af968a7b3` (`SUCCESS`, 
 - Starter allowance positioning: 50 live-data credits.
 - Existing crypto VWAP, shared bid/ask/equity, FX, and metals product metadata.
 - Existing `llms.txt`, OpenAPI, manifest, server metadata, prompt examples, support, privacy, and Claude connector documentation.
+- RWA, licensing, and signed-oracle category authority pages.
+- First-price quickstart and machine-readable category claims boundary.
+- Public RWA Coverage and Oracle Lineage evidence indexes in HTML and PDF.
+- RWA coverage, sourcing, daily discovery, rights, and quality APIs.
 
 Production live-price validation on 2026-07-22: `/v1/vwap/btc-usd` returned `200`, a timestamped Blocksize BTCUSD VWAP response, and a correct one-credit starter drawdown with 49/50 credits remaining for the dedicated smoke-test identity.
 
-## Release-qualified and pending production deployment
+## Shipped in this production release
 
 - RWA, licensing, and signed-oracle category authority pages.
 - Machine-readable category claims boundary.
@@ -31,9 +36,9 @@ Production live-price validation on 2026-07-22: `/v1/vwap/btc-usd` returned `200
 - Jira reconciliation/import pack.
 - Hosted post-deployment smoke script.
 
-## Verified production gap
+## Closed production gap
 
-The current production deployment returns `404` for:
+The previous production deployment returned `404` for:
 
 - `/quickstart/first-price`
 - `/rwa-market-data`
@@ -41,11 +46,11 @@ The current production deployment returns `404` for:
 - `/signed-oracle-feeds`
 - `/category-hubs.json`
 
-These features are therefore **release-qualified but not present in the observed production deployment**. The exact reviewed commit will be deployed after the archive verification below passes.
+All five routes now return `200` in production. The evidence HTML/PDF routes and their content assertions also pass.
 
-## Deployment gate
+## Deployment record
 
-Do not run `railway up` from the working directory. The workspace contains unrelated modified and untracked files beyond the release package. Deployment must use a clean archive of the reviewed commit.
+Deployment used a fresh `git archive` of commit `9434e02`; the working directory and its unrelated files were not uploaded.
 
 Completed qualification:
 
@@ -55,13 +60,18 @@ Completed qualification:
 4. Ruff, Python compilation, local hosted smoke checks, and live read-only RWA source checks passed.
 5. Staged secret scan returned no matches.
 
-Remaining release execution:
+Completed release execution:
 
-1. Commit the reviewed package and rerun qualification from a clean archive of that commit.
-2. Push the reviewed branch.
-3. Deploy that exact archive to the Railway production service.
-4. Run `scripts/run_agentic_marketing_smoke_checks.sh https://mcp.blocksize.info`.
-5. Verify the production RWA coverage and read-only sourcing routes, paid Blocksize route, and Railway logs.
+1. Clean-archive qualification passed: 275 tests, Ruff, Python compilation, and hosted smoke checks.
+2. Branch `codex/agentic-marketing-production-readiness` pushed to GitHub. GitLab push was blocked by unavailable HTTPS credentials.
+3. Exact archive deployed to Railway production as deployment `86f02bdc-c782-42e6-bc16-b66391420313`.
+4. Production hosted smoke checks passed for all ten route checks and four content assertions.
+5. Production RWA coverage returned 5,155 candidate rows / 1,959 unique assets; the daily discovery artifact returned 1,163 assets / 3,429 tokens.
+6. A production non-persisting RWA probe returned fresh Hyperliquid AAPL/USDC native L1 bid/ask data with live quality.
+7. The seven-source post-deploy matrix succeeded for six sources, including Ethereum and Base RPC pool state; the Raydium label guard safely rejected a Byreal-routed quote.
+8. Railway logs showed no application errors or 5xx responses. The Blocksize upstream returned `200` at startup.
+
+The post-deploy paid-route attempt returned the correct x402 `402` challenge because the production anti-abuse control rejected a duplicate starter allowance claim from the already-used IP. Before deployment, the paid BTC route had returned a fresh Blocksize response and drawn the dedicated identity from 50 to 49 credits. The complete tests cover successful credit drawdown and payment challenge behavior.
 
 ## Local hosted-style verification
 
