@@ -52,7 +52,7 @@ LiveMarketDataService = Annotated[
     Field(
         description=(
             "Live HTTP data service to prepare: vwap for crypto VWAP, bidask for "
-            "crypto pairs or supported equity tickers, state for AMM state price, "
+            "crypto pairs or supported equity/stock tickers such as AAPL, state for AMM state price, "
             "vwap30m for latest completed 30-minute close, vwap24h for fixed "
             "24-hour VWAP from the stream cache, fx for currency pairs, or metal for metals."
         ),
@@ -63,7 +63,7 @@ LiveMarketDataSymbol = Annotated[
     Field(
         description=(
             "Exact pair or ticker to use in the paid HTTP URL, such as BTC-USD, "
-            "AAPL, EURUSD, or XAUUSD. Use search_pairs first if unsure."
+            "AAPL, MSFT, NVDA, EURUSD, or XAUUSD. Use search_pairs first if unsure."
         ),
         min_length=2,
         max_length=80,
@@ -74,7 +74,7 @@ AssetClassFilter = Annotated[
     Field(
         description=(
             "Optional asset-class filter. Use all for the full catalog, crypto "
-            "for digital assets, equity/equities for supported stock tickers, "
+            "for digital assets, equity/equities for supported stock tickers such as AAPL, "
             "fx for currency pairs, or metal for metals."
         ),
     ),
@@ -84,7 +84,7 @@ InstrumentService = Annotated[
     Field(
         description=(
             "Blocksize service namespace to list: vwap for crypto VWAP pairs, "
-            "bidask for shared bid/ask symbols, fx for FX pairs, or metal for metals."
+            "bidask for shared bid/ask symbols including supported equities, fx for FX pairs, or metal for metals."
         ),
     ),
 ]
@@ -141,8 +141,9 @@ public_mcp = FastMCP(
     name="search_pairs",
     title="Instrument Search",
     description=(
-        "Discover supported symbols before using the paid HTTP API. Returns up to "
-        "50 catalog matches with asset class, available services, and pricing tier; "
+            "Discover supported crypto, equity, FX, and metal symbols before using "
+            "the paid HTTP API. Returns up to 50 catalog matches with asset class, "
+            "available services, and pricing tier; "
         "it is free, read-only, and never returns live prices or starts payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
@@ -207,8 +208,8 @@ async def public_get_pricing_info() -> str:
     name="get_product_catalog",
     title="Product Catalog",
     description=(
-        "Inspect Blocksize raw data and premium agent-native workflow products, "
-        "including starter-credit positioning, credit costs, suggested paid "
+        "Inspect Blocksize raw data, supported equity ticker bid/ask, and premium "
+        "agent-native workflow products, including starter-credit positioning, credit costs, suggested paid "
         "prices, endpoint templates, and upgrade path. This is free and read-only."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,

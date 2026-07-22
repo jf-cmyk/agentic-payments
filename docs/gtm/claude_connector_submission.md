@@ -56,7 +56,7 @@ Blocksize Market Data
 Tagline:
 
 ```text
-Read-only real-time crypto, equity, FX, and metals market data for Claude.
+Read-only real-time crypto, supported equity ticker, FX, and metals market data for Claude.
 ```
 
 Remote MCP URL:

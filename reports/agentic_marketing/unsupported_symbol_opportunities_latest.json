@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-07-22T21:36:40.461200+00:00",
+  "instrumentation_start": "Events accrue only after unsupported_symbol_request instrumentation is deployed.",
+  "privacy_boundary": "Only bounded symbol-like zero-result queries are retained; arbitrary free text is excluded.",
+  "rows": [],
+  "total_requests": 0,
+  "unique_symbol_asset_class_pairs": 0,
+  "window_days": 30
+}

@@ -1,0 +1,241 @@
+{
+  "asset_classes": [
+    {
+      "asset_class": "Equity",
+      "candidate_rows": 583
+    },
+    {
+      "asset_class": "Etf",
+      "candidate_rows": 26
+    },
+    {
+      "asset_class": "Tokenized Fund",
+      "candidate_rows": 71
+    },
+    {
+      "asset_class": "Treasury Fund",
+      "candidate_rows": 29
+    }
+  ],
+  "blockers": [
+    {
+      "affected_feeds": 492,
+      "clear_feeds": 0,
+      "promotion_gate": "Manipulation Concentration",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 486,
+      "clear_feeds": 6,
+      "promotion_gate": "Liquidity Depth Volume",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 442,
+      "clear_feeds": 50,
+      "promotion_gate": "Freshness Cadence",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 442,
+      "clear_feeds": 50,
+      "promotion_gate": "Replayable Payload",
+      "severity": "high"
+    },
+    {
+      "affected_feeds": 127,
+      "clear_feeds": 365,
+      "promotion_gate": "Venue Identifier",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 90,
+      "clear_feeds": 402,
+      "promotion_gate": "Blocksize Benchmark Alignment",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 72,
+      "clear_feeds": 48,
+      "promotion_gate": "Route Or Pool Discovery",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 67,
+      "clear_feeds": 0,
+      "promotion_gate": "Issuer Nav Alignment",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 42,
+      "clear_feeds": 190,
+      "promotion_gate": "Token Or Contract Discovery",
+      "severity": "critical"
+    },
+    {
+      "affected_feeds": 7,
+      "clear_feeds": 0,
+      "promotion_gate": "State Instrument Confirmation",
+      "severity": "critical"
+    }
+  ],
+  "claims_boundary": {
+    "existing_blocksize_coverage": "Existing Blocksize production market-data coverage remains live and is not counted by the expansion promotion metric.",
+    "expansion_catalog": "The RWA expansion catalog contains 1,025 canonical economic assets across 3,407 token-deployment rows.",
+    "zero_promoted_scope": "Zero means no newly sourced third-party or onchain addition has completed every expansion-workflow promotion gate."
+  },
+  "disposition": [
+    {
+      "deployment_rows": 709,
+      "status": "Candidate source lane"
+    },
+    {
+      "deployment_rows": 2698,
+      "status": "Access or adapter required"
+    }
+  ],
+  "generated_at": "2026-07-22T00:00:00Z",
+  "live_source_checks": [
+    {
+      "freshness_ms": 707.3439999999999,
+      "observed_mid": 326.405,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "Hyperliquid /info l2Book",
+      "source_lane": "Venue Api Order Book",
+      "status": "Working point-in-time probe",
+      "symbol": "AAPL/USDC",
+      "tiingo_dependency": "No",
+      "venue": "Hyperliquid Rwa Spot"
+    },
+    {
+      "freshness_ms": 15792.81,
+      "observed_mid": 326.0782,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "https://backend-pricing.eu.gains.trade/charts",
+      "source_lane": "Venue Api Reference Stream",
+      "status": "Working point-in-time probe",
+      "symbol": "AAPL/USD",
+      "tiingo_dependency": "No",
+      "venue": "Gains"
+    },
+    {
+      "freshness_ms": 1183.171,
+      "observed_mid": 4125.63625,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "https://builder.ostium.io/v1/prices",
+      "source_lane": "Venue Api Synthetic Market",
+      "status": "Working point-in-time probe",
+      "symbol": "XAU/USD",
+      "tiingo_dependency": "No",
+      "venue": "Ostium"
+    },
+    {
+      "freshness_ms": 0.034999999999999996,
+      "observed_mid": 326.3396148667574,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "Source-specific blocker",
+      "source_lane": "Solana Router Quote",
+      "status": "Working point-in-time probe",
+      "symbol": "AAPLX/USD",
+      "tiingo_dependency": "No",
+      "venue": "Jupiter Router"
+    },
+    {
+      "freshness_ms": null,
+      "observed_mid": null,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "Source-specific blocker",
+      "source_lane": "Solana Route Filtered Quote",
+      "status": "Blocked safely",
+      "symbol": "AAPLX/USD",
+      "tiingo_dependency": "No",
+      "venue": "Raydium Clmm"
+    },
+    {
+      "freshness_ms": 0.023,
+      "observed_mid": 4115.777698180686,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "EVM JSON-RPC eth_call; block 25591389",
+      "source_lane": "Evm Rpc Pool State",
+      "status": "Working point-in-time probe",
+      "symbol": "PAXG/USDC",
+      "tiingo_dependency": "No",
+      "venue": "Uniswap V3 V4"
+    },
+    {
+      "freshness_ms": 0.019,
+      "observed_mid": 1.1405538804604112,
+      "promotion_status": "Candidate only; not production-promoted",
+      "source_evidence": "EVM JSON-RPC eth_call; block 48985816",
+      "source_lane": "Evm Rpc Pool State",
+      "status": "Working point-in-time probe",
+      "symbol": "EURC/USDC",
+      "tiingo_dependency": "No",
+      "venue": "Aerodrome Slipstream"
+    }
+  ],
+  "metrics": [
+    {
+      "candidate_asset_share": 0.08780487804878048,
+      "candidate_deployment_rows": 709,
+      "candidate_row_share": 0.20810096859407104,
+      "candidate_unique_assets": 90,
+      "canonical_assets": 1025,
+      "deployment_rows": 3407,
+      "expansion_production_promoted": 0,
+      "live_probe_count": 7,
+      "live_probe_success_rate": 0.8571428571428571,
+      "live_probe_successes": 6
+    }
+  ],
+  "venues": [
+    {
+      "candidate_rows": 156,
+      "venue": "Hyperliquid Rwa Spot"
+    },
+    {
+      "candidate_rows": 143,
+      "venue": "Jupiter Router"
+    },
+    {
+      "candidate_rows": 131,
+      "venue": "Aevo"
+    },
+    {
+      "candidate_rows": 99,
+      "venue": "Aster"
+    },
+    {
+      "candidate_rows": 57,
+      "venue": "Ostium"
+    },
+    {
+      "candidate_rows": 55,
+      "venue": "Gains"
+    },
+    {
+      "candidate_rows": 30,
+      "venue": "Uniswap V3 V4"
+    },
+    {
+      "candidate_rows": 25,
+      "venue": "Aerodrome Slipstream"
+    },
+    {
+      "candidate_rows": 5,
+      "venue": "Curve Stableswap"
+    },
+    {
+      "candidate_rows": 4,
+      "venue": "Apex Omni"
+    },
+    {
+      "candidate_rows": 3,
+      "venue": "Hyperliquid Spot"
+    },
+    {
+      "candidate_rows": 1,
+      "venue": "Balancer Pools"
+    }
+  ]
+}

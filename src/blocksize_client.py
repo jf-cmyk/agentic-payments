@@ -483,8 +483,9 @@ class BlocksizeClient:
             item = result
             if "snapshot" in result:
                 items = result["snapshot"]
-                # Find the specific pair in the massive returned list, or default to empty dict
-                item = next((x for x in items if x.get("ticker", "").upper() == pair.upper()), {})
+                item = _find_snapshot_item(items, pair)
+            if not item:
+                raise BlocksizeAPIError(404, f"Bid/ask ticker {pair} not found in master stream")
             
             bid = _first_float(item, ("agg_bid_price", "bid", "bidPrice")) or 0.0
             ask = _first_float(item, ("agg_ask_price", "ask", "askPrice")) or 0.0
@@ -528,7 +529,7 @@ class BlocksizeClient:
             item = result
             if "snapshot" in result:
                 items = result["snapshot"]
-                item = next((x for x in items if x.get("ticker", "").upper() == ticker.upper()), {})
+                item = _find_snapshot_item(items, ticker)
             if not item:
                 raise BlocksizeAPIError(404, f"Equity ticker {ticker} not found in master stream")
                 
@@ -872,6 +873,25 @@ class BlocksizeClient:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _find_snapshot_item(items: Any, ticker: str) -> dict[str, Any]:
+    """Resolve bare equity tickers against upstream USD-suffixed snapshot symbols."""
+    if not isinstance(items, list):
+        return {}
+    clean = _normalize_ticker(ticker)
+    candidates = {clean}
+    if clean.isalpha() and 1 <= len(clean) <= 5 and not clean.endswith("USD"):
+        candidates.add(f"{clean}USD")
+    return next(
+        (
+            item
+            for item in items
+            if isinstance(item, dict)
+            and _normalize_ticker(str(item.get("ticker", ""))) in candidates
+        ),
+        {},
+    )
+
 
 def _parse_timestamp(ts: Any) -> datetime:
     """Parse a timestamp from various formats into a datetime."""

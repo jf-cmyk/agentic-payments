@@ -34,6 +34,7 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
+from src.observability import normalize_symbol_opportunity, record_usage_event
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
@@ -363,7 +364,7 @@ async def get_metal_price(ticker: str) -> str:
 @mcp.tool(
     title="Instrument Search",
     description=(
-        "Use this to discover valid crypto, equity, FX, or metal symbols before "
+        "Use this to discover valid crypto, equity/stock ticker, FX, or metal symbols before "
         "calling paid market data tools. This is free and does not return live prices."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
@@ -393,6 +394,15 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
         )
 
         if not pairs:
+            if (opportunity := normalize_symbol_opportunity(query)) is not None:
+                record_usage_event(
+                    "unsupported_symbol_request",
+                    surface="local_mcp",
+                    tool_name="search_pairs",
+                    subject=opportunity,
+                    asset_class=asset_class,
+                    metadata={"result_count": 0},
+                )
             return f"No instruments found matching '{query}' (class: {asset_class})."
 
         pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
@@ -428,7 +438,7 @@ async def list_instruments(service: str = "vwap") -> str:
     Args:
         service: Service to list. Options:
                  'vwap' — Real-time VWAP crypto pairs
-                 'bidask' — Shared upstream bid/ask instrument namespace
+                 'bidask' — Shared upstream bid/ask instrument namespace, including supported equities
                  'fx' — FX currency pairs derived from the shared bid/ask namespace
                  'metal' — Supported metal tickers exposed by this gateway
                  Default: 'vwap'.

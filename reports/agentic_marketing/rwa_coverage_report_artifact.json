@@ -1,0 +1,567 @@
+{
+  "manifest": {
+    "blocks": [
+      {
+        "body": "# Blocksize RWA Coverage Index\n\nEvidence as of July 22, 2026. This index measures the separate RWA expansion workflow; it does not negate or replace Blocksize's existing live production market-data coverage.",
+        "id": "title",
+        "type": "markdown"
+      },
+      {
+        "body": "## Executive Summary\n\nBlocksize already supplies broad production market data. Separately, the RWA expansion catalog contains **1,025 canonical economic assets** and **3,407 token-deployment rows**. **90 assets (8.8%)** have at least one candidate source lane, while **709 deployment rows (20.8%)** are candidate-sourceable. A July 22 read-only verification returned working data from **6 of 7 representative checks** across venue APIs, a Solana router quote, and Ethereum/Base RPC pool state. The runtime RWA path did **not** use Tiingo. No newly sourced third-party or onchain addition has yet cleared every expansion-workflow promotion gate.",
+        "id": "summary",
+        "type": "markdown"
+      },
+      {
+        "cardIds": [
+          "assets",
+          "candidate_share",
+          "live_probes",
+          "promoted"
+        ],
+        "id": "metrics",
+        "type": "metric-strip"
+      },
+      {
+        "body": "## Working data comes from venue APIs and chain infrastructure\n\nThe representative checks returned current Hyperliquid order-book data, Gains and Ostium venue prices, a Jupiter Solana route quote, and live Ethereum/Base pool state. The Raydium-labeled check was blocked because Jupiter routed through Byreal; that is the intended anti-mislabeling behavior. These RWA runtime checks have no Tiingo dependency.",
+        "id": "live_finding",
+        "type": "markdown"
+      },
+      {
+        "id": "live_table",
+        "tableId": "live_sources",
+        "type": "table"
+      },
+      {
+        "body": "## Key findings\n\nThe largest gap is operational source access and adapter readiness, not catalog breadth. The deployment-row view below preserves a consistent 3,407-row denominator.",
+        "id": "finding1",
+        "type": "markdown"
+      },
+      {
+        "chartId": "disposition",
+        "id": "chart1",
+        "type": "chart"
+      },
+      {
+        "body": "Candidate sourceability is necessary but not sufficient for production. Promotion remains gated by sustained quality windows, manipulation controls, replay evidence, identifiers, benchmark alignment, and issuer/NAV checks. Gate counts overlap and must not be summed.",
+        "id": "finding2",
+        "type": "markdown"
+      },
+      {
+        "chartId": "blockers",
+        "id": "chart2",
+        "type": "chart"
+      },
+      {
+        "body": "Venue concentration shows where adapter and access work can unlock the most deployment rows. It does not imply independent lineage, legal redistribution clearance, or production quality.",
+        "id": "finding3",
+        "type": "markdown"
+      },
+      {
+        "id": "table1",
+        "tableId": "venues",
+        "type": "table"
+      },
+      {
+        "body": "## Recommended next steps\n\n1. Resolve native identifiers and source access for the highest-yield candidate venues.\n2. Run continuous quality windows and persist replayable payload evidence.\n3. Apply manipulation, concentration, and Blocksize benchmark gates before consensus inclusion.\n4. Promote only when every required technical, lineage, issuer, and rights gate passes.",
+        "id": "next",
+        "type": "markdown"
+      },
+      {
+        "body": "## Further questions\n\nWhich candidate venues produce the fastest incremental asset coverage after rights and adapter effort? Which catalog assets are already covered by existing Blocksize products but need a clearer RWA taxonomy mapping?",
+        "id": "questions",
+        "type": "markdown"
+      },
+      {
+        "body": "## Caveats\n\nCatalog assets, ticker strings, token deployments, venue rows, and production feeds are different grains. Candidate-sourceable does not mean licensed, independent, manipulation-resistant, or production-promoted. A point-in-time success does not replace continuous freshness, replay, manipulation, benchmark, consensus, rights, and signoff windows. The zero-promotion statement applies only to new expansion sources.",
+        "id": "caveats",
+        "type": "markdown"
+      }
+    ],
+    "cards": [
+      {
+        "dataset": "metrics",
+        "description": "Expansion catalog denominator.",
+        "id": "assets",
+        "metrics": [
+          {
+            "field": "canonical_assets",
+            "format": "number",
+            "label": "Canonical economic assets"
+          }
+        ],
+        "sourceId": "coverage_reconciliation"
+      },
+      {
+        "dataset": "metrics",
+        "description": "Unique economic assets with at least one candidate source lane.",
+        "id": "candidate_share",
+        "metrics": [
+          {
+            "field": "candidate_asset_share",
+            "format": "percent",
+            "label": "Assets with candidate lane"
+          }
+        ],
+        "sourceId": "sourceability_summary"
+      },
+      {
+        "dataset": "metrics",
+        "description": "New third-party/onchain additions clearing every expansion gate; excludes existing Blocksize production coverage.",
+        "id": "promoted",
+        "metrics": [
+          {
+            "field": "expansion_production_promoted",
+            "format": "number",
+            "label": "New expansion feeds promoted"
+          }
+        ],
+        "sourceId": "mitigation_plan"
+      },
+      {
+        "dataset": "metrics",
+        "description": "Representative source lanes returning usable point-in-time observations on July 22, 2026.",
+        "id": "live_probes",
+        "metrics": [
+          {
+            "field": "live_probe_successes",
+            "format": "number",
+            "label": "Working representative probes"
+          },
+          {
+            "field": "live_probe_count",
+            "format": "number",
+            "label": "of probes run"
+          }
+        ],
+        "sourceId": "live_source_check"
+      }
+    ],
+    "charts": [
+      {
+        "dataset": "disposition",
+        "encodings": {
+          "x": {
+            "field": "status",
+            "label": "Disposition",
+            "type": "nominal"
+          },
+          "y": {
+            "field": "deployment_rows",
+            "label": "Deployment rows",
+            "type": "quantitative"
+          }
+        },
+        "id": "disposition",
+        "layout": "full",
+        "sourceId": "sourceability_summary",
+        "subtitle": "All 3,407 token-deployment rows use one denominator.",
+        "title": "Deployment-row sourceability disposition",
+        "type": "bar",
+        "valueFormat": "number"
+      },
+      {
+        "dataset": "blockers",
+        "encodings": {
+          "x": {
+            "field": "promotion_gate",
+            "label": "Promotion gate",
+            "type": "nominal"
+          },
+          "y": {
+            "field": "affected_feeds",
+            "label": "Affected feeds",
+            "type": "quantitative"
+          }
+        },
+        "id": "blockers",
+        "layout": "full",
+        "sourceId": "mitigation_plan",
+        "subtitle": "Counts overlap because one candidate can fail multiple gates.",
+        "title": "Expansion promotion gates with affected feeds",
+        "type": "bar",
+        "valueFormat": "number"
+      }
+    ],
+    "description": "Expansion-catalog sourceability and production-promotion evidence, explicitly separated from existing Blocksize production coverage.",
+    "generatedAt": "2026-07-22T00:00:00Z",
+    "sources": [
+      {
+        "id": "sourceability_summary",
+        "label": "RWA sourceability summary",
+        "path": "reports/rwa_master_sourceability_source_all_summary_2026-07-16.json"
+      },
+      {
+        "id": "mitigation_plan",
+        "label": "RWA discovery mitigation plan",
+        "path": "reports/rwa_discovery_mitigation_plan.json"
+      },
+      {
+        "id": "coverage_reconciliation",
+        "label": "RWA coverage reconciliation",
+        "path": "reports/rwa_coverage_and_client_usage_reconciliation_2026-07-16.md"
+      },
+      {
+        "id": "live_source_check",
+        "label": "Read-only live RWA source check",
+        "path": "reports/rwa_live_source_readiness_2026-07-22.json"
+      }
+    ],
+    "surface": "report",
+    "tables": [
+      {
+        "columns": [
+          {
+            "field": "venue",
+            "label": "Venue"
+          },
+          {
+            "field": "candidate_rows",
+            "format": "number",
+            "label": "Candidate rows"
+          }
+        ],
+        "dataset": "venues",
+        "defaultSort": {
+          "direction": "desc",
+          "field": "candidate_rows"
+        },
+        "id": "venues",
+        "sourceId": "sourceability_summary",
+        "subtitle": "A deployment row is not the same grain as an economic asset.",
+        "title": "Candidate deployment rows by venue"
+      },
+      {
+        "columns": [
+          {
+            "field": "venue",
+            "label": "Venue"
+          },
+          {
+            "field": "symbol",
+            "label": "Symbol"
+          },
+          {
+            "field": "source_lane",
+            "label": "Source lane"
+          },
+          {
+            "field": "status",
+            "label": "Check result"
+          },
+          {
+            "field": "source_evidence",
+            "label": "Evidence"
+          },
+          {
+            "field": "tiingo_dependency",
+            "label": "Tiingo?"
+          },
+          {
+            "field": "promotion_status",
+            "label": "Promotion"
+          }
+        ],
+        "dataset": "live_source_checks",
+        "defaultSort": {
+          "direction": "asc",
+          "field": "venue"
+        },
+        "id": "live_sources",
+        "sourceId": "live_source_check",
+        "subtitle": "Read-only checks on July 22, 2026; success proves reachable data, not production promotion.",
+        "title": "Representative live source verification"
+      }
+    ],
+    "title": "Blocksize RWA Coverage Index",
+    "version": 1
+  },
+  "snapshot": {
+    "datasets": {
+      "blockers": [
+        {
+          "affected_feeds": 492,
+          "clear_feeds": 0,
+          "promotion_gate": "Manipulation Concentration",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 486,
+          "clear_feeds": 6,
+          "promotion_gate": "Liquidity Depth Volume",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 442,
+          "clear_feeds": 50,
+          "promotion_gate": "Freshness Cadence",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 442,
+          "clear_feeds": 50,
+          "promotion_gate": "Replayable Payload",
+          "severity": "high"
+        },
+        {
+          "affected_feeds": 127,
+          "clear_feeds": 365,
+          "promotion_gate": "Venue Identifier",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 90,
+          "clear_feeds": 402,
+          "promotion_gate": "Blocksize Benchmark Alignment",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 72,
+          "clear_feeds": 48,
+          "promotion_gate": "Route Or Pool Discovery",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 67,
+          "clear_feeds": 0,
+          "promotion_gate": "Issuer Nav Alignment",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 42,
+          "clear_feeds": 190,
+          "promotion_gate": "Token Or Contract Discovery",
+          "severity": "critical"
+        },
+        {
+          "affected_feeds": 7,
+          "clear_feeds": 0,
+          "promotion_gate": "State Instrument Confirmation",
+          "severity": "critical"
+        }
+      ],
+      "disposition": [
+        {
+          "deployment_rows": 709,
+          "status": "Candidate source lane"
+        },
+        {
+          "deployment_rows": 2698,
+          "status": "Access or adapter required"
+        }
+      ],
+      "live_source_checks": [
+        {
+          "freshness_ms": 707.3439999999999,
+          "observed_mid": 326.405,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "Hyperliquid /info l2Book",
+          "source_lane": "Venue Api Order Book",
+          "status": "Working point-in-time probe",
+          "symbol": "AAPL/USDC",
+          "tiingo_dependency": "No",
+          "venue": "Hyperliquid Rwa Spot"
+        },
+        {
+          "freshness_ms": 15792.81,
+          "observed_mid": 326.0782,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "https://backend-pricing.eu.gains.trade/charts",
+          "source_lane": "Venue Api Reference Stream",
+          "status": "Working point-in-time probe",
+          "symbol": "AAPL/USD",
+          "tiingo_dependency": "No",
+          "venue": "Gains"
+        },
+        {
+          "freshness_ms": 1183.171,
+          "observed_mid": 4125.63625,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "https://builder.ostium.io/v1/prices",
+          "source_lane": "Venue Api Synthetic Market",
+          "status": "Working point-in-time probe",
+          "symbol": "XAU/USD",
+          "tiingo_dependency": "No",
+          "venue": "Ostium"
+        },
+        {
+          "freshness_ms": 0.034999999999999996,
+          "observed_mid": 326.3396148667574,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "Source-specific blocker",
+          "source_lane": "Solana Router Quote",
+          "status": "Working point-in-time probe",
+          "symbol": "AAPLX/USD",
+          "tiingo_dependency": "No",
+          "venue": "Jupiter Router"
+        },
+        {
+          "freshness_ms": null,
+          "observed_mid": null,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "Source-specific blocker",
+          "source_lane": "Solana Route Filtered Quote",
+          "status": "Blocked safely",
+          "symbol": "AAPLX/USD",
+          "tiingo_dependency": "No",
+          "venue": "Raydium Clmm"
+        },
+        {
+          "freshness_ms": 0.023,
+          "observed_mid": 4115.777698180686,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "EVM JSON-RPC eth_call; block 25591389",
+          "source_lane": "Evm Rpc Pool State",
+          "status": "Working point-in-time probe",
+          "symbol": "PAXG/USDC",
+          "tiingo_dependency": "No",
+          "venue": "Uniswap V3 V4"
+        },
+        {
+          "freshness_ms": 0.019,
+          "observed_mid": 1.1405538804604112,
+          "promotion_status": "Candidate only; not production-promoted",
+          "source_evidence": "EVM JSON-RPC eth_call; block 48985816",
+          "source_lane": "Evm Rpc Pool State",
+          "status": "Working point-in-time probe",
+          "symbol": "EURC/USDC",
+          "tiingo_dependency": "No",
+          "venue": "Aerodrome Slipstream"
+        }
+      ],
+      "metrics": [
+        {
+          "candidate_asset_share": 0.08780487804878048,
+          "candidate_deployment_rows": 709,
+          "candidate_row_share": 0.20810096859407104,
+          "candidate_unique_assets": 90,
+          "canonical_assets": 1025,
+          "deployment_rows": 3407,
+          "expansion_production_promoted": 0,
+          "live_probe_count": 7,
+          "live_probe_success_rate": 0.8571428571428571,
+          "live_probe_successes": 6
+        }
+      ],
+      "venues": [
+        {
+          "candidate_rows": 156,
+          "venue": "Hyperliquid Rwa Spot"
+        },
+        {
+          "candidate_rows": 143,
+          "venue": "Jupiter Router"
+        },
+        {
+          "candidate_rows": 131,
+          "venue": "Aevo"
+        },
+        {
+          "candidate_rows": 99,
+          "venue": "Aster"
+        },
+        {
+          "candidate_rows": 57,
+          "venue": "Ostium"
+        },
+        {
+          "candidate_rows": 55,
+          "venue": "Gains"
+        },
+        {
+          "candidate_rows": 30,
+          "venue": "Uniswap V3 V4"
+        },
+        {
+          "candidate_rows": 25,
+          "venue": "Aerodrome Slipstream"
+        },
+        {
+          "candidate_rows": 5,
+          "venue": "Curve Stableswap"
+        },
+        {
+          "candidate_rows": 4,
+          "venue": "Apex Omni"
+        },
+        {
+          "candidate_rows": 3,
+          "venue": "Hyperliquid Spot"
+        },
+        {
+          "candidate_rows": 1,
+          "venue": "Balancer Pools"
+        }
+      ]
+    },
+    "generatedAt": "2026-07-22T00:00:00Z",
+    "status": "ready",
+    "version": 1
+  },
+  "sources": [
+    {
+      "id": "sourceability_summary",
+      "label": "RWA sourceability summary",
+      "path": "reports/rwa_master_sourceability_source_all_summary_2026-07-16.json",
+      "query": {
+        "description": "Aggregate sourceability counts by row, asset, venue, and asset class.",
+        "engine": "python",
+        "executed_at": "2026-07-22T00:00:00Z",
+        "filters": {},
+        "language": "python",
+        "sql": "SELECT * FROM sourceability_summary",
+        "tables_used": [
+          "reports/rwa_master_sourceability_source_all_summary_2026-07-16.json"
+        ]
+      }
+    },
+    {
+      "id": "mitigation_plan",
+      "label": "RWA discovery mitigation plan",
+      "path": "reports/rwa_discovery_mitigation_plan.json",
+      "query": {
+        "description": "Promotion-gate issue counts and execution phases.",
+        "engine": "python",
+        "executed_at": "2026-07-22T00:00:00Z",
+        "filters": {},
+        "language": "python",
+        "sql": "SELECT issue_id, affected_feed_count, clear_feed_count, severity FROM mitigation_issues WHERE affected_feed_count > 0 ORDER BY affected_feed_count DESC",
+        "tables_used": [
+          "reports/rwa_discovery_mitigation_plan.json"
+        ]
+      }
+    },
+    {
+      "id": "coverage_reconciliation",
+      "label": "RWA coverage reconciliation",
+      "path": "reports/rwa_coverage_and_client_usage_reconciliation_2026-07-16.md",
+      "query": {
+        "description": "Reconciles the 1,025-asset, 1,150-ticker, and 3,407-deployment grains.",
+        "engine": "python",
+        "executed_at": "2026-07-22T00:00:00Z",
+        "filters": {},
+        "language": "python",
+        "sql": "SELECT canonical_assets, ticker_strings, deployment_rows FROM coverage_reconciliation",
+        "tables_used": [
+          "reports/rwa_coverage_and_client_usage_reconciliation_2026-07-16.md"
+        ]
+      }
+    },
+    {
+      "id": "live_source_check",
+      "label": "Read-only live RWA source check",
+      "path": "reports/rwa_live_source_readiness_2026-07-22.json",
+      "query": {
+        "description": "Representative point-in-time probes across venue API, Solana router, and EVM RPC source lanes.",
+        "engine": "python",
+        "executed_at": "2026-07-22T00:00:00Z",
+        "filters": {},
+        "language": "python",
+        "sql": "SELECT venue, requested_symbol, source_lane, status, observation FROM live_source_readiness_check",
+        "tables_used": [
+          "reports/rwa_live_source_readiness_2026-07-22.json"
+        ]
+      }
+    }
+  ],
+  "surface": "report"
+}

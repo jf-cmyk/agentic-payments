@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get Your First Live Blocksize Price</title>
+  <meta name="description" content="The shortest honest path to a live Blocksize market-data response in Claude, Cursor, or ChatGPT." />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <style>
+    :root { --ink:#111318; --muted:#5c6470; --line:#dfe3e8; --paper:#fff; --soft:#f6f8fb; --blue:#285cdb; --green:#117a52; --amber:#946200; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.6 Inter,system-ui,-apple-system,sans-serif; }
+    main { width:min(980px,calc(100vw - 32px)); margin:auto; padding:54px 0 80px; }
+    h1,h2 { line-height:1.12; letter-spacing:-.025em; }
+    h1 { max-width:760px; margin:.4rem 0 1rem; font-size:clamp(2.25rem,6vw,4rem); }
+    h2 { margin:0 0 .5rem; font-size:1.35rem; }
+    p,li { color:var(--muted); }
+    code,pre { font:14px/1.55 "SFMono-Regular",Consolas,monospace; }
+    pre { overflow:auto; padding:16px; color:#f8fafc; background:#101318; border-radius:10px; }
+    a { color:var(--blue); text-decoration:none; }
+    .eyebrow { color:var(--blue); font-size:.78rem; font-weight:800; text-transform:uppercase; }
+    .lede { max-width:780px; font-size:1.08rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(275px,1fr)); gap:16px; margin-top:30px; }
+    .card { padding:22px; border:1px solid var(--line); border-radius:14px; background:var(--soft); }
+    .status { display:inline-block; margin-bottom:12px; padding:3px 9px; border-radius:999px; font-size:.75rem; font-weight:800; }
+    .live { color:var(--green); background:#e8f6ef; }
+    .split { color:var(--amber); background:#fff3d6; }
+    .note { margin-top:28px; padding:18px 20px; border-left:4px solid var(--blue); background:#f3f6ff; }
+    .steps { margin:0; padding-left:1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="eyebrow">First-price quickstart</span>
+    <h1>Get a live Blocksize price in one short flow.</h1>
+    <p class="lede">Claude and Cursor can call authenticated, read-only live market-data tools. ChatGPT can discover the correct Blocksize endpoint today; the live-price step uses the HTTP API until the public ChatGPT connector exposes live tools.</p>
+
+    <div class="grid">
+      <section class="card">
+        <span class="status live">Live price in connector</span>
+        <h2>Claude</h2>
+        <ol class="steps">
+          <li>Add <code>https://mcp.blocksize.info/anthropic/mcp/</code> as a custom connector.</li>
+          <li>Sign in with Blocksize.</li>
+          <li>Ask: <em>Use Blocksize to get the latest BTC-USD VWAP and include the source timestamp.</em></li>
+        </ol>
+        <p>The successful <code>get_vwap</code> call uses one included data credit and reports the remaining balance.</p>
+      </section>
+
+      <section class="card">
+        <span class="status live">Live price in connector</span>
+        <h2>Cursor</h2>
+        <pre><code>{
+  "mcpServers": {
+    "blocksize-live": {
+      "url": "https://mcp.blocksize.info/cursor/mcp/"
+    }
+  }
+}</code></pre>
+        <p>Complete OAuth, then ask: <em>Use Blocksize get_vwap for BTC-USD and report the source timestamp.</em></p>
+      </section>
+
+      <section class="card">
+        <span class="status split">Discovery + HTTP live price</span>
+        <h2>ChatGPT</h2>
+        <p>Add <code>https://mcp.blocksize.info/mcp/server/</code> for discovery and endpoint construction. For the live response now:</p>
+        <pre><code>curl -sS \
+  -H 'X-AGENT-ID: chatgpt-quickstart-0001' \
+  'https://mcp.blocksize.info/v1/vwap/btc-usd'</code></pre>
+        <p>Eligible new identities start with 50 live-data credits; otherwise the route returns its x402 payment challenge.</p>
+      </section>
+    </div>
+
+    <aside class="note"><strong>Verify the evidence.</strong> A live result should include the instrument, price or VWAP, currency, source timestamp, provider context, and citation or methodology metadata. Discovery output is not a live price.</aside>
+    <p><a href="/claude-connector">Claude connector details</a> · <a href="/quickstart/remote-mcp">Public MCP discovery guide</a> · <a href="/docs">HTTP API reference</a></p>
+  </main>
+</body>
+</html>

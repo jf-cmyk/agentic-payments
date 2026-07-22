@@ -10,8 +10,8 @@ Target registry path:
 
 Current validation status:
 
-- `pay catalog check providers/blocksize/market-data/PAY.md --no-probe` passes.
-- Live probe is blocked until `mcp.blocksize.info` is redeployed with the local x402 challenge compatibility patch in `src/resource_server.py`.
+- `pay catalog check providers/blocksize/market-data/PAY.md --no-probe` passes with 16 endpoints walked.
+- `pay catalog check providers/blocksize/market-data/PAY.md -v --probe-timeout 20` passes against the live service with 16/16 Solana-compatible x402 gates.
 
 Commands used:
 
@@ -21,7 +21,7 @@ pay catalog check providers/blocksize/market-data/PAY.md --no-probe
 pay catalog check providers/blocksize/market-data/PAY.md -v --probe-timeout 20
 ```
 
-The staged OpenAPI is intentionally filtered to four paid market-data example
-routes. The full public Blocksize OpenAPI includes free discovery, docs, MCP,
-and credit-management endpoints that are not the right surface for Pay.sh's
-paid-provider probe.
+The staged OpenAPI is intentionally filtered to paid market-data and agent
+product routes. The full public Blocksize OpenAPI includes free discovery,
+docs, MCP, readiness, and provenance endpoints that are not the right surface
+for Pay.sh's paid-provider probe.

@@ -1,0 +1,1638 @@
+{
+  "as_of": "2026-07-10T21:50:14.565649+00:00",
+  "product": "rwa_solana_token_mint_registry",
+  "quality_policy": {
+    "promotion_status": "candidate_registry; internal issuer/underlying review still required before production promotion",
+    "secret_policy": "API key is used only in the request header and is never persisted",
+    "source": "Jupiter Tokens V2 search"
+  },
+  "summary": {
+    "by_status": {
+      "resolved": 15
+    },
+    "by_venue": {
+      "jupiter_router": 15,
+      "meteora_dlmm": 10,
+      "orca_whirlpool": 7,
+      "raydium_clmm": 8
+    },
+    "errors": 0,
+    "resolved": 15,
+    "token_count": 15,
+    "unresolved": 0,
+    "verified": 13
+  },
+  "tokens": [
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "AAPL"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 108657.79320519278,
+          "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+          "name": "Apple xStock",
+          "organic_score": 54.891311874573375,
+          "symbol": "AAPLx",
+          "tags": [
+            "moonshot-verified",
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2583.1620263465484,
+          "mint": "7qWXrUQ76cUw2ndiXitye4GC1Msx7gp9xzYdC44Wpump",
+          "name": "Apple xStock",
+          "organic_score": 0,
+          "symbol": "AAPLx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2561.4560914218246,
+          "mint": "DPCYirBUmMppieFQjfXeBoMMpFquZsi5dpXTpnWrpump",
+          "name": "AAPLx",
+          "organic_score": 0,
+          "symbol": "AAPLx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2432.5227395725738,
+          "mint": "5yuuTVW4eJZoXXbVKt53AiiYtyTpQB1TYYAzkSbcjtpJ",
+          "name": "Apple",
+          "organic_score": 0,
+          "symbol": "AAPLX",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 3.4425746387118963,
+          "mint": "GQfQ2avnmJBMttz2D5nyDkQAY9rWLHGvDVq8BMRpxWh4",
+          "name": "Apple tokenized  (xStock)",
+          "organic_score": 0,
+          "symbol": "AAPLX",
+          "tags": [
+            "unknown"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-27T14:21:12Z",
+        "id": "CKwJZwm7oj3nu4653N1EpDrqXbXAYXoPFiPeEnLouF8y"
+      },
+      "holder_count": 13541,
+      "is_verified": true,
+      "liquidity": 108657.79320519278,
+      "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "name": "Apple xStock",
+      "organic_score": 54.891311874573375,
+      "organic_score_label": "medium",
+      "query_symbol": "AAPLx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "AAPLx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "AAPLx",
+      "tags": [
+        "moonshot-verified",
+        "token-2022",
+        "verified",
+        "xstocks",
+        "stocks",
+        "rwa"
+      ],
+      "token_key": "AAPLX",
+      "updated_at": "2026-07-10T21:49:53.490967342Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "AMZN"
+      ],
+      "candidate_count": 11,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 157053.53064168675,
+          "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+          "name": "Amazon xStock",
+          "organic_score": 47.94125848390732,
+          "symbol": "AMZNx",
+          "tags": [
+            "xstocks",
+            "stocks",
+            "rwa",
+            "moonshot-verified",
+            "token-2022",
+            "verified"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2212.119106921259,
+          "mint": "BffET47mdc6P5twYLGsdGxi99f9Rpw1KsP6SagXopump",
+          "name": "AMAZONx (pumpstock)",
+          "organic_score": 0,
+          "symbol": "AMZNx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 1858.7932392576283,
+          "mint": "G5gLGpQCRzxAYxTytU1AkxihkbpHivxuvwf19FqVpump",
+          "name": "Amazon xStock",
+          "organic_score": 0,
+          "symbol": "AMZNx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 5.397921806754063,
+          "mint": "Fr4VPMoAgCPyEtzFAficBggbBz4SnjAbbh5oRXpiYKBR",
+          "name": "Amazon tokenized  (xStock)",
+          "organic_score": 0,
+          "symbol": "AMZNX",
+          "tags": [
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 5.478426350922994e-07,
+          "mint": "6DwUifrSjGL2QPppRZVkyJpKqJnANxWrJmoPh51agVXg",
+          "name": "yoA2CoHk6HRNtFuTP1kVt5xkcvG7mr5raQ5zuNxpump",
+          "organic_score": 0,
+          "symbol": "Islands",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-07-01T23:25:46Z",
+        "id": "6m5aXAve4uh6Kt4ytKyCLWNMjd8PYP5vujwNCtycrUiD"
+      },
+      "holder_count": 5679,
+      "is_verified": true,
+      "liquidity": 157053.53064168675,
+      "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+      "name": "Amazon xStock",
+      "organic_score": 47.94125848390732,
+      "organic_score_label": "medium",
+      "query_symbol": "AMZNx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "AMZNx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "AMZNx",
+      "tags": [
+        "xstocks",
+        "stocks",
+        "rwa",
+        "moonshot-verified",
+        "token-2022",
+        "verified"
+      ],
+      "token_key": "AMZNX",
+      "updated_at": "2026-07-10T21:49:53.818245052Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "fx"
+      ],
+      "asset_ids": [
+        "EURC"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 594720.1869711047,
+          "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "name": "EURC",
+          "organic_score": 71.7060194798183,
+          "symbol": "EURC",
+          "tags": [
+            "stable",
+            "community",
+            "strict",
+            "verified"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2759.4995452922667,
+          "mint": "3mJR9CGJV6bGqqZdMnDg3uR1tZxxqGEkYaiYdpZ1pump",
+          "name": "Chocolate Euro",
+          "organic_score": 0,
+          "symbol": "EURC",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2756.4954679194298,
+          "mint": "J8JUjcfqSdQ5G2xwaHMZtdcqaMUcm87f6cH4FNeopump",
+          "name": "Chocolate Euro",
+          "organic_score": 0,
+          "symbol": "EURC",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2756.486357264576,
+          "mint": "3wPjUuc6pUQijzXaeAsckuyd3w7YS9tHtQkESPt3pump",
+          "name": "Chocolate Euro",
+          "organic_score": 0,
+          "symbol": "EURC",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2755.6124079755646,
+          "mint": "3joVAhKdQxg39Qd5bP5si2aFmeQsRD74JohZkbU7pump",
+          "name": "Chocolate Euro",
+          "organic_score": 0,
+          "symbol": "EURC",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        }
+      ],
+      "decimals": 6,
+      "first_pool": {
+        "createdAt": "2023-12-15T21:32:07Z",
+        "id": "5x91Aaegvx1JmW7g8gDfWqwb6kPF7CdNunqNoYCdLjk1"
+      },
+      "holder_count": 53951,
+      "is_verified": true,
+      "liquidity": 594720.1869711047,
+      "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+      "name": "EURC",
+      "organic_score": 71.7060194798183,
+      "organic_score_label": "medium",
+      "query_symbol": "EURC",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "EURC/USDC"
+      ],
+      "status": "resolved",
+      "symbol": "EURC",
+      "tags": [
+        "stable",
+        "community",
+        "strict",
+        "verified"
+      ],
+      "token_key": "EURC",
+      "updated_at": "2026-07-10T21:50:01.15854599Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "META"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 140174.93322651729,
+          "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+          "name": "Meta xStock",
+          "organic_score": 58.10578350683697,
+          "symbol": "METAx",
+          "tags": [
+            "rwa",
+            "moonshot-verified",
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2583.6623318655174,
+          "mint": "D3DMLZ4M8LM6B9zBGC68Lbv9fQLNdd4uCeA52AYJpump",
+          "name": "Meta xStock",
+          "organic_score": 0,
+          "symbol": "METAx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2558.3590941466796,
+          "mint": "BUSyrUa8kud7Sf41qQNFfVqRwojGQErZA9MqQgxUpump",
+          "name": "MetaX",
+          "organic_score": 0,
+          "symbol": "METAX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2.795454223996912,
+          "mint": "7Wgv1fEZixmndcxKTF4sHs16JSL2TTd5fWQSMLTPaNgn",
+          "name": "Meta tokenized (xStock)",
+          "organic_score": 0,
+          "symbol": "METAX",
+          "tags": [
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": null,
+          "mint": "BRDDXwmwN7q5EAFCheSS9G6vkgynwLQ3732mPKvYpump",
+          "name": "METAx",
+          "organic_score": 0,
+          "symbol": "METAx",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-29T14:42:21Z",
+        "id": "DCvt3iPeUsDE4u6kMT5qJmeZXAyJvKmAC1zQM2wA26EL"
+      },
+      "holder_count": 5177,
+      "is_verified": true,
+      "liquidity": 140174.93322651729,
+      "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+      "name": "Meta xStock",
+      "organic_score": 58.10578350683697,
+      "organic_score_label": "medium",
+      "query_symbol": "METAx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "METAx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "METAx",
+      "tags": [
+        "rwa",
+        "moonshot-verified",
+        "token-2022",
+        "verified",
+        "xstocks",
+        "stocks"
+      ],
+      "token_key": "METAX",
+      "updated_at": "2026-07-10T21:49:53.168190743Z",
+      "venues": [
+        "jupiter_router"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "MSFT"
+      ],
+      "candidate_count": 17,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 85494.09694204183,
+          "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+          "name": "Microsoft xStock",
+          "organic_score": 0,
+          "symbol": "MSFTx",
+          "tags": [
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2829.4809400848253,
+          "mint": "GUkB3JjYWLtDK8g7KxF7G4LqFv2BaqdrdVbLpkxdpump",
+          "name": "NoMoneyLotsofTaxesNoMoneyToParty",
+          "organic_score": 0,
+          "symbol": "NMLTNMTP",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2211.5015643902557,
+          "mint": "2bXsTjKrYXxEQ3ayJrfWuLkL8UXdgAPxT2G3Q457pV5Y",
+          "name": "twice as much as FTX stole!",
+          "organic_score": 0,
+          "symbol": "XIAOWEI",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2211.5015640954052,
+          "mint": "926oQRMqCdH9PSb46ZH3rtWR6BAovHCu7g1GtDmV91kW",
+          "name": "twice as much as FTX stole!",
+          "organic_score": 0,
+          "symbol": "XIAOWEI",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2211.5015640954052,
+          "mint": "AN45M2FFUevaYzkQgS2JefRyh4kRURL9VyTYUUNuHdfy",
+          "name": "twice as much as FTX stole!",
+          "organic_score": 0,
+          "symbol": "XIAOWEI",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-09-29T12:26:32Z",
+        "id": "CLu4kFM4nb67xrdN7vJnMxXXir8Z5hA4HJUzPFccXjsL"
+      },
+      "holder_count": 3986,
+      "is_verified": true,
+      "liquidity": 85494.09694204183,
+      "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+      "name": "Microsoft xStock",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "MSFTx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "MSFTx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "MSFTx",
+      "tags": [
+        "token-2022",
+        "verified",
+        "xstocks",
+        "stocks",
+        "rwa"
+      ],
+      "token_key": "MSFTX",
+      "updated_at": "2026-07-10T21:49:53.818361189Z",
+      "venues": [
+        "jupiter_router"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "NVDA"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 2077285.3751846629,
+          "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+          "name": "NVIDIA xStock",
+          "organic_score": 74.18154370152412,
+          "symbol": "NVDAx",
+          "tags": [
+            "moonshot-verified",
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2822.7331941016937,
+          "mint": "x9ZwuBraPzfAvGsDpKZ83a3x7fXEKHm3Q5DMYZypump",
+          "name": "Nvidia Token",
+          "organic_score": 0,
+          "symbol": "NVDAX",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2657.159287747466,
+          "mint": "TpPUxNqk1EdHMptm9rioex39j4dAoEPwvezqh8Cpump",
+          "name": "NVIDIA xStock",
+          "organic_score": 0,
+          "symbol": "NVDAX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2518.8881601989287,
+          "mint": "GAs45EcCDSPA8pEqmyRZJq6eqWxcrmkUZUoJMdhMpump",
+          "name": "NVDAx",
+          "organic_score": 0,
+          "symbol": "NVDAX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2460.563446200911,
+          "mint": "6dXdHYvzx3Zrg2jr7Cj5oCotTPwY4wGQThTWKDJepump",
+          "name": "NVDAx",
+          "organic_score": 0,
+          "symbol": "NVDAx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-27T10:14:51Z",
+        "id": "GH5Jo3dRwkg6bYZcC7oPPrVRFu7KexBL7ncdgqVqGtnz"
+      },
+      "holder_count": 61061,
+      "is_verified": true,
+      "liquidity": 2077285.3751846629,
+      "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      "name": "NVIDIA xStock",
+      "organic_score": 74.18154370152412,
+      "organic_score_label": "medium",
+      "query_symbol": "NVDAx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "NVDAx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "NVDAx",
+      "tags": [
+        "moonshot-verified",
+        "token-2022",
+        "verified",
+        "xstocks",
+        "stocks",
+        "rwa"
+      ],
+      "token_key": "NVDAX",
+      "updated_at": "2026-07-10T21:49:54.950256808Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_ids": [
+        "OUSG"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": false,
+          "liquidity": null,
+          "mint": "9VgfD1e4A2Kn6BozwCMMinDPbQV8cz5NiQ7by7Mtpump",
+          "name": "OUSG",
+          "organic_score": 0,
+          "symbol": "OUSG",
+          "tags": [
+            "launchpad",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 4081.687318526746,
+          "mint": "XvxnVLYbW3J3wKCPfZX4kSVUH1ka4XcsWaTmSy4pump",
+          "name": "OUSG",
+          "organic_score": 0,
+          "symbol": "$ousg",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2713.956488096765,
+          "mint": "7P2xxYZPMQf7T8wq7C1iXkpW4D51XVP6qiQehvNjpump",
+          "name": "Some of us gonna make it",
+          "organic_score": 0,
+          "symbol": "Sugmi",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2607.3511349576597,
+          "mint": "ZtzYw56LVjdvjisXTfM56qDS6wumhvJVLqeh99Epump",
+          "name": "Some of us gotta make it",
+          "organic_score": 0,
+          "symbol": "SUGMI",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2547.46673254826,
+          "mint": "EK26ZZYXkZY8KULYtmRRQi3kEiqxtHYsabGiJvgKpump",
+          "name": "mstr of us gov",
+          "organic_score": 0,
+          "symbol": "insanegenny",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 6,
+      "first_pool": {
+        "createdAt": "2025-02-12T15:18:53Z",
+        "id": "9VgfD1e4A2Kn6BozwCMMinDPbQV8cz5NiQ7by7Mtpump"
+      },
+      "holder_count": null,
+      "is_verified": false,
+      "liquidity": null,
+      "mint": "9VgfD1e4A2Kn6BozwCMMinDPbQV8cz5NiQ7by7Mtpump",
+      "name": "OUSG",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "OUSG",
+      "review_status": "not_tradable",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "OUSG/USDC"
+      ],
+      "status": "resolved",
+      "symbol": "OUSG",
+      "tags": [
+        "launchpad",
+        "unknown"
+      ],
+      "token_key": "OUSG",
+      "updated_at": "2026-07-09T21:13:14.739728051Z",
+      "venues": [
+        "jupiter_router"
+      ]
+    },
+    {
+      "asset_classes": [
+        "etf"
+      ],
+      "asset_ids": [
+        "QQQ"
+      ],
+      "candidate_count": 10,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 2007665.1198234668,
+          "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+          "name": "Nasdaq xStock",
+          "organic_score": 58.59114473842226,
+          "symbol": "QQQx",
+          "tags": [
+            "moonshot-verified",
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2563.2284982974647,
+          "mint": "7PxD8JuBVTLxz2jUDAQSYFKr4bqaBTj5cG5rwBCXpump",
+          "name": "Nasdaq xStock",
+          "organic_score": 0,
+          "symbol": "QQQx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 10.485323970778698,
+          "mint": "AAmDPyYbvXkqCX8CBRR7w1m2XiGMcTuV9BRdL7miMJyM",
+          "name": "Nasdaq tokenized ETF",
+          "organic_score": 0,
+          "symbol": "QQQX",
+          "tags": [
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": true,
+          "liquidity": 965.2040174118761,
+          "mint": "XsjQP3iMAaQ3kQScQKthQpx9ALRbjKAjQtHg6TFomoc",
+          "name": "TQQQ xStock",
+          "organic_score": 0,
+          "symbol": "TQQQx",
+          "tags": [
+            "token-2022",
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2475.121288528271,
+          "mint": "FEaM9Pj1T95BqficUrZm9EaXx7fR8sbgBMLgggR4pump",
+          "name": "SPCXBANK QQQX",
+          "organic_score": 0,
+          "symbol": "SPCXBANK",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-29T14:50:24Z",
+        "id": "EibwWLHyuFeqgU6fvi6g5FtDLF9kQsQL5HQXvcJNkDN8"
+      },
+      "holder_count": 8618,
+      "is_verified": true,
+      "liquidity": 2007665.1198234668,
+      "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      "name": "Nasdaq xStock",
+      "organic_score": 58.59114473842226,
+      "organic_score_label": "medium",
+      "query_symbol": "QQQx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "QQQx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "QQQx",
+      "tags": [
+        "moonshot-verified",
+        "token-2022",
+        "verified",
+        "xstocks",
+        "stocks",
+        "rwa"
+      ],
+      "token_key": "QQQX",
+      "updated_at": "2026-07-10T21:50:05.966012997Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "etf"
+      ],
+      "asset_ids": [
+        "SGOV"
+      ],
+      "candidate_count": 12,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 1.2973267461262885,
+          "mint": "XsYD72ntjj7ZwoFDZCDmN2gamTcLpnywqvG7PQN5vCN",
+          "name": "iShares 0-3 Month Treasury Bond ETF xStock",
+          "organic_score": 0,
+          "symbol": "SGOVx",
+          "tags": [
+            "stocks",
+            "rwa",
+            "xstocks",
+            "token-2022",
+            "verified"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2894.1287128543177,
+          "mint": "ESk2YAdpPYHZ5ozC54F6W4FCPEV7KBEHL2tuBRVqpump",
+          "name": "MOMS.GOV",
+          "organic_score": 0,
+          "symbol": "MOMSGOVXVZS5U",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2473.9768366948797,
+          "mint": "AYvWzynZmUDie2aai66wMZjkXmGj23HByVXd8hAMpump",
+          "name": "CommunistOfficeGovExtraction",
+          "organic_score": 0,
+          "symbol": "COGE",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2471.7786099150835,
+          "mint": "m9WvJZE8uA2BbvmrnWw8X3c8FQrFmYsB3F7q5SSpump",
+          "name": "CommunistOfficeGovExtraction",
+          "organic_score": 0,
+          "symbol": "COGE",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2470.811505142755,
+          "mint": "BxNWhxcqQfEULhWp8CcFit4Uo5ytRZbiNNp7At9Ypump",
+          "name": "CommunistOfficeGovExtraction",
+          "organic_score": 0,
+          "symbol": "COGE",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2026-05-26T13:29:43Z",
+        "id": "5Th52E1VPP7FAQQXnpV4Jz6cYPXqQVWg3aL2983QCS1v"
+      },
+      "holder_count": 17,
+      "is_verified": true,
+      "liquidity": 1.2973267461262885,
+      "mint": "XsYD72ntjj7ZwoFDZCDmN2gamTcLpnywqvG7PQN5vCN",
+      "name": "iShares 0-3 Month Treasury Bond ETF xStock",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "SGOVx",
+      "review_status": "not_tradable",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "SGOVx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "SGOVx",
+      "tags": [
+        "stocks",
+        "rwa",
+        "xstocks",
+        "token-2022",
+        "verified"
+      ],
+      "token_key": "SGOVX",
+      "updated_at": "2026-07-10T21:49:52.76519351Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "etf"
+      ],
+      "asset_ids": [
+        "SPY"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 2659584.8099112376,
+          "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+          "name": "SP500 xStock",
+          "organic_score": 75,
+          "symbol": "SPYx",
+          "tags": [
+            "verified",
+            "xstocks",
+            "stocks",
+            "rwa",
+            "moonshot-verified",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2662.2747041863327,
+          "mint": "bjdrdzfWd7Qzy7CboU7HtyoFAUg7dUx4voghE8tpump",
+          "name": "SPYx",
+          "organic_score": 0,
+          "symbol": "SPYx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2533.2697157497537,
+          "mint": "Bk1qtFPirbx49rPW4gS3ayw3mbyAVaauYNSr2Wj2TB7d",
+          "name": "SPYx",
+          "organic_score": 0,
+          "symbol": "SPYX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2519.110310353858,
+          "mint": "7o3S3QxW1tGdpce7PW2pcDnaCrRNV9sZWpqNdMdxpump",
+          "name": "SP500 xStock",
+          "organic_score": 0,
+          "symbol": "SPYx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2515.737232990068,
+          "mint": "HrgkAPUJf5uodKq4HYa4tjp12qG3x6iSnPUkjAafpump",
+          "name": "SP500 xStock",
+          "organic_score": 0,
+          "symbol": "SPYx",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-27T12:59:37Z",
+        "id": "7sHMnvE7WqP7vQFWJGEnMT4vZg6Za9K7PpddDoXJCqME"
+      },
+      "holder_count": 24990,
+      "is_verified": true,
+      "liquidity": 2659584.8099112376,
+      "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "name": "SP500 xStock",
+      "organic_score": 75,
+      "organic_score_label": "medium",
+      "query_symbol": "SPYx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "SPYx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "SPYx",
+      "tags": [
+        "verified",
+        "xstocks",
+        "stocks",
+        "rwa",
+        "moonshot-verified",
+        "token-2022"
+      ],
+      "token_key": "SPYX",
+      "updated_at": "2026-07-10T21:50:02.919102267Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "etf"
+      ],
+      "asset_ids": [
+        "TBLL"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": null,
+          "mint": "XsqBC5tcVQLYt8wqGCHRnAUUecbRYXoJCReD6w7QEKp",
+          "name": "TBLL xStock",
+          "organic_score": 0,
+          "symbol": "TBLLx",
+          "tags": [
+            "verified",
+            "stocks",
+            "rwa",
+            "xstocks",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2842.441815897776,
+          "mint": "3NHDuK9HzfPoRP3C88wu4nAVLJW4ZDKxRCyRzoinpump",
+          "name": "Football X",
+          "organic_score": 0,
+          "symbol": "FT",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2837.0792099727987,
+          "mint": "CRB8TymnVMJLXVZarqq6KH6gBh3ABJCgBsqumMsXpump",
+          "name": "Football X",
+          "organic_score": 0,
+          "symbol": "FX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2758.5188378167077,
+          "mint": "5D768CeYBFfwymXqt3sMWMxz4wkaxdbhPD94ymyDpump",
+          "name": "Football X",
+          "organic_score": 0,
+          "symbol": "Football X",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2755.3150763348117,
+          "mint": "HoAFLftB7ZY2Mf7fwmQPH1nnZdWmpc2euYXwAQSkpump",
+          "name": "Football X",
+          "organic_score": 0,
+          "symbol": "FX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2026-05-26T13:33:20Z",
+        "id": "CLiDajATGaiNwWrVserAwSdNfdCqd9bWG8Som6reZwz7"
+      },
+      "holder_count": 10,
+      "is_verified": true,
+      "liquidity": null,
+      "mint": "XsqBC5tcVQLYt8wqGCHRnAUUecbRYXoJCReD6w7QEKp",
+      "name": "TBLL xStock",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "TBLLx",
+      "review_status": "not_tradable",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "TBLLx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "TBLLx",
+      "tags": [
+        "verified",
+        "stocks",
+        "rwa",
+        "xstocks",
+        "token-2022"
+      ],
+      "token_key": "TBLLX",
+      "updated_at": "2026-07-10T21:49:52.565336835Z",
+      "venues": [
+        "jupiter_router"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity"
+      ],
+      "asset_ids": [
+        "TSLA"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 1898572.8531534541,
+          "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+          "name": "Tesla xStock",
+          "organic_score": 69.60303661565827,
+          "symbol": "TSLAx",
+          "tags": [
+            "stocks",
+            "rwa",
+            "moonshot-verified",
+            "token-2022",
+            "verified",
+            "xstocks"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2631.5714273660733,
+          "mint": "2w2FLr6VEYvpXCyrpT2n3vUnhhmdpCrgZecvLXbipump",
+          "name": "Tesla xStock",
+          "organic_score": 0,
+          "symbol": "TSLAx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2543.978751772801,
+          "mint": "HtYx9YZsqPnm3UDD3ruxy7QLzPJ4knn4sESu1tQhpump",
+          "name": "Tesla xStock",
+          "organic_score": 0,
+          "symbol": "TSLAx",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2540.493677685566,
+          "mint": "64izgQRQTuSRfrzirmSD9aoeTaxm9Ls3n8hRXAL2pump",
+          "name": "Tesla xStock",
+          "organic_score": 0,
+          "symbol": "TSLAX",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2512.6262786283946,
+          "mint": "91t3wuew99QX6Q5nBkoG5zwkqnbD4mvyZzpb2gGvpump",
+          "name": "TSLAX",
+          "organic_score": 0,
+          "symbol": "TSLAX",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 8,
+      "first_pool": {
+        "createdAt": "2025-06-27T12:56:29Z",
+        "id": "HHQUnUbmWLrYzkscDY1C3deEFbGtiGBGoHjpANogmvum"
+      },
+      "holder_count": 26641,
+      "is_verified": true,
+      "liquidity": 1898572.8531534541,
+      "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "name": "Tesla xStock",
+      "organic_score": 69.60303661565827,
+      "organic_score_label": "medium",
+      "query_symbol": "TSLAx",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "TSLAx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "TSLAx",
+      "tags": [
+        "stocks",
+        "rwa",
+        "moonshot-verified",
+        "token-2022",
+        "verified",
+        "xstocks"
+      ],
+      "token_key": "TSLAX",
+      "updated_at": "2026-07-10T21:50:04.574210353Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "equity",
+        "etf",
+        "fx",
+        "treasury_fund"
+      ],
+      "asset_ids": [
+        "USDC"
+      ],
+      "candidate_count": 1,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": null,
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "name": "USDC",
+          "organic_score": null,
+          "symbol": "USDC",
+          "tags": []
+        }
+      ],
+      "decimals": 6,
+      "first_pool": null,
+      "holder_count": null,
+      "is_verified": true,
+      "liquidity": null,
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "name": "USDC",
+      "organic_score": null,
+      "organic_score_label": null,
+      "query_symbol": "USDC",
+      "review_status": "default_verified_quote_token",
+      "roles": [
+        "quote"
+      ],
+      "source": "jupiter_docs_example",
+      "source_symbols": [
+        "AAPLx/USD",
+        "AMZNx/USD",
+        "EURC/USDC",
+        "METAx/USD",
+        "MSFTx/USD",
+        "NVDAx/USD",
+        "OUSG/USDC",
+        "QQQx/USD",
+        "SGOVx/USD",
+        "SPYx/USD",
+        "TBLLx/USD",
+        "TSLAx/USD",
+        "USDY/USDC",
+        "VOOx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "USDC",
+      "tags": [],
+      "token_key": "USDC",
+      "updated_at": null,
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "orca_whirlpool",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_ids": [
+        "USDY"
+      ],
+      "candidate_count": 20,
+      "candidate_mints": [
+        {
+          "is_verified": true,
+          "liquidity": 2173933.904432483,
+          "mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+          "name": "Ondo US Dollar Yield",
+          "organic_score": 0,
+          "symbol": "USDY",
+          "tags": [
+            "community",
+            "strict",
+            "verified",
+            "yb",
+            "yield"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2531.281734087719,
+          "mint": "FhLnAVzaAkddAHJ7MRQKmPcbLp2FwtftvZoL8mJopump",
+          "name": "Ondo U.S. Dollar Yield.",
+          "organic_score": 0,
+          "symbol": "USDY",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2528.8972264654954,
+          "mint": "EydaNqqxDq3LGTYX8qkN8H1yNck6HyboidHYJp2Vpump",
+          "name": "Ondo U.S. Dollar Yield.",
+          "organic_score": 0,
+          "symbol": "USDY",
+          "tags": [
+            "token-2022",
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 2197.2219642692753,
+          "mint": "2VFSijQ6Kn1UBMfMWt9TiRjHtiVx6ZvCUMzmkkmUpump",
+          "name": "Ondo US Dollar Yield",
+          "organic_score": 0,
+          "symbol": "USDY",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 29.997069473068105,
+          "mint": "8Fy64ayoxnPst7vfHLZvPzZ6rx5emoewEPs3MwLapump",
+          "name": "USDY",
+          "organic_score": 0,
+          "symbol": "USDY",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        }
+      ],
+      "decimals": 6,
+      "first_pool": {
+        "createdAt": "2024-06-10T06:01:33.658Z",
+        "id": "4dLtt8WQEjkZCiRrNJA5XRqqDBsoymdBxN54dz7pbDie"
+      },
+      "holder_count": 7502,
+      "is_verified": true,
+      "liquidity": 2173933.904432483,
+      "mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+      "name": "Ondo US Dollar Yield",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "USDY",
+      "review_status": "jupiter_verified_needs_internal_review",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "USDY/USDC"
+      ],
+      "status": "resolved",
+      "symbol": "USDY",
+      "tags": [
+        "community",
+        "strict",
+        "verified",
+        "yb",
+        "yield"
+      ],
+      "token_key": "USDY",
+      "updated_at": "2026-07-10T21:22:42.635088365Z",
+      "venues": [
+        "jupiter_router",
+        "meteora_dlmm",
+        "raydium_clmm"
+      ]
+    },
+    {
+      "asset_classes": [
+        "etf"
+      ],
+      "asset_ids": [
+        "VOO"
+      ],
+      "candidate_count": 7,
+      "candidate_mints": [
+        {
+          "is_verified": false,
+          "liquidity": 2616.5823809205313,
+          "mint": "H3sU4sKMXDK1Z8qE6A5ChyeC9VcHGQsDjfZS6YbLpump",
+          "name": "ShellChevronOxyPetronasExxon",
+          "organic_score": 0,
+          "symbol": "SCOPE",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": 1.0940981194195988e-06,
+          "mint": "2fkaVpHMfCggyX8NGHozzVp1LL9wEbTGWwWp1Zo7kme5",
+          "name": "BJyqZdnN8ymSVwKmWSFPpUb4mpoXoxzwmgv8rf6bajje",
+          "organic_score": 0,
+          "symbol": "CHONKERS",
+          "tags": [
+            "unknown",
+            "token-2022"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": null,
+          "mint": "2wJPQLrDdpbxmqVpyg4z4WWjtphYveSRaVeDLKCopump",
+          "name": "Davoo Xeneize",
+          "organic_score": 0,
+          "symbol": "DAVOO",
+          "tags": [
+            "unknown"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": null,
+          "mint": "6HfKijmTRMxjHB6krgpCP85X2zbvactj71sZ6BVUpump",
+          "name": "virus-0xx0o0ox0x0oxx00x00ox0x0xo",
+          "organic_score": 0,
+          "symbol": "0xx0o0ox0x",
+          "tags": [
+            "unknown",
+            "launchpad"
+          ]
+        },
+        {
+          "is_verified": false,
+          "liquidity": null,
+          "mint": "9vqjjwLofNsFHkepWVbBVKdDUyn7H5H3mb1JMCdepump",
+          "name": "VOROX",
+          "organic_score": 0,
+          "symbol": "VOROX",
+          "tags": [
+            "unknown",
+            "launchpad"
+          ]
+        }
+      ],
+      "decimals": 6,
+      "first_pool": {
+        "createdAt": "2026-03-09T14:06:38Z",
+        "id": "H3sU4sKMXDK1Z8qE6A5ChyeC9VcHGQsDjfZS6YbLpump"
+      },
+      "holder_count": 4,
+      "is_verified": false,
+      "liquidity": 2616.5823809205313,
+      "mint": "H3sU4sKMXDK1Z8qE6A5ChyeC9VcHGQsDjfZS6YbLpump",
+      "name": "ShellChevronOxyPetronasExxon",
+      "organic_score": 0,
+      "organic_score_label": "low",
+      "query_symbol": "VOOx",
+      "review_status": "not_tradable",
+      "roles": [
+        "base"
+      ],
+      "source": "jupiter_tokens_v2_search",
+      "source_symbols": [
+        "VOOx/USD"
+      ],
+      "status": "resolved",
+      "symbol": "SCOPE",
+      "tags": [
+        "unknown",
+        "token-2022"
+      ],
+      "token_key": "VOOX",
+      "updated_at": "2026-06-28T16:47:49Z",
+      "venues": [
+        "jupiter_router"
+      ]
+    }
+  ]
+}

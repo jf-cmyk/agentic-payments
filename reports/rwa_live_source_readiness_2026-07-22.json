@@ -1,0 +1,193 @@
+{
+  "generated_at": "2026-07-22T22:56:20.215235+00:00",
+  "policy": {
+    "candidate_not_promotion": "A successful point-in-time probe proves reachable working data only; it does not satisfy continuous freshness, replay, manipulation, benchmark, consensus, or signoff gates.",
+    "persistence": false,
+    "read_only": true
+  },
+  "product": "rwa_live_source_readiness_check",
+  "results": [
+    {
+      "checked_at": "2026-07-22T22:56:15.112344+00:00",
+      "observation": {
+        "ask": 328.39,
+        "bid": 324.42,
+        "block_number": null,
+        "book_time_ms": 1784760974405,
+        "chain": null,
+        "context_slot": null,
+        "endpoint": "Hyperliquid /info l2Book",
+        "freshness_ms": 707.3439999999999,
+        "level_count": 0,
+        "mid": 326.405,
+        "production_gate": "issuer_identity_liquidity_and_benchmark_validation_required",
+        "route_labels": [],
+        "source_type": "native_l1",
+        "symbol": "AAPL/USDC",
+        "timestamp": "2026-07-22T22:56:14.405000+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "AAPL/USDC",
+      "source_lane": "venue_api_order_book",
+      "started_at": "2026-07-22T22:56:14.483089+00:00",
+      "status": "ok",
+      "venue": "hyperliquid_rwa_spot"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:15.794810+00:00",
+      "observation": {
+        "ask": 326.2412391,
+        "bid": 325.9151609,
+        "block_number": null,
+        "book_time_ms": null,
+        "chain": null,
+        "context_slot": null,
+        "endpoint": "https://backend-pricing.eu.gains.trade/charts",
+        "freshness_ms": 15792.81,
+        "level_count": 0,
+        "mid": 326.0782,
+        "production_gate": "candidate_only_pending_virtual_order_book_price_impact_recent_trade_windows_benchmark_rights",
+        "route_labels": [],
+        "source_type": "price_stream_no_book",
+        "symbol": "AAPL/USD",
+        "timestamp": "2026-07-22T22:56:00.002000+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "AAPL/USD",
+      "source_lane": "venue_api_reference_stream",
+      "started_at": "2026-07-22T22:56:15.112368+00:00",
+      "status": "ok",
+      "venue": "gains"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:16.183171+00:00",
+      "observation": {
+        "ask": 4126.1371905365495,
+        "bid": 4125.032809463451,
+        "block_number": null,
+        "book_time_ms": null,
+        "chain": null,
+        "context_slot": null,
+        "endpoint": "https://builder.ostium.io/v1/prices",
+        "freshness_ms": 1183.171,
+        "level_count": 0,
+        "mid": 4125.63625,
+        "production_gate": "candidate_only_pending_builder_sdk_sim_orderbook_depth_windows_benchmark_rights",
+        "route_labels": [],
+        "source_type": "synthetic_depth",
+        "symbol": "XAU/USD",
+        "timestamp": "2026-07-22T22:56:15+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "XAU/USD",
+      "source_lane": "venue_api_synthetic_market",
+      "started_at": "2026-07-22T22:56:15.794837+00:00",
+      "status": "ok",
+      "venue": "ostium"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:16.674423+00:00",
+      "observation": {
+        "ask": 327.1370736397984,
+        "bid": 325.5421560937164,
+        "block_number": null,
+        "book_time_ms": null,
+        "chain": null,
+        "context_slot": null,
+        "endpoint": null,
+        "freshness_ms": 0.034999999999999996,
+        "level_count": 0,
+        "mid": 326.3396148667574,
+        "production_gate": null,
+        "route_labels": [
+          "Byreal"
+        ],
+        "source_type": "quote_sweep",
+        "symbol": "AAPLX/USDC",
+        "timestamp": "2026-07-22T22:56:16.674388+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "AAPLX/USD",
+      "source_lane": "solana_router_quote",
+      "started_at": "2026-07-22T22:56:16.183214+00:00",
+      "status": "ok",
+      "venue": "jupiter_router"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:17.132407+00:00",
+      "error_type": "RWAAdapterBlockedError",
+      "message": "Jupiter quote did not route through raydium_clmm; required_labels=('raydium',); observed_labels=[['Byreal'], ['Byreal']]",
+      "production_promoted": false,
+      "requested_symbol": "AAPLX/USD",
+      "source_lane": "solana_route_filtered_quote",
+      "started_at": "2026-07-22T22:56:16.674475+00:00",
+      "status": "error",
+      "venue": "raydium_clmm"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:18.991568+00:00",
+      "observation": {
+        "ask": 4116.806642605231,
+        "bid": 4114.74875375614,
+        "block_number": 25591389,
+        "book_time_ms": null,
+        "chain": "ethereum",
+        "context_slot": null,
+        "endpoint": "EVM JSON-RPC eth_call",
+        "freshness_ms": 0.023,
+        "level_count": 0,
+        "mid": 4115.777698180686,
+        "production_gate": "candidate_only_pending_tick_bitmap_liquidity_replay_depth_manipulation_benchmark_rights",
+        "route_labels": [],
+        "source_type": "onchain_clmm_pool",
+        "symbol": "PAXG/USDC",
+        "timestamp": "2026-07-22T22:56:18.991545+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "PAXG/USDC",
+      "source_lane": "evm_rpc_pool_state",
+      "started_at": "2026-07-22T22:56:17.132426+00:00",
+      "status": "ok",
+      "venue": "uniswap_v3_v4"
+    },
+    {
+      "checked_at": "2026-07-22T22:56:20.215210+00:00",
+      "observation": {
+        "ask": 1.1406679358484573,
+        "bid": 1.140439825072365,
+        "block_number": 48985816,
+        "book_time_ms": null,
+        "chain": "base",
+        "context_slot": null,
+        "endpoint": "EVM JSON-RPC eth_call",
+        "freshness_ms": 0.019,
+        "level_count": 0,
+        "mid": 1.1405538804604112,
+        "production_gate": "candidate_only_pending_tick_bitmap_liquidity_replay_depth_manipulation_benchmark_rights",
+        "route_labels": [],
+        "source_type": "onchain_clmm_pool",
+        "symbol": "EURC/USDC",
+        "timestamp": "2026-07-22T22:56:20.215191+00:00"
+      },
+      "production_promoted": false,
+      "requested_symbol": "EURC/USDC",
+      "source_lane": "evm_rpc_pool_state",
+      "started_at": "2026-07-22T22:56:18.991590+00:00",
+      "status": "ok",
+      "venue": "aerodrome_slipstream"
+    }
+  ],
+  "summary": {
+    "failure_count": 1,
+    "probe_count": 7,
+    "success_count": 6,
+    "successful_source_lanes": [
+      "evm_rpc_pool_state",
+      "solana_router_quote",
+      "venue_api_order_book",
+      "venue_api_reference_stream",
+      "venue_api_synthetic_market"
+    ],
+    "tiingo_runtime_dependency": false
+  }
+}

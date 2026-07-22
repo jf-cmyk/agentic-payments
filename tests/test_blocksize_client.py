@@ -209,6 +209,36 @@ class TestBidAskParsing:
         assert bidask.ask == 181.6
         assert bidask.spread == pytest.approx(0.2)
 
+    @pytest.mark.asyncio
+    async def test_get_bidask_snapshot_resolves_bare_equity_to_usd_suffix(self, client):
+        mock_result = {
+            "snapshot": [
+                {
+                    "ticker": "LCIDUSD",
+                    "agg_bid_price": "7.14",
+                    "agg_ask_price": "7.16",
+                    "agg_mid_price": "7.15",
+                    "ts": 1784652304843551,
+                }
+            ]
+        }
+        with patch.object(client, "_rpc_call", new_callable=AsyncMock, return_value=mock_result):
+            bidask = await client.get_bidask_snapshot("LCID")
+        assert bidask.pair == "LCIDUSD"
+        assert bidask.bid == 7.14
+        assert bidask.ask == 7.16
+
+    @pytest.mark.asyncio
+    async def test_get_bidask_snapshot_rejects_missing_master_stream_symbol(self, client):
+        with patch.object(
+            client,
+            "_rpc_call",
+            new_callable=AsyncMock,
+            return_value={"snapshot": []},
+        ):
+            with pytest.raises(BlocksizeAPIError, match="not found"):
+                await client.get_bidask_snapshot("MISSING")
+
 
 # ---------------------------------------------------------------------------
 # Equity Parsing

@@ -1,0 +1,133 @@
+{
+  "benchmark": "blocksize_tool_grounding_harness_v1",
+  "methodology": {
+    "baseline": "Deterministic ungrounded static fixture that asserts a numeric value without checking support or attaching evidence.",
+    "grounded": "Deterministic Blocksize-shaped fixture that checks support, attaches source/timestamp/methodology/citation evidence, and refuses unsupported or invalid symbols.",
+    "scope": "Validates benchmark scoring and response contracts. It does not measure a named LLM, live price accuracy, latency, or production uptime."
+  },
+  "next_valid_run": [
+    "Freeze prompts and current truth timestamps.",
+    "Run named models without tools and with Blocksize tools under identical prompts.",
+    "Score price error only against timestamp-aligned source truth.",
+    "Publish confidence intervals, failures, and the complete prompt/output corpus."
+  ],
+  "publication_status": "not_a_competitive_model_result",
+  "rows": [
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "04f9a70ac0b5525d362d4b2b45543ea1236664759976dea4b0b359a550d4060b",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": false,
+      "case_id": "btc_vwap",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "b244aa15ad6c19c7a859c3dab00506937496cb08ab725b7f2afad873dbacd35a",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "BTC-USD",
+      "supported_fixture": true
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "3637fcbd61609fc3c12261d588c88444231de7d04d1ed80d334b6d0384a45c1d",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": false,
+      "case_id": "eth_vwap",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "8cf2122d93293d992ee15f5151bfc40c7bd3b530973d8eff96c857ff00413b8a",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "ETH-USD",
+      "supported_fixture": true
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "4fa30c8d7ad5a91fea9d81e1fc5173aa5a27165667a9218aecabe024b7bdf79c",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": false,
+      "case_id": "aapl_bidask",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "95d3848897db2a6625bda4380f8dd1465cb5c090983c73772923ed1594be288e",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "AAPL",
+      "supported_fixture": true
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "cb0417da40b25e8c6095b049dcffa0d1a020b2658a8f42e538f34029035d8293",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": false,
+      "case_id": "eurusd_fx",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "4ae658830d46cabbf7bf1800499ab3d0487720171c4aae75054bfe908def4e9d",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "EURUSD",
+      "supported_fixture": true
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "cab4ac305c67016f3ea26845d8ffe9e90c60cc31a6ca14d7fa87df4a444df794",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": false,
+      "case_id": "xauusd_metal",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "e3bfc42c7302d680e5c003b5960cc18b500a22b40f45fe6c0bcd88b67570daad",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "XAUUSD",
+      "supported_fixture": true
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "4b142305d312d01a85f17f6ff427c5009bc59b7155156ec24ae6deb599ae4957",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": true,
+      "case_id": "unsupported_equity",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "25cf537d05172ac66806e771c5c62a325543f0035be1705c9198bb7258a77258",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "ZZZQ",
+      "supported_fixture": false
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "14d6d9c89d92b4ebb6d554be7f234fb1b7ff1b2ccaf8188525f4131a57eefbb5",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": true,
+      "case_id": "unsupported_crypto",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "ff1ffc6af376c3730717f17d0e5809ef4ca0a0ddc9f5c194c73b255927f358b5",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "NOTREAL-USD",
+      "supported_fixture": false
+    },
+    {
+      "baseline_evidence_fields": 0,
+      "baseline_response_hash": "320846afeb6a78ce518832b1e0c7606866f575683256bf1c83f7164cdde3e14e",
+      "baseline_support_checked": false,
+      "baseline_unsupported_price_assertion": true,
+      "case_id": "invalid_symbol",
+      "grounded_evidence_fields": 4,
+      "grounded_response_hash": "91d33d390a218fad837d0009c026cd755bcc582e7cb635b1b05946b20c334bd7",
+      "grounded_support_checked": true,
+      "grounded_unsupported_price_assertion": false,
+      "instrument": "../BAD",
+      "supported_fixture": false
+    }
+  ],
+  "run_date": "2026-07-22",
+  "status": "methodology_validation_only",
+  "summary": {
+    "baseline_evidence_completeness": 0.0,
+    "baseline_unsupported_price_assertion_rate": 1.0,
+    "cases": 8,
+    "grounded_evidence_completeness": 1.0,
+    "grounded_support_check_rate": 1.0,
+    "grounded_unsupported_price_assertion_rate": 0.0,
+    "supported_cases": 5,
+    "unsupported_or_invalid_cases": 3
+  }
+}

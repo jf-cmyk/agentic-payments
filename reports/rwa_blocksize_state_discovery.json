@@ -1,0 +1,121 @@
+{
+  "as_of": "2026-07-10T21:01:49.454459+00:00",
+  "policy": {
+    "not_live_liquidity": true,
+    "promotion_rule": "Matched state_instruments are still supplemental until state_pool freshness, issuer/NAV alignment, manipulation/stale-value checks, and Blocksize benchmark alignment pass."
+  },
+  "product": "rwa_blocksize_state_discovery",
+  "summary": {
+    "blocksize_state_instrument_count": 199,
+    "matched": 0,
+    "missing_state_instrument": 7,
+    "target_count": 7
+  },
+  "symbols": [
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_id": "BUIDL",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "BUIDLUSD",
+      "status": "missing_state_instrument",
+      "symbol": "BUIDL/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_id": "OUSG",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "OUSGUSD",
+      "status": "missing_state_instrument",
+      "symbol": "OUSG/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "metal"
+      ],
+      "asset_id": "PAXG",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "PAXGUSD",
+      "status": "missing_state_instrument",
+      "symbol": "PAXG/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_id": "TBILL",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "TBILLUSD",
+      "status": "missing_state_instrument",
+      "symbol": "TBILL/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "tokenized_fund"
+      ],
+      "asset_id": "USCC",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "USCCUSD",
+      "status": "missing_state_instrument",
+      "symbol": "USCC/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_id": "USDY",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "USDYUSD",
+      "status": "missing_state_instrument",
+      "symbol": "USDY/USD",
+      "venue": "blocksize_state"
+    },
+    {
+      "asset_classes": [
+        "treasury_fund"
+      ],
+      "asset_id": "USTB",
+      "match_count": 0,
+      "matched_instruments": [],
+      "matched_symbols": [],
+      "promotion_status": "blocked_missing_state_instruments_coverage",
+      "source_type": "blocksize_state_reference",
+      "state_symbol": "USTBUSD",
+      "status": "missing_state_instrument",
+      "symbol": "USTB/USD",
+      "venue": "blocksize_state"
+    }
+  ]
+}

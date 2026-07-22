@@ -1,0 +1,1049 @@
+{
+  "clearance_evidence": {
+    "acknowledgement_count": 38,
+    "acknowledgement_names": [
+      "API3_API_TERMS_ACK",
+      "B3_MARKET_DATA_LICENSE_ACK",
+      "BLOCKSIZE_STATE_REFERENCE_POLICY_ACK",
+      "BME_MARKET_DATA_LICENSE_ACK",
+      "BMV_MARKET_DATA_LICENSE_ACK",
+      "CBOE_MARKET_DATA_LICENSE_ACK",
+      "CME_MARKET_DATA_LICENSE_ACK",
+      "CTA_UTP_LICENSE_ACK",
+      "EUREX_MARKET_DATA_LICENSE_ACK",
+      "EURONEXT_MARKET_DATA_LICENSE_ACK",
+      "EVM_RPC_PROVIDER_TERMS_ACK",
+      "GAINS_API_TERMS_ACK",
+      "HKEX_DERIVATIVES_LICENSE_ACK",
+      "HKEX_MARKET_DATA_LICENSE_ACK",
+      "HYPERLIQUID_API_TERMS_ACK",
+      "ICE_CONNECTIVITY_ACK",
+      "ICE_MARKET_DATA_LICENSE_ACK",
+      "ISSUER_NAV_TERMS_ACK",
+      "JPX_MARKET_DATA_LICENSE_ACK",
+      "JPX_OSE_LICENSE_ACK",
+      "JUPITER_API_TERMS_ACK",
+      "KRX_DERIVATIVES_LICENSE_ACK",
+      "KRX_MARKET_DATA_LICENSE_ACK",
+      "LME_MARKET_DATA_LICENSE_ACK",
+      "LSE_MARKET_DATA_LICENSE_ACK",
+      "NASDAQ_MARKET_DATA_LICENSE_ACK",
+      "NSE_BSE_MARKET_DATA_LICENSE_ACK",
+      "NYSE_MARKET_DATA_LICENSE_ACK",
+      "OSTIUM_API_TERMS_ACK",
+      "RWA_MARKET_DATA_POLICY_ACK",
+      "SGX_MARKET_DATA_LICENSE_ACK",
+      "SIX_MARKET_DATA_LICENSE_ACK",
+      "SOLANA_RPC_PROVIDER_TERMS_ACK",
+      "SSE_SZSE_MARKET_DATA_LICENSE_ACK",
+      "SWITCHBOARD_API_TERMS_ACK",
+      "TSX_MARKET_DATA_LICENSE_ACK",
+      "TWSE_MARKET_DATA_LICENSE_ACK",
+      "XETRA_MARKET_DATA_LICENSE_ACK"
+    ],
+    "applies_to_all_registered_sources": true,
+    "artifact_present": true,
+    "clearance_id": "rwa-rights-clearance-2026-07-10",
+    "cleared_at": "2026-07-10",
+    "cleared_by": "operator",
+    "not_legal_advice": true,
+    "path": "reports/rwa_rights_clearance.json",
+    "rights_cleared": true
+  },
+  "filters": {
+    "status": "all",
+    "venue": "all"
+  },
+  "policy": {
+    "internal_rule": "Public/API sources may be probed for internal benchmarking only when access is configured and terms review is pending.",
+    "not_legal_advice": true,
+    "production_rule": "Production redistribution requires configured dependencies and explicit policy/legal acknowledgements.",
+    "reference_rule": "Oracle, NAV, and state references are supplemental and do not become executable liquidity through rights clearance alone."
+  },
+  "rows": [
+    {
+      "access_model": "public_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 10,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "evm_rpc_multichain"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "aerodrome_slipstream",
+      "provider_name": "Aerodrome Slipstream",
+      "required_dependency_ids": [
+        "evm_rpc_multichain",
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "aerodrome_slipstream"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 50,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "aevo",
+      "provider_name": "Aevo",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "aevo"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 76,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "apex_omni",
+      "provider_name": "ApeX Omni",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "apex_omni"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 116,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "aster",
+      "provider_name": "Aster",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "aster"
+    },
+    {
+      "access_model": "rpc_and_indexer",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 12,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "evm_rpc_multichain"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "balancer_pools",
+      "provider_name": "Balancer weighted and stable pools",
+      "required_dependency_ids": [
+        "evm_rpc_multichain",
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "balancer_pools"
+    },
+    {
+      "access_model": "authenticated_blocksize_api",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "oracle_reference",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "BLOCKSIZE_STATE_REFERENCE_POLICY_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "supplemental_reference_only",
+      "feed_count": 7,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "blocksize_benchmark_access"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "Blocksize state instrument coverage plus internal policy signoff; state rows are not executable liquidity",
+      "provider_id": "blocksize_state",
+      "provider_name": "Blocksize state reference",
+      "required_dependency_ids": [
+        "blocksize_benchmark_access",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "BLOCKSIZE_STATE_REFERENCE_POLICY_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "high",
+      "venue": "blocksize_state"
+    },
+    {
+      "access_model": "public_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 12,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "evm_rpc_multichain"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "curve_stableswap",
+      "provider_name": "Curve StableSwap",
+      "required_dependency_ids": [
+        "evm_rpc_multichain",
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "curve_stableswap"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 4,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "derive",
+      "provider_name": "Derive / Lyra",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "derive"
+    },
+    {
+      "access_model": "public_constants_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 32,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "drift",
+      "provider_name": "Drift",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "drift"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 8,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "dydx",
+      "provider_name": "dYdX v4",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "dydx"
+    },
+    {
+      "access_model": "unknown",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "tokenized_security",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "GAINS_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 110,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "issuer/venue terms, transfer restriction review, jurisdiction review, and redistribution policy signoff",
+      "provider_id": "gains",
+      "provider_name": "gains",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "GAINS_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "high",
+      "venue": "gains"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "tokenized_security",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 2,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "Hyperliquid API/data-use terms review, identity review, and redistribution signoff",
+      "provider_id": "hyperliquid_rwa_spot",
+      "provider_name": "Hyperliquid RWA spot",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "high",
+      "venue": "hyperliquid_paxg"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 2,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "Hyperliquid API/data-use terms review, leverage/perp risk labeling, and redistribution signoff",
+      "provider_id": "hyperliquid_perps",
+      "provider_name": "Hyperliquid perps",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "hyperliquid_perps"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "tokenized_security",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 56,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "Hyperliquid spot identity review, issuer review, API/data-use terms, and redistribution signoff",
+      "provider_id": "hyperliquid_rwa_spot",
+      "provider_name": "Hyperliquid RWA spot",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "high",
+      "venue": "hyperliquid_rwa_spot"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "tokenized_security",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 64,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "Hyperliquid spot API/data-use terms plus issuer identity review for RWA-like spot rows",
+      "provider_id": "hyperliquid_spot",
+      "provider_name": "Hyperliquid spot",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "HYPERLIQUID_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "high",
+      "venue": "hyperliquid_spot"
+    },
+    {
+      "access_model": "api_keyed",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "jupiter_route_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "JUPITER_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 28,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "jupiter_api_key"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "Jupiter API terms review, quote-data retention policy, and redistribution signoff",
+      "provider_id": "jupiter_router",
+      "provider_name": "Jupiter Solana router",
+      "required_dependency_ids": [
+        "jupiter_api_key",
+        "jupiter_route_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "JUPITER_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "jupiter_router"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 120,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "lighter",
+      "provider_name": "Lighter",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "lighter"
+    },
+    {
+      "access_model": "public_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 18,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "solana_rpc_indexer"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "meteora_dlmm",
+      "provider_name": "Meteora DLMM",
+      "required_dependency_ids": [
+        "solana_rpc_indexer",
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "meteora_dlmm"
+    },
+    {
+      "access_model": "public_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 12,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "solana_rpc_indexer"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "orca_whirlpool",
+      "provider_name": "Orca Whirlpool",
+      "required_dependency_ids": [
+        "solana_rpc_indexer",
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "orca_whirlpool"
+    },
+    {
+      "access_model": "public_rest",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 70,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "venue API/data-use terms, derivative-data labeling, derived-data policy, and redistribution signoff",
+      "provider_id": "orderly",
+      "provider_name": "Orderly Network",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "medium",
+      "venue": "orderly"
+    },
+    {
+      "access_model": "public_or_builder_api",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": true,
+      "can_use_for_consensus": true,
+      "category": "tokenized_security",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "OSTIUM_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "eligible_after_quality_gates",
+      "feed_count": 124,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; continue with replay, liquidity, freshness, and manipulation gates.",
+      "not_legal_advice": true,
+      "production_access_ready": true,
+      "production_requirement": "issuer/venue terms, transfer restriction review, jurisdiction review, and redistribution policy signoff",
+      "provider_id": "ostium",
+      "provider_name": "Ostium",
+      "required_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "OSTIUM_API_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": false,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": true,
+      "source_rights_risk": "high",
+      "venue": "ostium"
+    },
+    {
+      "access_model": "public_plus_rpc",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 14,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "solana_rpc_indexer"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "provider/API terms, RPC terms, public-chain data policy, and redistribution policy signoff",
+      "provider_id": "raydium_clmm",
+      "provider_name": "Raydium CLMM / CPMM",
+      "required_dependency_ids": [
+        "solana_rpc_indexer",
+        "solana_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "SOLANA_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "raydium_clmm"
+    },
+    {
+      "access_model": "issuer_or_admin_reference",
+      "blocked_dependency_ids": [
+        "treasury_issuer_pack"
+      ],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "issuer_nav_reserve",
+      "configured_dependency_ids": [
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "ISSUER_NAV_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "supplemental_reference_only",
+      "feed_count": 7,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "issuer/admin NAV permission, reserve/attestation terms, and redistribution signoff",
+      "provider_id": "treasury_nav",
+      "provider_name": "Treasury/fund issuer NAV references",
+      "required_dependency_ids": [
+        "treasury_issuer_pack",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "ISSUER_NAV_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": true,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "high",
+      "venue": "treasury_nav"
+    },
+    {
+      "access_model": "rpc_and_indexer",
+      "blocked_dependency_ids": [],
+      "can_redistribute_production": true,
+      "can_source_for_internal_benchmark": false,
+      "can_use_for_consensus": false,
+      "category": "dex_liquidity",
+      "configured_dependency_ids": [
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "configured_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "consensus_role": "rights_cleared_pending_source_access",
+      "feed_count": 14,
+      "legal_rights_cleared": true,
+      "missing_dependency_ids": [
+        "evm_rpc_multichain"
+      ],
+      "missing_policy_env": [],
+      "next_action": "Rights gate is clear; configure source access, identifiers, and replay evidence before live use.",
+      "not_legal_advice": true,
+      "production_access_ready": false,
+      "production_requirement": "direct onchain pool-state reads plus RPC/indexer terms and redistribution policy signoff",
+      "provider_id": "uniswap_v3_v4",
+      "provider_name": "Uniswap v3/v4 pools",
+      "required_dependency_ids": [
+        "evm_rpc_multichain",
+        "evm_pool_allowlist",
+        "redistribution_policy"
+      ],
+      "required_policy_env": [
+        "EVM_RPC_PROVIDER_TERMS_ACK",
+        "RWA_MARKET_DATA_POLICY_ACK"
+      ],
+      "requires_auth": true,
+      "requires_license_or_contract": false,
+      "rights_status": "production_rights_cleared",
+      "source_access_ready": false,
+      "source_rights_risk": "medium",
+      "venue": "uniswap_v3_v4"
+    }
+  ],
+  "summary": {
+    "blocked_or_missing_rights": 0,
+    "by_category": {
+      "dex_liquidity": 17,
+      "issuer_nav_reserve": 1,
+      "oracle_reference": 1,
+      "tokenized_security": 5
+    },
+    "by_status": {
+      "production_rights_cleared": 24
+    },
+    "feed_count": 968,
+    "internal_benchmark_sourceable": 14,
+    "missing_or_blocked_source_access": 10,
+    "production_access_ready": 14,
+    "production_rights_cleared": 24,
+    "venue_count": 24
+  }
+}

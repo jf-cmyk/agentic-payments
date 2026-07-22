@@ -17,6 +17,7 @@ Institutional-grade market data for AI agents, with two public integration layer
 - OpenAPI JSON: `https://mcp.blocksize.info/openapi.json`
 - Swagger UI: `https://mcp.blocksize.info/docs`
 - Quickstart: `https://mcp.blocksize.info/quickstart/remote-mcp`
+- First live price quickstart: `https://mcp.blocksize.info/quickstart/first-price`
 - Prompt examples: `https://mcp.blocksize.info/prompt-examples`
 - Privacy policy: `https://mcp.blocksize.info/privacy`
 - Support: `https://mcp.blocksize.info/support`
@@ -25,6 +26,10 @@ Institutional-grade market data for AI agents, with two public integration layer
 - Sitemap: `https://mcp.blocksize.info/sitemap.xml`
 - Robots policy: `https://mcp.blocksize.info/robots.txt`
 - Data package catalog: `https://mcp.blocksize.info/data-packages.json`
+- Category hubs and claims boundary: `https://mcp.blocksize.info/category-hubs.json`
+- RWA market data hub: `https://mcp.blocksize.info/rwa-market-data`
+- Market data licensing hub: `https://mcp.blocksize.info/market-data-licensing`
+- Signed oracle feeds hub: `https://mcp.blocksize.info/signed-oracle-feeds`
 
 ## Agent and Search Discoverability
 
@@ -32,6 +37,9 @@ Blocksize is optimized to be found for high-intent searches around real-time pri
 
 Canonical intent pages:
 
+- RWA market data API: `https://mcp.blocksize.info/rwa-market-data`
+- Market data licensing and redistribution: `https://mcp.blocksize.info/market-data-licensing`
+- Signed market data and oracle feeds: `https://mcp.blocksize.info/signed-oracle-feeds`
 - Market data API for AI agents: `https://mcp.blocksize.info/market-data-api-for-ai-agents`
 - Real-time price data API: `https://mcp.blocksize.info/real-time-price-data-api`
 - Crypto VWAP API: `https://mcp.blocksize.info/crypto-vwap-api`
@@ -52,6 +60,15 @@ Indexing checklist:
 - Submit `https://mcp.blocksize.info/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
 - Request indexing for the homepage, data package catalog, and every canonical intent page above.
 - Use the MCP manifest, `server.json`, `llms.txt`, OpenAPI JSON, and `data-packages.json` as the canonical machine-readable citations in marketplaces, docs, and repo descriptions.
+- Use `category-hubs.json` for dated coverage states, rights boundaries, methodology, and citation instructions. Cataloged, candidate, and production-promoted coverage are intentionally separate states.
+
+RWA claims boundary:
+
+- Blocksize already provides broad production coverage across its live market-data packages.
+- Separately, the RWA expansion research catalog contains 1,025 canonical economic asset IDs as of 2026-07-16.
+- Candidate expansion lanes are not additional production feeds until their promotion gates pass.
+- Zero newly sourced third-party or onchain additions have completed the full RWA expansion-workflow promotion process. This figure does not describe or reduce existing Blocksize production coverage.
+- Hash-linked provenance receipts are not described as cryptographically signed unless a response includes a signature envelope with an algorithm, key identifier, digest, and signature.
 
 ## Product Shape
 
