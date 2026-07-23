@@ -2934,6 +2934,118 @@ class TestObservabilityDashboard:
         )
         assert activation["metadata"]["identity_type"] == "agent"
         assert activation["metadata"]["payment_mode"] == "starter_credit"
+        assert activation["metadata"]["identity_hash"]
+        funnel = stats["growth_funnel"]
+        assert funnel["summary"]["eligible_identities"] == 1
+        assert funnel["summary"]["activated_identities"] == 1
+        assert funnel["summary"]["activation_rate"] == 1.0
+        assert funnel["summary"]["first_live_price_within_3m_rate"] == 1.0
+        assert funnel["summary"]["unattributed_activation_events"] == 0
+
+    def test_growth_funnel_tracks_mature_repeat_and_starter_conversion(self):
+        started_at = datetime.now(timezone.utc) - timedelta(days=8)
+        activated_at = started_at + timedelta(minutes=2)
+        identity_hash = "privacy-safe-growth-identity"
+
+        def event(name, timestamp, **values):
+            return {
+                "event": name,
+                "timestamp": timestamp.isoformat(),
+                "wallet_hash": None,
+                "metadata": {"identity_hash": identity_hash, **values.pop("metadata", {})},
+                **values,
+            }
+
+        growth = UsageEventStore._growth_funnel(
+            [
+                event("free_discovery_call", started_at),
+                event("data_delivered", activated_at),
+                event(
+                    "first_live_price_delivered",
+                    activated_at,
+                    metadata={"payment_mode": "starter_credit"},
+                ),
+                event("data_delivered", activated_at + timedelta(days=1)),
+                event("payment_verified", activated_at + timedelta(days=2)),
+                event(
+                    "credit_drawdown_failed",
+                    activated_at + timedelta(days=3),
+                    reason="insufficient_credits",
+                    metadata={"credits_remaining": 0},
+                ),
+            ]
+        )
+
+        summary = growth["summary"]
+        assert summary["activation_rate"] == 1.0
+        assert summary["median_time_to_first_live_price_seconds"] == 120.0
+        assert summary["first_live_price_within_3m_rate"] == 1.0
+        assert summary["repeat_7d_eligible_identities"] == 1
+        assert summary["repeat_7d_identities"] == 1
+        assert summary["repeat_7d_rate"] == 1.0
+        assert summary["starter_to_paid_identities"] == 1
+        assert summary["starter_to_paid_rate"] == 1.0
+        assert summary["credits_exhausted_identities"] == 1
+
+    def test_full_growth_journey_reaches_verified_payment_after_starter_exhaustion(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+    ):
+        mock_client = AsyncMock()
+        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95432.50,
+                timestamp=datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        previous_manager = app.state.credits
+        app.state.credits = CreditManager(str(tmp_path / "growth_journey_credits.db"))
+        headers = {"X-AGENT-ID": "growth-journey-agent-12345678"}
+
+        try:
+            discovery = test_client.get("/v1/search?q=BTC", headers=headers)
+            starter_responses = [
+                test_client.get("/v1/vwap/btc-usd", headers=headers)
+                for _ in range(50)
+            ]
+            exhausted = test_client.get("/v1/vwap/btc-usd", headers=headers)
+            with patch(
+                "src.resource_server._verify_payment",
+                new_callable=AsyncMock,
+                return_value={"valid": True, "network": "solana"},
+            ), patch(
+                "src.resource_server._settle_payment",
+                new_callable=AsyncMock,
+                return_value={"success": True},
+            ):
+                paid = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={**headers, "X-PAYMENT": "growth_journey_proof"},
+                )
+        finally:
+            app.state.credits = previous_manager
+
+        assert discovery.status_code == 200
+        assert all(response.status_code == 200 for response in starter_responses)
+        assert starter_responses[-1].headers["X-Blocksize-Credits-Remaining"] == "0.0"
+        assert exhausted.status_code == 402
+        assert paid.status_code == 200
+
+        stats = observability_store.summarize(days=1)
+        funnel = stats["growth_funnel"]["summary"]
+        assert funnel["activated_identities"] == 1
+        assert funnel["starter_activated_identities"] == 1
+        assert funnel["credits_exhausted_identities"] == 1
+        assert funnel["starter_to_paid_identities"] == 1
+        assert funnel["starter_to_paid_rate"] == 1.0
+        assert stats["event_counts"]["payment_verified"] == 1
+        assert stats["event_counts"]["data_delivered"] == 51
 
     def test_zero_result_symbol_search_is_ranked_as_coverage_opportunity(
         self,
@@ -3037,6 +3149,12 @@ class TestObservabilityDashboard:
 
         assert response.status_code == 200
         assert "Product Usage Command Center" in response.text
+        assert "Growth Funnel" in response.text
+        assert "renderGrowthFunnel" in response.text
+        assert "renderRwaPilot" in response.text
+        assert 'id="growth-stages"' in response.text
+        assert 'id="growth-targets"' in response.text
+        assert 'id="rwa-pilot-table"' in response.text
         assert "Called Data Detail" in response.text
         assert "Recent Event Trace" in response.text
         assert "Glama" in response.text

@@ -29,6 +29,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import base64
 import binascii
@@ -38,7 +39,7 @@ import re
 import secrets
 import time
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -187,6 +188,7 @@ from src.anthropic_mcp_server import anthropic_mcp
 from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
 from src.cursor_mcp_server import cursor_mcp
 from src.public_mcp_server import public_mcp
+from scripts.run_rwa_growth_pilot import capture_pilot, persist_capture
 
 logger = logging.getLogger(__name__)
 DOCS_DIR = Path("docs")
@@ -213,6 +215,83 @@ PAY_SH_SERVICE_URL = os.getenv(
     "https://pay.sh/services/blocksize/market-data",
 )
 PAY_SH_METRICS_API_URL = os.getenv("PAY_SH_METRICS_API_URL", "").strip()
+
+
+def _env_enabled(name: str, default: str = "false") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rwa_growth_pilot_paths() -> tuple[Path, Path]:
+    return (
+        Path(os.environ.get("RWA_GROWTH_PILOT_HISTORY_PATH", "/data/rwa_growth_pilot_history.jsonl")),
+        Path(os.environ.get("RWA_GROWTH_PILOT_STATUS_PATH", "/data/rwa_growth_pilot_status.json")),
+    )
+
+
+def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
+    _, status_path = _rwa_growth_pilot_paths()
+    if not status_path.exists():
+        return {
+            "status": "not_started",
+            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "production_promoted_feed_count": 0,
+            "feeds": [],
+        }
+    try:
+        report = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "status": "status_unreadable",
+            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "production_promoted_feed_count": 0,
+            "feeds": [],
+        }
+    current = report.get("current_capture") if isinstance(report.get("current_capture"), dict) else {}
+    return {
+        "status": report.get("status", "candidate_monitoring"),
+        "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+        "generated_at": report.get("generated_at"),
+        "source_monitoring_ready": bool(report.get("source_monitoring_ready")),
+        "promotion_ready": bool(report.get("promotion_ready")),
+        "production_promoted_feed_count": int(report.get("production_promoted_feed_count") or 0),
+        "current_capture": {
+            "attempted": int(current.get("attempted") or 0),
+            "succeeded": int(current.get("succeeded") or 0),
+        },
+        "thresholds": report.get("thresholds", {}),
+        "non_monitoring_gates": report.get("non_monitoring_gates", {}),
+        "feeds": report.get("feeds", []),
+        "policy": report.get("policy", {}),
+    }
+
+
+async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
+    initial_delay = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_INITIAL_DELAY_SECONDS", "15")))
+    interval = max(300.0, float(os.environ.get("RWA_GROWTH_PILOT_INTERVAL_SECONDS", "1800")))
+    timeout = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_TIMEOUT_SECONDS", "20")))
+    history_path, status_path = _rwa_growth_pilot_paths()
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
+            captures = await capture_pilot(registry, timeout_seconds=timeout)
+            report = await asyncio.to_thread(
+                persist_capture,
+                history_path,
+                captures,
+                status_output=status_path,
+            )
+            logger.info(
+                "RWA growth pilot captured %s/%s feeds; promotion_ready=%s",
+                report["current_capture"]["succeeded"],
+                report["current_capture"]["attempted"],
+                report["promotion_ready"],
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("RWA growth pilot capture failed")
+        await asyncio.sleep(interval)
 
 
 def _marketplace_metrics_feed_overrides() -> dict[str, str]:
@@ -336,14 +415,23 @@ async def lifespan(app: FastAPI):
     app.state.rwa_store = RWAObservationStore(
         os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
     )
+    app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
-    async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
-        async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
-            async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
-                yield
+    if _env_enabled("RWA_GROWTH_PILOT_ENABLED"):
+        app.state.rwa_growth_pilot_task = asyncio.create_task(_run_rwa_growth_pilot_loop(app))
+    try:
+        async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
+            async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
+                async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
+                    yield
+    finally:
+        if app.state.rwa_growth_pilot_task is not None:
+            app.state.rwa_growth_pilot_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.rwa_growth_pilot_task
     await app.state.stream_cache.stop()
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
@@ -539,6 +627,14 @@ def _activation_identity_hash(request: Request) -> tuple[str, str] | None:
     return None
 
 
+def _growth_identity_metadata(request: Request) -> dict[str, str]:
+    identity = _activation_identity_hash(request)
+    if identity is None:
+        return {}
+    identity_hash, identity_type = identity
+    return {"identity_hash": identity_hash, "identity_type": identity_type}
+
+
 def _is_live_price_delivery_path(path: str) -> bool:
     return path.startswith(
         (
@@ -572,7 +668,11 @@ def _record_http_usage(request: Request, status_code: int, latency_ms: float) ->
             metadata={"registry": registry_name},
         )
     elif _is_discovery_rate_limited_path(request.url.path):
-        record_usage_event("free_discovery_call", **fields)
+        record_usage_event(
+            "free_discovery_call",
+            **fields,
+            metadata=_growth_identity_metadata(request),
+        )
 
 
 def _record_product_event(
@@ -588,13 +688,14 @@ def _record_product_event(
     fields = _request_event_fields(request)
     if wallet_hash is not None:
         fields["wallet_hash"] = wallet_hash
+    event_metadata = {**_growth_identity_metadata(request), **(metadata or {})}
     record_usage_event(
         event,
         **fields,
         price_usdc=str(price_usdc) if price_usdc is not None else None,
         network=network,
         reason=reason,
-        metadata=metadata,
+        metadata=event_metadata,
     )
 
 
@@ -638,6 +739,7 @@ def _record_charged_delivery_outcome(
                 price_usdc=str(price_usdc) if price_usdc is not None else None,
                 network=network,
                 metadata={
+                    "identity_hash": identity_hash,
                     "identity_type": identity_type,
                     "payment_mode": payment_mode,
                 },
@@ -6434,6 +6536,7 @@ async def observability_stats(
             "rows": [],
         }
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
+    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status()
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
@@ -6986,6 +7089,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       </div>
       <nav>
         <a class="active" href="#overview">Overview</a>
+        <a href="#growth-funnel">Growth Funnel</a>
         <a href="#daily-brief">Daily Brief</a>
         <a href="#popularity">Popularity</a>
         <a href="#acquisition">Acquisition</a>
@@ -7028,6 +7132,35 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
           <div class="status-list" id="attention"></div>
         </div>
         <div class="grid kpis" id="kpis"></div>
+      </section>
+
+      <section class="card section" id="growth-funnel">
+        <div class="headline">
+          <div>
+            <h2>Growth Funnel</h2>
+            <div class="sub">Privacy-safe explicit identities from first discovery through live-price activation, seven-day repeat use, and paid conversion.</div>
+          </div>
+          <div class="summary-strip" id="growth-kpis"></div>
+        </div>
+        <div class="grid two">
+          <div>
+            <h3>Identity progression</h3>
+            <div id="growth-stages" class="bars"></div>
+          </div>
+          <div>
+            <h3>Operating targets</h3>
+            <div class="check-grid" id="growth-targets"></div>
+          </div>
+        </div>
+        <div class="metric-note" id="growth-boundary"></div>
+        <div class="headline" style="margin-top:18px">
+          <div>
+            <h3>Three-feed RWA pilot</h3>
+            <div class="sub">AAPL/USDC, PAXG/USDC and EURC/USDC candidate observations. Monitoring can never promote a feed automatically.</div>
+          </div>
+          <div class="summary-strip" id="rwa-pilot-kpis"></div>
+        </div>
+        <div class="scroll"><table id="rwa-pilot-table"></table></div>
       </section>
 
       <section class="card section" id="daily-brief">
@@ -7252,6 +7385,66 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
           <span>${escapeAttr(check.detail || "")}</span>
         </div>`)
         .join("") || `<div class="empty">No checks generated.</div>`;
+    }
+
+    function renderGrowthFunnel(data) {
+      const funnel = data.growth_funnel || {};
+      const summary = funnel.summary || {};
+      const targets = funnel.targets || {};
+      document.getElementById("growth-kpis").innerHTML = [
+        summaryItem("Activated", fmt.format(summary.activated_identities || 0)),
+        summaryItem("Under 3 min", pct(summary.first_live_price_within_3m_rate)),
+        summaryItem("7-day repeat", pct(summary.repeat_7d_rate)),
+        summaryItem("Starter to paid", pct(summary.starter_to_paid_rate)),
+        summaryItem("Credits exhausted", fmt.format(summary.credits_exhausted_identities || 0)),
+      ].join("");
+      bars(
+        "growth-stages",
+        Object.fromEntries((funnel.stages || []).map(row => [row.stage, Number(row.identities || 0)])),
+        "blue",
+      );
+      const targetRows = [
+        ["First price under 3 min", summary.first_live_price_within_3m_rate, targets.first_live_price_within_3m_rate],
+        ["Seven-day repeat", summary.repeat_7d_rate, targets.repeat_7d_rate],
+        ["Starter to paid", summary.starter_to_paid_rate, targets.starter_to_paid_rate],
+      ];
+      document.getElementById("growth-targets").innerHTML = targetRows.map(([label, actual, target]) => {
+        const status = actual == null ? "watch" : Number(actual) >= Number(target) ? "pass" : "watch";
+        return `<div class="check">
+          ${rowBadge(status)}
+          <strong>${escapeAttr(label)}</strong>
+          <div class="value">${pct(actual)} / ${pct(target)}</div>
+          <span>Observed rate versus the provisional operating target.</span>
+        </div>`;
+      }).join("");
+      const boundary = funnel.definitions?.measurement_boundary || "Identity-attributed events in the selected window.";
+      const unattributed = Number(summary.unattributed_activation_events || 0);
+      document.getElementById("growth-boundary").textContent =
+        `${boundary} ${fmt.format(unattributed)} activation event${unattributed === 1 ? " is" : "s are"} currently unattributed.`;
+    }
+
+    function renderRwaPilot(data) {
+      const pilot = data.rwa_growth_pilot || {};
+      const capture = pilot.current_capture || {};
+      document.getElementById("rwa-pilot-kpis").innerHTML = [
+        summaryItem("Status", text(pilot.status)),
+        summaryItem("Latest capture", `${fmt.format(capture.succeeded || 0)}/${fmt.format(capture.attempted || 0)}`),
+        summaryItem("Monitoring ready", pilot.source_monitoring_ready ? "Yes" : "No"),
+        summaryItem("Promoted feeds", fmt.format(pilot.production_promoted_feed_count || 0)),
+      ].join("");
+      const rows = pilot.feeds || [];
+      document.getElementById("rwa-pilot-table").innerHTML =
+        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Monitoring</th></tr></thead><tbody>` +
+        (rows.length ? rows.map(row => `<tr>
+          <td><code>${escapeAttr(row.symbol || row.pilot_id)}</code></td>
+          <td>${escapeAttr(row.source_lane || row.venue)}</td>
+          <td>${fmt.format(row.sample_count || 0)}</td>
+          <td>${fmt.format(row.window_days || 0)} days</td>
+          <td>${pct(row.success_rate)}</td>
+          <td>${pct(row.freshness_rate)}</td>
+          <td>${rowBadge(row.source_monitoring_ready ? "pass" : "collecting")}</td>
+        </tr>`).join("") : `<tr><td colspan="7" class="empty">Pilot monitoring has not produced a persisted capture yet.</td></tr>`) +
+        `</tbody>`;
     }
 
     function bars(target, data, color = "") {
@@ -7598,23 +7791,26 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       if (!res.ok) throw new Error(data.message || data.error || "Unable to load stats");
       currentData = data;
       const o = data.overview || {};
+      const g = data.growth_funnel?.summary || {};
       const prompts = Number(data.event_counts?.payment_required || 0);
       const paid = Number(o.paid_calls || 0);
       const conversion = prompts ? paid / prompts : null;
       document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}. ${live ? "Live refresh is on." : "Live refresh is paused."}`;
-      document.getElementById("headline-value").textContent = text(o.most_used_service || "No usage yet");
-      document.getElementById("headline-note").textContent = o.most_used_service ? "Most used service by called data volume in the selected window." : "No called data has been recorded in this window.";
+      document.getElementById("headline-value").textContent = g.activated_identities ? `${fmt.format(g.activated_identities)} activated` : "No activation yet";
+      document.getElementById("headline-note").textContent = g.activated_identities ? "Explicit identities that received their first live price in the selected window." : "No identity-attributed first live price has been recorded in this window.";
       document.getElementById("kpis").innerHTML = [
-        metric("Data Calls", fmt.format((data.data_called || []).reduce((sum, row) => sum + Number(row.calls || 0), 0)), "Called data subjects across API and MCP"),
-        metric("Payment Prompts", fmt.format(prompts), "x402 challenges shown"),
+        metric("Activation", pct(g.activation_rate), "First live price / eligible explicit identities"),
+        metric("Time to Value", g.median_time_to_first_live_price_seconds == null ? "n/a" : `${fmt.format(g.median_time_to_first_live_price_seconds)}s`, "Median discovery-to-first-live-price time"),
+        metric("7-Day Repeat", pct(g.repeat_7d_rate), "Mature activated identities with repeat delivery"),
+        metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to verified revenue"),
         metric("Paid Calls", fmt.format(paid), "Verified x402, credits, and MCP paid usage"),
         metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Direct x402 + bulk credit claims"),
-        metric("Registry Hits", fmt.format(o.registry_requests || 0), "Directory and metadata discovery"),
-        metric("MCP Tools", fmt.format(o.mcp_tool_calls || 0), "Tool-level activity"),
-        metric("Unique Clients", fmt.format(o.unique_client_fingerprints || 0), "Privacy-safe hashed fingerprints"),
-        metric("Prompt Conversion", pct(conversion), "Paid calls / payment prompts"),
+        metric("Unexpected Errors", pct(o.http_error_rate_excluding_payment_required), "HTTP errors excluding normal 402 prompts"),
+        metric("Unsupported Demand", fmt.format(o.unsupported_symbol_requests || 0), "Bounded zero-result symbol searches"),
       ].join("");
       renderAttention(data);
+      renderGrowthFunnel(data);
+      renderRwaPilot(data);
       renderDailyInterpretation(data);
       timeline(data.timeline || []);
       bars("funnel", {

@@ -446,6 +446,7 @@ class UsageEventStore:
         )
         data_called = self._data_called(events, called_data_events)
         popularity = self._popularity(events)
+        growth_funnel = self._growth_funnel(events)
         evidence = self._source_evidence(events)
         unsupported_symbol_opportunities = self._unsupported_symbol_opportunities(events)
         most_used_service = service_mix.most_common(1)[0][0] if service_mix else None
@@ -492,6 +493,7 @@ class UsageEventStore:
             "client_fingerprint_mix": dict(client_fingerprint_mix.most_common(20)),
             "data_called": data_called,
             "popularity": popularity,
+            "growth_funnel": growth_funnel,
             "source_evidence": evidence,
             "unsupported_symbol_opportunities": unsupported_symbol_opportunities,
             "marketplace_metrics": self.marketplace_metrics_summary(days=days),
@@ -503,8 +505,179 @@ class UsageEventStore:
                 "Client IPs, wallets, and payment proofs are stored only as salted hashes.",
                 "Credit drawdown calls count as paid product usage; revenue is counted when direct x402 payment or bulk credit purchase is verified.",
                 "First-live-price activation is counted once per privacy-safe explicit user, agent, wallet, device, or session identity.",
+                "Growth-funnel identity attribution uses salted identity hashes or wallet hashes; IP fingerprints are never used as funnel identities.",
                 "Unsupported-symbol opportunities include only bounded symbol-like searches with zero results; arbitrary free text is excluded.",
             ],
+        }
+
+    @staticmethod
+    def _growth_identity(event: dict[str, Any]) -> str | None:
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        identity_hash = str(metadata.get("identity_hash") or "").strip()
+        if identity_hash:
+            return identity_hash
+        wallet_hash = str(event.get("wallet_hash") or "").strip()
+        if wallet_hash:
+            return wallet_hash
+        return None
+
+    @staticmethod
+    def _event_time(event: dict[str, Any]) -> datetime | None:
+        value = str(event.get("timestamp") or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @classmethod
+    def _growth_funnel(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build privacy-safe activation, retention, and monetization cohorts."""
+        eligible_event_names = {
+            "free_discovery_call",
+            "mcp_tool_call",
+            "payment_required",
+            "credit_drawdown_success",
+        }
+        delivery_event_names = {"data_delivered", "mcp_credit_drawdown_success"}
+        conversion_event_names = {"payment_verified", "bulk_credit_claimed"}
+
+        eligible_first_seen: dict[str, datetime] = {}
+        activations: dict[str, datetime] = {}
+        activation_modes: dict[str, str] = {}
+        deliveries: dict[str, list[datetime]] = {}
+        conversions: dict[str, list[datetime]] = {}
+        exhausted: set[str] = set()
+        activation_events = 0
+
+        for event in events:
+            event_name = str(event.get("event") or "")
+            event_time = cls._event_time(event)
+            identity = cls._growth_identity(event)
+            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+            if event_name == "first_live_price_delivered":
+                activation_events += 1
+            if identity is None or event_time is None:
+                continue
+            if event_name in eligible_event_names:
+                eligible_first_seen.setdefault(identity, event_time)
+            if event_name == "first_live_price_delivered":
+                activations.setdefault(identity, event_time)
+                activation_modes.setdefault(identity, str(metadata.get("payment_mode") or "unknown"))
+            if event_name in delivery_event_names:
+                deliveries.setdefault(identity, []).append(event_time)
+            if event_name in conversion_event_names:
+                conversions.setdefault(identity, []).append(event_time)
+            if (
+                event_name == "credit_drawdown_failed"
+                and str(event.get("reason") or "") == "insufficient_credits"
+                and float(metadata.get("credits_remaining") or 0) <= 0
+            ):
+                exhausted.add(identity)
+
+        activated_identities = set(activations)
+        eligible_identities = set(eligible_first_seen) | activated_identities
+        activation_rate = (
+            len(activated_identities) / len(eligible_identities)
+            if eligible_identities
+            else None
+        )
+
+        time_to_value_seconds: list[float] = []
+        for identity, activated_at in activations.items():
+            started_at = eligible_first_seen.get(identity)
+            if started_at is not None and started_at <= activated_at:
+                time_to_value_seconds.append((activated_at - started_at).total_seconds())
+        within_three_minutes = sum(value <= 180 for value in time_to_value_seconds)
+        within_three_minutes_rate = (
+            within_three_minutes / len(time_to_value_seconds)
+            if time_to_value_seconds
+            else None
+        )
+
+        observed_at = datetime.now(UTC)
+        matured_activations = {
+            identity
+            for identity, activated_at in activations.items()
+            if activated_at <= observed_at - timedelta(days=7)
+        }
+        repeated_within_seven_days = {
+            identity
+            for identity in matured_activations
+            if sum(
+                activations[identity] <= delivered_at <= activations[identity] + timedelta(days=7)
+                for delivered_at in deliveries.get(identity, [])
+            ) >= 2
+        }
+        repeat_rate = (
+            len(repeated_within_seven_days) / len(matured_activations)
+            if matured_activations
+            else None
+        )
+
+        starter_activated = {
+            identity
+            for identity, mode in activation_modes.items()
+            if mode == "starter_credit"
+        }
+        starter_converted = {
+            identity
+            for identity in starter_activated
+            if any(converted_at >= activations[identity] for converted_at in conversions.get(identity, []))
+        }
+        starter_to_paid_rate = (
+            len(starter_converted) / len(starter_activated)
+            if starter_activated
+            else None
+        )
+
+        median_time_to_value = None
+        if time_to_value_seconds:
+            ordered = sorted(time_to_value_seconds)
+            midpoint = len(ordered) // 2
+            median_time_to_value = (
+                ordered[midpoint]
+                if len(ordered) % 2
+                else (ordered[midpoint - 1] + ordered[midpoint]) / 2
+            )
+
+        return {
+            "summary": {
+                "eligible_identities": len(eligible_identities),
+                "activated_identities": len(activated_identities),
+                "activation_rate": activation_rate,
+                "activation_events": activation_events,
+                "unattributed_activation_events": max(0, activation_events - len(activated_identities)),
+                "median_time_to_first_live_price_seconds": median_time_to_value,
+                "first_live_price_within_3m_rate": within_three_minutes_rate,
+                "repeat_7d_eligible_identities": len(matured_activations),
+                "repeat_7d_identities": len(repeated_within_seven_days),
+                "repeat_7d_rate": repeat_rate,
+                "starter_activated_identities": len(starter_activated),
+                "starter_to_paid_identities": len(starter_converted),
+                "starter_to_paid_rate": starter_to_paid_rate,
+                "credits_exhausted_identities": len(exhausted),
+            },
+            "stages": [
+                {"stage": "Eligible explicit identities", "identities": len(eligible_identities)},
+                {"stage": "First live price", "identities": len(activated_identities)},
+                {"stage": "Repeated within 7 days", "identities": len(repeated_within_seven_days)},
+                {"stage": "Converted after starter", "identities": len(starter_converted)},
+            ],
+            "targets": {
+                "first_live_price_within_3m_rate": 0.5,
+                "repeat_7d_rate": 0.25,
+                "starter_to_paid_rate": 0.05,
+            },
+            "definitions": {
+                "eligible_identity": "Salted explicit user, agent, wallet, device, or session identity observed in discovery, MCP use, a payment prompt, or credit drawdown.",
+                "activation": "First successfully delivered live price, recorded once per explicit identity.",
+                "repeat_7d": "At least two successful paid or starter-credit delivery events during the seven days beginning at activation; only mature seven-day cohorts enter the denominator.",
+                "starter_to_paid": "Starter-credit activated identity later observed with a verified x402 payment or claimed prepaid credit purchase in the selected window.",
+                "measurement_boundary": "Rates include attributable explicit identities observed inside the selected dashboard window; legacy events without identity attribution remain visible as unattributed activation events.",
+            },
         }
 
     @staticmethod

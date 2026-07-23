@@ -265,7 +265,11 @@ def create_authenticated_market_data_mcp(
             tool_name=tool_name,
             subject=subject,
             wallet_hash=fingerprint(identity.user_id),
-            metadata={"identity_type": "user", "payment_mode": "starter_credit"},
+            metadata={
+                "identity_hash": fingerprint(identity.user_id),
+                "identity_type": "user",
+                "payment_mode": "starter_credit",
+            },
         )
         return (
             f"{rendered}\n\n"
