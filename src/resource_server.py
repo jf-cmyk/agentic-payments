@@ -6157,6 +6157,7 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     wallet_inflows = summary.get("wallet_inflows") if isinstance(summary.get("wallet_inflows"), dict) else {}
     external_sources = summary.get("external_sources") if isinstance(summary.get("external_sources"), dict) else {}
     source_evidence = summary.get("source_evidence") if isinstance(summary.get("source_evidence"), dict) else {}
+    reliability = summary.get("reliability") if isinstance(summary.get("reliability"), dict) else {}
     platforms = external_sources.get("platforms") if isinstance(external_sources.get("platforms"), list) else []
     timeline = summary.get("timeline") if isinstance(summary.get("timeline"), list) else []
 
@@ -6176,10 +6177,11 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     revenue_usdc = float(overview.get("estimated_revenue_usdc") or 0.0)
     inflow_count = int(wallet_inflows.get("total_inflows") or 0)
     inflow_usdc = float(wallet_inflows.get("total_usdc") or 0.0)
-    error_rate = overview.get("http_error_rate_excluding_payment_required")
+    error_rate = reliability.get("server_error_rate")
     if error_rate is None:
-        error_rate = overview.get("http_error_rate")
+        error_rate = overview.get("server_error_rate")
     error_rate_float = float(error_rate) if error_rate is not None else 0.0
+    post_credit_failures = int(reliability.get("charged_delivery_failures") or failed_after_credit)
     delivery_rate = _brief_ratio(delivered, requested)
     block_rate = _brief_ratio(blocked, requested)
     active_registry_sources = sum(1 for value in summary.get("registry_source_mix", {}).values() if value)
@@ -6202,7 +6204,7 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     elif requested and (delivery_rate is not None and delivery_rate < 0.5):
         status = "watch"
         status_label = "Watch closely"
-    elif error_rate_float >= 0.05 or failed_after_credit:
+    elif error_rate_float >= 0.01 or post_credit_failures:
         status = "watch"
         status_label = "Watch closely"
     elif requested or registry_requests:
@@ -6379,13 +6381,13 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
                 "check": "Expect platform coverage to show configured feeds for Pay.sh, Smithery, and other onboarded registries.",
             }
         )
-    if error_rate_float >= 0.05 or failed_after_credit:
+    if error_rate_float >= 0.01 or post_credit_failures:
         improvement_steps.append(
             {
                 "priority": "P1",
                 "action": "Audit recent failed/rejected events and add refunds or retries for charged failures.",
                 "why": "Reliability problems after a user pays are high trust-risk events.",
-                "check": "Expect HTTP error rate below 5% and failed-after-credit count at 0.",
+                "check": "Expect server error rate below 1% and failed-after-credit count at 0.",
             }
         )
     improvement_steps.append(
@@ -6430,9 +6432,9 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "HTTP reliability",
-            "status": "pass" if error_rate_float < 0.05 and not failed_after_credit else "fail",
-            "value": _brief_pct(error_rate_float),
-            "detail": "Unexpected HTTP error rate, excluding normal 402 payment prompts, plus any post-credit failure signals.",
+            "status": "pass" if error_rate_float < 0.01 and not post_credit_failures else "fail",
+            "value": f"{_brief_pct(error_rate_float)} server; {post_credit_failures} post-credit failure(s)",
+            "detail": "HTTP 5xx rate plus charged-delivery failures. Payment prompts, auth challenges, rate limits and client/protocol responses are reported separately.",
         },
         {
             "name": "Raw evidence",
@@ -7805,7 +7807,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to verified revenue"),
         metric("Paid Calls", fmt.format(paid), "Verified x402, credits, and MCP paid usage"),
         metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Direct x402 + bulk credit claims"),
-        metric("Unexpected Errors", pct(o.http_error_rate_excluding_payment_required), "HTTP errors excluding normal 402 prompts"),
+        metric("Server Errors", pct(data.reliability?.server_error_rate), "HTTP 5xx responses / all HTTP requests"),
         metric("Unsupported Demand", fmt.format(o.unsupported_symbol_requests || 0), "Bounded zero-result symbol searches"),
       ].join("");
       renderAttention(data);

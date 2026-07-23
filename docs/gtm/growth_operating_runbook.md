@@ -18,7 +18,8 @@ The protected production command center at `/internal/observability/command-cent
 | First price under 3 minutes | Attributed activations reached within 180 seconds of first eligible event | 50% | Simplify quickstart and identity/payment instructions |
 | Seven-day repeat | Mature activated identities with at least two successful delivery events during their first seven days / mature activated identities | 25% | Improve recurring workflows and product utility |
 | Starter-to-paid | Starter-credit activated identities later tied to verified x402 payment or prepaid credit claim / starter-credit activated identities | 5% | Improve upgrade prompts, payment support and offer packaging |
-| Unexpected HTTP error rate | HTTP failures excluding normal `402 Payment Required` responses / HTTP requests | Below 5% | Stop acquisition work and fix reliability if breached |
+| Server error rate | HTTP `5xx` responses / HTTP requests; payment prompts, auth challenges, rate limits and client/protocol `4xx` responses are reported separately | Below 1% | Stop acquisition work and fix server reliability if breached |
+| Post-credit failure rate | Charged HTTP or MCP delivery failures / successful plus failed charged deliveries | 0% | Refund, retry and fix before scaling acquisition |
 | Unsupported demand | Bounded zero-result symbol searches, ranked by request count | No fixed target | Prioritize source expansion by demonstrated demand |
 
 Targets are provisional operating thresholds, not external benchmarks. Replace them after four complete weekly cohorts exist.

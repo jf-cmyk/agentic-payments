@@ -46,6 +46,10 @@ def normalize_symbol_opportunity(value: str | None) -> str | None:
     clean = value.strip()
     if not SYMBOL_OPPORTUNITY_RE.fullmatch(clean):
         return None
+    # Keep market pairs such as BTC-USD, BTC/USD and BRK.B while rejecting
+    # prose-like slugs such as DATA-API-FOR-AI from the sourcing backlog.
+    if len(re.split(r"[-/:]", clean)) > 2:
+        return None
     return clean.upper()
 
 
@@ -447,6 +451,7 @@ class UsageEventStore:
         data_called = self._data_called(events, called_data_events)
         popularity = self._popularity(events)
         growth_funnel = self._growth_funnel(events)
+        reliability = self._reliability_summary(events)
         evidence = self._source_evidence(events)
         unsupported_symbol_opportunities = self._unsupported_symbol_opportunities(events)
         most_used_service = service_mix.most_common(1)[0][0] if service_mix else None
@@ -473,6 +478,8 @@ class UsageEventStore:
                     events,
                     exclude_status_codes={402},
                 ),
+                "server_error_rate": reliability["server_error_rate"],
+                "post_credit_failure_rate": reliability["post_credit_failure_rate"],
                 "avg_latency_ms": round(mean(latencies), 2) if latencies else None,
                 "p95_latency_ms": self._percentile(latencies, 95),
                 "most_used_service": most_used_service,
@@ -494,6 +501,7 @@ class UsageEventStore:
             "data_called": data_called,
             "popularity": popularity,
             "growth_funnel": growth_funnel,
+            "reliability": reliability,
             "source_evidence": evidence,
             "unsupported_symbol_opportunities": unsupported_symbol_opportunities,
             "marketplace_metrics": self.marketplace_metrics_summary(days=days),
@@ -507,7 +515,70 @@ class UsageEventStore:
                 "First-live-price activation is counted once per privacy-safe explicit user, agent, wallet, device, or session identity.",
                 "Growth-funnel identity attribution uses salted identity hashes or wallet hashes; IP fingerprints are never used as funnel identities.",
                 "Unsupported-symbol opportunities include only bounded symbol-like searches with zero results; arbitrary free text is excluded.",
+                "Server reliability is measured from HTTP 5xx responses and charged-delivery failures; expected payment, auth, rate-limit, and client/protocol responses are reported separately.",
             ],
+        }
+
+    @staticmethod
+    def _reliability_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Separate server failures from expected payment and client/protocol responses."""
+        http_events = [event for event in events if event.get("event") == "http_request"]
+        status_counts = Counter(int(event.get("status_code") or 0) for event in http_events)
+        total = len(http_events)
+        server_errors = sum(count for status, count in status_counts.items() if status >= 500)
+        payment_required = status_counts[402]
+        auth_required = status_counts[401] + status_counts[403]
+        rate_limited = status_counts[429]
+        client_protocol_statuses = {400, 404, 405, 406, 416, 422}
+        client_protocol = sum(status_counts[status] for status in client_protocol_statuses)
+        other_http_errors = sum(
+            count
+            for status, count in status_counts.items()
+            if 400 <= status < 500
+            and status not in client_protocol_statuses | {401, 402, 403, 429}
+        )
+        successful_http = sum(count for status, count in status_counts.items() if 200 <= status < 400)
+        http_delivery_failures = sum(
+            1 for event in events if event.get("event") == "charged_delivery_failed"
+        )
+        http_delivery_successes = sum(
+            1 for event in events if event.get("event") == "data_delivered"
+        )
+        mcp_drawdowns = sum(
+            1 for event in events if event.get("event") == "mcp_credit_drawdown_success"
+        )
+        mcp_delivery_failures = sum(
+            1 for event in events if event.get("event") == "mcp_tool_error"
+        )
+        # MCP drawdown success is recorded before the provider call, so a later
+        # tool error converts that attempt into a failure instead of creating a
+        # second delivery attempt.
+        mcp_delivery_successes = max(0, mcp_drawdowns - mcp_delivery_failures)
+        charged_delivery_failures = http_delivery_failures + mcp_delivery_failures
+        charged_delivery_successes = http_delivery_successes + mcp_delivery_successes
+        charged_delivery_attempts = charged_delivery_successes + charged_delivery_failures
+        return {
+            "http_requests": total,
+            "successful_http_responses": successful_http,
+            "payment_required_responses": payment_required,
+            "auth_required_responses": auth_required,
+            "rate_limited_responses": rate_limited,
+            "client_protocol_responses": client_protocol,
+            "other_http_errors": other_http_errors,
+            "server_errors": server_errors,
+            "server_error_rate": round(server_errors / total, 6) if total else None,
+            "charged_delivery_successes": charged_delivery_successes,
+            "charged_delivery_failures": charged_delivery_failures,
+            "post_credit_failure_rate": (
+                round(charged_delivery_failures / charged_delivery_attempts, 6)
+                if charged_delivery_attempts
+                else None
+            ),
+            "definitions": {
+                "server_error_rate": "HTTP 5xx responses divided by all HTTP requests.",
+                "post_credit_failure_rate": "Charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries.",
+                "client_protocol_responses": "HTTP 400, 404, 405, 406, 416 and 422 responses; visible for diagnosis but excluded from the server-error KPI.",
+            },
         }
 
     @staticmethod

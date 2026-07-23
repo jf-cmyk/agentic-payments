@@ -2711,6 +2711,57 @@ class TestDiscoveryRateLimit:
 
 
 class TestObservabilityDashboard:
+    def test_reliability_separates_protocol_responses_from_server_failures(
+        self,
+        observability_store,
+    ):
+        for status_code in (200, 402, 404, 405, 429, 500):
+            observability_store.record(
+                "http_request",
+                surface="http_api",
+                endpoint="/v1/example",
+                method="GET",
+                status_code=status_code,
+            )
+        observability_store.record("data_delivered", status_code=200)
+        observability_store.record("charged_delivery_failed", status_code=500)
+        observability_store.record("mcp_credit_drawdown_success")
+        observability_store.record("mcp_credit_drawdown_success")
+        observability_store.record("mcp_tool_error")
+
+        stats = observability_store.summarize(days=1)
+        reliability = stats["reliability"]
+
+        assert reliability["http_requests"] == 6
+        assert reliability["payment_required_responses"] == 1
+        assert reliability["client_protocol_responses"] == 2
+        assert reliability["rate_limited_responses"] == 1
+        assert reliability["server_errors"] == 1
+        assert reliability["server_error_rate"] == pytest.approx(1 / 6, abs=0.000001)
+        assert reliability["charged_delivery_successes"] == 2
+        assert reliability["charged_delivery_failures"] == 2
+        assert reliability["post_credit_failure_rate"] == 0.5
+        assert stats["overview"]["server_error_rate"] == reliability["server_error_rate"]
+
+    def test_unsupported_demand_rejects_prose_like_slug(self, observability_store):
+        observability_store.record(
+            "unsupported_symbol_request",
+            surface="local_mcp",
+            subject="DATA-API-FOR-AI",
+            asset_class="all",
+        )
+        observability_store.record(
+            "unsupported_symbol_request",
+            surface="http_api",
+            subject="BTC-USD",
+            asset_class="crypto",
+        )
+
+        opportunities = observability_store.summarize(days=1)["unsupported_symbol_opportunities"]
+
+        assert opportunities["total_requests"] == 1
+        assert opportunities["rows"][0]["symbol"] == "BTC-USD"
+
     def test_registry_and_payment_challenges_are_summarized(
         self,
         observability_store,
