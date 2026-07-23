@@ -711,6 +711,82 @@ class TestPaymentGate:
         assert response.status_code == 405
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/briefs/market",
+            "/v1/checks/pre-trade",
+            "/v1/receipts/price",
+            "/v1/snapshots/macro",
+            "/v1/monitors/evaluate",
+            "/v1/indicators/token-quality",
+            "/v1/indicators/state-divergence",
+            "/v1/signals/solana-token-brief",
+            "/v1/signals/trader-alpha-pack",
+            "/v1/rwa/benchmark/blocksize",
+        ],
+    )
+    def test_post_only_paid_routes_reject_get_before_payment(self, test_client, path):
+        response = test_client.get(path, headers={"X-PAYMENT": "must-not-be-used"})
+
+        assert response.status_code == 405
+        assert "PAYMENT-REQUIRED" not in response.headers
+        assert "PAYMENT-RESPONSE" not in response.headers
+
+    def test_unsupported_post_route_method_never_charges_or_draws_credit(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+    ):
+        previous_manager = app.state.credits
+        manager = CreditManager(str(tmp_path / "credits.db"))
+        app.state.credits = manager
+        agent_id = "wrong-method-agent-12345678"
+
+        try:
+            with patch(
+                "src.resource_server._verify_payment",
+                new_callable=AsyncMock,
+            ) as verify_payment:
+                starter_response = test_client.get(
+                    "/v1/checks/pre-trade",
+                    headers={"X-AGENT-ID": agent_id},
+                )
+                paid_response = test_client.get(
+                    "/v1/checks/pre-trade",
+                    headers={"X-PAYMENT": "must-not-be-verified"},
+                )
+                missing_starter_response = test_client.post(
+                    "/v1/checks/pre-trade/not-a-route",
+                    headers={"X-AGENT-ID": agent_id},
+                )
+                missing_paid_response = test_client.post(
+                    "/v1/checks/pre-trade/not-a-route",
+                    headers={"X-PAYMENT": "also-must-not-be-verified"},
+                )
+        finally:
+            app.state.credits = previous_manager
+
+        assert starter_response.status_code == 405
+        assert paid_response.status_code == 405
+        assert missing_starter_response.status_code == 404
+        assert missing_paid_response.status_code == 404
+        assert "PAYMENT-REQUIRED" not in starter_response.headers
+        assert "PAYMENT-RESPONSE" not in paid_response.headers
+        assert "PAYMENT-REQUIRED" not in missing_starter_response.headers
+        assert "PAYMENT-RESPONSE" not in missing_paid_response.headers
+        assert manager.get_balance(agent_id) == 0.0
+        verify_payment.assert_not_awaited()
+
+        stats = observability_store.summarize(days=1)
+        assert stats["event_counts"].get("credit_drawdown_success", 0) == 0
+        assert stats["event_counts"].get("payment_proof_submitted", 0) == 0
+        assert stats["event_counts"].get("payment_verified", 0) == 0
+        assert stats["event_counts"].get("charged_delivery_failed", 0) == 0
+        assert stats["reliability"]["client_protocol_responses"] == 4
+        assert stats["reliability"]["charged_delivery_failures"] == 0
+
     def test_state_requires_payment(self, test_client):
         response = test_client.get("/v1/state/MSOLUSD")
         assert response.status_code == 402

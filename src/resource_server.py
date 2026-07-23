@@ -1721,7 +1721,22 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         "/v1/fx/",
         "/v1/metal/",
     )
-    if path.startswith(paid_get_prefixes) and request.method.upper() not in {"GET", "HEAD"}:
+    paid_post_paths = {
+        "/v1/briefs/market",
+        "/v1/checks/pre-trade",
+        "/v1/receipts/price",
+        "/v1/snapshots/macro",
+        "/v1/monitors/evaluate",
+        "/v1/indicators/token-quality",
+        "/v1/indicators/state-divergence",
+        "/v1/signals/solana-token-brief",
+        "/v1/signals/trader-alpha-pack",
+        "/v1/rwa/benchmark/blocksize",
+    }
+    method = request.method.upper()
+    if path.startswith(paid_get_prefixes) and method not in {"GET", "HEAD"}:
+        return None
+    if path in paid_post_paths and method != "POST":
         return None
     
     # Handle Batch endpoint dynamically
@@ -1765,7 +1780,7 @@ def _get_price_for_request(request: Request) -> Decimal | None:
 
     # Check static route pricing
     for route_prefix, price in ROUTE_PRICING.items():
-        if path.startswith(route_prefix):
+        if path == route_prefix or (route_prefix.endswith("/") and path.startswith(route_prefix)):
             return price
 
     return None  # Free endpoint
