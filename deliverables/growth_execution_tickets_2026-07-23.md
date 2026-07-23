@@ -11,7 +11,7 @@ This pack translates the approved growth plan into two operating epics: the agen
 - Growth Funnel and RWA Pilot sections in the protected production command center.
 - Full local integration regression from discovery through starter exhaustion and verified x402 delivery.
 - Three-feed RWA capture, raw replay history, monitoring thresholds and non-automatic promotion policy.
-- Production-capable background scheduler, disabled until its explicit Railway environment switch is set.
+- Production background scheduler enabled at a 30-minute interval with observations persisted on the Railway volume.
 - Weekly growth operating runbook.
 
 ## External actions
@@ -24,4 +24,4 @@ This pack translates the approved growth plan into two operating epics: the agen
 
 ## Current RWA pilot state
 
-The first read-only capture succeeded for AAPL/USDC, PAXG/USDC and EURC/USDC on 2026-07-23. This is one sample per feed, so the minimum 14-day and 672-sample gates remain open. Production-promoted expansion feeds remain zero.
+The latest production capture succeeded for AAPL/USDC, PAXG/USDC and EURC/USDC on 2026-07-23. The first production PAXG attempt exposed a missing Ethereum RPC variable; the configured RPC was added and the next capture passed 3/3. The minimum 14-day and 672-sample gates remain open, and production-promoted expansion feeds remain zero.

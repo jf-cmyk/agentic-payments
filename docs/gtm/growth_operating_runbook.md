@@ -33,7 +33,7 @@ The pilot contains exactly three candidate feeds:
 | PAXG/USDC | Uniswap pool state through Ethereum RPC | Ethereum onchain pool state |
 | EURC/USDC | Aerodrome pool state through Base RPC | Base onchain pool state |
 
-`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is controlled by `RWA_GROWTH_PILOT_ENABLED` and defaults to a 30-minute interval when enabled.
+`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume.
 
 Monitoring thresholds:
 
@@ -45,7 +45,7 @@ Monitoring thresholds:
 
 Even when every monitoring threshold passes, promotion remains blocked until independent benchmark alignment, depth/manipulation review, source-independence review, rights/redistribution signoff and explicit human approval are complete. The scheduler cannot promote a feed.
 
-The first read-only capture on 2026-07-23 succeeded for all three feeds. That proves current reachability only; the sample/window gates remain open and production-promoted expansion feeds remain zero.
+The latest production capture on 2026-07-23 succeeded for all three feeds. The first production PAXG attempt failed because the Ethereum RPC variable was absent; the configured RPC was added and the following capture passed 3/3. This proves current reachability only; the sample/window gates remain open and production-promoted expansion feeds remain zero.
 
 ## Weekly cadence
 
