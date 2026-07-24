@@ -13,13 +13,13 @@ flowchart LR
       D3["Pay.sh · x402scan · Awesome MCP"]:::live
     end
 
-    subgraph ACTIVATE["2. Activate — release candidate"]
+    subgraph ACTIVATE["2. Activate — deployed and verified"]
       A1["One-click first live BTC-USD price"]:::release
       A2["Stable privacy-safe agent identity"]:::release
       A3["50 starter credits → explicit 402"]:::live
     end
 
-    subgraph INTEGRATE["3. Integrate — validated in repository"]
+    subgraph INTEGRATE["3. Integrate — live guide + validated packages"]
       I1["LangChain · LlamaIndex · OpenAI Agents"]:::release
       I2["Vercel AI SDK · GOAT · Solana Agent Kit"]:::release
       I3["Shared clients preserve source + timestamp"]:::release
@@ -40,7 +40,7 @@ flowchart LR
     subgraph RWA["6. RWA evidence lane — monitored, not promoted"]
       R1["AAPL: Hyperliquid venue API"]:::live
       R2["PAXG: Ethereum RPC · EURC: Base RPC"]:::live
-      R3["30-min replay + queryable candidate ledger"]:::release
+      R3["30-min replay + queryable candidate ledger · live"]:::release
       R4["14 days · 672 samples · ≥99% success/freshness"]:::gate
       R5["Benchmark · depth · independence · rights"]:::blocked
       R6["Named human promotion approval"]:::blocked
@@ -62,4 +62,4 @@ flowchart LR
     R3 --> R4 --> R5 --> R6
 ```
 
-Status meaning: green is functioning in production before this release; blue is implemented and locally validated in the pending release; amber is an elapsed-time/data threshold; red requires external evidence or named human approval.
+Status meaning: green is established production capability; blue is newly deployed and verified in release `48d8a6a`; amber is an elapsed-time/data threshold; red requires external evidence or named human approval.

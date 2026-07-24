@@ -30,3 +30,7 @@ This pack translates the approved growth plan into two operating epics: the agen
 ## Current RWA pilot state
 
 The latest production capture succeeded for AAPL/USDC, PAXG/USDC and EURC/USDC on 2026-07-23. The first production PAXG attempt exposed a missing Ethereum RPC variable; the configured RPC was added and the next capture passed 3/3. The minimum 14-day and 672-sample gates remain open, and production-promoted expansion feeds remain zero.
+
+## Latest release evidence
+
+Commit `48d8a6a` was deployed as Railway deployment `9de0fa96-d8a1-4eb4-afbd-7405f6f7468a`. Production hosted smoke passed, the first scheduled RWA capture logged 3/3 successful feeds and 3 queryable-ledger writes, and the public observation ledger showed one candidate record per feed. No production HTTP 5xx responses were present after rollout. An eligible local release identity received a live starter-credit VWAP; the production verification identity correctly received the explicit x402 challenge because this acquisition environment was no longer eligible for another starter grant.
