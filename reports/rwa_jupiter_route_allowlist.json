@@ -1,0 +1,1539 @@
+{
+  "as_of": "2026-07-10T21:51:07.771770+00:00",
+  "product": "rwa_jupiter_route_allowlist",
+  "quality_policy": {
+    "promotion_status": "route evidence only; pool-specific adapters still require pool state and liquidity checks",
+    "secret_policy": "API key is used only in the request header and is never persisted",
+    "source": "Jupiter /swap/v1/quote",
+    "source_type": "quote_sweep"
+  },
+  "routes": [
+    {
+      "allowlist_id": "dex:jupiter_router:AAPLX:USD",
+      "ask": 317.4187910210223,
+      "ask_context_slot": 432093519,
+      "ask_price_impact_pct": "0.0002459073358705782931955482",
+      "ask_route_steps": [
+        {
+          "amm_key": "EHdow7Yhmr1ac8Qff9Co1LhSosr38puA6zLd4cbJLdpV",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Byreal",
+          "output_mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "AAPL",
+      "base_token": {
+        "decimals": 8,
+        "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "AAPLX"
+      },
+      "bid": 315.9776938388473,
+      "bid_context_slot": 432093520,
+      "bid_price_impact_pct": "0.0042951988850442772232877179",
+      "bid_route_steps": [
+        {
+          "amm_key": "EHdow7Yhmr1ac8Qff9Co1LhSosr38puA6zLd4cbJLdpV",
+          "bps": 10000,
+          "input_mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+          "label": "Byreal",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 317.87753222593153,
+          "size": 3.14586562
+        },
+        {
+          "price": 320.63832086944177,
+          "size": 12.47511523
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093521,
+          "cumulative_price": 317.87753222593153,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0016886906426054689867659393",
+          "route_plan": [
+            {
+              "bps": 3900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "CKwJZwm7oj3nu4653N1EpDrqXbXAYXoPFiPeEnLouF8y",
+                "inAmount": "390000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "122679850",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            },
+            {
+              "bps": 100,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "7wXtGayssQRekJYop299FoJZmcD7fvRW6NUwLk3r6VWM",
+                "inAmount": "10000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Quantum",
+                "outAmount": "128327637",
+                "outputMint": "So11111111111111111111111111111111111111112"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "21xzJuNiW7pikhcYRp9WSUVQvE21CsVJSrTS6fm8r3iu",
+                "inAmount": "128327637",
+                "inputMint": "So11111111111111111111111111111111111111112",
+                "label": "PancakeSwap",
+                "outAmount": "3142203",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            },
+            {
+              "bps": 6000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "EHdow7Yhmr1ac8Qff9Co1LhSosr38puA6zLd4cbJLdpV",
+                "inAmount": "600000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "188764509",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            }
+          ],
+          "time_taken": 0.104404035
+        },
+        {
+          "context_slot": 432093524,
+          "cumulative_price": 320.0823333702506,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0085652898415739846603835317",
+          "route_plan": [
+            {
+              "bps": 5600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "EHdow7Yhmr1ac8Qff9Co1LhSosr38puA6zLd4cbJLdpV",
+                "inAmount": "2800000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "874937199",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            },
+            {
+              "bps": 100,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q",
+                "inAmount": "50000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "641534484",
+                "outputMint": "So11111111111111111111111111111111111111112"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "21xzJuNiW7pikhcYRp9WSUVQvE21CsVJSrTS6fm8r3iu",
+                "inAmount": "641534484",
+                "inputMint": "So11111111111111111111111111111111111111112",
+                "label": "PancakeSwap",
+                "outAmount": "15628611",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            },
+            {
+              "bps": 4300,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "CKwJZwm7oj3nu4653N1EpDrqXbXAYXoPFiPeEnLouF8y",
+                "inAmount": "2150000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "671532275",
+                "outputMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+              }
+            }
+          ],
+          "time_taken": 0.095317238
+        }
+      ],
+      "symbol": "AAPLx/USD",
+      "timestamp": "2026-07-10T21:50:14.899107+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:AMZNX:USD",
+      "ask": 246.0367780696594,
+      "ask_context_slot": 432093527,
+      "ask_price_impact_pct": "0.0000484668961258466330268684",
+      "ask_route_steps": [
+        {
+          "amm_key": "6m5aXAve4uh6Kt4ytKyCLWNMjd8PYP5vujwNCtycrUiD",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Raydium CLMM",
+          "output_mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "AMZN",
+      "base_token": {
+        "decimals": 8,
+        "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "AMZNX"
+      },
+      "bid": 244.89834375422106,
+      "bid_context_slot": 432093530,
+      "bid_price_impact_pct": "0.0045788450262804184495106667",
+      "bid_route_steps": [
+        {
+          "amm_key": "5bWgqeKbHpxVGxdxSEJ9FGjU8AyNhCMuGGhHFBoakQvj",
+          "bps": 10000,
+          "input_mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+          "label": "Byreal",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 246.14498190502087,
+          "size": 4.0626463
+        },
+        {
+          "price": 246.75011621529507,
+          "size": 16.21073198
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093539,
+          "cumulative_price": 246.14498190502087,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0004880395017504668321593847",
+          "route_plan": [
+            {
+              "bps": 800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "5bWgqeKbHpxVGxdxSEJ9FGjU8AyNhCMuGGhHFBoakQvj",
+                "inAmount": "80000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "32502017",
+                "outputMint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"
+              }
+            },
+            {
+              "bps": 9200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "6m5aXAve4uh6Kt4ytKyCLWNMjd8PYP5vujwNCtycrUiD",
+                "inAmount": "920000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "373762613",
+                "outputMint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"
+              }
+            }
+          ],
+          "time_taken": 0.078555198
+        },
+        {
+          "context_slot": 432093540,
+          "cumulative_price": 246.62885143975126,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0024490160235987039410721271",
+          "route_plan": [
+            {
+              "bps": 9200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "6m5aXAve4uh6Kt4ytKyCLWNMjd8PYP5vujwNCtycrUiD",
+                "inAmount": "4600000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "1865130076",
+                "outputMint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"
+              }
+            },
+            {
+              "bps": 800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "5bWgqeKbHpxVGxdxSEJ9FGjU8AyNhCMuGGhHFBoakQvj",
+                "inAmount": "400000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "162207752",
+                "outputMint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg"
+              }
+            }
+          ],
+          "time_taken": 0.106485972
+        }
+      ],
+      "symbol": "AMZNx/USD",
+      "timestamp": "2026-07-10T21:50:18.675946+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:EURC:USDC",
+      "ask": 1.1413582329610539,
+      "ask_context_slot": 432093542,
+      "ask_price_impact_pct": "0.0000043257289909101482172804",
+      "ask_route_steps": [
+        {
+          "amm_key": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Whirlpool",
+          "output_mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "percent": null
+        }
+      ],
+      "asset_class": "fx",
+      "asset_id": "EURC",
+      "base_token": {
+        "decimals": 6,
+        "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "EURC"
+      },
+      "bid": 1.1411234898132807,
+      "bid_context_slot": 432093542,
+      "bid_price_impact_pct": "0",
+      "bid_route_steps": [
+        {
+          "amm_key": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i",
+          "bps": 10000,
+          "input_mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+          "label": "Whirlpool",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 1.141386364128301,
+          "size": 876.127516
+        },
+        {
+          "price": 1.141545111245091,
+          "size": 3504.0227149999996
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093546,
+          "cumulative_price": 1.141386364128301,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.000177892220713070680101894",
+          "route_plan": [
+            {
+              "bps": 200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "2zVV22uNWdJNmkXpj5vCrMzwHGBoJdsyV7qACh29sK1w",
+                "inAmount": "20000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "17522795",
+                "outputMint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+              }
+            },
+            {
+              "bps": 9800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i",
+                "inAmount": "980000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "858604721",
+                "outputMint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+              }
+            }
+          ],
+          "time_taken": 0.045567886
+        },
+        {
+          "context_slot": 432093546,
+          "cumulative_price": 1.1415133582891943,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0002280837483404754848014203",
+          "route_plan": [
+            {
+              "bps": 200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "2zVV22uNWdJNmkXpj5vCrMzwHGBoJdsyV7qACh29sK1w",
+                "inAmount": "100000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "87603435",
+                "outputMint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+              }
+            },
+            {
+              "bps": 9800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i",
+                "inAmount": "4900000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "4292546796",
+                "outputMint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+              }
+            }
+          ],
+          "time_taken": 0.046963023
+        }
+      ],
+      "symbol": "EURC/USDC",
+      "timestamp": "2026-07-10T21:50:23.437913+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:METAX:USD",
+      "ask": 672.19185968936,
+      "ask_context_slot": 432093549,
+      "ask_price_impact_pct": "0.0001797789961678510798164977",
+      "ask_route_steps": [
+        {
+          "amm_key": "BqXGCG4vcD81GMiX2Rw9sKrSTqeAAZS6mGR5Ek69B7Lm",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Byreal",
+          "output_mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "META",
+      "base_token": {
+        "decimals": 8,
+        "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "METAX"
+      },
+      "bid": 669.4147729621579,
+      "bid_context_slot": 432093549,
+      "bid_price_impact_pct": "0.0039523215482326227481152646",
+      "bid_route_steps": [
+        {
+          "amm_key": "3L7KbPVaAQA4UTecaGQYsm6UCq5F3sZM9zAYkxqYt63j",
+          "bps": 10000,
+          "input_mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+          "label": "Raydium CLMM",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 673.0155227059521,
+          "size": 1.48584983
+        },
+        {
+          "price": 675.8683917842399,
+          "size": 5.9183119799999995
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093552,
+          "cumulative_price": 673.0155227059521,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0014033985287021367825809946",
+          "route_plan": [
+            {
+              "bps": 5900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "BqXGCG4vcD81GMiX2Rw9sKrSTqeAAZS6mGR5Ek69B7Lm",
+                "inAmount": "590000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "87686573",
+                "outputMint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"
+              }
+            },
+            {
+              "bps": 4100,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "3L7KbPVaAQA4UTecaGQYsm6UCq5F3sZM9zAYkxqYt63j",
+                "inAmount": "410000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "60898410",
+                "outputMint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"
+              }
+            }
+          ],
+          "time_taken": 0.000609016
+        },
+        {
+          "context_slot": 432093555,
+          "cumulative_price": 675.2958847073063,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0047754933337276149947108011",
+          "route_plan": [
+            {
+              "bps": 5600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "3L7KbPVaAQA4UTecaGQYsm6UCq5F3sZM9zAYkxqYt63j",
+                "inAmount": "2800000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "414507663",
+                "outputMint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"
+              }
+            },
+            {
+              "bps": 4400,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "BqXGCG4vcD81GMiX2Rw9sKrSTqeAAZS6mGR5Ek69B7Lm",
+                "inAmount": "2200000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "325908518",
+                "outputMint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu"
+              }
+            }
+          ],
+          "time_taken": 0.000840797
+        }
+      ],
+      "symbol": "METAx/USD",
+      "timestamp": "2026-07-10T21:50:26.067817+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:MSFTX:USD",
+      "ask": 387.3975996767245,
+      "ask_context_slot": 432093565,
+      "ask_price_impact_pct": "0.0000703851894376506144274531",
+      "ask_route_steps": [
+        {
+          "amm_key": "CLu4kFM4nb67xrdN7vJnMxXXir8Z5hA4HJUzPFccXjsL",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Raydium CLMM",
+          "output_mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "MSFT",
+      "base_token": {
+        "decimals": 8,
+        "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "MSFTX"
+      },
+      "bid": 386.0959166239787,
+      "bid_context_slot": 432093565,
+      "bid_price_impact_pct": "0.0032899163719494230739356542",
+      "bid_route_steps": [
+        {
+          "amm_key": "HrkeM8zFLiLp7ShhZKkM3b6Tvt8Aq2AKFcCvxRnfwKaq",
+          "bps": 10000,
+          "input_mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+          "label": "Raydium CLMM",
+          "output_mint": "So11111111111111111111111111111111111111112",
+          "percent": null
+        },
+        {
+          "amm_key": "DJNtGuBGEQiUCWE8F981M2C3ZghZt2XLD8f2sQdZ6rsZ",
+          "bps": 10000,
+          "input_mint": "So11111111111111111111111111111111111111112",
+          "label": "PancakeSwap",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 387.6710240282416,
+          "size": 2.57950669
+        },
+        {
+          "price": 389.14728311726464,
+          "size": 10.27888456
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093566,
+          "cumulative_price": 387.6710240282416,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0007756354907149268121862058",
+          "route_plan": [
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "CLu4kFM4nb67xrdN7vJnMxXXir8Z5hA4HJUzPFccXjsL",
+                "inAmount": "1000000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "257950669",
+                "outputMint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"
+              }
+            }
+          ],
+          "time_taken": 0.096779945
+        },
+        {
+          "context_slot": 432093567,
+          "cumulative_price": 388.85113252406285,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0038081408974363444016658474",
+          "route_plan": [
+            {
+              "bps": 9600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "CLu4kFM4nb67xrdN7vJnMxXXir8Z5hA4HJUzPFccXjsL",
+                "inAmount": "4800000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "1234488953",
+                "outputMint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"
+              }
+            },
+            {
+              "bps": 400,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "hKgG7iEDRFNsJSwLYqz8ETHuZwzh6qMMLow8VXa8pLm",
+                "inAmount": "200000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "HumidiFi",
+                "outAmount": "988492277",
+                "outputMint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "7T5BKFBFLGSgVBKKcBwrrUTHPtpVGvorKfmYuS4TzdfV",
+                "inAmount": "988492277",
+                "inputMint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+                "label": "Scorch",
+                "outAmount": "2567560000",
+                "outputMint": "So11111111111111111111111111111111111111112"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "HrkeM8zFLiLp7ShhZKkM3b6Tvt8Aq2AKFcCvxRnfwKaq",
+                "inAmount": "2567560000",
+                "inputMint": "So11111111111111111111111111111111111111112",
+                "label": "Raydium CLMM",
+                "outAmount": "51350172",
+                "outputMint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX"
+              }
+            }
+          ],
+          "time_taken": 0.12424455
+        }
+      ],
+      "symbol": "MSFTx/USD",
+      "timestamp": "2026-07-10T21:50:32.807430+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:NVDAX:USD",
+      "ask": 210.39117821374103,
+      "ask_context_slot": 432093569,
+      "ask_price_impact_pct": "0.0000959291739761822166244838",
+      "ask_route_steps": [
+        {
+          "amm_key": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Whirlpool",
+          "output_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "NVDA",
+      "base_token": {
+        "decimals": 8,
+        "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "NVDAX"
+      },
+      "bid": 210.28508635821498,
+      "bid_context_slot": 432093569,
+      "bid_price_impact_pct": "0.0004083700006206539757305377",
+      "bid_route_steps": [
+        {
+          "amm_key": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo",
+          "bps": 10000,
+          "input_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+          "label": "Whirlpool",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 210.4494459172293,
+          "size": 4.75173501
+        },
+        {
+          "price": 210.72607223875093,
+          "size": 18.981989069999997
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093573,
+          "cumulative_price": 210.4494459172293,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0003727753004255594869219715",
+          "route_plan": [
+            {
+              "bps": 2900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "HxXYvpXYEVP652FwaDyuKKFT8H3s52LrVziss8hVKVXG",
+                "inAmount": "290000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "TaurusFi",
+                "outAmount": "137805651",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            },
+            {
+              "bps": 200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "GH5Jo3dRwkg6bYZcC7oPPrVRFu7KexBL7ncdgqVqGtnz",
+                "inAmount": "20000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "9502583",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            },
+            {
+              "bps": 6900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo",
+                "inAmount": "690000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "327865267",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            }
+          ],
+          "time_taken": 0.125847004
+        },
+        {
+          "context_slot": 432093574,
+          "cumulative_price": 210.67068881168186,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0014225673802520959788215311",
+          "route_plan": [
+            {
+              "bps": 3800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo",
+                "inAmount": "1900000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "902231860",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            },
+            {
+              "bps": 5400,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "49iMatQtoyabsYAQc8GafVq6aeBFVDxSRH44oiatyyw6",
+                "inAmount": "2700000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "1281099384",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            },
+            {
+              "bps": 800,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "HxXYvpXYEVP652FwaDyuKKFT8H3s52LrVziss8hVKVXG",
+                "inAmount": "400000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "TaurusFi",
+                "outAmount": "190041164",
+                "outputMint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+              }
+            }
+          ],
+          "time_taken": 0.096970735
+        }
+      ],
+      "symbol": "NVDAx/USD",
+      "timestamp": "2026-07-10T21:50:34.550882+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:OUSG:USDC",
+      "asset_class": "treasury_fund",
+      "asset_id": "OUSG",
+      "error": "Jupiter /swap/v1/quote returned HTTP 400: {\"error\":\"The token 9VgfD1e4A2Kn6BozwCMMinDPbQV8cz5NiQ7by7Mtpump is not tradable\",\"errorCode\":\"TOKEN_NOT_TRADABLE\"}",
+      "promotion_status": "needs_manual_review",
+      "status": "error",
+      "symbol": "OUSG/USDC",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:QQQX:USD",
+      "ask": 728.4219917592162,
+      "ask_context_slot": 432093578,
+      "ask_price_impact_pct": "0.0000265138574967567870740574",
+      "ask_route_steps": [
+        {
+          "amm_key": "GMjGLWzvK75LPetrgAmdeXnvxc4fUuQPwJxeQqTDU1aG",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Raydium CLMM",
+          "output_mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+          "percent": null
+        }
+      ],
+      "asset_class": "etf",
+      "asset_id": "QQQ",
+      "base_token": {
+        "decimals": 8,
+        "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "QQQX"
+      },
+      "bid": 727.2104584498626,
+      "bid_context_slot": 432093594,
+      "bid_price_impact_pct": "0.001630214645186376236077462",
+      "bid_route_steps": [
+        {
+          "amm_key": "AdJmXwZpHpWiVYSho1GSiaR1dsQXfRGoqadaMNTNST7Y",
+          "bps": 10000,
+          "input_mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+          "label": "AlphaQ",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 728.4458747851513,
+          "size": 1.37278559
+        },
+        {
+          "price": 728.5910982932669,
+          "size": 5.490047860000001
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093594,
+          "cumulative_price": 728.4458747851513,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.00006585445444453832684088",
+          "route_plan": [
+            {
+              "bps": 9200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "GMjGLWzvK75LPetrgAmdeXnvxc4fUuQPwJxeQqTDU1aG",
+                "inAmount": "920000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "126296053",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            },
+            {
+              "bps": 100,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "EibwWLHyuFeqgU6fvi6g5FtDLF9kQsQL5HQXvcJNkDN8",
+                "inAmount": "10000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "1372876",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            },
+            {
+              "bps": 700,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "FknDV1F5n6QaA7rLmjquDjuU6wcPMNm5RYq7zWbqhpZw",
+                "inAmount": "70000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "9609630",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            }
+          ],
+          "time_taken": 0.107507291
+        },
+        {
+          "context_slot": 432093595,
+          "cumulative_price": 728.56204895953,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.000218746608375028316654126",
+          "route_plan": [
+            {
+              "bps": 500,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "FknDV1F5n6QaA7rLmjquDjuU6wcPMNm5RYq7zWbqhpZw",
+                "inAmount": "250000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "34315350",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            },
+            {
+              "bps": 300,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "FSLSua26xaXSLUG31SnyifgS6wgkRh5SirbCZW9zXNoG",
+                "inAmount": "150000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Byreal",
+                "outAmount": "20585797",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            },
+            {
+              "bps": 9200,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "GMjGLWzvK75LPetrgAmdeXnvxc4fUuQPwJxeQqTDU1aG",
+                "inAmount": "4600000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "631382198",
+                "outputMint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+              }
+            }
+          ],
+          "time_taken": 0.127355242
+        }
+      ],
+      "symbol": "QQQx/USD",
+      "timestamp": "2026-07-10T21:50:44.667022+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:SGOVX:USD",
+      "asset_class": "etf",
+      "asset_id": "SGOV",
+      "error": "Jupiter /swap/v1/quote returned HTTP 400: {\"error\":\"The token XsYD72ntjj7ZwoFDZCDmN2gamTcLpnywqvG7PQN5vCN is not tradable\",\"errorCode\":\"TOKEN_NOT_TRADABLE\"}",
+      "promotion_status": "needs_manual_review",
+      "status": "error",
+      "symbol": "SGOVx/USD",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:SPYX:USD",
+      "ask": 759.2771135199768,
+      "ask_context_slot": 432093597,
+      "ask_price_impact_pct": "0.0000021259713980919406702125",
+      "ask_route_steps": [
+        {
+          "amm_key": "4pCZCVEiYyT4efNdXUdL2tJF8VGMgiMXrZWq6FiNXhRw",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Raydium CLMM",
+          "output_mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+          "percent": null
+        }
+      ],
+      "asset_class": "etf",
+      "asset_id": "SPY",
+      "base_token": {
+        "decimals": 8,
+        "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "SPYX"
+      },
+      "bid": 759.1231548996684,
+      "bid_context_slot": 432093597,
+      "bid_price_impact_pct": "0.0002006444551662809285837663",
+      "bid_route_steps": [
+        {
+          "amm_key": "8j3y8NyGs4X38pRSFMvgdPFk8SZx7RqJ4qQMQ7udn9qU",
+          "bps": 10000,
+          "input_mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+          "label": "AlphaQ",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 759.2939535091449,
+          "size": 1.31701299
+        },
+        {
+          "price": 759.3744942684522,
+          "size": 5.2674932199999995
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093597,
+          "cumulative_price": 759.2939535091449,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0000243044087331867931619649",
+          "route_plan": [
+            {
+              "bps": 1400,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "gef4pD5g6GJSjX7hfXKUfhCVpE89BzX9TXnXJNW6kSt",
+                "inAmount": "140000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "18438089",
+                "outputMint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+              }
+            },
+            {
+              "bps": 8600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "4pCZCVEiYyT4efNdXUdL2tJF8VGMgiMXrZWq6FiNXhRw",
+                "inAmount": "860000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "113263210",
+                "outputMint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+              }
+            }
+          ],
+          "time_taken": 0.091034105
+        },
+        {
+          "context_slot": 432093598,
+          "cumulative_price": 759.3583847497048,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0001091519272310361453101451",
+          "route_plan": [
+            {
+              "bps": 900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "Fae5dWVntUt6zbWu2voXxioDpMii7SqQwtsxBmoVCsHR",
+                "inAmount": "450000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "59258915",
+                "outputMint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+              }
+            },
+            {
+              "bps": 7600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "4pCZCVEiYyT4efNdXUdL2tJF8VGMgiMXrZWq6FiNXhRw",
+                "inAmount": "3800000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Raydium CLMM",
+                "outAmount": "500423686",
+                "outputMint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+              }
+            },
+            {
+              "bps": 1500,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "gef4pD5g6GJSjX7hfXKUfhCVpE89BzX9TXnXJNW6kSt",
+                "inAmount": "750000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "98768020",
+                "outputMint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+              }
+            }
+          ],
+          "time_taken": 0.120834704
+        }
+      ],
+      "symbol": "SPYx/USD",
+      "timestamp": "2026-07-10T21:50:47.293590+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:TBLLX:USD",
+      "asset_class": "etf",
+      "asset_id": "TBLL",
+      "error": "Jupiter /swap/v1/quote returned HTTP 400: {\"error\":\"The token XsqBC5tcVQLYt8wqGCHRnAUUecbRYXoJCReD6w7QEKp is not tradable\",\"errorCode\":\"TOKEN_NOT_TRADABLE\"}",
+      "promotion_status": "needs_manual_review",
+      "status": "error",
+      "symbol": "TBLLx/USD",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:TSLAX:USD",
+      "ask": 407.51056644335495,
+      "ask_context_slot": 432093619,
+      "ask_price_impact_pct": "0",
+      "ask_route_steps": [
+        {
+          "amm_key": "9p7abUFv31ycgu9kckvnoqMMvBy67dqTDM2m6HP9xokN",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "Whirlpool",
+          "output_mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+          "percent": null
+        }
+      ],
+      "asset_class": "equity",
+      "asset_id": "TSLA",
+      "base_token": {
+        "decimals": 8,
+        "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "TSLAX"
+      },
+      "bid": 407.3101405214611,
+      "bid_context_slot": 432093619,
+      "bid_price_impact_pct": "0.0004319961403573973620455693",
+      "bid_route_steps": [
+        {
+          "amm_key": "HHQUnUbmWLrYzkscDY1C3deEFbGtiGBGoHjpANogmvum",
+          "bps": 10000,
+          "input_mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+          "label": "Raydium CLMM",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 407.6601644095889,
+          "size": 2.45302359
+        },
+        {
+          "price": 407.92501503609054,
+          "size": 9.80572373
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093622,
+          "cumulative_price": 407.6601644095889,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.0004206953712547716922515215",
+          "route_plan": [
+            {
+              "bps": 6100,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "HxNaPy1oYA8xkyg2GSSzcF3VwEX5bH6Mo6BLLAHF3Ack",
+                "inAmount": "610000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Riptide",
+                "outAmount": "149618206",
+                "outputMint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+              }
+            },
+            {
+              "bps": 3900,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "9p7abUFv31ycgu9kckvnoqMMvBy67dqTDM2m6HP9xokN",
+                "inAmount": "390000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "95684153",
+                "outputMint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+              }
+            }
+          ],
+          "time_taken": 0.139646998
+        },
+        {
+          "context_slot": 432093623,
+          "cumulative_price": 407.8720173832574,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0009398872723360836101539655",
+          "route_plan": [
+            {
+              "bps": 2400,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "2qkH8uVPkNrLFXztpyquSzrUFGyq8VFYjWu6m6omdo8e",
+                "inAmount": "1200000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "AlphaQ",
+                "outAmount": "294200874",
+                "outputMint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+              }
+            },
+            {
+              "bps": 2000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "9p7abUFv31ycgu9kckvnoqMMvBy67dqTDM2m6HP9xokN",
+                "inAmount": "1000000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "245236101",
+                "outputMint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+              }
+            },
+            {
+              "bps": 5600,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "HxNaPy1oYA8xkyg2GSSzcF3VwEX5bH6Mo6BLLAHF3Ack",
+                "inAmount": "2800000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Riptide",
+                "outAmount": "686437757",
+                "outputMint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+              }
+            }
+          ],
+          "time_taken": 0.055752631
+        }
+      ],
+      "symbol": "TSLAx/USD",
+      "timestamp": "2026-07-10T21:50:56.709156+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:USDY:USDC",
+      "ask": 1.13937612093247,
+      "ask_context_slot": 432093625,
+      "ask_price_impact_pct": "0.0006664324152362413530593381",
+      "ask_route_steps": [
+        {
+          "amm_key": "61LMyNZudQFDNMRFKwkBmf5HtRf1vU8B8FgNYdrha3fq",
+          "bps": 10000,
+          "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "label": "AlphaQ",
+          "output_mint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+          "percent": null
+        },
+        {
+          "amm_key": "2gG6bGNZkg8PUiDjkvhNvCZNY6b58zDpTCMjF6UDg8zc",
+          "bps": 10000,
+          "input_mint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+          "label": "Meteora DLMM",
+          "output_mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+          "percent": null
+        }
+      ],
+      "asset_class": "treasury_fund",
+      "asset_id": "USDY",
+      "base_token": {
+        "decimals": 6,
+        "mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDY"
+      },
+      "bid": 1.1375250676988806,
+      "bid_context_slot": 432093626,
+      "bid_price_impact_pct": "0.0009588265778758451464799032",
+      "bid_route_steps": [
+        {
+          "amm_key": "2gG6bGNZkg8PUiDjkvhNvCZNY6b58zDpTCMjF6UDg8zc",
+          "bps": 10000,
+          "input_mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+          "label": "Meteora DLMM",
+          "output_mint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+          "percent": null
+        },
+        {
+          "amm_key": "61LMyNZudQFDNMRFKwkBmf5HtRf1vU8B8FgNYdrha3fq",
+          "bps": 10000,
+          "input_mint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+          "label": "AlphaQ",
+          "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "percent": null
+        }
+      ],
+      "promotion_status": "candidate_route_requires_liquidity_volume_manipulation_and_benchmark_checks",
+      "quote_token": {
+        "decimals": 6,
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "rwa_solana_token_mint_registry",
+        "status": "verified",
+        "symbol": "USDC"
+      },
+      "source_type": "quote_sweep",
+      "status": "route_discovered",
+      "sweep_levels": [
+        {
+          "price": 1.1409559217145782,
+          "size": 876.458048
+        },
+        {
+          "price": 1.1411737413906793,
+          "size": 3505.163022
+        }
+      ],
+      "sweep_quotes": [
+        {
+          "context_slot": 432093626,
+          "cumulative_price": 1.1409559217145782,
+          "notional_usd": 1000.0,
+          "price_impact_pct": "0.002050138763229873296999312",
+          "route_plan": [
+            {
+              "bps": 1500,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "61LMyNZudQFDNMRFKwkBmf5HtRf1vU8B8FgNYdrha3fq",
+                "inAmount": "150000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "AlphaQ",
+                "outAmount": "127889893",
+                "outputMint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "2gG6bGNZkg8PUiDjkvhNvCZNY6b58zDpTCMjF6UDg8zc",
+                "inAmount": "127889893",
+                "inputMint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+                "label": "Meteora DLMM",
+                "outAmount": "131601340",
+                "outputMint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
+              }
+            },
+            {
+              "bps": 8500,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "AGXrswVDRoUf62UX9voTXv6TCGw6fBUEwDpyUd9YdZfD",
+                "inAmount": "850000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "744856708",
+                "outputMint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
+              }
+            }
+          ],
+          "time_taken": 0.006253897
+        },
+        {
+          "context_slot": 432093627,
+          "cumulative_price": 1.1411301708022872,
+          "notional_usd": 5000.0,
+          "price_impact_pct": "0.0022025244045432632256604149",
+          "route_plan": [
+            {
+              "bps": 300,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "61LMyNZudQFDNMRFKwkBmf5HtRf1vU8B8FgNYdrha3fq",
+                "inAmount": "150000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "AlphaQ",
+                "outAmount": "127889893",
+                "outputMint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj"
+              }
+            },
+            {
+              "bps": 10000,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "2gG6bGNZkg8PUiDjkvhNvCZNY6b58zDpTCMjF6UDg8zc",
+                "inAmount": "127889893",
+                "inputMint": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj",
+                "label": "Meteora DLMM",
+                "outAmount": "131601340",
+                "outputMint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
+              }
+            },
+            {
+              "bps": 9700,
+              "percent": null,
+              "swapInfo": {
+                "ammKey": "AGXrswVDRoUf62UX9voTXv6TCGw6fBUEwDpyUd9YdZfD",
+                "inAmount": "4850000000",
+                "inputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "label": "Whirlpool",
+                "outAmount": "4250019730",
+                "outputMint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
+              }
+            }
+          ],
+          "time_taken": 0.010452975
+        }
+      ],
+      "symbol": "USDY/USDC",
+      "timestamp": "2026-07-10T21:50:59.396943+00:00",
+      "venue": "jupiter_router"
+    },
+    {
+      "allowlist_id": "dex:jupiter_router:VOOX:USD",
+      "asset_class": "etf",
+      "asset_id": "VOO",
+      "error": "Jupiter /swap/v1/quote returned HTTP 400: {\"error\":\"The token H3sU4sKMXDK1Z8qE6A5ChyeC9VcHGQsDjfZS6YbLpump is not tradable\",\"errorCode\":\"TOKEN_NOT_TRADABLE\"}",
+      "promotion_status": "needs_manual_review",
+      "status": "error",
+      "symbol": "VOOx/USD",
+      "venue": "jupiter_router"
+    }
+  ],
+  "summary": {
+    "by_route_label": {
+      "AlphaQ": 4,
+      "Byreal": 4,
+      "Meteora DLMM": 2,
+      "PancakeSwap": 1,
+      "Raydium CLMM": 7,
+      "Whirlpool": 5
+    },
+    "by_status": {
+      "error": 4,
+      "route_discovered": 10
+    },
+    "errors": 4,
+    "route_count": 14,
+    "route_discovered": 10
+  }
+}

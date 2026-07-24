@@ -4,7 +4,7 @@ import logging
 import httpx
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,8 @@ class StarterAllowanceResult:
 
 
 class CreditManager:
-    def __init__(self, db_path: str = "credits.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = db_path or os.environ.get("CREDIT_DB_PATH", "credits.db")
         self._init_db()
 
     def _init_db(self):
@@ -402,6 +402,35 @@ class CreditManager:
         finally:
             conn.close()
 
+    def refund_credits(self, address: str, credits: float) -> bool:
+        """Return previously spent credits to a wallet after a charged delivery failure."""
+        if credits <= 0:
+            return False
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute(
+                """
+                UPDATE wallets
+                SET balance_credits = balance_credits + ?, last_updated = ?
+                WHERE address = ?
+                """,
+                (credits, _utc_now(), address),
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return False
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error refunding credits for {address}: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
     def record_payment_proof(
         self,
         tx_hash: str,
@@ -435,6 +464,84 @@ class CreditManager:
             return False
         finally:
             conn.close()
+
+    def wallet_inflow_summary(self, *, days: int = 30, limit: int = 100) -> dict:
+        """Return read-only wallet inflow rows for the internal dashboard."""
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            direct_rows = conn.execute(
+                '''
+                SELECT tx_hash, network, amount_atomic, recipient, purpose, timestamp
+                FROM payment_proofs
+                WHERE timestamp >= ?
+                  AND (purpose IS NULL OR purpose NOT LIKE 'credits:%')
+                ORDER BY timestamp DESC
+                LIMIT ?
+                ''',
+                (cutoff.isoformat(), limit),
+            ).fetchall()
+            purchase_rows = conn.execute(
+                '''
+                SELECT cp.tx_hash, cp.address, cp.amount_usdc, cp.credits_added,
+                       cp.timestamp, pp.network, pp.recipient, pp.purpose
+                FROM credit_purchases cp
+                LEFT JOIN payment_proofs pp ON pp.tx_hash = cp.tx_hash
+                WHERE cp.timestamp >= ?
+                ORDER BY cp.timestamp DESC
+                LIMIT ?
+                ''',
+                (cutoff.isoformat(), limit),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        rows = []
+        for row in direct_rows:
+            amount_usdc = round(float(row["amount_atomic"] or 0) / 1_000_000, 6)
+            rows.append(
+                {
+                    "timestamp": row["timestamp"],
+                    "kind": "direct_x402",
+                    "network": row["network"],
+                    "amount_usdc": amount_usdc,
+                    "credits_added": None,
+                    "wallet": None,
+                    "recipient": row["recipient"],
+                    "purpose": row["purpose"],
+                    "tx_hash": row["tx_hash"],
+                }
+            )
+        for row in purchase_rows:
+            rows.append(
+                {
+                    "timestamp": row["timestamp"],
+                    "kind": "credit_topup",
+                    "network": row["network"] or "",
+                    "amount_usdc": float(row["amount_usdc"] or 0.0),
+                    "credits_added": float(row["credits_added"] or 0.0),
+                    "wallet": row["address"],
+                    "recipient": row["recipient"] or "",
+                    "purpose": row["purpose"] or "credits",
+                    "tx_hash": row["tx_hash"],
+                }
+            )
+
+        rows.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        rows = rows[:limit]
+        direct_count = sum(1 for row in rows if row["kind"] == "direct_x402")
+        topup_count = sum(1 for row in rows if row["kind"] == "credit_topup")
+        total_usdc = round(sum(float(row.get("amount_usdc") or 0.0) for row in rows), 6)
+        return {
+            "window_days": days,
+            "total_inflows": len(rows),
+            "direct_x402_count": direct_count,
+            "credit_topup_count": topup_count,
+            "total_usdc": total_usdc,
+            "latest_timestamp": rows[0]["timestamp"] if rows else None,
+            "rows": rows,
+        }
 
     def store_price_receipt(
         self,
@@ -500,6 +607,7 @@ CREDIT_COSTS = {
     "state_divergence_indicator": 15.0,
     "solana_token_brief": 25.0,
     "trader_alpha_pack": 50.0,
+    "rwa_blocksize_benchmark": 10.0,
     "provenance_lookup": 0.0,
 }
 

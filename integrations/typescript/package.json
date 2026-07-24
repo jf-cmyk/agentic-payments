@@ -1,0 +1,17 @@
+{
+  "name": "blocksize-agent-framework-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@goat-sdk/core": "0.5.0",
+    "ai": "7.0.37",
+    "solana-agent-kit": "2.0.10",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}

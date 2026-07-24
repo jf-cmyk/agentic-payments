@@ -97,6 +97,8 @@ All endpoints natively support the Model Context Protocol (MCP) or direct HTTP a
 **Search Instruments**
 `GET /v1/search?q={query}&asset_class={all|crypto|equity|fx|metal}`
 Returns all matching instrument pairs based on string queries.
+For supported stock tickers, search with `asset_class=equity` first.
+*Example:* `/v1/search?q=AAPL&asset_class=equity`
 
 **List Instruments by Service**
 `GET /v1/instruments/{service}`
@@ -115,6 +117,8 @@ Supported equity tickers are accessed through the same bid/ask route:
 `GET /v1/bidask/{ticker}`
 *Example:* `/v1/bidask/AAPL`
 *Price:* **$0.008 USDC** for supported equity tickers.
+*Discovery:* Use `/v1/search?q=AAPL&asset_class=equity` or MCP `search_pairs`
+before spending credits on a live equity bid/ask snapshot.
 
 ### 2.3 Traditional Finance ($0.005 USDC)
 

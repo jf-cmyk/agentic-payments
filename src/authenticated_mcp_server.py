@@ -22,7 +22,12 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
-from src.observability import fingerprint, record_usage_event
+from src.observability import (
+    fingerprint,
+    normalize_symbol_opportunity,
+    record_usage_event,
+    record_usage_event_once,
+)
 from src.public_metadata import APP_VERSION, MAIN_WEBSITE_PRICING_URL, PUBLIC_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -30,22 +35,22 @@ logger = logging.getLogger(__name__)
 InstrumentSearchQuery = Annotated[
     str,
     Field(
-        description="Symbol, ticker, asset, or pair to search for.",
+        description="Symbol, ticker, asset, or pair to search for, such as BTC, AAPL, EURUSD, or XAUUSD.",
         min_length=1,
         max_length=80,
     ),
 ]
 AssetClassFilter = Annotated[
     Literal["all", "crypto", "equity", "equities", "fx", "metal"],
-    Field(description="Optional asset class filter."),
+    Field(description="Optional asset class filter. Use equity/equities for supported stock tickers."),
 ]
 InstrumentService = Annotated[
     Literal["vwap", "bidask", "fx", "metal"],
-    Field(description="Blocksize service namespace to list."),
+    Field(description="Blocksize service namespace to list. Use bidask for supported equities."),
 ]
 PairValue = Annotated[
     str,
-    Field(description="Trading pair or ticker, such as BTC-USD, EURUSD, or XAUUSD."),
+    Field(description="Trading pair or ticker, such as BTC-USD, AAPL, EURUSD, or XAUUSD."),
 ]
 
 T = TypeVar("T")
@@ -253,6 +258,19 @@ def create_authenticated_market_data_mcp(
             )
 
         current = entitlements.status(identity.user_id, identity.email)
+        record_usage_event_once(
+            "first_live_price_delivered",
+            fingerprint(f"user:{identity.user_id}"),
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            wallet_hash=fingerprint(identity.user_id),
+            metadata={
+                "identity_hash": fingerprint(identity.user_id),
+                "identity_type": "user",
+                "payment_mode": "starter_credit",
+            },
+        )
         return (
             f"{rendered}\n\n"
             f"Starter credits remaining: {current.credits_remaining}/{current.daily_limit} "
@@ -263,8 +281,8 @@ def create_authenticated_market_data_mcp(
         name="search_pairs",
         title="Instrument Search",
         description=(
-            "Search supported Blocksize crypto, equity, FX, and metal instruments by "
-            "symbol or asset name. This returns metadata only, not live prices."
+            "Search supported Blocksize crypto, equity/stock ticker, FX, and metal "
+            "instruments by symbol or asset name. This returns metadata only, not live prices."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -284,6 +302,15 @@ def create_authenticated_market_data_mcp(
             pairs = await client.search_pairs(query, asset_class)
             response = PairSearchResponse(query=query, total_matches=len(pairs), pairs=pairs)
             if not pairs:
+                if (opportunity := normalize_symbol_opportunity(query)) is not None:
+                    record_usage_event(
+                        "unsupported_symbol_request",
+                        surface=observability_surface,
+                        tool_name="search_pairs",
+                        subject=opportunity,
+                        asset_class=asset_class,
+                        metadata={"result_count": 0},
+                    )
                 return f"No instruments found matching '{query}' (class: {asset_class})."
             pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
             summary = (
@@ -302,8 +329,9 @@ def create_authenticated_market_data_mcp(
         name="list_instruments",
         title="Instrument List",
         description=(
-            "List supported instruments for one Blocksize service. This returns "
-            "metadata only, not live prices."
+            "List supported instruments for one Blocksize service. Use bidask for "
+            "shared bid/ask coverage, including supported equity tickers. This "
+            "returns metadata only, not live prices."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -416,10 +444,11 @@ def create_authenticated_market_data_mcp(
 
     @mcp.tool(
         name="get_bid_ask",
-        title="Crypto Bid Ask Snapshot",
+        title="Bid Ask Snapshot",
         description=(
             "Get the latest bid, ask, and spread for one crypto pair or supported "
-            "equity ticker. This read-only live data call uses daily Blocksize credits."
+            "equity/stock ticker such as AAPL. This read-only live data call uses "
+            "daily Blocksize credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -500,6 +529,12 @@ def create_authenticated_market_data_mcp(
                 "name": mcp_name,
                 "version": APP_VERSION,
                 "purpose": f"Read-only market data connector for {client_label}.",
+                "equities": {
+                    "positioning": "Supported equity tickers are first-class live-data symbols.",
+                    "discovery": "Use search_pairs with asset_class=equity before paid calls.",
+                    "live_tool": "get_bid_ask",
+                    "example_symbols": ["AAPL", "MSFT", "NVDA"],
+                },
                 "starter_allowance": {
                     "positioning": "Start with 50 live data credits",
                     "allowance_credits": get_entitlements().default_daily_credits,

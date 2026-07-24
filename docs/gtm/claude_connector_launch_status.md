@@ -160,7 +160,7 @@ https://mcp.blocksize.info/anthropic/mcp/
 Tagline:
 
 ```text
-Read-only real-time crypto, equity, FX, and metals market data for Claude.
+Read-only real-time crypto, supported equity ticker, FX, and metals market data for Claude.
 ```
 
 Short description:
@@ -302,7 +302,7 @@ Tools:
 | `list_instruments` | Instrument List | List supported instruments for one service namespace. |
 | `get_credit_balance` | Credit Balance | Show remaining daily data credits for the signed-in user. |
 | `get_vwap` | Crypto VWAP Snapshot | Fetch read-only crypto VWAP for one pair. |
-| `get_bid_ask` | Crypto Bid Ask Snapshot | Fetch read-only bid/ask for one crypto pair or supported equity ticker. |
+| `get_bid_ask` | Bid Ask Snapshot | Fetch read-only bid/ask for one crypto pair or supported equity ticker such as AAPL. |
 | `get_fx_rate` | FX Snapshot | Fetch read-only FX bid, ask, and mid-rate snapshot. |
 | `get_metal_price` | Metal Snapshot | Fetch read-only metal spot-price snapshot. |
 

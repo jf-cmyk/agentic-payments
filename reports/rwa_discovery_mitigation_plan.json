@@ -1,0 +1,625 @@
+{
+  "execution_phases": [
+    {
+      "actions": [
+        "Keep /v1/rwa/discovery production_promoted at 0 until gates pass.",
+        "Use reports/rwa_feed_discovery.json as the current promotion source of truth."
+      ],
+      "objective": "Prevent candidate/supplemental coverage from being treated as production liquidity.",
+      "phase": "P0_hold_the_line",
+      "status": "implemented"
+    },
+    {
+      "actions": [
+        "Run scripts/run_rwa_solana_discovery.py.",
+        "Run scripts/run_rwa_blocksize_state_discovery.py.",
+        "Create EVM pool discovery adapters for Uniswap, Curve, Balancer, and Aerodrome."
+      ],
+      "objective": "Resolve venue-native identifiers, token contracts/mints, routes, pools, and state instruments.",
+      "phase": "P1_identifier_and_pool_discovery",
+      "status": "ready_to_execute"
+    },
+    {
+      "actions": [
+        "Extend scripts/run_feed_quality_window.py to consume /v1/rwa/discovery ready rows.",
+        "Run 30-minute windows per venue/source type with persistence enabled.",
+        "Fail rows with stale, sparse, or high-latency behavior."
+      ],
+      "objective": "Measure freshness, latency, tick frequency, spread, and block-size fillability over continuous windows.",
+      "phase": "P2_live_quality_windows",
+      "status": "ready_after_P1"
+    },
+    {
+      "actions": [
+        "Apply MAD and benchmark drift gates before consensus inclusion.",
+        "Downweight thin or single-route sources.",
+        "Persist exclusion reasons and raw payload hashes."
+      ],
+      "objective": "Run outlier, concentration, route diversity, and cross-source consensus checks.",
+      "phase": "P3_manipulation_and_consensus",
+      "status": "ready_after_P2"
+    },
+    {
+      "actions": [
+        "Keep rights-clearance evidence attached to source-readiness and discovery reports.",
+        "Acquire production data plans where required.",
+        "Attach issuer NAV/admin/reserve evidence for tokenized funds."
+      ],
+      "objective": "Maintain rights evidence and complete issuer/NAV alignment plus provider access for traditional/RWA redistribution.",
+      "phase": "P4_issuer_legal_and_nav",
+      "status": "rights_cleared_nav_and_access_pending"
+    },
+    {
+      "actions": [
+        "Run /v1/rwa/feeds/promotion-check.",
+        "Run /v1/rwa/benchmark/blocksize.",
+        "Store final promotion receipts."
+      ],
+      "objective": "Promote only feeds with every required gate passed.",
+      "phase": "P5_promotion",
+      "status": "blocked_until_all_required_gates_pass"
+    }
+  ],
+  "immediate_actions": [
+    {
+      "action_id": "refresh_blocksize_state_discovery",
+      "command": "source .env && source .venv/bin/activate && python3 scripts/run_rwa_blocksize_state_discovery.py",
+      "current_blocked_feeds": 7,
+      "note": "The latest run should remain the authority for whether state rows are references or matched state instruments.",
+      "priority": "P0",
+      "status": "ready",
+      "unblocks": [
+        "state_instrument_confirmation"
+      ]
+    },
+    {
+      "action_id": "refresh_solana_token_and_route_discovery",
+      "command": "source .env && source .venv/bin/activate && python3 scripts/run_rwa_solana_discovery.py",
+      "current_blocked_feeds": 114,
+      "note": "Requires Jupiter/Solana access and should record token verification, context slots, route labels, and quote payloads.",
+      "priority": "P0",
+      "status": "configured",
+      "unblocks": [
+        "token_or_contract_discovery",
+        "route_or_pool_discovery",
+        "replayable_payload"
+      ]
+    },
+    {
+      "action_id": "run_30_minute_quality_windows",
+      "command": "source .venv/bin/activate && python3 scripts/run_feed_quality_window.py --duration-seconds 1800",
+      "current_blocked_feeds": 928,
+      "note": "Extend the script feed list from the discovery report before running the full universe.",
+      "priority": "P0",
+      "status": "ready_after_identifier_discovery",
+      "unblocks": [
+        "freshness_cadence",
+        "liquidity_depth_volume",
+        "blocksize_benchmark_alignment"
+      ]
+    },
+    {
+      "action_id": "legal_and_nav_clearance",
+      "command": "GET /v1/rwa/source-readiness and update provider access/NAV evidence records",
+      "current_blocked_feeds": 67,
+      "note": "Rights are recorded separately; this action now tracks issuer NAV, reserve, entitlement metadata, and provider access evidence.",
+      "priority": "P0",
+      "status": "rights_cleared_nav_and_access_pending",
+      "unblocks": [
+        "rights_and_redistribution",
+        "issuer_nav_alignment"
+      ]
+    },
+    {
+      "action_id": "manipulation_outlier_controls",
+      "command": "POST /v1/rwa/quality/check and POST /v1/rwa/consensus/calculate for replayed windows",
+      "current_blocked_feeds": 492,
+      "note": "Requires multi-source observations and pool/route concentration evidence.",
+      "priority": "P0",
+      "status": "ready_after_live_payloads",
+      "unblocks": [
+        "manipulation_concentration"
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "acceptance_criteria": [
+        "No source enters consensus without documented manipulation/concentration pass or explicit downweighting."
+      ],
+      "affected_feed_count": 492,
+      "clear_feed_count": 0,
+      "current_status": "blocked",
+      "evidence_required": [
+        "outlier test result",
+        "concentration metrics",
+        "route diversity",
+        "cross-source deviation bps",
+        "exclusion/downweight decision"
+      ],
+      "issue_id": "manipulation_concentration",
+      "mitigation_steps": [
+        "Compute MAD/z-score outlier checks across venue observations and Blocksize/oracle/futures references.",
+        "Measure pool liquidity concentration, largest LP/holder where possible, AMM route diversity, and single-venue dependency.",
+        "Detect quote stuffing, wash-volume signatures, sudden route changes, and stale NAV/state references.",
+        "Exclude or downweight sources that fail manipulation controls."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Thin pools, single routes, synthetic marks, or issuer-priced references can be manipulated or stale without obvious spread changes.",
+      "severity": "critical",
+      "target_state": "Each source has concentration, route diversity, outlier, stale-value, and cross-source deviation checks."
+    },
+    {
+      "acceptance_criteria": [
+        "Minimum fill ratio is 1.0 for required block size or feed is marked indicative only.",
+        "Spread, slippage, and volume clear asset-class thresholds."
+      ],
+      "affected_feed_count": 486,
+      "clear_feed_count": 6,
+      "current_status": "blocked",
+      "evidence_required": [
+        "bid/ask or depth snapshot",
+        "VWAP by block size",
+        "fill ratio",
+        "slippage bps",
+        "24h organic volume",
+        "depth timestamp"
+      ],
+      "issue_id": "liquidity_depth_volume",
+      "mitigation_steps": [
+        "Run block-size sweeps for each asset class and side using venue-native order books, route quotes, or pool simulations.",
+        "Measure fill ratio and slippage for target notionals; exclude feeds that cannot fill minimum blocks.",
+        "Measure 24h volume from venue trades/candles or pool swap events and compare with liquidity minimums.",
+        "Persist depth snapshots and quote payload hashes for replay."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Current evidence is mostly route, symbol, or point-in-time book evidence, not sustained fillability or organic volume.",
+      "severity": "critical",
+      "target_state": "Every live-liquidity feed has block-size VWAP, fill ratio, slippage, top-of-book spread, order-book/pool depth, and organic 24h volume."
+    },
+    {
+      "acceptance_criteria": [
+        "Feed meets target cadence for the asset class over the full test window.",
+        "No unexplained stale or gap periods exceed quality thresholds."
+      ],
+      "affected_feed_count": 442,
+      "clear_feed_count": 50,
+      "current_status": "blocked",
+      "evidence_required": [
+        "window start/end",
+        "sample count",
+        "tick interval stats",
+        "latency stats",
+        "age stats",
+        "stale/gap flags"
+      ],
+      "issue_id": "freshness_cadence",
+      "mitigation_steps": [
+        "Run a 30-minute feed-quality window for each ready adapter and Blocksize comparable feed.",
+        "Record p50/p95 latency, max age, tick intervals, missing ticks, stale windows, and market-hours behavior.",
+        "Use WebSocket where available; REST polling must meet per-asset target cadence and rate limits."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "A single quote or payload does not prove real-time data quality.",
+      "severity": "critical",
+      "target_state": "Each feed has a continuous benchmark window measuring freshness, latency, tick frequency, gaps, uptime, and benchmark drift."
+    },
+    {
+      "acceptance_criteria": [
+        "A sampled observation can be re-run through quality, benchmark, and promotion checks deterministically."
+      ],
+      "affected_feed_count": 442,
+      "clear_feed_count": 50,
+      "current_status": "blocked",
+      "evidence_required": [
+        "raw payload hash",
+        "normalized payload hash",
+        "adapter version",
+        "request metadata",
+        "storage receipt id"
+      ],
+      "issue_id": "replayable_payload",
+      "mitigation_steps": [
+        "Persist request parameters, response payload, source timestamp, receipt timestamp, adapter version, and hashes.",
+        "Store normalized observations through /v1/rwa/observations/store.",
+        "Retain enough payload detail to replay VWAP, bid/ask, quality, benchmark, and promotion decisions."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Without raw payloads and request metadata, we cannot audit, replay, or debug feed quality decisions.",
+      "severity": "high",
+      "target_state": "Every observation has raw payload hash, normalized payload hash, adapter version, request metadata, and storage pointer."
+    },
+    {
+      "acceptance_criteria": [
+        "Adapter can fetch one normalized observation without symbol guessing.",
+        "Discovery artifact records enough fields to replay the request."
+      ],
+      "affected_feed_count": 127,
+      "clear_feed_count": 365,
+      "current_status": "blocked",
+      "evidence_required": [
+        "native venue identifier",
+        "quote asset identifier",
+        "adapter request payload",
+        "timestamped discovery artifact"
+      ],
+      "issue_id": "venue_identifier",
+      "mitigation_steps": [
+        "For Hyperliquid, store spot index notation such as @268 and verify against spotMeta/allMids.",
+        "For Jupiter, store base/quote mint addresses and route allowlist ids.",
+        "For EVM pools, store chain id, token contracts, pool address or pool id, fee tier, and block number.",
+        "For oracle/reference providers, store feed id, report schema, network, heartbeat/deviation or report freshness rules."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "A display symbol is not enough to fetch executable data; each venue needs its native market id, coin, pool, contract, feed id, or route key.",
+      "severity": "critical",
+      "target_state": "Every source row has stable native identifiers and replay-safe request parameters."
+    },
+    {
+      "acceptance_criteria": [
+        "Drift remains below warning/exclusion thresholds over the required freshness window."
+      ],
+      "affected_feed_count": 90,
+      "clear_feed_count": 402,
+      "current_status": "blocked",
+      "evidence_required": [
+        "benchmark service",
+        "benchmark symbol",
+        "observed value",
+        "reference value",
+        "drift bps",
+        "benchmark decision"
+      ],
+      "issue_id": "blocksize_benchmark_alignment",
+      "mitigation_steps": [
+        "Run /v1/rwa/benchmark/blocksize for comparable bidask, fx, metal, vwap, and state references.",
+        "Persist benchmark drift bps, pass/warn/exclude outcome, and raw normalized observation hash.",
+        "Use Blocksize state only after state_instrument_confirmation passes."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Replacement-grade feeds must be benchmarked against existing Blocksize data and accepted supplemental references.",
+      "severity": "critical",
+      "target_state": "Every comparable observation has drift, freshness, and alignment status versus Blocksize, oracle, NAV, or futures fair value."
+    },
+    {
+      "acceptance_criteria": [
+        "Route/pool can be replayed and produces deterministic normalized VWAP/bidask inputs."
+      ],
+      "affected_feed_count": 72,
+      "clear_feed_count": 48,
+      "current_status": "blocked",
+      "evidence_required": [
+        "routePlan or pool address/id",
+        "fee tier or curve parameters",
+        "context slot/block number",
+        "quote output by block size",
+        "raw payload hash"
+      ],
+      "issue_id": "route_or_pool_discovery",
+      "mitigation_steps": [
+        "For Jupiter, request /swap/v1/quote over configured block sizes and persist routePlan, contextSlot, priceImpactPct, AMM labels, and mostReliableAmmsQuoteReport.",
+        "For Uniswap v3/v4, compute or discover pool addresses from token pair plus fee, fetch token0/token1/fee/liquidity/slot0 together, and quote with QuoterV2 offchain.",
+        "For Curve/Balancer, persist pool address/id, balances, amplification/weights, virtual price where applicable, and simulated swap outputs.",
+        "Reject direct routes or single-pool quotes that are illiquid or cannot fill minimum block sizes."
+      ],
+      "priority": "P0",
+      "required_feed_count": 120,
+      "root_cause": "Seed coverage lists candidate symbols, but production needs the actual route, pool, fee tier, or state path.",
+      "severity": "critical",
+      "target_state": "Each DEX feed has an allowlisted route or pool with replayable state and quote evidence."
+    },
+    {
+      "acceptance_criteria": [
+        "NAV/reference source is fresh and market/NAV drift is within tolerance or explicitly explained."
+      ],
+      "affected_feed_count": 67,
+      "clear_feed_count": 0,
+      "current_status": "blocked",
+      "evidence_required": [
+        "issuer/admin NAV",
+        "NAV timestamp",
+        "attestation/reserve source",
+        "fee/redemption adjustment",
+        "market-vs-NAV drift bps"
+      ],
+      "issue_id": "issuer_nav_alignment",
+      "mitigation_steps": [
+        "Collect issuer NAV/admin references and timestamps for BUIDL/OUSG/USDY/TBILL/USTB/USCC-like assets.",
+        "Compare market mid/VWAP to NAV and redemption value after fees, lockups, and settlement delays.",
+        "Block feeds when NAV is stale, unavailable, or deviates beyond asset-class tolerance without explanation."
+      ],
+      "priority": "P0",
+      "required_feed_count": 67,
+      "root_cause": "Treasury and tokenized funds trade around NAV and redemption constraints; market quotes alone are not enough.",
+      "severity": "critical",
+      "target_state": "Treasury/tokenized fund prices reconcile to issuer NAV, administrator data, reserves, attestations, or redemption economics."
+    },
+    {
+      "acceptance_criteria": [
+        "Token identity gate is passed for all route/pool feeds before quote collection affects consensus."
+      ],
+      "affected_feed_count": 42,
+      "clear_feed_count": 190,
+      "current_status": "blocked",
+      "evidence_required": [
+        "mint or contract",
+        "decimals",
+        "verification status",
+        "issuer or registry source",
+        "holder/pool concentration review"
+      ],
+      "issue_id": "token_or_contract_discovery",
+      "mitigation_steps": [
+        "Run Solana token discovery with Jupiter/Helius inputs and persist mint, decimals, verification, liquidity, organic score, and first pool.",
+        "Run EVM token discovery from issuer registries, token lists, verified contracts, and pool registries.",
+        "Block tokens with unverifiable issuer metadata, missing decimals, or suspicious holder concentration."
+      ],
+      "priority": "P0",
+      "required_feed_count": 232,
+      "root_cause": "Onchain tickers can be wrappers or spoofed symbols; token mint/contract identity must be verified before routing.",
+      "severity": "critical",
+      "target_state": "Every onchain token has a verified mint/contract, decimals, issuer/source metadata, holder/pool concentration snapshot, and transfer restriction status."
+    },
+    {
+      "acceptance_criteria": [
+        "Matched state instrument count is greater than zero and state_pool data is fresh within the configured threshold."
+      ],
+      "affected_feed_count": 7,
+      "clear_feed_count": 0,
+      "current_status": "blocked",
+      "evidence_required": [
+        "state_symbol",
+        "matched state_instruments rows",
+        "state_pool payload",
+        "state timestamp/freshness"
+      ],
+      "issue_id": "state_instrument_confirmation",
+      "mitigation_steps": [
+        "Run scripts/run_rwa_blocksize_state_discovery.py against live Blocksize state_instruments.",
+        "For unmatched RWA rows, keep coverage_status as blocked_missing_state_instruments_coverage.",
+        "For matched rows, run state_pool freshness, stale-value, and issuer/NAV alignment checks before allowing benchmark use."
+      ],
+      "priority": "P0",
+      "required_feed_count": 7,
+      "root_cause": "Blocksize state rows are references only unless state_instruments confirms matching pool/instrument coverage.",
+      "severity": "critical",
+      "target_state": "State-reference symbols either have confirmed state_instruments/state_pool coverage or are removed from production consideration."
+    },
+    {
+      "acceptance_criteria": [
+        "No feed has unverified_identity status.",
+        "Ticker aliases resolve to one canonical asset unless explicitly multi-listed."
+      ],
+      "affected_feed_count": 0,
+      "clear_feed_count": 492,
+      "current_status": "clear_or_not_required",
+      "evidence_required": [
+        "canonical asset_id",
+        "asset_classes",
+        "underlying exposure",
+        "instrument type",
+        "issuer or venue identity note"
+      ],
+      "issue_id": "canonical_identity",
+      "mitigation_steps": [
+        "Resolve each venue symbol through /v1/rwa/resolve and the identity audit.",
+        "Attach issuer or exchange metadata for tokenized securities, funds, and synthetic venues.",
+        "Reject ambiguous identities until a manual review row confirms the underlying exposure."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Symbols are venue-specific strings and can refer to tokenized, derivative, synthetic, NAV, or issuer-specific instruments.",
+      "severity": "critical",
+      "target_state": "Every feed maps to one canonical asset, asset class, underlying exposure, quote asset, instrument type, issuer where relevant, and transfer/restriction notes."
+    },
+    {
+      "acceptance_criteria": [
+        "Provider is cleared for the intended Blocksize product surface and storage/redistribution pattern."
+      ],
+      "affected_feed_count": 0,
+      "clear_feed_count": 492,
+      "current_status": "clear_or_not_required",
+      "evidence_required": [
+        "license status",
+        "redistribution status",
+        "allowed usage",
+        "rate limits",
+        "data retention rules",
+        "signoff owner/date"
+      ],
+      "issue_id": "rights_and_redistribution",
+      "mitigation_steps": [
+        "Map each provider through /v1/rwa/source-readiness and provider catalog legal fields.",
+        "Attach commercial plan, license, ToS review, data retention limits, and redistribution status.",
+        "Block production promotion until legal/commercial signoff is recorded."
+      ],
+      "priority": "P0",
+      "required_feed_count": 492,
+      "root_cause": "Open API access does not imply production redistribution rights, especially for traditional assets.",
+      "severity": "critical",
+      "target_state": "Every provider, issuer, and venue has documented access tier, redistribution rights, attribution, and production limits."
+    }
+  ],
+  "policy": {
+    "legal_rule": "No traditional/RWA feed may be redistributed until rights and usage are cleared.",
+    "oracle_rule": "Oracle, NAV, and state rows can improve consensus but are not executable liquidity.",
+    "promotion_rule": "A feed is production-ready only when every required discovery gate is passed, not merely evidenced."
+  },
+  "research_basis": [
+    {
+      "applies_to": "jupiter_router route discovery, quote sweeps, price impact, route replay",
+      "relevant_fields": "inputMint, outputMint, amount, slippageBps, priceImpactPct, routePlan, contextSlot, mostReliableAmmsQuoteReport",
+      "source": "Jupiter Swap API",
+      "url": "https://dev.jup.ag/docs/swap/v1/get-quote"
+    },
+    {
+      "applies_to": "Hyperliquid RWA spot and PAXG depth, candles, trades, spot index notation",
+      "relevant_fields": "spotMeta, allMids, l2Book, candleSnapshot, recentTrades, @{spot_index}",
+      "source": "Hyperliquid Info API",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint"
+    },
+    {
+      "applies_to": "EVM CLMM pool discovery, pool identifiers, quote simulation",
+      "relevant_fields": "token0, token1, fee, pool address, liquidity, slot0, QuoterV2 amountOut, initializedTicksCrossed, sqrtPriceX96After",
+      "source": "Uniswap v3 SDK quoting guide",
+      "url": "https://developers.uniswap.org/docs/sdks/v3/guides/swapping/quoting"
+    },
+    {
+      "applies_to": "oracle benchmark and supplemental real-time price confidence",
+      "relevant_fields": "REST updates, streaming updates, rate limits, node-provider recommendation",
+      "source": "Pyth Hermes",
+      "url": "https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes"
+    },
+    {
+      "applies_to": "RWA oracle/reference layer, low-latency streams, LWBA-style liquidity metrics, report verification",
+      "relevant_fields": "REST, WebSocket, SDK, RWA report schemas, mid, bid/ask, liquidity metrics, onchain verification",
+      "source": "Chainlink Data Streams",
+      "url": "https://docs.chain.link/data-streams"
+    }
+  ],
+  "summary": {
+    "blocked_from_production": 492,
+    "by_missing_gate": {
+      "blocksize_benchmark_alignment": 90,
+      "freshness_cadence": 442,
+      "issuer_nav_alignment": 67,
+      "liquidity_depth_volume": 486,
+      "manipulation_concentration": 492,
+      "replayable_payload": 442,
+      "route_or_pool_discovery": 72,
+      "state_instrument_confirmation": 7,
+      "token_or_contract_discovery": 42,
+      "venue_identifier": 127
+    },
+    "by_status": {
+      "production_blocked_missing_discovery": 478,
+      "production_blocked_nav_reference_only": 7,
+      "production_blocked_state_reference_only": 7
+    },
+    "by_venue": {
+      "aerodrome_slipstream": 10,
+      "balancer_pools": 12,
+      "blocksize_state": 7,
+      "curve_stableswap": 12,
+      "gains": 110,
+      "hyperliquid_paxg": 2,
+      "hyperliquid_perps": 2,
+      "hyperliquid_rwa_spot": 56,
+      "hyperliquid_spot": 64,
+      "jupiter_router": 28,
+      "meteora_dlmm": 18,
+      "orca_whirlpool": 12,
+      "ostium": 124,
+      "raydium_clmm": 14,
+      "treasury_nav": 7,
+      "uniswap_v3_v4": 14
+    },
+    "critical_open_issue_count": 9,
+    "feed_count": 492,
+    "open_issue_count": 10,
+    "production_promoted": 0,
+    "ready_to_execute_action_count": 4
+  },
+  "venue_playbooks": [
+    {
+      "implementation": [
+        "Use scripts/run_rwa_solana_discovery.py after JUPITER_API_KEY and SOLANA_RPC_URL are configured.",
+        "Reject routes with no quote, excessive price impact, non-verified base token, or no replayable route plan.",
+        "Run a 30-minute quote-sweep window for the route allowlist before promotion."
+      ],
+      "primary_blockers": [
+        "token_or_contract_discovery",
+        "route_or_pool_discovery",
+        "liquidity_depth_volume",
+        "freshness_cadence"
+      ],
+      "research_source": "Jupiter Swap API",
+      "solution": "Run Solana mint discovery, then quote-sweep each mint pair with /swap/v1/quote across block sizes, recording routePlan, contextSlot, priceImpactPct, AMM labels, and route replay payloads.",
+      "venue_family": "jupiter_router"
+    },
+    {
+      "implementation": [
+        "Verify spot pair index and UI remappings before treating the ticker as a canonical traditional asset.",
+        "Capture l2Book at full precision, allMids, candles, and recent trades for each sourced RWA candidate.",
+        "Benchmark PAXG/equity-like rows against Blocksize metal/bidask or licensed benchmarks where comparable."
+      ],
+      "primary_blockers": [
+        "freshness_cadence",
+        "liquidity_depth_volume",
+        "blocksize_benchmark_alignment",
+        "canonical_identity"
+      ],
+      "research_source": "Hyperliquid Info API",
+      "solution": "Use spotMeta/index notation for identity, l2Book for depth, candles/trades for volume, and a timed window for latency and tick cadence.",
+      "venue_family": "hyperliquid"
+    },
+    {
+      "implementation": [
+        "For Uniswap CLMM pools, fetch token0/token1/fee/liquidity/slot0 in one block-consistent batch.",
+        "Use QuoterV2 offchain for block-size simulations and persist initializedTicksCrossed/sqrtPriceX96After.",
+        "For Curve/Balancer, capture balances/weights/amplification and replay swap math for block-size VWAP."
+      ],
+      "primary_blockers": [
+        "token_or_contract_discovery",
+        "route_or_pool_discovery",
+        "liquidity_depth_volume",
+        "manipulation_concentration"
+      ],
+      "research_source": "Uniswap v3 SDK quoting guide",
+      "solution": "Resolve contracts, pool ids, fee tiers, balances, ticks, and quote simulations from onchain state and verified registries.",
+      "venue_family": "evm_clmm_and_stableswap"
+    },
+    {
+      "implementation": [
+        "Run scripts/run_rwa_blocksize_state_discovery.py after Blocksize credentials are loaded.",
+        "For unmatched state rows, keep them blocked and remove them from replacement-readiness counts.",
+        "For matched rows, require state_pool freshness and issuer/NAV alignment before benchmark use."
+      ],
+      "primary_blockers": [
+        "state_instrument_confirmation",
+        "liquidity_depth_volume",
+        "issuer_nav_alignment",
+        "freshness_cadence"
+      ],
+      "research_source": "Blocksize state_instruments/state_pool",
+      "solution": "Keep as supplemental unless state_instruments and state_pool confirm the symbol; current live result is 0/7 matched.",
+      "venue_family": "blocksize_state_reference"
+    },
+    {
+      "implementation": [
+        "For Pyth, use Hermes REST/streaming updates and respect public rate limits or use a production node provider.",
+        "For Chainlink, use Data Streams REST/WebSocket/SDK and capture report schema, verification, and RWA fields.",
+        "Never classify oracle-only prices as DEX/venue liquidity."
+      ],
+      "primary_blockers": [
+        "blocksize_benchmark_alignment",
+        "freshness_cadence",
+        "rights_and_redistribution"
+      ],
+      "research_source": "Pyth Hermes and Chainlink Data Streams",
+      "solution": "Use Pyth/Chainlink as supplemental references with confidence/freshness metadata, not executable liquidity.",
+      "venue_family": "oracle_reference"
+    },
+    {
+      "implementation": [
+        "Fetch issuer/admin NAV with timestamp and terms for each treasury/tokenized fund.",
+        "Compare market VWAP/mid to NAV after fees, lockups, and redemption friction.",
+        "Block promotion when NAV source is stale, inaccessible, or legally restricted."
+      ],
+      "primary_blockers": [
+        "issuer_nav_alignment",
+        "rights_and_redistribution",
+        "manipulation_concentration"
+      ],
+      "research_source": "Issuer/admin disclosures and provider contracts",
+      "solution": "Attach issuer/admin NAV, reserve/attestation, redemption fees, restrictions, and stale-value rules before using fund-like feeds.",
+      "venue_family": "issuer_nav_and_tokenized_funds"
+    }
+  ]
+}

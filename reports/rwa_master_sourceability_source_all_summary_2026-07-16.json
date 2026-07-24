@@ -1,0 +1,31 @@
+{
+  "by_sourceability_status": {
+    "candidate_price_fetched_source_all": 709,
+    "not_fetched_lane_requires_access_or_adapter": 2698
+  },
+  "missing_best_join_rows": 0,
+  "sourceable_by_asset_class": {
+    "equity": 583,
+    "etf": 26,
+    "tokenized_fund": 71,
+    "treasury_fund": 29
+  },
+  "sourceable_by_venue": {
+    "aerodrome_slipstream": 25,
+    "aevo": 131,
+    "apex_omni": 4,
+    "aster": 99,
+    "balancer_pools": 1,
+    "curve_stableswap": 5,
+    "gains": 55,
+    "hyperliquid_rwa_spot": 156,
+    "hyperliquid_spot": 3,
+    "jupiter_router": 143,
+    "ostium": 57,
+    "uniswap_v3_v4": 30
+  },
+  "sourceable_token_rows": 709,
+  "sourceable_unique_asset_ids": 90,
+  "sourceable_unique_tickers": 168,
+  "token_rows": 3407
+}

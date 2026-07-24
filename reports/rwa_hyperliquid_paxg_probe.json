@@ -1,0 +1,244 @@
+{
+  "product": "rwa_hyperliquid_paxg_live_probe",
+  "result": {
+    "quality": {
+      "aggregate_status": "live",
+      "as_of": "2026-07-09T21:28:17.649319+00:00",
+      "observations": [
+        {
+          "age_ms": 128,
+          "asset_class": "metal",
+          "max_age_ms": 10000,
+          "max_tick_gap_ms": 5000,
+          "mode": "event_driven_perp_ws",
+          "quality": {
+            "flags": [
+              "cadence_unmeasured"
+            ],
+            "score": 90
+          },
+          "source_type": "native_l1",
+          "status": "live",
+          "symbol": "PAXG/USD",
+          "target_tick_ms": 1000,
+          "tick_interval_ms": null,
+          "usable_for_realtime": true,
+          "venue": "hyperliquid_paxg"
+        },
+        {
+          "age_ms": 128,
+          "asset_class": "metal",
+          "max_age_ms": 10000,
+          "max_tick_gap_ms": 5000,
+          "mode": "event_driven_perp_ws",
+          "quality": {
+            "flags": [
+              "cadence_unmeasured"
+            ],
+            "score": 90
+          },
+          "source_type": "native_l2",
+          "status": "live",
+          "symbol": "PAXG/USD",
+          "target_tick_ms": 1000,
+          "tick_interval_ms": null,
+          "usable_for_realtime": true,
+          "venue": "hyperliquid_paxg"
+        }
+      ],
+      "total_observations": 2,
+      "usable_observations": 2
+    },
+    "results": [
+      {
+        "bidask": {
+          "ask": 4117.5,
+          "asset_class": "metal",
+          "bid": 4117.4,
+          "metadata": {
+            "book_time_ms": 1783632497521,
+            "coin": "PAXG",
+            "endpoint": "Hyperliquid /info l2Book"
+          },
+          "source_type": "native_l1",
+          "symbol": "PAXG/USD",
+          "timestamp": "2026-07-09T21:28:17.521000+00:00",
+          "venue": "hyperliquid_paxg"
+        },
+        "block_vwap": {
+          "asset_class": "metal",
+          "benchmark_drift_bps": null,
+          "block_size_usd": 10000.0,
+          "consumed_levels": [
+            {
+              "consumed_notional_usd": 699.975,
+              "consumed_size": 0.17,
+              "price": 4117.5
+            },
+            {
+              "consumed_notional_usd": 3578.1944,
+              "consumed_size": 0.869,
+              "price": 4117.6
+            },
+            {
+              "consumed_notional_usd": 630.0081,
+              "consumed_size": 0.153,
+              "price": 4117.7
+            },
+            {
+              "consumed_notional_usd": 5036.0694,
+              "consumed_size": 1.223,
+              "price": 4117.8
+            },
+            {
+              "consumed_notional_usd": 55.7531,
+              "consumed_size": 0.013538878096,
+              "price": 4118.0
+            }
+          ],
+          "fill_ratio": 1.0,
+          "fillable_notional_usd": 10000.0,
+          "quality": {
+            "age_ms": 746,
+            "flags": [],
+            "score": 100
+          },
+          "side": "buy",
+          "slippage_bps": 0.491194,
+          "source_type": "native_l2",
+          "status": "full_fill",
+          "symbol": "PAXG/USD",
+          "top_price": 4117.5,
+          "venue": "hyperliquid_paxg",
+          "vwap": 4117.7022489504
+        },
+        "job": {
+          "adapter_implementation": "src.rwa_adapters.HyperliquidPAXGAdapter",
+          "asset_class": "commodity",
+          "asset_id": "PAXG",
+          "category": "metals",
+          "endpoint_hint": "Hyperliquid info REST/WS for PAXG l2Book, mids, candles, trades",
+          "job_id": "metals:PAXG:hyperliquid_paxg",
+          "job_type": "perp_l2_reference",
+          "missing_source_types": [
+            "benchmark_reference",
+            "price_stream_no_book",
+            "synthetic_depth"
+          ],
+          "priority": "P0",
+          "requires_auth": false,
+          "source_mode": "executable_market_data",
+          "status": "ready_to_probe",
+          "symbol": "PAXG/USD",
+          "target_status": "partial",
+          "venue": "hyperliquid_paxg"
+        },
+        "order_book": {
+          "asset_class": "metal",
+          "levels": [
+            {
+              "price": 4117.5,
+              "size": 0.17
+            },
+            {
+              "price": 4117.6,
+              "size": 0.869
+            },
+            {
+              "price": 4117.7,
+              "size": 0.153
+            },
+            {
+              "price": 4117.8,
+              "size": 1.223
+            },
+            {
+              "price": 4118.0,
+              "size": 5.462
+            },
+            {
+              "price": 4118.1,
+              "size": 2.031
+            },
+            {
+              "price": 4118.2,
+              "size": 1.522
+            },
+            {
+              "price": 4118.4,
+              "size": 2.433
+            },
+            {
+              "price": 4118.5,
+              "size": 14.485
+            },
+            {
+              "price": 4118.7,
+              "size": 6.017
+            },
+            {
+              "price": 4118.8,
+              "size": 0.101
+            },
+            {
+              "price": 4119.0,
+              "size": 9.288
+            },
+            {
+              "price": 4119.2,
+              "size": 1.456
+            },
+            {
+              "price": 4119.3,
+              "size": 10.287
+            },
+            {
+              "price": 4119.4,
+              "size": 0.242
+            },
+            {
+              "price": 4119.6,
+              "size": 5.659
+            },
+            {
+              "price": 4119.7,
+              "size": 6.921
+            },
+            {
+              "price": 4119.8,
+              "size": 0.56
+            },
+            {
+              "price": 4120.0,
+              "size": 0.12
+            },
+            {
+              "price": 4120.1,
+              "size": 0.418
+            }
+          ],
+          "metadata": {
+            "book_time_ms": 1783632497521,
+            "coin": "PAXG",
+            "endpoint": "Hyperliquid /info l2Book",
+            "max_levels_per_side": 20
+          },
+          "side": "buy",
+          "source_type": "native_l2",
+          "symbol": "PAXG/USD",
+          "timestamp": "2026-07-09T21:28:17.521000+00:00",
+          "venue": "hyperliquid_paxg"
+        },
+        "status": "ok"
+      }
+    ],
+    "stored_observations": [],
+    "summary": {
+      "jobs_selected": 1,
+      "jobs_succeeded": 1,
+      "observations": 2,
+      "persisted": 0,
+      "requested_limit": 1
+    }
+  }
+}

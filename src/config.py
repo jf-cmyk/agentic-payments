@@ -110,6 +110,18 @@ class BlocksizeSettings(BaseSettings):
         return _csv_list(self.state_cache_tickers)
 
 
+class TiingoSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+    """Tiingo real-time equities settings."""
+
+    api_key: str = Field("", alias="TIINGO_API_KEY")
+    base_url: str = Field("https://api.tiingo.com/iex", alias="TIINGO_BASE_URL")
+    equity_base_url: str = Field(
+        "https://api.tiingo.com/tiingo/equity/intraday",
+        alias="TIINGO_EQUITY_BASE_URL",
+    )
+
+
 class X402Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
     """x402 payment protocol settings — Solana (primary) + Base (fallback)."""
@@ -226,6 +238,7 @@ class Settings:
         env_kwargs = {"_env_file": dotenv_path} if dotenv_path else {}
 
         self.blocksize = BlocksizeSettings(**env_kwargs)  # type: ignore[arg-type]
+        self.tiingo = TiingoSettings(**env_kwargs)  # type: ignore[arg-type]
         self.x402 = X402Settings(**env_kwargs)  # type: ignore[arg-type]
         self.pricing = PricingSettings(**env_kwargs)  # type: ignore[arg-type]
         self.server = ServerSettings(**env_kwargs)  # type: ignore[arg-type]

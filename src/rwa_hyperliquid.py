@@ -1,0 +1,402 @@
+"""Hyperliquid RWA/traditional-asset symbol inventory."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+HYPERLIQUID_RWA_SPOT_VENUE_ID = "hyperliquid_rwa_spot"
+
+
+HYPERLIQUID_RWA_SPOT_SYMBOLS: list[dict[str, Any]] = [
+    {
+        "symbol": "BRLA",
+        "display_pair": "BRLA/USDC",
+        "hyperliquid_coin": "@298",
+        "pair_index": 298,
+        "asset_class": "fiat_stablecoin",
+        "identity_note": "Brila Finance",
+        "token_id": "0x82790bc500d677101986a696d341a156",
+        "evm_contract": "0xa300c891157803e72370d15a30ccedffc7153142",
+        "use_case": "fx_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "RUBT",
+        "display_pair": "RUBT/USDT0",
+        "hyperliquid_coin": "@273",
+        "pair_index": 273,
+        "asset_class": "fiat_token",
+        "identity_note": "RUBT",
+        "token_id": "0x224950f99c3354ed475df173324124bd",
+        "evm_contract": None,
+        "use_case": "fx_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "WARS",
+        "display_pair": "WARS/USDC",
+        "hyperliquid_coin": "@367",
+        "pair_index": 367,
+        "asset_class": "fiat_token",
+        "identity_note": "Wrapped Peso Argentino",
+        "token_id": "0x1a0d7ef3946be2742b75133328c06eb1",
+        "evm_contract": "0x0dc4f92879b7670e5f4e4e6e3c801d229129d90d",
+        "use_case": "fx_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "SPCXD",
+        "display_pair": "SPCXD/USDC",
+        "hyperliquid_coin": "@465",
+        "pair_index": 465,
+        "asset_class": "private_company_token",
+        "identity_note": "Space Exploration Technologies Corp.",
+        "token_id": "0x4f49b5f025c969501c6a350f984e1725",
+        "evm_contract": "0x95687557c66bc799a850ba7037673528238ae763",
+        "use_case": "private_market_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "USDH",
+        "display_pair": "USDH/USDC",
+        "hyperliquid_coin": "@230",
+        "pair_index": 230,
+        "asset_class": "stablecoin",
+        "identity_note": "USDH",
+        "token_id": "0x54e00a5988577cb0b0c9ab0cb6ef7f4b",
+        "evm_contract": "0x111111a1a0667d36bd57c0a9f569b98057111111",
+        "use_case": "supplemental_fx_stable_reference",
+    },
+    {
+        "symbol": "USDHL",
+        "display_pair": "USDHL/USDC",
+        "hyperliquid_coin": "@180",
+        "pair_index": 180,
+        "asset_class": "stablecoin",
+        "identity_note": "Hyper USD",
+        "token_id": "0xd289c79872a9eace15cc4cadb030661f",
+        "evm_contract": "0xb50a96253abdf803d85efcdce07ad8becbc52bd5",
+        "use_case": "supplemental_fx_stable_reference",
+    },
+    {
+        "symbol": "USDT0",
+        "display_pair": "USDT0/USDC",
+        "hyperliquid_coin": "@166",
+        "pair_index": 166,
+        "asset_class": "stablecoin",
+        "identity_note": "USDT0",
+        "token_id": "0x25faedc3f054130dbb4e4203aca63567",
+        "evm_contract": "0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb",
+        "use_case": "supplemental_fx_stable_reference",
+    },
+    {
+        "symbol": "USDE",
+        "display_pair": "USDE/USDC",
+        "hyperliquid_coin": "@150",
+        "pair_index": 150,
+        "asset_class": "stablecoin_or_synthetic_dollar",
+        "identity_note": "USDe",
+        "token_id": "0x2e6d84f2d7ca82e6581e03523e4389f7",
+        "evm_contract": "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34",
+        "use_case": "supplemental_fx_stable_reference",
+    },
+    {
+        "symbol": "USR",
+        "display_pair": "USR/USDC",
+        "hyperliquid_coin": "@178",
+        "pair_index": 178,
+        "asset_class": "stablecoin_or_yield_dollar",
+        "identity_note": "Resolv USR",
+        "token_id": "0x44759ebad788666b5ab35f4e20cea722",
+        "evm_contract": "0x0ad339d66bf4aed5ce31c64bc37b3244b6394a77",
+        "use_case": "supplemental_fx_stable_reference",
+    },
+    {
+        "symbol": "AAPL",
+        "display_pair": "AAPL/USDC",
+        "hyperliquid_coin": "@268",
+        "pair_index": 268,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Apple",
+        "token_id": "0xec340db435d4d90899e97655cb8e71f5",
+        "evm_contract": "0x7374dc1894fbd1bc6c42f6ebbc50b78c211a8606",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "AMZN",
+        "display_pair": "AMZN/USDC",
+        "hyperliquid_coin": "@280",
+        "pair_index": 280,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Amazon",
+        "token_id": "0xd35b9bc1770c7bdda96f65cf0f76d4d5",
+        "evm_contract": "0x4f2164c12d2d450a8b1d430492ef6670fe4cad8e",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "AVGO",
+        "display_pair": "AVGO/USDC",
+        "hyperliquid_coin": "@332",
+        "pair_index": 332,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Broadcom",
+        "token_id": "0xeba4707b8cce42965026c6863faca7d4",
+        "evm_contract": "0xc2785563af80c05177fff006e3b380ac5d172602",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "CRCL",
+        "display_pair": "CRCL/USDC",
+        "hyperliquid_coin": "@263",
+        "pair_index": 263,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Circle Internet Group",
+        "token_id": "0x8b92defb1901e6be9384d365c4f306a4",
+        "evm_contract": "0xe74aa6c4050a15790525eb11cc4562c664dc67c9",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "GOOGL",
+        "display_pair": "GOOGL/USDC",
+        "hyperliquid_coin": "@266",
+        "pair_index": 266,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Alphabet",
+        "token_id": "0xba48f5724be19bf0b127bb4c7fbeb9db",
+        "evm_contract": "0x35eeda03e55ff217a013892e9e2e37e792b264ea",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "HOOD",
+        "display_pair": "HOOD/USDC",
+        "hyperliquid_coin": "@271",
+        "pair_index": 271,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Robinhood",
+        "token_id": "0xe101753dcfea619a512111d3ae54a592",
+        "evm_contract": "0xc304a9d52cf9165024ebc7814250ef3a5013f924",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "META",
+        "display_pair": "META/USDC",
+        "hyperliquid_coin": "@287",
+        "pair_index": 287,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Meta Platforms",
+        "token_id": "0x555659a2a856d42399cdde096eb998e9",
+        "evm_contract": "0x5a9d2deee7d8782011695623f1c453f46b2b566e",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "MSFT",
+        "display_pair": "MSFT/USDC",
+        "hyperliquid_coin": "@289",
+        "pair_index": 289,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Microsoft",
+        "token_id": "0xf5559ee90ac19c61eb6379eb3b3dade8",
+        "evm_contract": "0x66520d8fd614487214a25af7babf27584f59f76b",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "MU",
+        "display_pair": "MU/USDC",
+        "hyperliquid_coin": "@333",
+        "pair_index": 333,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Micron",
+        "token_id": "0x5e28c011d22a86d0787301fc8512fb00",
+        "evm_contract": "0x173c83a71c1a9e254721a86b7512cd65bf92648d",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "ORCL",
+        "display_pair": "ORCL/USDC",
+        "hyperliquid_coin": "@331",
+        "pair_index": 331,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Oracle",
+        "token_id": "0x92de6e7ea04b168f6acc93d18f3becce",
+        "evm_contract": "0xca2156522638f597ffb3705857ffdc356efabe50",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "TSLA",
+        "display_pair": "TSLA/USDC",
+        "hyperliquid_coin": "@264",
+        "pair_index": 264,
+        "asset_class": "tokenized_equity",
+        "identity_note": "Tesla - Wagyu.xyz",
+        "token_id": "0xc8a24412041cdc4a167e7d3568fb6ebd",
+        "evm_contract": "0x3727c797073840936e3c18b4088f3574cd1a72a3",
+        "use_case": "equity_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "GLD",
+        "display_pair": "GLD/USDC",
+        "hyperliquid_coin": "@276",
+        "pair_index": 276,
+        "asset_class": "tokenized_etf",
+        "identity_note": "SPDR Gold Shares proxy",
+        "token_id": "0xd0b13a173230b8e8dfd664ac0a00c9a8",
+        "evm_contract": "0x08be08c37d93e689518ced744a89f113b4afaad4",
+        "use_case": "gold_etf_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "QQQ",
+        "display_pair": "QQQ/USDC",
+        "hyperliquid_coin": "@288",
+        "pair_index": 288,
+        "asset_class": "tokenized_etf",
+        "identity_note": "Invesco QQQ proxy",
+        "token_id": "0xd443b26d9c0663dc89413d4cbab11b5b",
+        "evm_contract": "0x499e347174f237ad28687b947b94c0d49570d1b7",
+        "use_case": "equity_index_etf_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "QQQM",
+        "display_pair": "QQQM/USDC",
+        "hyperliquid_coin": "@308",
+        "pair_index": 308,
+        "asset_class": "tokenized_etf",
+        "identity_note": "Melt QQQ",
+        "token_id": "0xf7d4cc2f969e1b4f6233bafd4f82f752",
+        "evm_contract": "0x3f56e73ec528ba1e69e66b36dcb4d96174d5580e",
+        "use_case": "equity_index_etf_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "SLV",
+        "display_pair": "SLV/USDC",
+        "hyperliquid_coin": "@265",
+        "pair_index": 265,
+        "asset_class": "tokenized_etf",
+        "identity_note": "iShares Silver Trust proxy",
+        "token_id": "0x354131c048026531b2e4bb07d3180977",
+        "evm_contract": "0x7ef4eba0c0200957e357627ced1884d6cb63e961",
+        "use_case": "metal_etf_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "SPY",
+        "display_pair": "SPY/USDC",
+        "hyperliquid_coin": "@279",
+        "pair_index": 279,
+        "asset_class": "tokenized_etf",
+        "identity_note": "SPDR S&P 500 ETF proxy",
+        "token_id": "0x7ad071597884285ad3be27ef21a024f1",
+        "evm_contract": "0xb7bf37783db41a2851b77c6917280c56312c833a",
+        "use_case": "equity_index_etf_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "XAUT0",
+        "display_pair": "XAUT0/USDC",
+        "hyperliquid_coin": "@182",
+        "pair_index": 182,
+        "asset_class": "tokenized_gold",
+        "identity_note": "XAUT0",
+        "token_id": "0xfd61ec89811ba3cf2ae12d0ed8ef1afd",
+        "evm_contract": "0xf4d9235269a96aadafc9adae454a0618ebe37949",
+        "use_case": "metal_reference",
+    },
+    {
+        "symbol": "XAUT0",
+        "display_pair": "XAUT0/USDT0",
+        "hyperliquid_coin": "@209",
+        "pair_index": 209,
+        "asset_class": "tokenized_gold",
+        "identity_note": "XAUT0",
+        "token_id": "0xfd61ec89811ba3cf2ae12d0ed8ef1afd",
+        "evm_contract": "0xf4d9235269a96aadafc9adae454a0618ebe37949",
+        "use_case": "metal_reference",
+    },
+    {
+        "symbol": "USPYX",
+        "display_pair": "USPYX/USDC",
+        "hyperliquid_coin": "@189",
+        "pair_index": 189,
+        "asset_class": "tokenized_index_or_etf",
+        "identity_note": "Unit SP500 xStock",
+        "token_id": "0xc0fe8a28e4fbcfb7c6cb298c8ae0f206",
+        "evm_contract": None,
+        "use_case": "index_reference_needs_issuer_verification",
+    },
+    {
+        "symbol": "THBILL",
+        "display_pair": "THBILL/USDC",
+        "hyperliquid_coin": "@205",
+        "pair_index": 205,
+        "asset_class": "tokenized_treasury_fund",
+        "identity_note": "Theo Short Duration US Treasury Fund",
+        "token_id": "0x3d4d3796a3d34c8693d087ad266950e5",
+        "evm_contract": "0xfdd22ce6d1f66bc0ec89b20bf16ccb6670f55a5a",
+        "use_case": "treasury_fund_reference",
+    },
+    {
+        "symbol": "DIME",
+        "display_pair": "DIME/USDC",
+        "hyperliquid_coin": "@300",
+        "pair_index": 300,
+        "asset_class": "unverified_cash_like_token",
+        "identity_note": "DIME",
+        "token_id": "0xaa2cf8dba4f3869dd5f77002cabade48",
+        "evm_contract": "0xa72ae85ca2340ff74cc45c423f2a85a062a4fb4c",
+        "use_case": "exclude_until_identity_verified",
+    },
+    {
+        "symbol": "SPCX",
+        "display_pair": "SPCX/USDC",
+        "hyperliquid_coin": "@590",
+        "pair_index": 590,
+        "asset_class": "unverified_equity_or_fund_token",
+        "identity_note": "SPCX",
+        "token_id": "0x7d12581c6783aed7cd320d5460077063",
+        "evm_contract": "0xe8c8afdf7e80be51e91afa28b6ac44404d270b5d",
+        "use_case": "exclude_until_identity_verified",
+    },
+]
+
+
+_NORMALIZED_ASSET_CLASS = {
+    "fiat_stablecoin": "fx",
+    "fiat_token": "fx",
+    "stablecoin": "fx",
+    "stablecoin_or_synthetic_dollar": "fx",
+    "stablecoin_or_yield_dollar": "fx",
+    "private_company_token": "equity",
+    "tokenized_equity": "equity",
+    "tokenized_etf": "etf",
+    "tokenized_gold": "metal",
+    "tokenized_index_or_etf": "index",
+    "tokenized_treasury_fund": "treasury_fund",
+    "unverified_cash_like_token": "fx",
+    "unverified_equity_or_fund_token": "tokenized_fund",
+}
+
+
+def hyperliquid_normalized_asset_class(row: dict[str, Any]) -> str:
+    """Map Hyperliquid-specific RWA labels to aggregator asset classes."""
+    raw = str(row["asset_class"])
+    return _NORMALIZED_ASSET_CLASS.get(raw, "tokenized_fund")
+
+
+def hyperliquid_is_unverified(row: dict[str, Any]) -> bool:
+    """Return whether the candidate should stay out of promoted feeds."""
+    return str(row["asset_class"]).startswith("unverified_")
+
+
+def hyperliquid_symbol_by_alias() -> dict[str, dict[str, Any]]:
+    """Build lookup aliases for display symbols and Hyperliquid @coin ids."""
+    aliases: dict[str, dict[str, Any]] = {}
+    preferred_base_rows: dict[str, dict[str, Any]] = {}
+    for row in HYPERLIQUID_RWA_SPOT_SYMBOLS:
+        base = str(row["symbol"]).upper()
+        display_pair = str(row["display_pair"]).upper()
+        coin = str(row["hyperliquid_coin"]).upper()
+        aliases[coin] = row
+        aliases[display_pair] = row
+        aliases[display_pair.replace("/", "")] = row
+        preferred = preferred_base_rows.get(base)
+        if preferred is None or str(row["display_pair"]).endswith("/USDC"):
+            preferred_base_rows[base] = row
+    for base, row in preferred_base_rows.items():
+        aliases[base] = row
+        aliases[f"{base}/USD"] = row
+        aliases[f"{base}USD"] = row
+    return aliases

@@ -59,11 +59,12 @@ def _resolve_identity():
 _bundle = create_authenticated_market_data_mcp(
     mcp_name="Blocksize Market Data for Cursor",
     instructions=(
-        "Read-only Blocksize Capital market data for Cursor. Sign in with "
-        "Blocksize through Clerk to use the 50-credit starter live-data "
-        "allowance. Production usage can upgrade through x402 payment or "
-        "prepaid credits outside Cursor. This connector never executes wallet "
-        "transactions or submits x402 payment proofs from Cursor."
+        "Read-only Blocksize Capital market data for Cursor across crypto VWAP, "
+        "supported equity ticker bid/ask, FX, and metals. Sign in with Blocksize "
+        "through Clerk to use the 50-credit starter live-data allowance. Production "
+        "usage can upgrade through x402 payment or prepaid credits outside Cursor. "
+        "This connector never executes wallet transactions or submits x402 payment "
+        "proofs from Cursor."
     ),
     auth_provider=cursor_auth.build_cursor_auth_provider(),
     resolve_identity=_resolve_identity,

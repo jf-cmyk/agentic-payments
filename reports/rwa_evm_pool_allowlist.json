@@ -1,0 +1,307 @@
+{
+  "errors": [
+    {
+      "allowlist_id": "dex:aerodrome_slipstream:BUIDL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "BUIDL USDC"
+    },
+    {
+      "allowlist_id": "dex:aerodrome_slipstream:USCC:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USCC USDC"
+    },
+    {
+      "allowlist_id": "dex:aerodrome_slipstream:USDY:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USDY USDC"
+    },
+    {
+      "allowlist_id": "dex:aerodrome_slipstream:USTB:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USTB USDC"
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:BUIDL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "BUIDL USDC"
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:OUSG:USDC",
+      "error": "no_matching_pair_found",
+      "query": "OUSG USDC"
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:TBILL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "TBILL USDC"
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:USCC:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USCC USDC"
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:USTB:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USTB USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:EURC:USDC",
+      "error": "no_matching_pair_found",
+      "query": "EURC USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:OUSG:USDC",
+      "error": "no_matching_pair_found",
+      "query": "OUSG USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:TBILL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "TBILL USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:USCC:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USCC USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:USDY:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USDY USDC"
+    },
+    {
+      "allowlist_id": "dex:curve_stableswap:USTB:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USTB USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:BUIDL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "BUIDL USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:OUSG:USDC",
+      "error": "no_matching_pair_found",
+      "query": "OUSG USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:TBILL:USDC",
+      "error": "no_matching_pair_found",
+      "query": "TBILL USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:USCC:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USCC USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:USDY:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USDY USDC"
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:USTB:USDC",
+      "error": "no_matching_pair_found",
+      "query": "USTB USDC"
+    }
+  ],
+  "generated_at": "2026-07-13T14:55:26.164014+00:00",
+  "policy": {
+    "promotion_rule": "Pair search plus block-tagged RPC state resolves replay evidence only; live liquidity, manipulation, benchmark, and production RPC gates are still required before promotion.",
+    "source_limit": "Public RPC fallback receipts are discovery evidence and must be replaced by monitored production RPC/indexer access for promoted feeds."
+  },
+  "pools": [
+    {
+      "allowlist_id": "dex:aerodrome_slipstream:EURC:USDC",
+      "amplification": null,
+      "asset_id": "EURC",
+      "balances": null,
+      "base_symbol": "EURC",
+      "base_token": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+      "block_number": 48582586,
+      "chain": "base",
+      "chain_id": "base",
+      "dex_id": "aerodrome",
+      "evm_rpc_state": {
+        "attempted_rpc": [],
+        "block_number": 48582586,
+        "block_tag": "0x2e54fba",
+        "call_errors": {},
+        "fee_tier": 76,
+        "liquidity": 404013677462117,
+        "pool_contract_address": "0xE846373C1a92B167b4E9cd5d8E4d6B1Db9E90EC7",
+        "raw_call_sha256": "8c6bf529ebc8388e42e856a2a27262f6d1d383742ff1895d2889ef72ecb3690b",
+        "rpc_source": "public_fallback:mainnet.base.org",
+        "slot0_raw": "0x0000000000000000000000000000000000000001115b0f9eacf1b7ef0312f82f000000000000000000000000000000000000000000000000000000000000051f0000000000000000000000000000000000000000000000000000000000000131000000000000000000000000000000000000000000000000000000000000038400000000000000000000000000000000000000000000000000000000000003840000000000000000000000000000000000000000000000000000000000000001",
+        "slot0_sha256": "036617a1ca2f753a51ee9cf3efa59489ff111f79fcd6f0dcbcc1bb974e43dfbb",
+        "status": "pool_state_captured",
+        "tick_spacing": 50,
+        "token0": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+        "token1": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "token_contract_status": "token_contracts_match_pair_metadata"
+      },
+      "fee_tier": 76,
+      "fee_tier_status": "fee_tier_read_from_pool_contract",
+      "liquidity_usd": 2452510.07,
+      "pair_created_at": null,
+      "pool_address": "0xE846373C1a92B167b4E9cd5d8E4d6B1Db9E90EC7",
+      "pool_id": "0xE846373C1a92B167b4E9cd5d8E4d6B1Db9E90EC7",
+      "price_usd": "1.14",
+      "quote_symbol": "USDC",
+      "quote_token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "raw_payload_artifact": "reports/rwa_evm_pool_allowlist.json",
+      "raw_payload_sha256": "1e730181af2c7127cb0de3fe0a1dd7276e646244097acd8f3ae90a0df1ca88ee",
+      "review_status": "pool_block_state_ready_pending_live_quality",
+      "source": "dexscreener_public_pair_search",
+      "symbol": "EURC/USDC",
+      "tick_state": {
+        "block_number": 48582586,
+        "block_tag": "0x2e54fba",
+        "liquidity": 404013677462117,
+        "rpc_source": "public_fallback:mainnet.base.org",
+        "slot0_raw": "0x0000000000000000000000000000000000000001115b0f9eacf1b7ef0312f82f000000000000000000000000000000000000000000000000000000000000051f0000000000000000000000000000000000000000000000000000000000000131000000000000000000000000000000000000000000000000000000000000038400000000000000000000000000000000000000000000000000000000000003840000000000000000000000000000000000000000000000000000000000000001",
+        "slot0_sha256": "036617a1ca2f753a51ee9cf3efa59489ff111f79fcd6f0dcbcc1bb974e43dfbb",
+        "tick_spacing": 50
+      },
+      "token0": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
+      "token1": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "url": "https://dexscreener.com/base/0xe846373c1a92b167b4e9cd5d8e4d6b1db9e90ec7",
+      "venue": "aerodrome_slipstream",
+      "volume_h24": 7468100.4,
+      "weights": null
+    },
+    {
+      "allowlist_id": "dex:balancer_pools:PAXG:USDC",
+      "amplification": null,
+      "asset_id": "PAG",
+      "balances": null,
+      "base_symbol": "PAXG",
+      "base_token": "0x45804880De22913dAFE09f4980848ECE6EcbAf78",
+      "block_number": 25524438,
+      "chain": "ethereum",
+      "chain_id": "ethereum",
+      "dex_id": "balancer",
+      "evm_rpc_state": {
+        "attempted_rpc": [],
+        "block_number": 25524438,
+        "block_tag": "0x18578d6",
+        "call_errors": {
+          "fee": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}",
+          "liquidity": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}",
+          "slot0": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}",
+          "tick_spacing": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}",
+          "token0": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}",
+          "token1": "RuntimeError: {\"code\": 3, \"data\": \"0x\", \"message\": \"execution reverted\"}"
+        },
+        "fee_tier": null,
+        "liquidity": null,
+        "pool_contract_address": "0x6B61D8680C4F9E560c8306807908553f95c749C5",
+        "raw_call_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "rpc_source": "public_fallback:ethereum-rpc.publicnode.com",
+        "slot0_raw": null,
+        "slot0_sha256": null,
+        "status": "block_number_only",
+        "tick_spacing": null,
+        "token0": null,
+        "token1": null,
+        "token_contract_status": "token_contracts_not_returned"
+      },
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_public_pair_search",
+      "liquidity_usd": 34232.72,
+      "pair_created_at": null,
+      "pool_address": "0x6B61D8680C4F9E560c8306807908553f95c749C5-0x45804880De22913dAFE09f4980848ECE6EcbAf78-0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "pool_id": "0x6B61D8680C4F9E560c8306807908553f95c749C5-0x45804880De22913dAFE09f4980848ECE6EcbAf78-0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "price_usd": "3993.058",
+      "quote_symbol": "USDC",
+      "quote_token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "raw_payload_artifact": "reports/rwa_evm_pool_allowlist.json",
+      "raw_payload_sha256": "2afabd29fd32722317d00761f74386830ce8936671bf29696bede6cdde9084b6",
+      "review_status": "pool_block_number_ready_missing_pool_state",
+      "source": "dexscreener_public_pair_search",
+      "symbol": "PAXG/USDC",
+      "tick_state": null,
+      "url": "https://dexscreener.com/ethereum/0x6b61d8680c4f9e560c8306807908553f95c749c5-0x45804880de22913dafe09f4980848ece6ecbaf78-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "venue": "balancer_pools",
+      "volume_h24": 675.44,
+      "weights": null
+    },
+    {
+      "allowlist_id": "dex:uniswap_v3_v4:PAXG:USDC",
+      "amplification": null,
+      "asset_id": "PAG",
+      "balances": null,
+      "base_symbol": "PAXG",
+      "base_token": "0x45804880De22913dAFE09f4980848ECE6EcbAf78",
+      "block_number": 25524438,
+      "chain": "ethereum",
+      "chain_id": "ethereum",
+      "dex_id": "uniswap",
+      "evm_rpc_state": {
+        "attempted_rpc": [],
+        "block_number": 25524438,
+        "block_tag": "0x18578d6",
+        "call_errors": {},
+        "fee_tier": 500,
+        "liquidity": 217042273288425440,
+        "pool_contract_address": "0x5aE13BAAEF0620FdaE1D355495Dc51a17adb4082",
+        "raw_call_sha256": "0b809f4ebb17d0b10c229b29e387c64bb0c1a0294c635a711217454ea95a4c12",
+        "rpc_source": "public_fallback:ethereum-rpc.publicnode.com",
+        "slot0_raw": "0x0000000000000000000000000000000000000000000425cf4e0fa5d6e87846abfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd0caa000000000000000000000000000000000000000000000000000000000000005f0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000440000000000000000000000000000000000000000000000000000000000000001",
+        "slot0_sha256": "ff23c3923bc223799c7747134e25267bf02fdef6e1e02f3f95de75e6605585a4",
+        "status": "pool_state_captured",
+        "tick_spacing": 10,
+        "token0": "0x45804880de22913dafe09f4980848ece6ecbaf78",
+        "token1": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "token_contract_status": "token_contracts_match_pair_metadata"
+      },
+      "fee_tier": 500,
+      "fee_tier_status": "fee_tier_read_from_pool_contract",
+      "liquidity_usd": 2569813.99,
+      "pair_created_at": 1655264999000,
+      "pool_address": "0x5aE13BAAEF0620FdaE1D355495Dc51a17adb4082",
+      "pool_id": "0x5aE13BAAEF0620FdaE1D355495Dc51a17adb4082",
+      "price_usd": "4005.47",
+      "quote_symbol": "USDC",
+      "quote_token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "raw_payload_artifact": "reports/rwa_evm_pool_allowlist.json",
+      "raw_payload_sha256": "891c5cd606986eae7320db449824467ab983ec54eae0fdcca24ac0cd6bf7889a",
+      "review_status": "pool_block_state_ready_pending_live_quality",
+      "source": "dexscreener_public_pair_search",
+      "symbol": "PAXG/USDC",
+      "tick_state": {
+        "block_number": 25524438,
+        "block_tag": "0x18578d6",
+        "liquidity": 217042273288425440,
+        "rpc_source": "public_fallback:ethereum-rpc.publicnode.com",
+        "slot0_raw": "0x0000000000000000000000000000000000000000000425cf4e0fa5d6e87846abfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd0caa000000000000000000000000000000000000000000000000000000000000005f0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000440000000000000000000000000000000000000000000000000000000000000001",
+        "slot0_sha256": "ff23c3923bc223799c7747134e25267bf02fdef6e1e02f3f95de75e6605585a4",
+        "tick_spacing": 10
+      },
+      "token0": "0x45804880de22913dafe09f4980848ece6ecbaf78",
+      "token1": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "url": "https://dexscreener.com/ethereum/0x5ae13baaef0620fdae1d355495dc51a17adb4082",
+      "venue": "uniswap_v3_v4",
+      "volume_h24": 1248088.31,
+      "weights": null
+    }
+  ],
+  "product": "rwa_evm_pool_allowlist",
+  "summary": {
+    "block_state_captured": 2,
+    "by_chain": {
+      "base": 1,
+      "ethereum": 2
+    },
+    "by_venue": {
+      "aerodrome_slipstream": 1,
+      "balancer_pools": 1,
+      "uniswap_v3_v4": 1
+    },
+    "candidate_count": 24,
+    "fee_tiers_missing": 1,
+    "missing_pair_count": 21,
+    "pool_count": 3
+  }
+}

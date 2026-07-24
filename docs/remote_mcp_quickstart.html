@@ -79,6 +79,8 @@
       <p>
         The public remote MCP exposes free discovery and documentation tools: instrument search,
         supported instrument lists, pricing inspection, and document-style <code>search</code>/<code>fetch</code>.
+        Search <code>AAPL</code> with <code>asset_class=equity</code> to discover supported stock tickers,
+        then route live equity snapshots through <code>/v1/bidask/{ticker}</code>.
         Live paid market data remains available through the x402-protected HTTP API and the advanced local MCP setup.
       </p>
     </div>
@@ -106,6 +108,9 @@
     }
   }
 }</code></pre>
+    <p>
+      In Cursor, ask: <code>Search Blocksize for AAPL with asset_class=equity and build the paid bid/ask URL.</code>
+    </p>
 
     <h2>Anthropic Messages API</h2>
     <p>
@@ -128,6 +133,9 @@
       <a href="https://mcp.blocksize.info/claude-connector">https://mcp.blocksize.info/claude-connector</a>.
       That connector uses OAuth and server-side daily data credits, and does not execute wallet
       transactions or submit payment proofs.
+    </p>
+    <p>
+      In Claude, ask: <code>Search Blocksize equities for AAPL, then fetch the AAPL bid/ask snapshot if it is supported.</code>
     </p>
 
     <h2>Any Streamable HTTP Client</h2>

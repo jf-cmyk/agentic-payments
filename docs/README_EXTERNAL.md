@@ -33,7 +33,7 @@ Live market data is available via the HTTP API and documented here:
 Supported paid endpoints:
 
 - `GET /v1/vwap/{pair}`
-- `GET /v1/bidask/{pair}`
+- `GET /v1/bidask/{pair}` for crypto pairs and supported equity tickers
 - `GET /v1/state/{pair}`
 - `GET /v1/vwap30m/{pair}`
 - `GET /v1/vwap24h/{pair}`
@@ -82,8 +82,8 @@ Feed mapping from the upstream Blocksize documentation:
 
 Free discovery endpoints:
 
-- `GET /v1/search`
-- `GET /v1/instruments/{service}`
+- `GET /v1/search`, including `GET /v1/search?q=AAPL&asset_class=equity`
+- `GET /v1/instruments/{service}`; use `bidask` for the shared bid/ask namespace
 - `GET /health`
 
 ## Pricing

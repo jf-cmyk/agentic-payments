@@ -95,9 +95,9 @@
     <h1>Blocksize Market Data for Claude</h1>
     <p class="summary">
       Blocksize Market Data connects Claude to a hosted Streamable HTTP MCP endpoint
-      for read-only market-data discovery, daily credit visibility, and live market
-      data snapshots. The Claude connector does not transfer money, execute wallet
-      transactions, submit payment proofs, or place trades.
+      for read-only market-data discovery, daily credit visibility, and live crypto,
+      supported equity ticker, FX, and metals snapshots. The Claude connector does
+      not transfer money, execute wallet transactions, submit payment proofs, or place trades.
     </p>
 
     <section class="panel">
@@ -109,7 +109,11 @@
     <div class="grid">
       <div class="item">
         <span class="label">Discovery</span>
-        <p>Search supported crypto, equity, FX, and metals instruments before making live data calls.</p>
+        <p>Search supported crypto, equity ticker, FX, and metals instruments before making live data calls.</p>
+      </div>
+      <div class="item">
+        <span class="label">Equities</span>
+        <p>Use <code>search_pairs</code> with <code>asset_class=equity</code>, then call <code>get_bid_ask</code> for supported stock tickers such as AAPL.</p>
       </div>
       <div class="item">
         <span class="label">Credits</span>
@@ -124,7 +128,7 @@
     <h2>MCP Tools</h2>
     <ul>
       <li><code>search_pairs</code>: Search supported instruments by symbol or asset name.</li>
-      <li><code>list_instruments</code>: List supported instruments for one Blocksize service namespace.</li>
+      <li><code>list_instruments</code>: List supported instruments for one Blocksize service namespace; use <code>bidask</code> for supported equities.</li>
       <li><code>get_credit_balance</code>: Show remaining daily data credits for the signed-in user.</li>
       <li><code>get_vwap</code>: Fetch a crypto VWAP snapshot for one supported pair.</li>
       <li><code>get_bid_ask</code>: Fetch bid/ask data for one supported crypto pair or equity ticker.</li>
@@ -144,6 +148,7 @@ https://mcp.blocksize.info/.well-known/oauth-authorization-server/anthropic/mcp<
     <h2>Example Prompts</h2>
     <ul>
       <li>Search Blocksize for BTC market data instruments.</li>
+      <li>Search Blocksize for AAPL with asset_class=equity, then get the current AAPL bid/ask snapshot.</li>
       <li>Get the latest BTC-USD VWAP from Blocksize.</li>
       <li>Show my remaining Blocksize data credits.</li>
       <li>Get the current EURUSD FX snapshot.</li>

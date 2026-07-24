@@ -1,5 +1,6 @@
 .env
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -8,6 +9,14 @@ build/
 .pytest_cache/
 agent_wallet.json
 credits.db
+usage_events.db
+rwa_observations.db
+*entitlements.db
+anthropic_entitlements.db
+cursor_entitlements.db
+.tmp_stork_coverage/
+tmp/
+outputs/
 .DS_Store
 mcp-registry-key.pem
 tools/mcp-publisher

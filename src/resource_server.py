@@ -10,6 +10,18 @@ Endpoints:
   GET /v1/bidask/{pair}           — Bid/Ask snapshot (shared upstream namespace)
   GET /v1/fx/{pair}               — FX rate ($0.005)
   GET /v1/metal/{ticker}          — Metal price ($0.005)
+  GET /v1/rwa/coverage            — RWA coverage and venue readiness (FREE)
+  GET /v1/rwa/build-plan          — RWA VWAP/bid/ask build plan (FREE)
+  GET /v1/rwa/provider-catalog    — RWA provider ingestion roadmap (FREE)
+  GET /v1/rwa/source-readiness    — RWA external dependency readiness (FREE)
+  GET /v1/rwa/derivative-venues   — RWA derivative venue discovery (FREE)
+  GET /v1/rwa/rwa-xyz-monitor     — RWA.xyz New Asset Monitor catalog (FREE)
+  GET /v1/rwa/daily-feed-agent    — Daily RWA new-feed discovery diff (FREE)
+  GET /v1/rwa/discovery           — RWA feed discovery and promotion gates (FREE)
+  GET /v1/rwa/blocker-resolution  — RWA blocker resolution ledger (FREE)
+  GET /v1/rwa/source-rights       — RWA rights-to-source register (FREE)
+  GET /v1/rwa/replay-inventory    — RWA route/pool replay inventory (FREE)
+  POST /v1/rwa/observations/store — Replayable RWA observation ledger (FREE)
   GET /v1/search?q={query}        — Pair search (FREE)
   GET /v1/instruments/{service}   — Instrument list (FREE)
   GET /health                     — Health check (FREE)
@@ -17,6 +29,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import base64
 import binascii
@@ -26,7 +39,7 @@ import re
 import secrets
 import time
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -70,16 +83,21 @@ from src.observability import (
     UsageEventStore,
     configure_global_store,
     fingerprint,
+    normalize_symbol_opportunity,
     record_usage_event,
+    record_usage_event_once,
     registry_name_for_path,
     surface_for_path,
 )
 from src.public_metadata import (
+    AGENT_FRAMEWORK_INTEGRATIONS_URL,
     AGENT_MANUAL_URL,
     APP_VERSION,
     CLAUDE_CONNECTOR_URL,
+    CATEGORY_HUBS_JSON_URL,
     DATA_CATALOG_URL,
     DATA_PACKAGES_JSON_URL,
+    FIRST_PRICE_QUICKSTART_URL,
     GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
     LLMS_TXT_URL,
@@ -87,6 +105,8 @@ from src.public_metadata import (
     MCP_REGISTRY_AUTH_CONTENT,
     MCP_REGISTRY_AUTH_URL,
     OPENAPI_URL,
+    ORACLE_LINEAGE_INDEX_PDF_URL,
+    ORACLE_LINEAGE_INDEX_URL,
     PRICING_GUIDE_URL,
     PRIVACY_POLICY_URL,
     PROMPT_EXAMPLES_URL,
@@ -97,6 +117,8 @@ from src.public_metadata import (
     REMOTE_MCP_PATH,
     REMOTE_MCP_URL,
     REPOSITORY_URL,
+    RWA_COVERAGE_INDEX_PDF_URL,
+    RWA_COVERAGE_INDEX_URL,
     ROBOTS_URL,
     SERVER_JSON_URL,
     SEO_LANDING_PAGES,
@@ -105,6 +127,7 @@ from src.public_metadata import (
     SWAGGER_URL,
     USER_FLOW_URL,
     build_data_packages_json,
+    build_category_hubs_json,
     build_llms_txt,
     build_open_graph_svg,
     build_robots_txt,
@@ -112,6 +135,53 @@ from src.public_metadata import (
     build_seo_landing_page,
     build_sitemap_xml,
 )
+from src.rwa_coverage import (
+    QUALITY_ALIGNMENT,
+    build_dex_venue_quality_plan,
+    build_oracle_parity_matrix,
+    build_rwa_asset_matrix,
+    build_rwa_build_plan,
+    build_rwa_coverage_overview,
+)
+from src.rwa_dex_allowlist import build_dex_allowlist
+from src.rwa_derivative_venues import build_derivative_venue_report
+from src.rwa_asset_identity import build_rwa_ticker_identity_audit
+from src.rwa_pricing import calculate_bidask, calculate_block_vwap, detect_outliers
+from src.rwa_aggregator import (
+    aggregate_submitted_observations,
+    build_aggregator_status,
+    evaluate_feed_promotion,
+)
+from src.rwa_realtime_quality import build_realtime_requirements, evaluate_realtime_quality
+from src.rwa_adapters import RWA_ADAPTER_REGISTRY
+from src.rwa_sourcing import build_sourcing_jobs
+from src.rwa_sourcing_runner import probe_sourcing_jobs
+from src.rwa_symbol_registry import (
+    build_rwa_registry_overview,
+    build_rwa_venue_registry,
+    normalize_venue_alias,
+    resolve_rwa_symbol,
+)
+from src.rwa_non_crypto_feeds import build_non_crypto_feed_catalog
+from src.rwa_feed_discovery import build_feed_discovery_audit
+from src.rwa_discovery_mitigation import build_discovery_mitigation_plan
+from src.rwa_blocker_resolution import build_blocker_resolution_ledger
+from src.rwa_source_rights import build_source_rights_registry
+from src.rwa_replay_inventory import build_route_pool_replay_inventory
+from src.rwa_equity_universes import build_equity_universe_sourcing_plan
+from src.rwa_blocksize_benchmark import (
+    build_blocksize_state_methodology,
+    compare_observation_to_blocksize,
+    resolve_blocksize_benchmark,
+)
+from src.rwa_market_expansion import build_futures_data_plan, build_market_expansion_plan
+from src.rwa_oracle_streams import build_oracle_stream_coverage
+from src.rwa_provider_catalog import build_provider_catalog
+from src.rwa_consensus import build_consensus_source_plan, calculate_consensus_metric
+from src.rwa_source_readiness import build_source_readiness
+from src.rwa_store import RWAObservationStore
+from src.rwa_daily_feed_agent import build_daily_feed_agent_view
+from src.rwa_xyz_monitor import build_rwa_xyz_monitor_view
 from src import anthropic_auth
 from src import cursor_auth
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
@@ -119,6 +189,7 @@ from src.anthropic_mcp_server import anthropic_mcp
 from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
 from src.cursor_mcp_server import cursor_mcp
 from src.public_mcp_server import public_mcp
+from scripts.run_rwa_growth_pilot import capture_pilot, persist_capture
 
 logger = logging.getLogger(__name__)
 DOCS_DIR = Path("docs")
@@ -140,6 +211,182 @@ SMITHERY_HOSTED_MCP_ENDPOINT = os.getenv(
     "https://agentic-payments--blocksize.run.tools",
 )
 SMITHERY_METRICS_API_URL = os.getenv("SMITHERY_METRICS_API_URL", "").strip()
+PAY_SH_SERVICE_URL = os.getenv(
+    "PAY_SH_SERVICE_URL",
+    "https://pay.sh/services/blocksize/market-data",
+)
+PAY_SH_METRICS_API_URL = os.getenv("PAY_SH_METRICS_API_URL", "").strip()
+
+
+def _env_enabled(name: str, default: str = "false") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _rwa_growth_pilot_paths() -> tuple[Path, Path]:
+    return (
+        Path(os.environ.get("RWA_GROWTH_PILOT_HISTORY_PATH", "/data/rwa_growth_pilot_history.jsonl")),
+        Path(os.environ.get("RWA_GROWTH_PILOT_STATUS_PATH", "/data/rwa_growth_pilot_status.json")),
+    )
+
+
+def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
+    _, status_path = _rwa_growth_pilot_paths()
+    if not status_path.exists():
+        return {
+            "status": "not_started",
+            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "production_promoted_feed_count": 0,
+            "feeds": [],
+        }
+    try:
+        report = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "status": "status_unreadable",
+            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "production_promoted_feed_count": 0,
+            "feeds": [],
+        }
+    current = report.get("current_capture") if isinstance(report.get("current_capture"), dict) else {}
+    return {
+        "status": report.get("status", "candidate_monitoring"),
+        "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+        "generated_at": report.get("generated_at"),
+        "source_monitoring_ready": bool(report.get("source_monitoring_ready")),
+        "promotion_ready": bool(report.get("promotion_ready")),
+        "production_promoted_feed_count": int(report.get("production_promoted_feed_count") or 0),
+        "current_capture": {
+            "attempted": int(current.get("attempted") or 0),
+            "succeeded": int(current.get("succeeded") or 0),
+            "ledger_persisted": int(current.get("ledger_persisted") or 0),
+            "ledger_observation_ids": current.get("ledger_observation_ids", []),
+        },
+        "observation_ledger": report.get("observation_ledger", {}),
+        "thresholds": report.get("thresholds", {}),
+        "non_monitoring_gates": report.get("non_monitoring_gates", {}),
+        "feeds": report.get("feeds", []),
+        "policy": report.get("policy", {}),
+    }
+
+
+async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
+    initial_delay = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_INITIAL_DELAY_SECONDS", "15")))
+    interval = max(300.0, float(os.environ.get("RWA_GROWTH_PILOT_INTERVAL_SECONDS", "1800")))
+    timeout = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_TIMEOUT_SECONDS", "20")))
+    history_path, status_path = _rwa_growth_pilot_paths()
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
+            captures = await capture_pilot(registry, timeout_seconds=timeout)
+            report = await asyncio.to_thread(
+                persist_capture,
+                history_path,
+                captures,
+                status_output=status_path,
+                observation_store=getattr(app.state, "rwa_store", None),
+            )
+            logger.info(
+                "RWA growth pilot captured %s/%s feeds; persisted=%s; promotion_ready=%s",
+                report["current_capture"]["succeeded"],
+                report["current_capture"]["attempted"],
+                report["current_capture"]["ledger_persisted"],
+                report["promotion_ready"],
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("RWA growth pilot capture failed")
+        await asyncio.sleep(interval)
+
+
+def _marketplace_metrics_feed_overrides() -> dict[str, str]:
+    raw = os.getenv("MARKETPLACE_METRICS_FEEDS_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Invalid MARKETPLACE_METRICS_FEEDS_JSON; expected object mapping platform ids to URLs")
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(platform_id): str(url).strip()
+        for platform_id, url in parsed.items()
+        if str(platform_id).strip() and str(url).strip()
+    }
+
+
+MARKETPLACE_METRICS_FEEDS = _marketplace_metrics_feed_overrides()
+DISTRIBUTION_PLATFORMS = [
+    {
+        "id": "pay_sh",
+        "name": "Pay.sh / pay-skills",
+        "source_label": "Pay.sh",
+        "listing_url": PAY_SH_SERVICE_URL,
+        "metric_status": "external_metrics_not_ingested",
+        "note": "Pay.sh catalog and pay-skills validation are tracked locally only when traffic reaches this service with Pay.sh attribution.",
+    },
+    {
+        "id": "smithery",
+        "name": "Smithery",
+        "source_label": "Smithery",
+        "listing_url": SMITHERY_LISTING_URL,
+        "hosted_endpoint": SMITHERY_HOSTED_MCP_ENDPOINT,
+        "metric_status": "external_metrics_not_ingested",
+        "note": "Smithery hosted performance is separate unless a metrics feed or hosted endpoint logs are wired into this observability database.",
+    },
+    {
+        "id": "glama",
+        "name": "Glama",
+        "source_label": "Glama",
+        "listing_url": "https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments",
+        "metric_status": "local_attribution_only",
+        "note": "Glama claim and connector traffic are recorded when they hit instrumented registry or MCP surfaces.",
+    },
+    {
+        "id": "mcp_registry",
+        "name": "Official MCP Registry",
+        "source_label": "MCP Registry",
+        "listing_url": "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize",
+        "metric_status": "local_attribution_only",
+        "note": "Official registry discovery is recorded through /server.json and domain-verification traffic.",
+    },
+    {
+        "id": "x402scan",
+        "name": "x402scan",
+        "source_label": "x402scan",
+        "secondary_source_label": "x402 Directory",
+        "listing_url": "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66",
+        "metric_status": "local_attribution_only",
+        "note": "x402scan and x402 discovery calls are tracked when they request /.well-known/x402 or send an identifiable referrer.",
+    },
+    {
+        "id": "github_package",
+        "name": "GitHub Package",
+        "source_label": "GitHub",
+        "listing_url": "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp",
+        "metric_status": "repository_referral_only",
+        "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
+    },
+    {
+        "id": "gitlab_mirror",
+        "name": "GitLab Mirror",
+        "source_label": "GitLab",
+        "listing_url": "https://gitlab.com/jfocke/agentic-payments",
+        "metric_status": "repository_referral_only",
+        "note": "GitLab activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
+    },
+    {
+        "id": "awesome_mcp",
+        "name": "Awesome MCP",
+        "source_label": "Awesome MCP",
+        "listing_url": "https://github.com/punkpeye/awesome-mcp-servers/pull/7790",
+        "metric_status": "submission_referral_only",
+        "note": "Awesome MCP submission traffic is tracked when identifiable referrers reach the service.",
+    },
+]
 
 
 class _SlashlessMountEndpoint:
@@ -171,14 +418,26 @@ async def lifespan(app: FastAPI):
     app.state.blocksize = BlocksizeClient()
     app.state.stream_cache = BlocksizeStreamCache(rest_client=app.state.blocksize)
     app.state.credits = CreditManager()
+    app.state.rwa_store = RWAObservationStore(
+        os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
+    )
+    app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
-    async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
-        async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
-            async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
-                yield
+    if _env_enabled("RWA_GROWTH_PILOT_ENABLED"):
+        app.state.rwa_growth_pilot_task = asyncio.create_task(_run_rwa_growth_pilot_loop(app))
+    try:
+        async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
+            async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
+                async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
+                    yield
+    finally:
+        if app.state.rwa_growth_pilot_task is not None:
+            app.state.rwa_growth_pilot_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.rwa_growth_pilot_task
     await app.state.stream_cache.stop()
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
@@ -211,11 +470,20 @@ app.add_middleware(
     allow_origins=settings.server.cors_origins,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["PAYMENT-REQUIRED", "PAYMENT-RESPONSE", "X-PAYMENT-RESPONSE"],
+    expose_headers=[
+        "PAYMENT-REQUIRED",
+        "PAYMENT-RESPONSE",
+        "X-PAYMENT-RESPONSE",
+        "X-Blocksize-Provider",
+        "X-Blocksize-Citation",
+    ],
 )
 
 
-X402_EXPOSE_HEADERS = "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE"
+X402_EXPOSE_HEADERS = (
+    "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, "
+    "X-Blocksize-Provider, X-Blocksize-Citation"
+)
 SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
@@ -227,6 +495,12 @@ SECURITY_HEADERS = {
 def _apply_security_headers(response: Any) -> Any:
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
+    response.headers.setdefault("X-Blocksize-Provider", "Blocksize")
+    response.headers.setdefault("X-Blocksize-Citation", CATEGORY_HUBS_JSON_URL)
+    response.headers.setdefault(
+        "Link",
+        f'<{CATEGORY_HUBS_JSON_URL}>; rel="describedby"; type="application/json"',
+    )
     return response
 
 
@@ -343,6 +617,44 @@ def _request_event_fields(
     }
 
 
+def _activation_identity_hash(request: Request) -> tuple[str, str] | None:
+    """Resolve an explicit activation identity without retaining its raw value."""
+    for header_name, identity_type in (
+        ("X-AUTHENTICATED-USER", "user"),
+        ("X-USER-ID", "user"),
+        ("X-AGENT-ID", "agent"),
+        ("X-AGENT-WALLET", "wallet"),
+        ("X-DEVICE-ID", "device"),
+        ("X-SESSION-ID", "session"),
+    ):
+        value = request.headers.get(header_name)
+        if value and (identity_hash := fingerprint(f"{identity_type}:{value.strip()}")):
+            return identity_hash, identity_type
+    return None
+
+
+def _growth_identity_metadata(request: Request) -> dict[str, str]:
+    identity = _activation_identity_hash(request)
+    if identity is None:
+        return {}
+    identity_hash, identity_type = identity
+    return {"identity_hash": identity_hash, "identity_type": identity_type}
+
+
+def _is_live_price_delivery_path(path: str) -> bool:
+    return path.startswith(
+        (
+            "/v1/vwap/",
+            "/v1/bidask/",
+            "/v1/fx/",
+            "/v1/metal/",
+            "/v1/state/",
+            "/v1/vwap30m/",
+            "/v1/vwap24h/",
+        )
+    )
+
+
 def _record_http_usage(request: Request, status_code: int, latency_ms: float) -> None:
     if request.url.path.startswith("/internal/observability"):
         return
@@ -362,7 +674,11 @@ def _record_http_usage(request: Request, status_code: int, latency_ms: float) ->
             metadata={"registry": registry_name},
         )
     elif _is_discovery_rate_limited_path(request.url.path):
-        record_usage_event("free_discovery_call", **fields)
+        record_usage_event(
+            "free_discovery_call",
+            **fields,
+            metadata=_growth_identity_metadata(request),
+        )
 
 
 def _record_product_event(
@@ -378,14 +694,62 @@ def _record_product_event(
     fields = _request_event_fields(request)
     if wallet_hash is not None:
         fields["wallet_hash"] = wallet_hash
+    event_metadata = {**_growth_identity_metadata(request), **(metadata or {})}
     record_usage_event(
         event,
         **fields,
         price_usdc=str(price_usdc) if price_usdc is not None else None,
         network=network,
         reason=reason,
-        metadata=metadata,
+        metadata=event_metadata,
     )
+
+
+def _delivery_event_for_response(response: Response) -> str:
+    return "data_delivered" if response.status_code < 400 else "charged_delivery_failed"
+
+
+def _record_charged_delivery_outcome(
+    request: Request,
+    response: Response,
+    *,
+    price_usdc: Decimal | float | str | None,
+    payment_mode: str,
+    network: str | None = None,
+    wallet_hash: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    event = _delivery_event_for_response(response)
+    outcome_metadata = {
+        "payment_mode": payment_mode,
+        "response_status_code": response.status_code,
+        **(metadata or {}),
+    }
+    _record_product_event(
+        event,
+        request,
+        price_usdc=price_usdc,
+        network=network,
+        reason=None if event == "data_delivered" else f"http_{response.status_code}",
+        wallet_hash=wallet_hash,
+        metadata=outcome_metadata,
+    )
+    if event == "data_delivered" and _is_live_price_delivery_path(request.url.path):
+        activation_identity = _activation_identity_hash(request)
+        if activation_identity is not None:
+            identity_hash, identity_type = activation_identity
+            record_usage_event_once(
+                "first_live_price_delivered",
+                identity_hash,
+                **_request_event_fields(request, status_code=response.status_code),
+                price_usdc=str(price_usdc) if price_usdc is not None else None,
+                network=network,
+                metadata={
+                    "identity_hash": identity_hash,
+                    "identity_type": identity_type,
+                    "payment_mode": payment_mode,
+                },
+            )
 
 
 @app.middleware("http")
@@ -419,12 +783,15 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         "/health",
         "/privacy",
         "/prompt-examples",
+        "/quickstart/first-price",
+        "/integrations/agent-frameworks",
         "/support",
         "/claude-connector",
         "/robots.txt",
         "/sitemap.xml",
         "/llms.txt",
         "/data-packages.json",
+        "/category-hubs.json",
         "/server.json",
         "/mcp/manifest.json",
         "/favicon.ico",
@@ -500,6 +867,22 @@ async def get_remote_quickstart():
     return _serve_doc("remote_mcp_quickstart.html", "Remote MCP quickstart")
 
 
+@app.api_route("/quickstart/first-price", methods=["GET", "HEAD"], include_in_schema=False)
+async def get_first_price_quickstart():
+    """Serve the shortest honest path to a first live Blocksize price."""
+    return _serve_doc("first_price_quickstart.html", "First price quickstart")
+
+
+@app.api_route(
+    "/integrations/agent-frameworks",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_agent_framework_integrations():
+    """Serve the public agent-framework integration guide."""
+    return _serve_doc("agent_framework_integrations.html", "Agent framework integrations")
+
+
 @app.api_route("/prompt-examples", methods=["GET", "HEAD"], include_in_schema=False)
 async def get_prompt_examples():
     """Serve prompt examples for reviewers and users."""
@@ -561,6 +944,12 @@ async def get_llms_txt() -> PlainTextResponse:
 async def get_data_packages_json() -> JSONResponse:
     """Serve the machine-readable Blocksize data package catalog."""
     return JSONResponse(build_data_packages_json())
+
+
+@app.api_route("/category-hubs.json", methods=["GET", "HEAD"], include_in_schema=False)
+async def get_category_hubs_json() -> JSONResponse:
+    """Serve machine-readable category definitions, evidence, and claims boundaries."""
+    return JSONResponse(build_category_hubs_json())
 
 
 @app.get("/v1/products")
@@ -768,6 +1157,7 @@ async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
 # Mount assets, PDFs, and the public remote MCP discovery server
 app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
 app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
+app.mount("/evidence", StaticFiles(directory="docs/evidence", html=True), name="evidence")
 app.add_route(
     REMOTE_MCP_PATH.rstrip("/"),
     _SlashlessMountEndpoint(PUBLIC_MCP_HTTP_APP, REMOTE_MCP_PATH),
@@ -812,9 +1202,50 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/indicators/state-divergence": Decimal("0.50"),
     "/v1/signals/solana-token-brief": Decimal("1.00"),
     "/v1/signals/trader-alpha-pack": Decimal("2.50"),
+    "/v1/rwa/benchmark/blocksize": Decimal("0.25"),
     # Free
     "/v1/search": None,
     "/v1/instruments/": None,
+    "/v1/rwa/coverage": None,
+    "/v1/rwa/assets": None,
+    "/v1/rwa/oracle-parity": None,
+    "/v1/rwa/dex-venues": None,
+    "/v1/rwa/derivative-venues": None,
+    "/v1/rwa/rwa-xyz-monitor": None,
+    "/v1/rwa/daily-feed-agent": None,
+    "/v1/rwa/dex-allowlist": None,
+    "/v1/rwa/non-crypto-feeds": None,
+    "/v1/rwa/discovery": None,
+    "/v1/rwa/discovery/mitigation-plan": None,
+    "/v1/rwa/blocker-resolution": None,
+    "/v1/rwa/source-rights": None,
+    "/v1/rwa/replay-inventory": None,
+    "/v1/rwa/equity-universes": None,
+    "/v1/rwa/market-expansion": None,
+    "/v1/rwa/futures-data-plan": None,
+    "/v1/rwa/oracle-streams": None,
+    "/v1/rwa/provider-catalog": None,
+    "/v1/rwa/source-readiness": None,
+    "/v1/rwa/blocksize-state-methodology": None,
+    "/v1/rwa/consensus/sources": None,
+    "/v1/rwa/consensus/calculate": None,
+    "/v1/rwa/registry": None,
+    "/v1/rwa/registry/venues": None,
+    "/v1/rwa/resolve": None,
+    "/v1/rwa/sourcing/jobs": None,
+    "/v1/rwa/sourcing/probe": None,
+    "/v1/rwa/build-plan": None,
+    "/v1/rwa/vwap/calculate": None,
+    "/v1/rwa/bidask/calculate": None,
+    "/v1/rwa/quality/check": None,
+    "/v1/rwa/feeds": None,
+    "/v1/rwa/feeds/promotion-check": None,
+    "/v1/rwa/aggregate": None,
+    "/v1/rwa/realtime/requirements": None,
+    "/v1/rwa/realtime/quality": None,
+    "/v1/rwa/observations/store": None,
+    "/v1/rwa/observations": None,
+    "/v1/rwa/observations/summary": None,
     "/v1/cache/status": None,
     "/v1/provenance/": None,
     "/health": None,
@@ -827,7 +1258,7 @@ SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,32}$")
 WALLET_ID_RE = re.compile(r"^[A-Za-z0-9:._-]{20,128}$")
 STARTER_ID_RE = re.compile(r"^[A-Za-z0-9:._@-]{8,160}$")
 EVM_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/")
+DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/", "/v1/rwa/")
 # ---------------------------------------------------------------------------
 # Documentation & Schemas
 # ---------------------------------------------------------------------------
@@ -1239,12 +1670,13 @@ def _client_ip(request: Request) -> str:
 def _is_discovery_rate_limited_path(path: str) -> bool:
     """Limit public discovery calls without throttling docs, manifests, or paid routes."""
     remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
-    return (
-        path == DISCOVERY_RATE_LIMIT_PATHS[0]
-        or path.startswith(DISCOVERY_RATE_LIMIT_PATHS[1])
-        or path == remote_mcp_path
-        or path.startswith(f"{remote_mcp_path}/")
-    )
+    for discovery_path in DISCOVERY_RATE_LIMIT_PATHS:
+        if discovery_path.endswith("/"):
+            if path.startswith(discovery_path):
+                return True
+        elif path == discovery_path:
+            return True
+    return path == remote_mcp_path or path.startswith(f"{remote_mcp_path}/")
 
 
 def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
@@ -1306,7 +1738,22 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         "/v1/fx/",
         "/v1/metal/",
     )
-    if path.startswith(paid_get_prefixes) and request.method.upper() not in {"GET", "HEAD"}:
+    paid_post_paths = {
+        "/v1/briefs/market",
+        "/v1/checks/pre-trade",
+        "/v1/receipts/price",
+        "/v1/snapshots/macro",
+        "/v1/monitors/evaluate",
+        "/v1/indicators/token-quality",
+        "/v1/indicators/state-divergence",
+        "/v1/signals/solana-token-brief",
+        "/v1/signals/trader-alpha-pack",
+        "/v1/rwa/benchmark/blocksize",
+    }
+    method = request.method.upper()
+    if path.startswith(paid_get_prefixes) and method not in {"GET", "HEAD"}:
+        return None
+    if path in paid_post_paths and method != "POST":
         return None
     
     # Handle Batch endpoint dynamically
@@ -1350,7 +1797,7 @@ def _get_price_for_request(request: Request) -> Decimal | None:
 
     # Check static route pricing
     for route_prefix, price in ROUTE_PRICING.items():
-        if path.startswith(route_prefix):
+        if path == route_prefix or (route_prefix.endswith("/") and path.startswith(route_prefix)):
             return price
 
     return None  # Free endpoint
@@ -1412,6 +1859,8 @@ def _credit_cost_for_request(request: Request) -> float | None:
         return CREDIT_COSTS["solana_token_brief"]
     if path.startswith("/v1/signals/trader-alpha-pack"):
         return CREDIT_COSTS["trader_alpha_pack"]
+    if path.startswith("/v1/rwa/benchmark/blocksize"):
+        return CREDIT_COSTS["rwa_blocksize_benchmark"]
     if path.startswith("/v1/provenance/"):
         return CREDIT_COSTS["provenance_lookup"]
     return None
@@ -1471,9 +1920,48 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _citation_metadata(
+    *,
+    methodology_path: str,
+    product_path: str,
+    timestamp: str | None = None,
+    lineage: dict[str, Any] | None = None,
+    receipt_url: str | None = None,
+) -> dict[str, Any]:
+    """Return a stable citation envelope for safe public response metadata."""
+    methodology_url = f"{PUBLIC_BASE_URL}/{methodology_path.lstrip('/')}"
+    product_url = f"{PUBLIC_BASE_URL}/{product_path.lstrip('/')}"
+    citation = {
+        "provider": "Blocksize",
+        "methodology_url": methodology_url,
+        "product_url": product_url,
+        "timestamp": timestamp or _utc_now_iso(),
+        "lineage": lineage or {},
+        "attribution": "Powered by Blocksize",
+        "instructions": (
+            "Cite Blocksize as provider, link the product and methodology URLs, "
+            "and preserve the timestamp and lineage fields."
+        ),
+    }
+    if receipt_url:
+        citation["receipt_url"] = receipt_url
+    return citation
+
+
 def _json_hash(payload: Any) -> str:
     stable = json.dumps(payload, default=str, sort_keys=True, separators=(",", ":"))
     return f"sha256:{fingerprint(stable, salt_env='RECEIPT_HASH_SALT')}"
+
+
+def _rwa_observation_store(request: Request) -> RWAObservationStore:
+    store = getattr(request.app.state, "rwa_store", None)
+    if isinstance(store, RWAObservationStore):
+        return store
+    store = RWAObservationStore(
+        os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
+    )
+    request.app.state.rwa_store = store
+    return store
 
 
 def _response_receipt(
@@ -1505,6 +1993,13 @@ def _response_receipt(
         "source_endpoints": source_endpoints,
         "lookup_url": f"{PUBLIC_BASE_URL}/v1/provenance/{receipt_id}",
     }
+    receipt["citation"] = _citation_metadata(
+        methodology_path="signed-oracle-feeds",
+        product_path="audit-grade-price-receipt-api",
+        timestamp=created_at,
+        lineage={"source_endpoints": source_endpoints},
+        receipt_url=receipt["lookup_url"],
+    )
     request.app.state.credits.store_price_receipt(
         receipt_id=receipt_id,
         product=product,
@@ -1548,6 +2043,7 @@ async def _fetch_service_snapshot(
     *,
     service: str,
     symbol: str,
+    stream_cache: BlocksizeStreamCache | None = None,
 ) -> dict[str, Any]:
     clean = _normalise_symbol(symbol)
     if service == "vwap":
@@ -1597,6 +2093,35 @@ async def _fetch_service_snapshot(
             "timestamp": data.timestamp.isoformat(),
             "value": data.price,
         }
+    if service == "state":
+        cache_error: str | None = None
+        try:
+            if stream_cache and stream_cache.enabled:
+                data = await stream_cache.get_state_price(clean)
+            else:
+                raise BlocksizeAPIError(-32004, "state stream cache disabled")
+        except BlocksizeAPIError as exc:
+            cache_error = exc.message
+            data = await client.get_state_price(clean)
+        source_method = (
+            "state_subscribe_cache"
+            if data.source.endswith("state_subscribe_cache")
+            else "state_instruments+state_pool"
+        )
+        snapshot = {
+            "service": "state",
+            "symbol": clean,
+            "asset_class": "crypto_state",
+            "endpoint": f"/v1/state/{clean}",
+            "data": data.model_dump(mode="json"),
+            "timestamp": data.timestamp.isoformat(),
+            "value": data.price,
+            "source_method": source_method,
+            "source_type": "blocksize_state_reference",
+        }
+        if cache_error:
+            snapshot["cache_note"] = cache_error
+        return snapshot
     raise ValueError(f"Unsupported service: {service}")
 
 
@@ -1740,7 +2265,6 @@ async def _fetch_state_instrument_coverage(
     symbol: str,
 ) -> dict[str, Any]:
     clean = _normalise_symbol(symbol, "symbol")
-    base = _base_ticker_from_symbol(clean)
     try:
         instruments = await client.list_state_instruments()
     except BlocksizeAPIError as exc:
@@ -2418,6 +2942,7 @@ async def x402_payment_middleware(request: Request, call_next):
 
         if mgr.spend_credits(subject, credit_cost):
             credits_remaining = mgr.get_balance(subject)
+            subject_wallet_hash = _wallet_hash(subject)
             request.state.starter_credit_context = {
                 "subject_type": subject_type,
                 "credits_spent": credit_cost,
@@ -2435,7 +2960,7 @@ async def x402_payment_middleware(request: Request, call_next):
                 "credit_drawdown_success",
                 request,
                 price_usdc=price,
-                wallet_hash=_wallet_hash(subject),
+                wallet_hash=subject_wallet_hash,
                 metadata={
                     "credits_spent": credit_cost,
                     "credits_remaining": credits_remaining,
@@ -2444,6 +2969,27 @@ async def x402_payment_middleware(request: Request, call_next):
                 },
             )
             response = await call_next(request)
+            refund_metadata: dict[str, Any] = {}
+            if response.status_code >= 400:
+                refunded = mgr.refund_credits(subject, credit_cost)
+                refund_metadata = {
+                    "credits_refunded": credit_cost if refunded else 0.0,
+                    "refund_status": "refunded" if refunded else "refund_failed",
+                    "credits_remaining_after_refund": mgr.get_balance(subject),
+                }
+            _record_charged_delivery_outcome(
+                request,
+                response,
+                price_usdc=price,
+                payment_mode="starter_credit",
+                wallet_hash=subject_wallet_hash,
+                metadata={
+                    "credits_spent": credit_cost,
+                    "credits_remaining": credits_remaining,
+                    "starter_subject_type": subject_type,
+                    **refund_metadata,
+                },
+            )
             return _apply_credit_response_headers(response, request)
         else:
             logger.warning("INSUFFICIENT CREDITS: %s:%s for %s", subject_type, subject, path)
@@ -2579,14 +3125,23 @@ async def x402_payment_middleware(request: Request, call_next):
         )
 
     # Payment verified — serve the request
+    network = str(verification.get("network") or "")
     _record_product_event(
         "payment_verified",
         request,
         price_usdc=price,
-        network=str(verification.get("network") or ""),
+        network=network,
         metadata={"mock": bool(verification.get("mock"))},
     )
     response = await call_next(request)
+    _record_charged_delivery_outcome(
+        request,
+        response,
+        price_usdc=price,
+        payment_mode="x402",
+        network=network,
+        metadata={"mock": bool(verification.get("mock"))},
+    )
 
     # Settle payment (best-effort)
     try:
@@ -2628,6 +3183,11 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         vwap_data = await client.get_vwap_latest(clean)
         resp = VWAPResponse(data=vwap_data).model_dump()
         resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Real-Time VWAP", "asset_class": "crypto"}
+        resp["meta"]["citation"] = _citation_metadata(
+            methodology_path="crypto-vwap-api",
+            product_path="crypto-vwap-api",
+            lineage={"upstream_method": "vwap_latest", "symbol": clean},
+        )
         if credit_meta := _credit_meta_for_request(request):
             resp["meta"]["credits"] = credit_meta
         return resp
@@ -2647,7 +3207,20 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         clean = _normalise_symbol(pair, "pair")
         bidask_data = await client.get_bidask_snapshot(clean)
         resp = BidAskResponse(data=bidask_data).model_dump()
-        resp["meta"] = {"provider": "Blocksize Capital", "endpoint": "Bid/Ask Snapshot", "asset_class": "multi_asset"}
+        is_equity = _looks_like_equity_bidask_symbol(clean)
+        resp["meta"] = {
+            "provider": "Blocksize Capital",
+            "endpoint": "Bid/Ask Snapshot",
+            "asset_class": "equity" if is_equity else "multi_asset",
+            "route_family": "shared_bidask",
+        }
+        if is_equity:
+            resp["meta"]["equity_ticker"] = clean
+        resp["meta"]["citation"] = _citation_metadata(
+            methodology_path=("equities-bidask-api" if is_equity else "bid-ask-price-api"),
+            product_path=("equities-bidask-api" if is_equity else "bid-ask-price-api"),
+            lineage={"upstream_method": "bidask_getSnapshot", "symbol": clean},
+        )
         if credit_meta := _credit_meta_for_request(request):
             resp["meta"]["credits"] = credit_meta
         return resp
@@ -2705,6 +3278,11 @@ async def get_state_price_endpoint(pair: str, request: Request) -> dict[str, Any
                     if source_method == "state_subscribe_cache"
                     else ["state_instruments", "state_pool"]
                 ),
+                "citation": _citation_metadata(
+                    methodology_path="signed-oracle-feeds",
+                    product_path="state-price-api",
+                    lineage={"upstream_method": source_method, "symbol": clean},
+                ),
             },
         }
         if cache_error:
@@ -2758,6 +3336,11 @@ async def get_vwap_30m_endpoint(
                 "provider": "Blocksize Capital",
                 "endpoint": "30-Minute VWAP Close",
                 "asset_class": "crypto",
+                "citation": _citation_metadata(
+                    methodology_path="vwap-30m-api",
+                    product_path="vwap-30m-api",
+                    lineage={"upstream_method": "closingprice_list", "symbol": clean},
+                ),
             },
         }
         if credit_meta := _credit_meta_for_request(request):
@@ -2802,6 +3385,18 @@ async def get_vwap_24h_endpoint(pair: str, request: Request) -> dict[str, Any]:
                 "provider": "Blocksize Capital",
                 "endpoint": "24-Hour Fixed VWAP",
                 "asset_class": "crypto",
+                "citation": _citation_metadata(
+                    methodology_path="vwap-24h-api",
+                    product_path="vwap-24h-api",
+                    lineage={
+                        "upstream_method": (
+                            "fixedvwap_subscribe"
+                            if data.source.endswith("fixedvwap_subscribe_cache")
+                            else "vwap_24h_latest"
+                        ),
+                        "symbol": clean,
+                    },
+                ),
             },
         }
         if credit_meta := _credit_meta_for_request(request):
@@ -2822,7 +3417,20 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = _normalise_symbol(pair, "pair")
         data = await client.get_fx_rate(clean)
-        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "FX Rate", "asset_class": "fx"}}
+        resp = {
+            "status": "ok",
+            "data": data.model_dump(),
+            "meta": {
+                "provider": "Blocksize Capital",
+                "endpoint": "FX Rate",
+                "asset_class": "fx",
+                "citation": _citation_metadata(
+                    methodology_path="fx-rates-api",
+                    product_path="fx-rates-api",
+                    lineage={"upstream_method": "fx_latest", "symbol": clean},
+                ),
+            },
+        }
         if credit_meta := _credit_meta_for_request(request):
             resp["meta"]["credits"] = credit_meta
         return resp
@@ -2840,7 +3448,20 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
         client: BlocksizeClient = request.app.state.blocksize
         clean = _normalise_symbol(ticker, "ticker")
         data = await client.get_metal_price(clean)
-        resp = {"status": "ok", "data": data.model_dump(), "meta": {"provider": "Blocksize Capital", "endpoint": "Metal Price", "asset_class": "metal"}}
+        resp = {
+            "status": "ok",
+            "data": data.model_dump(),
+            "meta": {
+                "provider": "Blocksize Capital",
+                "endpoint": "Metal Price",
+                "asset_class": "metal",
+                "citation": _citation_metadata(
+                    methodology_path="metals-price-api",
+                    product_path="metals-price-api",
+                    lineage={"upstream_method": "metal_latest", "symbol": clean},
+                ),
+            },
+        }
         if credit_meta := _credit_meta_for_request(request):
             resp["meta"]["credits"] = credit_meta
         return resp
@@ -3985,6 +4606,12 @@ async def search_pairs(
     try:
         client: BlocksizeClient = request.app.state.blocksize
         pairs = await client.search_pairs(q, asset_class)
+        if not pairs and (opportunity := normalize_symbol_opportunity(q)) is not None:
+            _record_product_event(
+                "unsupported_symbol_request",
+                request,
+                metadata={"normalized_query": opportunity, "result_count": 0},
+            )
         return PairSearchResponse(query=q, total_matches=len(pairs), pairs=pairs).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -4014,6 +4641,1043 @@ async def list_instruments(service: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to list for {service}", details=str(e),
         ).model_dump())
+
+
+@app.get("/v1/rwa/build-plan")
+async def get_rwa_build_plan() -> dict[str, Any]:
+    """Return the recommended RWA VWAP and bid/ask build plan. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_market_data_build_plan",
+        "as_of": _utc_now_iso(),
+        **build_rwa_build_plan(),
+    }
+
+
+@app.get("/v1/rwa/coverage")
+async def get_rwa_coverage(
+    asset_class: str = Query(
+        "all",
+        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        description="RWA asset-class filter",
+    ),
+    venue: str = Query(
+        "all",
+        max_length=64,
+        description="Venue filter, e.g. kraken_xstocks, ostium, gains, jupiter_xstocks",
+    ),
+    include_symbols: bool = Query(True, description="Include per-symbol coverage rows"),
+) -> dict[str, Any]:
+    """Return filterable RWA symbol and venue coverage. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_market_data_coverage",
+            "as_of": _utc_now_iso(),
+            "filters": {
+                "asset_class": asset_class,
+                "venue": venue,
+                "include_symbols": include_symbols,
+            },
+            **build_rwa_coverage_overview(
+                asset_class=asset_class,
+                venue=venue,
+                include_symbols=include_symbols,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/assets")
+async def get_rwa_assets(
+    asset_class: str = Query(
+        "all",
+        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        description="RWA asset-class filter",
+    ),
+    venue: str = Query(
+        "all",
+        max_length=64,
+        description="Venue filter, e.g. kraken_xstocks, ostium, gains, ondo_stocks",
+    ),
+) -> dict[str, Any]:
+    """Return sourceable assets grouped across all RWA venues. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_asset_sourcing_matrix",
+            "as_of": _utc_now_iso(),
+            "filters": {"asset_class": asset_class, "venue": venue},
+            **build_rwa_asset_matrix(asset_class=asset_class, venue=venue),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/identity-audit")
+async def get_rwa_identity_audit() -> dict[str, Any]:
+    """Return verified ticker identities and taxonomy corrections. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_ticker_identity_audit",
+        "as_of": _utc_now_iso(),
+        **build_rwa_ticker_identity_audit(),
+    }
+
+
+@app.get("/v1/rwa/oracle-parity")
+async def get_rwa_oracle_parity() -> dict[str, Any]:
+    """Return Pyth/Chainlink-style oracle parity sourcing gaps. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_oracle_parity_matrix",
+        "as_of": _utc_now_iso(),
+        **build_oracle_parity_matrix(),
+    }
+
+
+@app.get("/v1/rwa/dex-venues")
+async def get_rwa_dex_venues() -> dict[str, Any]:
+    """Return high-quality DEX venue candidates and promotion gates. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_dex_venue_quality_plan",
+        "as_of": _utc_now_iso(),
+        **build_dex_venue_quality_plan(),
+    }
+
+
+@app.get("/v1/rwa/derivative-venues")
+async def get_rwa_derivative_venues(
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Derivative venue filter, e.g. aevo, aster, dydx, orderly, drift",
+    ),
+    asset_class: str = Query(
+        "all",
+        max_length=64,
+        description="Asset class filter, e.g. crypto, equity, commodity, option, yield_token",
+    ),
+    status: str = Query(
+        "all",
+        max_length=96,
+        description="Discovery or ingestion status filter, e.g. catalog_fetched, ready_to_probe, blocked_by_auth_or_license",
+    ),
+    include_market_rows: bool = Query(
+        False,
+        description="Include inactive/settled and raw market rows from the generated report",
+    ),
+) -> dict[str, Any]:
+    """Return derivative/perp/futures/yield venue discovery and fair-value methodology. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_derivative_venue_discovery",
+        "as_of": _utc_now_iso(),
+        **build_derivative_venue_report(
+            venue=venue,
+            asset_class=asset_class,
+            status=status,
+            include_market_rows=include_market_rows,
+        ),
+    }
+
+
+@app.get("/v1/rwa/rwa-xyz-monitor")
+async def get_rwa_xyz_monitor(
+    include_asset_rows: bool = Query(
+        False,
+        description="Include normalized RWA.xyz asset/product rows",
+    ),
+    include_token_rows: bool = Query(
+        False,
+        description="Include normalized RWA.xyz token contract rows",
+    ),
+    include_coverage_rows: bool = Query(
+        False,
+        description="Include aggregator coverage rows derived from the monitor",
+    ),
+    row_limit: int = Query(
+        100,
+        ge=0,
+        le=1000,
+        description="Maximum rows to return for each requested row set",
+    ),
+) -> dict[str, Any]:
+    """Return RWA.xyz New Asset Monitor catalog and source assessment. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_xyz_new_asset_monitor",
+        "as_of": _utc_now_iso(),
+        "filters": {
+            "include_asset_rows": include_asset_rows,
+            "include_token_rows": include_token_rows,
+            "include_coverage_rows": include_coverage_rows,
+            "row_limit": row_limit,
+        },
+        **build_rwa_xyz_monitor_view(
+            include_asset_rows=include_asset_rows,
+            include_token_rows=include_token_rows,
+            include_coverage_rows=include_coverage_rows,
+            row_limit=row_limit,
+        ),
+    }
+
+
+@app.get("/v1/rwa/daily-feed-agent")
+async def get_rwa_daily_feed_agent(
+    include_rows: bool = Query(
+        False,
+        description="Include new asset, token, and sourcing action rows",
+    ),
+    row_limit: int = Query(
+        100,
+        ge=0,
+        le=1000,
+        description="Maximum rows to return for each requested row set",
+    ),
+) -> dict[str, Any]:
+    """Return the latest daily RWA new-feed discovery diff. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_daily_feed_discovery_agent",
+        "as_of": _utc_now_iso(),
+        "filters": {"include_rows": include_rows, "row_limit": row_limit},
+        **build_daily_feed_agent_view(include_rows=include_rows, row_limit=row_limit),
+    }
+
+
+@app.get("/v1/rwa/dex-allowlist")
+async def get_rwa_dex_allowlist(
+    venue: str = Query(
+        "all",
+        max_length=64,
+        description="DEX venue filter, e.g. jupiter_router, meteora_dlmm, uniswap_v3_v4",
+    ),
+    status: str = Query(
+        "all",
+        max_length=64,
+        description="Allowlist status filter, e.g. planned_adapter, blocked_by_auth_or_rpc",
+    ),
+) -> dict[str, Any]:
+    """Return executable DEX route/pool candidates and promotion jobs. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_dex_allowlist",
+            "as_of": _utc_now_iso(),
+            **build_dex_allowlist(venue=venue, status=status),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/non-crypto-feeds")
+async def get_rwa_non_crypto_feeds(
+    exclude_tokenized_stocks: bool = Query(
+        True,
+        description="Exclude tokenized stock/xStock-style rows by default",
+    ),
+    asset_class: str = Query(
+        "all",
+        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        description="Optional non-crypto asset class filter",
+    ),
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Optional venue id filter",
+    ),
+) -> dict[str, Any]:
+    """Return generated non-crypto VWAP and bid/ask feed definitions. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_non_crypto_feed_catalog",
+            "as_of": _utc_now_iso(),
+            **build_non_crypto_feed_catalog(
+                exclude_tokenized_stocks=exclude_tokenized_stocks,
+                asset_class=None if asset_class == "all" else asset_class,
+                venue=None if venue == "all" else venue,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/discovery")
+async def get_rwa_discovery(
+    exclude_tokenized_stocks: bool = Query(
+        False,
+        description="Exclude tokenized stock/xStock-style rows from the discovery audit",
+    ),
+    asset_class: str = Query(
+        "all",
+        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        description="Optional asset class filter",
+    ),
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Optional venue id filter",
+    ),
+    status: str = Query(
+        "all",
+        max_length=96,
+        description="Optional promotion status filter",
+    ),
+    include_feed_details: bool = Query(
+        True,
+        description="Include per-feed gate details",
+    ),
+) -> dict[str, Any]:
+    """Return discovery evidence and promotion blockers for every sourced RWA feed. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_feed_discovery_promotion_audit",
+            "as_of": _utc_now_iso(),
+            **build_feed_discovery_audit(
+                exclude_tokenized_stocks=exclude_tokenized_stocks,
+                asset_class=asset_class,
+                venue=venue,
+                status=status,
+                include_feed_details=include_feed_details,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/discovery/mitigation-plan")
+async def get_rwa_discovery_mitigation_plan(
+    exclude_tokenized_stocks: bool = Query(
+        False,
+        description="Exclude tokenized stock/xStock-style rows from mitigation counts",
+    ),
+) -> dict[str, Any]:
+    """Return a research-backed mitigation plan for RWA discovery blockers. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_discovery_mitigation_plan",
+        "as_of": _utc_now_iso(),
+        **build_discovery_mitigation_plan(
+            exclude_tokenized_stocks=exclude_tokenized_stocks,
+        ),
+    }
+
+
+@app.get("/v1/rwa/blocker-resolution")
+async def get_rwa_blocker_resolution() -> dict[str, Any]:
+    """Return the RWA production blocker-resolution ledger. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_blocker_resolution_ledger",
+        "as_of": _utc_now_iso(),
+        **build_blocker_resolution_ledger(),
+    }
+
+
+@app.get("/v1/rwa/source-rights")
+async def get_rwa_source_rights(
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Optional venue id filter",
+    ),
+    status: str = Query(
+        "all",
+        max_length=96,
+        description="Optional rights status filter",
+    ),
+) -> dict[str, Any]:
+    """Return venue/provider rights-to-source and redistribution readiness. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_source_rights_registry",
+        "as_of": _utc_now_iso(),
+        **build_source_rights_registry(venue=venue, status=status),
+    }
+
+
+@app.get("/v1/rwa/replay-inventory")
+async def get_rwa_replay_inventory(
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Optional DEX venue filter",
+    ),
+    status: str = Query(
+        "all",
+        max_length=96,
+        description="Optional replay status filter",
+    ),
+) -> dict[str, Any]:
+    """Return route/pool identifiers and replayable payload evidence. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_route_pool_replay_inventory",
+            "as_of": _utc_now_iso(),
+            **build_route_pool_replay_inventory(venue=venue, status=status),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/equity-universes")
+async def get_rwa_equity_universes(
+    universe: str = Query(
+        "all",
+        max_length=64,
+        description="Universe id filter, e.g. sp500, china_a_shares, hong_kong_equities, south_korea_equities",
+    ),
+    region: str = Query(
+        "all",
+        max_length=64,
+        description="Optional region filter, e.g. United States, China, Hong Kong, South Korea",
+    ),
+) -> dict[str, Any]:
+    """Return S&P 500 and APAC equity universe sourceability. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_equity_universe_sourcing_plan",
+            "as_of": _utc_now_iso(),
+            "filters": {"universe": universe, "region": region},
+            **build_equity_universe_sourcing_plan(
+                universe=None if universe == "all" else universe,
+                region=None if region == "all" else region,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/market-expansion")
+async def get_rwa_market_expansion() -> dict[str, Any]:
+    """Return expanded RWA/traditional venue and ticker sourcing plan. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_market_expansion_plan",
+        "as_of": _utc_now_iso(),
+        **build_market_expansion_plan(),
+    }
+
+
+@app.get("/v1/rwa/futures-data-plan")
+async def get_rwa_futures_data_plan() -> dict[str, Any]:
+    """Return futures data and fair-value methodology for RWA replacement coverage. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_futures_data_plan",
+        "as_of": _utc_now_iso(),
+        **build_futures_data_plan(),
+    }
+
+
+@app.get("/v1/rwa/oracle-streams")
+async def get_rwa_oracle_streams() -> dict[str, Any]:
+    """Return oracle-streamed feed coverage for RWA/traditional assets. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_oracle_stream_coverage",
+        "as_of": _utc_now_iso(),
+        **build_oracle_stream_coverage(),
+    }
+
+
+@app.get("/v1/rwa/provider-catalog")
+async def get_rwa_provider_catalog(
+    category: str = Query(
+        "all",
+        max_length=64,
+        description="Provider category filter, e.g. tokenized_security, dex_liquidity, licensed_exchange",
+    ),
+    status: str = Query(
+        "all",
+        max_length=64,
+        description="Ingestion status filter, e.g. ready_to_probe, planned_adapter, blocked_by_auth_or_license",
+    ),
+) -> dict[str, Any]:
+    """Return the provider catalog ingestion roadmap for expanded RWA coverage. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_provider_catalog_ingestion",
+            "as_of": _utc_now_iso(),
+            "filters": {"category": category, "status": status},
+            **build_provider_catalog(category=category, status=status),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/source-readiness")
+async def get_rwa_source_readiness(
+    category: str = Query(
+        "all",
+        max_length=64,
+        description="Dependency category filter, e.g. dex_liquidity, oracle_reference, licensed_exchange",
+    ),
+    status: str = Query(
+        "all",
+        max_length=64,
+        description="Readiness status filter, e.g. missing_identifier_mapping, blocked_by_license_or_contract",
+    ),
+) -> dict[str, Any]:
+    """Return credential, identifier, licensing, and ops dependency readiness. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_source_readiness",
+            "as_of": _utc_now_iso(),
+            "filters": {"category": category, "status": status},
+            **build_source_readiness(category=category, status=status),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/blocksize-state-methodology")
+async def get_rwa_blocksize_state_methodology() -> dict[str, Any]:
+    """Return the Blocksize state reference methodology for RWA consensus. FREE."""
+    methodology = build_blocksize_state_methodology()
+    return {
+        "status": "ok",
+        "product": "rwa_blocksize_state_methodology",
+        "as_of": _utc_now_iso(),
+        "methodology": methodology,
+        "usage": {
+            "benchmark": {
+                "endpoint": "/v1/rwa/benchmark/blocksize",
+                "required_observation_fields": ["symbol", "value", "timestamp"],
+                "recommended_fields": [
+                    "venue",
+                    "provider",
+                    "source_type",
+                    "benchmark_service",
+                    "benchmark_symbol",
+                ],
+                "example": methodology["observation_shape"],
+            },
+            "consensus": {
+                "endpoint": "/v1/rwa/consensus/calculate",
+                "source_type": methodology["source_type"],
+                "venue": methodology["venue"],
+                "role": "supplemental_reference",
+            },
+        },
+        "thresholds": {
+            "benchmark_drift_bps": QUALITY_ALIGNMENT["thresholds"]["benchmark_drift_bps"],
+            "freshness_ms": QUALITY_ALIGNMENT["thresholds"]["max_age_ms"],
+        },
+    }
+
+
+@app.get("/v1/rwa/consensus/sources")
+async def get_rwa_consensus_sources(
+    exclude_tokenized_stocks: bool = Query(
+        False,
+        description="Exclude tokenized stock/xStock-style rows from primary market feed counts",
+    ),
+) -> dict[str, Any]:
+    """Return all source layers needed for RWA consensus metrics. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_consensus_source_plan",
+        "as_of": _utc_now_iso(),
+        **build_consensus_source_plan(exclude_tokenized_stocks=exclude_tokenized_stocks),
+    }
+
+
+@app.post("/v1/rwa/consensus/calculate")
+async def calculate_rwa_consensus(payload: dict[str, Any]) -> dict[str, Any]:
+    """Calculate a quality-weighted RWA consensus metric from submitted observations. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_consensus_metric",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_weighted_consensus_v1",
+                "steps": [
+                    "Normalize submitted source observations into one price value per row.",
+                    "Apply real-time timestamp, spread/depth, confidence, benchmark drift, and source-family gates.",
+                    "Use MAD to exclude cross-source outliers.",
+                    "Calculate a quality-weighted consensus value and basis for each source.",
+                    "Keep supplemental oracle, futures, NAV, issuer, and proof rows visibly labeled.",
+                ],
+            },
+            "result": calculate_consensus_metric(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/registry")
+async def get_rwa_registry(
+    symbol: str | None = Query(None, max_length=96, description="Optional symbol or alias, e.g. AAPL, AAPLx/USD, EURUSD"),
+    venue: str | None = Query(None, max_length=96, description="Optional venue alias, e.g. Meteora DLMM, uniswap, jupiter"),
+    include_aliases: bool = Query(False, description="Include generated symbol and venue aliases"),
+) -> dict[str, Any]:
+    """Return canonical RWA assets and venue coverage with alias handling. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_canonical_registry",
+            "as_of": _utc_now_iso(),
+            "filters": {"symbol": symbol, "venue": venue, "include_aliases": include_aliases},
+            **build_rwa_registry_overview(
+                symbol=symbol,
+                venue=venue,
+                include_aliases=include_aliases,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/resolve")
+async def resolve_rwa_symbol_endpoint(
+    symbol: str = Query(..., max_length=96, description="Symbol or alias to resolve"),
+    venue: str | None = Query(None, max_length=96, description="Optional venue alias"),
+) -> dict[str, Any]:
+    """Resolve any supported naming convention into canonical RWA coverage. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_symbol_resolution",
+            "as_of": _utc_now_iso(),
+            **resolve_rwa_symbol(symbol, venue=venue),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/registry/venues")
+async def get_rwa_registry_venues(
+    venue: str | None = Query(None, max_length=96, description="Optional venue alias"),
+    include_aliases: bool = Query(False, description="Include generated venue aliases"),
+) -> dict[str, Any]:
+    """Return what each venue covers and how it should be interpreted. FREE."""
+    try:
+        registry = build_rwa_venue_registry()
+        venues = registry["venues"]
+        if venue:
+            resolved = registry["venue_alias_index"].get(normalize_venue_alias(venue))
+            if resolved is None:
+                raise ValueError(f"Unsupported venue: {venue}")
+            venues = [row for row in venues if row["venue_id"] == resolved]
+        if not include_aliases:
+            for row in venues:
+                row.pop("aliases", None)
+        return {
+            "status": "ok",
+            "product": "rwa_venue_coverage_registry",
+            "as_of": _utc_now_iso(),
+            "filters": {"venue": venue, "include_aliases": include_aliases},
+            "summary": {
+                **registry["summary"],
+                "returned_venues": len(venues),
+            },
+            "venues": venues,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/sourcing/jobs")
+async def get_rwa_sourcing_jobs(
+    include_completed_targets: bool = Query(
+        False,
+        description="Include jobs for targets already marked covered",
+    ),
+) -> dict[str, Any]:
+    """Return per-symbol sourcing jobs needed for oracle-parity coverage. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_sourcing_jobs",
+        "as_of": _utc_now_iso(),
+        "filters": {"include_completed_targets": include_completed_targets},
+        **build_sourcing_jobs(include_completed_targets=include_completed_targets),
+    }
+
+
+@app.post("/v1/rwa/sourcing/probe")
+async def probe_rwa_sourcing_jobs(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute bounded ready-to-probe RWA sourcing jobs. FREE."""
+    registry = getattr(request.app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
+    store = _rwa_observation_store(request) if payload.get("persist") else None
+    return {
+        "status": "ok",
+        "product": "rwa_sourcing_probe",
+        "as_of": _utc_now_iso(),
+        "methodology": {
+            "type": "rwa_sourcing_probe_v1",
+            "steps": [
+                "Select ready_to_probe jobs from the oracle-parity sourcing queue.",
+                "Fetch normalized bid/ask and optional L2 depth through the registered adapter.",
+                "Calculate block-size VWAP when depth is available.",
+                "Run the real-time quality gate over fetched observations.",
+                "Persist observations only when persist is explicitly true.",
+            ],
+        },
+        **await probe_sourcing_jobs(payload, registry=registry, store=store),
+    }
+
+
+@app.post("/v1/rwa/vwap/calculate")
+async def calculate_rwa_vwap(payload: dict[str, Any]) -> dict[str, Any]:
+    """Calculate block-size RWA VWAP from normalized venue depth. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_block_vwap_calculation",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_block_vwap_v1",
+                "steps": [
+                    "Normalize venue order-book levels into price and USD notional depth.",
+                    "Sort asks ascending for buys or bids descending for sells.",
+                    "Walk depth until the requested block size is filled or venue depth is exhausted.",
+                    "Return fillable_notional_usd and partial_fill status instead of extrapolating.",
+                    "Score quality using source type, freshness, fill ratio, and optional benchmark drift.",
+                ],
+            },
+            "result": calculate_block_vwap(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/v1/rwa/bidask/calculate")
+async def calculate_rwa_bidask(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and score an RWA bid/ask observation. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_bidask_calculation",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_bidask_v1",
+                "steps": [
+                    "Normalize bid and ask into bid, ask, mid, spread, and spread_bps.",
+                    "Apply source-type, freshness, spread, and optional benchmark-drift gates.",
+                    "Keep source_type explicit so native L1, synthetic L1, quotes, and NAV are not blended blindly.",
+                ],
+            },
+            "result": calculate_bidask(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/v1/rwa/quality/check")
+async def check_rwa_quality(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run RWA cross-venue outlier and quality checks. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_quality_check",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_quality_check_v1",
+                "steps": [
+                    "Compute median and median absolute deviation across venue observations.",
+                    "Flag large robust-z outliers.",
+                    "Apply optional benchmark drift gates against Blocksize/vendor reference prices.",
+                    "Exclude stale, severe benchmark-drift, and MAD-outlier observations from consolidated value.",
+                ],
+            },
+            "result": detect_outliers(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/feeds")
+async def get_rwa_feeds() -> dict[str, Any]:
+    """Return RWA adapter registry, readiness, and expansion todos. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_feed_registry",
+        "as_of": _utc_now_iso(),
+        **build_aggregator_status(),
+    }
+
+
+@app.post("/v1/rwa/feeds/promotion-check")
+async def check_rwa_feed_promotion(payload: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate whether a feed can be promoted to a stronger trust tier. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_feed_promotion_check",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_feed_promotion_gate_v1",
+                "steps": [
+                    "Check backtest window, uptime, sample size, excluded-observation rate, and benchmark drift.",
+                    "Require legal approval, locked source-type labeling, and replayable receipts.",
+                    "Return promote only when every gate passes.",
+                ],
+            },
+            "result": evaluate_feed_promotion(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/v1/rwa/aggregate")
+async def aggregate_rwa_observations(payload: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate normalized RWA observations into a quality-gated value. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_market_data_aggregation",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_aggregator_v1",
+                "steps": [
+                    "Normalize submitted bid/ask and order-book observations.",
+                    "Calculate per-venue mid prices and block-size VWAPs.",
+                    "Run cross-observation MAD and benchmark-drift checks.",
+                    "Return consolidated value from included observations only.",
+                ],
+            },
+            "result": aggregate_submitted_observations(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/realtime/requirements")
+async def get_rwa_realtime_requirements() -> dict[str, Any]:
+    """Return real-time freshness and cadence requirements. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_realtime_quality_requirements",
+        "as_of": _utc_now_iso(),
+        **build_realtime_requirements(),
+    }
+
+
+@app.post("/v1/rwa/realtime/quality")
+async def check_rwa_realtime_quality(payload: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate whether submitted observations are real-time usable. FREE."""
+    try:
+        return {
+            "status": "ok",
+            "product": "rwa_realtime_quality_check",
+            "as_of": _utc_now_iso(),
+            "methodology": {
+                "type": "rwa_realtime_quality_v1",
+                "steps": [
+                    "Check every observation has a source timestamp.",
+                    "Compare age against the stricter of asset-class and venue freshness thresholds.",
+                    "Compare observed tick interval against venue cadence requirements.",
+                    "Block reference/NAV observations from tick-by-tick real-time consolidation.",
+                ],
+            },
+            "result": evaluate_realtime_quality(payload),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/v1/rwa/observations/store")
+async def store_rwa_observation(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    """Store one replayable RWA observation and its quality artifacts. FREE."""
+    try:
+        record = _rwa_observation_store(request).store_observation(payload)
+        return {
+            "status": "ok",
+            "product": "rwa_observation_store",
+            "as_of": _utc_now_iso(),
+            "record": record,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/v1/rwa/observations")
+async def list_rwa_observations(
+    request: Request,
+    symbol: str | None = Query(None, max_length=64, description="Optional symbol filter"),
+    venue: str | None = Query(None, max_length=64, description="Optional venue filter"),
+    limit: int = Query(50, ge=1, le=200, description="Maximum observations to return"),
+) -> dict[str, Any]:
+    """List replayable RWA observation records. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_observation_ledger",
+        "as_of": _utc_now_iso(),
+        "filters": {"symbol": symbol, "venue": venue, "limit": limit},
+        "observations": _rwa_observation_store(request).list_observations(
+            symbol=symbol,
+            venue=venue,
+            limit=limit,
+        ),
+    }
+
+
+@app.get("/v1/rwa/observations/summary")
+async def summarize_rwa_observations(request: Request) -> dict[str, Any]:
+    """Return compact RWA observation persistence stats. FREE."""
+    return {
+        "status": "ok",
+        "product": "rwa_observation_ledger_summary",
+        "as_of": _utc_now_iso(),
+        "summary": _rwa_observation_store(request).summary(),
+    }
+
+
+@app.post("/v1/rwa/benchmark/blocksize", responses=X402_RESPONSE)
+async def benchmark_rwa_against_blocksize(
+    request: Request,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Benchmark sourced RWA observations against live Blocksize market data."""
+    import asyncio
+
+    observations = payload.get("observations")
+    if not isinstance(observations, list) or not observations:
+        raise HTTPException(status_code=400, detail="observations must include at least one row")
+    if len(observations) > 20:
+        raise HTTPException(status_code=400, detail="Benchmark supports up to 20 observations")
+
+    client: BlocksizeClient = request.app.state.blocksize
+    stream_cache: BlocksizeStreamCache | None = getattr(request.app.state, "stream_cache", None)
+
+    async def benchmark_one(raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            return {"status": "error", "error_code": "INVALID_OBSERVATION"}
+        try:
+            resolved = resolve_blocksize_benchmark(raw)
+            snapshot = await _fetch_service_snapshot(
+                client,
+                service=resolved["service"],
+                symbol=resolved["symbol"],
+                stream_cache=stream_cache,
+            )
+            comparison = compare_observation_to_blocksize(raw, snapshot)
+            return {
+                "status": "ok",
+                "resolved_benchmark": resolved,
+                **comparison,
+            }
+        except ValueError as exc:
+            return {
+                "status": "unsupported",
+                "error_code": "UNSUPPORTED_BENCHMARK",
+                "message": str(exc),
+                "observation": raw,
+            }
+        except BlocksizeAPIError as exc:
+            return {
+                "status": "unavailable",
+                "error_code": "BLOCKSIZE_ERROR",
+                "message": str(exc),
+                "resolved_benchmark": (
+                    resolve_blocksize_benchmark(raw)
+                    if isinstance(raw, dict)
+                    else None
+                ),
+                "observation": raw,
+            }
+
+    results = await asyncio.gather(*(benchmark_one(item) for item in observations))
+    ok_results = [item for item in results if item.get("status") == "ok"]
+    decisions = [item["decision"] for item in ok_results]
+    summary_decision = (
+        "exclude"
+        if "exclude" in decisions
+        else "warn"
+        if "warn" in decisions
+        else "pass"
+        if ok_results
+        else "unavailable"
+    )
+    response_core = {
+        "methodology": {
+            "type": "rwa_blocksize_benchmark_v1",
+            "steps": [
+                "Resolve each RWA observation to the closest Blocksize benchmark service.",
+                "Fetch one live Blocksize snapshot per observation through the existing Blocksize API client.",
+                "Compare sourced observation value against the live Blocksize value in basis points.",
+                "Return pass, warn, or exclude based on configured benchmark drift thresholds.",
+                "Keep unsupported or unavailable benchmarks explicit instead of fabricating comparisons.",
+            ],
+            "thresholds": QUALITY_ALIGNMENT["thresholds"]["benchmark_drift_bps"],
+        },
+        "summary": {
+            "decision": summary_decision,
+            "observations": len(observations),
+            "benchmarked": len(ok_results),
+            "unavailable": len([item for item in results if item.get("status") == "unavailable"]),
+            "unsupported": len([item for item in results if item.get("status") == "unsupported"]),
+        },
+        "benchmarks": results,
+    }
+    source_endpoints = [
+        str(item["benchmark"]["endpoint"])
+        for item in ok_results
+        if isinstance(item.get("benchmark"), dict) and item["benchmark"].get("endpoint")
+    ]
+    if payload.get("persist"):
+        store = _rwa_observation_store(request)
+        stored_observations: list[dict[str, Any]] = []
+        for raw, benchmark_result in zip(observations, results):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                stored_observations.append(
+                    store.store_observation(
+                        {
+                            "raw_payload": raw,
+                            "normalized_observation": raw,
+                            "blocksize_benchmark": benchmark_result
+                            if isinstance(benchmark_result, dict)
+                            else {},
+                            "metadata": {
+                                "product": "rwa_blocksize_benchmark",
+                                "benchmark_status": (
+                                    benchmark_result.get("status")
+                                    if isinstance(benchmark_result, dict)
+                                    else "unknown"
+                                ),
+                            },
+                        }
+                    )
+                )
+            except ValueError as exc:
+                stored_observations.append(
+                    {
+                        "status": "error",
+                        "error_code": "RWA_OBSERVATION_STORE_ERROR",
+                        "message": str(exc),
+                    }
+                )
+        response_core["stored_observations"] = stored_observations
+    receipt = _response_receipt(
+        request,
+        product="rwa_blocksize_benchmark",
+        subject=",".join(str(item.get("symbol") or "") for item in observations if isinstance(item, dict)),
+        request_payload=payload,
+        response_payload=response_core,
+        source_endpoints=sorted(set(source_endpoints)),
+    )
+    return {
+        "status": "ok",
+        "product": "rwa_blocksize_benchmark",
+        "credit_cost": CREDIT_COSTS["rwa_blocksize_benchmark"],
+        "as_of": _utc_now_iso(),
+        **response_core,
+        "provenance": receipt,
+        "meta": {"credits": _credit_meta_for_request(request)},
+    }
 
 
 @app.get("/v1/cache/status")
@@ -4086,7 +5750,7 @@ async def purchase_credits_challenge(
     """
     tier_data = BULK_TIERS.get(tier)
     price = Decimal(str(tier_data["price"]))
-    
+
     # Return 402 challenge
     requirements = settings.payment_requirements(price)
     payment_required = _x402_payment_required(request, requirements)
@@ -4097,7 +5761,7 @@ async def purchase_credits_challenge(
         price_usdc=price,
         metadata={"tier": tier, "credits": tier_data["credits"]},
     )
-    
+
     return JSONResponse(
         status_code=402,
         headers={"PAYMENT-REQUIRED": payload},
@@ -4119,7 +5783,7 @@ async def claim_credits(request: Request, payload: dict):
     network = payload.get("network", "solana")
     tier = payload.get("tier")
     wallet = payload.get("wallet") # The address to credit
-    
+
     if not all([tx_hash, tier, wallet]):
         _record_product_event("bulk_credit_claim_failed", request, reason="missing_fields")
         raise HTTPException(status_code=400, detail="Missing tx_hash, tier, or wallet")
@@ -4127,7 +5791,7 @@ async def claim_credits(request: Request, payload: dict):
     if not WALLET_ID_RE.fullmatch(wallet):
         _record_product_event("bulk_credit_claim_failed", request, reason="invalid_wallet")
         raise HTTPException(status_code=400, detail="Invalid wallet")
-        
+
     tier_data = BULK_TIERS.get(tier)
     if not tier_data:
         _record_product_event("bulk_credit_claim_failed", request, reason="invalid_tier")
@@ -4139,7 +5803,7 @@ async def claim_credits(request: Request, payload: dict):
         "proof": tx_hash,
         "network": network
     }).encode()).decode(), payment_reqs, mgr, purpose=f"credits:{tier}")
-    
+
     if not verification.get("valid"):
         _record_product_event(
             "bulk_credit_claim_failed",
@@ -4198,14 +5862,16 @@ async def mcp_manifest():
             "url": REMOTE_MCP_URL,
         },
         "capabilities": {
-            "discovery_modes": ["instrument-search", "pricing-inspection", "document-search"],
+            "discovery_modes": ["instrument-search", "equity-search", "pricing-inspection", "document-search"],
             "paid_api_modes": ["real-time-x402", "credit-drawdown"],
             "bulk_discounts": "up to 40% via /v1/credits/purchase",
             "public_remote_server": "read-only and listing-safe",
             "ai_reader_brief": LLMS_TXT_URL,
             "sitemap": SITEMAP_URL,
             "data_package_catalog": DATA_PACKAGES_JSON_URL,
+            "category_hubs": CATEGORY_HUBS_JSON_URL,
             "starter_allowance": "Start with 50 live data credits across raw data and premium workflow products.",
+            "equities": "Supported stock tickers are discoverable with asset_class=equity and fetched through /v1/bidask/{ticker}.",
         },
         "links": {
             "homepage": PUBLIC_BASE_URL,
@@ -4215,6 +5881,7 @@ async def mcp_manifest():
             "sitemap": SITEMAP_URL,
             "llms_txt": LLMS_TXT_URL,
             "data_packages_json": DATA_PACKAGES_JSON_URL,
+            "category_hubs_json": CATEGORY_HUBS_JSON_URL,
             "quickstart": QUICKSTART_URL,
             "prompt_examples": PROMPT_EXAMPLES_URL,
             "privacy_policy": PRIVACY_POLICY_URL,
@@ -4231,12 +5898,12 @@ async def mcp_manifest():
             {
                 "name": "search_pairs",
                 "description": (
-                    "Search supported crypto, equity, FX, and metal symbols. "
+                    "Search supported crypto, equity/stock ticker, FX, and metal symbols. "
                     "Returns catalog metadata only; free, read-only, and no live prices."
                 ),
                 "parameters": {
-                    "query": {"type": "string", "example": "BTC"},
-                    "asset_class": {"type": "string", "example": "crypto"},
+                    "query": {"type": "string", "example": "AAPL"},
+                    "asset_class": {"type": "string", "example": "equity"},
                 },
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
@@ -4245,9 +5912,9 @@ async def mcp_manifest():
                 "name": "list_instruments",
                 "description": (
                     "List supported instruments for one service such as vwap, bidask, fx, "
-                    "or metal. Free read-only catalog metadata."
+                    "or metal. Use bidask for supported equities. Free read-only catalog metadata."
                 ),
-                "parameters": {"service": {"type": "string", "example": "metal"}},
+                "parameters": {"service": {"type": "string", "example": "bidask"}},
                 "payment": {"required": False},
                 "annotations": {"readOnlyHint": True, "idempotentHint": True},
             },
@@ -4265,7 +5932,8 @@ async def mcp_manifest():
                 "name": "get_market_data_endpoint",
                 "description": (
                     "Build the exact x402-protected HTTP URL for one live market-data "
-                    "request. Free and read-only; does not fetch prices or charge a wallet."
+                    "request, including supported equity ticker bid/ask URLs. Free and "
+                    "read-only; does not fetch prices or charge a wallet."
                 ),
                 "parameters": {
                     "service": {"type": "string", "example": "bidask"},
@@ -4332,6 +6000,7 @@ async def mcp_manifest():
                 "applies_to": [
                     "raw_vwap",
                     "bid_ask",
+                    "equity_bid_ask",
                     "fx",
                     "metals",
                     "batch",
@@ -4396,8 +6065,54 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
     overview = summary.get("overview")
     if not isinstance(overview, dict):
         overview = {}
+    marketplace_metrics = summary.get("marketplace_metrics")
+    if not isinstance(marketplace_metrics, dict):
+        marketplace_metrics = {}
+    latest_external_metrics = marketplace_metrics.get("latest_by_platform")
+    if not isinstance(latest_external_metrics, dict):
+        latest_external_metrics = {}
+
+    platforms = []
+    total_platform_calls = 0
+    for platform in DISTRIBUTION_PLATFORMS:
+        platform_id = str(platform["id"])
+        source_label = str(platform.get("source_label") or "")
+        secondary_label = str(platform.get("secondary_source_label") or "")
+        local_calls = int(registry_sources.get(source_label) or 0)
+        if secondary_label:
+            local_calls += int(registry_sources.get(secondary_label) or 0)
+        total_platform_calls += local_calls
+        metrics_env = (
+            PAY_SH_METRICS_API_URL
+            if platform_id == "pay_sh"
+            else SMITHERY_METRICS_API_URL
+            if platform_id == "smithery"
+            else ""
+        )
+        metrics_env = MARKETPLACE_METRICS_FEEDS.get(platform_id, metrics_env)
+        latest_metrics = latest_external_metrics.get(platform_id)
+        external_metrics_configured = bool(metrics_env or latest_metrics)
+        platforms.append(
+            {
+                **platform,
+                "local_recorded_calls": local_calls,
+                "external_metrics_configured": external_metrics_configured,
+                "metrics_api_url": metrics_env or None,
+                "latest_external_metrics": latest_metrics,
+                "status": (
+                    "configured"
+                    if external_metrics_configured
+                    else "watching"
+                    if local_calls
+                    else "no_local_activity"
+                ),
+            }
+        )
 
     summary["external_sources"] = {
+        "platforms": platforms,
+        "platform_count": len(platforms),
+        "local_recorded_platform_calls": total_platform_calls,
         "smithery": {
             "name": "Smithery",
             "listing_url": SMITHERY_LISTING_URL,
@@ -4406,20 +6121,424 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
             "local_recorded_registry_calls": int(registry_sources.get("Smithery") or 0),
             "local_recorded_mcp_tool_calls": 0,
             "all_recorded_mcp_tool_calls": int(overview.get("mcp_tool_calls") or 0),
-            "metrics_ingestion_configured": bool(SMITHERY_METRICS_API_URL),
-            "metrics_api_url": SMITHERY_METRICS_API_URL or None,
+            "metrics_ingestion_configured": bool(
+                SMITHERY_METRICS_API_URL or latest_external_metrics.get("smithery")
+            ),
+            "metrics_api_url": MARKETPLACE_METRICS_FEEDS.get("smithery")
+            or SMITHERY_METRICS_API_URL
+            or None,
+            "latest_external_metrics": latest_external_metrics.get("smithery"),
             "status": (
                 "configured"
-                if SMITHERY_METRICS_API_URL
+                if SMITHERY_METRICS_API_URL or latest_external_metrics.get("smithery")
                 else "not_ingested"
             ),
             "note": (
                 "Smithery marketplace performance is only shown here when a metrics feed "
                 "or hosted endpoint logs are wired into this observability database."
             ),
-        }
+        },
+        "pay_sh": {
+            "name": "Pay.sh / pay-skills",
+            "listing_url": PAY_SH_SERVICE_URL,
+            "local_recorded_calls": int(registry_sources.get("Pay.sh") or 0),
+            "metrics_ingestion_configured": bool(
+                PAY_SH_METRICS_API_URL or latest_external_metrics.get("pay_sh")
+            ),
+            "metrics_api_url": MARKETPLACE_METRICS_FEEDS.get("pay_sh")
+            or PAY_SH_METRICS_API_URL
+            or None,
+            "latest_external_metrics": latest_external_metrics.get("pay_sh"),
+            "status": (
+                "configured"
+                if PAY_SH_METRICS_API_URL or latest_external_metrics.get("pay_sh")
+                else "not_ingested"
+            ),
+            "note": (
+                "Pay.sh catalog performance and pay-skills marketplace activity are only "
+                "shown here when a metrics feed, referral, or hosted logs reach this observability database."
+            ),
+        },
     }
     return summary
+
+
+def _brief_ratio(numerator: int | float, denominator: int | float) -> float | None:
+    if not denominator:
+        return None
+    return round(float(numerator) / float(denominator), 4)
+
+
+def _brief_pct(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{round(value * 100, 1)}%"
+
+
+def _top_popularity_row(rows: list[dict[str, Any]], field: str) -> dict[str, Any] | None:
+    ranked = [row for row in rows if int(row.get(field) or 0) > 0]
+    if not ranked:
+        return None
+    return max(ranked, key=lambda row: (int(row.get(field) or 0), str(row.get("service") or "")))
+
+
+def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[str, Any]:
+    overview = summary.get("overview") if isinstance(summary.get("overview"), dict) else {}
+    event_counts = summary.get("event_counts") if isinstance(summary.get("event_counts"), dict) else {}
+    popularity = summary.get("popularity") if isinstance(summary.get("popularity"), dict) else {}
+    wallet_inflows = summary.get("wallet_inflows") if isinstance(summary.get("wallet_inflows"), dict) else {}
+    external_sources = summary.get("external_sources") if isinstance(summary.get("external_sources"), dict) else {}
+    source_evidence = summary.get("source_evidence") if isinstance(summary.get("source_evidence"), dict) else {}
+    reliability = summary.get("reliability") if isinstance(summary.get("reliability"), dict) else {}
+    platforms = external_sources.get("platforms") if isinstance(external_sources.get("platforms"), list) else []
+    timeline = summary.get("timeline") if isinstance(summary.get("timeline"), list) else []
+
+    rows = popularity.get("rows") if isinstance(popularity.get("rows"), list) else []
+    requested = int(popularity.get("total_requested") or 0)
+    delivered = int(popularity.get("total_delivered") or 0)
+    blocked = int(popularity.get("total_blocked") or 0)
+    failed_after_credit = int(popularity.get("total_failed_after_credit") or 0)
+    prompts = int(event_counts.get("payment_required") or 0)
+    proof_submissions = int(event_counts.get("payment_proof_submitted") or 0)
+    verified_payments = int(event_counts.get("payment_verified") or 0)
+    credit_successes = int(event_counts.get("credit_drawdown_success") or 0) + int(
+        event_counts.get("mcp_credit_drawdown_success") or 0
+    )
+    paid_calls = int(overview.get("paid_calls") or 0)
+    registry_requests = int(overview.get("registry_requests") or 0)
+    revenue_usdc = float(overview.get("estimated_revenue_usdc") or 0.0)
+    inflow_count = int(wallet_inflows.get("total_inflows") or 0)
+    inflow_usdc = float(wallet_inflows.get("total_usdc") or 0.0)
+    error_rate = reliability.get("server_error_rate")
+    if error_rate is None:
+        error_rate = overview.get("server_error_rate")
+    error_rate_float = float(error_rate) if error_rate is not None else 0.0
+    post_credit_failures = int(reliability.get("charged_delivery_failures") or failed_after_credit)
+    delivery_rate = _brief_ratio(delivered, requested)
+    block_rate = _brief_ratio(blocked, requested)
+    active_registry_sources = sum(1 for value in summary.get("registry_source_mix", {}).values() if value)
+    evidence_events = int(source_evidence.get("events_reviewed") or 0)
+    synthetic_evidence_events = int(source_evidence.get("synthetic_events") or 0)
+    proof_hash_events = int(source_evidence.get("transaction_or_proof_hash_events") or 0)
+    unconfigured_platforms = [
+        str(platform.get("name") or platform.get("id") or "Unknown platform")
+        for platform in platforms
+        if not platform.get("external_metrics_configured")
+    ]
+    latest_day = timeline[-1] if timeline else {}
+    top_requested = _top_popularity_row(rows, "requested")
+    top_blocked = _top_popularity_row(rows, "blocked")
+    top_delivered = _top_popularity_row(rows, "delivered")
+
+    if requested and delivered == 0 and (blocked or prompts):
+        status = "needs_attention"
+        status_label = "Needs attention"
+    elif requested and (delivery_rate is not None and delivery_rate < 0.5):
+        status = "watch"
+        status_label = "Watch closely"
+    elif error_rate_float >= 0.01 or post_credit_failures:
+        status = "watch"
+        status_label = "Watch closely"
+    elif requested or registry_requests:
+        status = "working"
+        status_label = "Working"
+    else:
+        status = "quiet"
+        status_label = "Quiet"
+
+    executive_summary: list[str] = []
+    if requested:
+        leader = ""
+        if top_requested:
+            leader = (
+                f" Top demand is {top_requested.get('service')} / {top_requested.get('subject')} "
+                f"with {int(top_requested.get('requested') or 0)} requests."
+            )
+        executive_summary.append(
+            f"{requested} data requests were observed; {delivered} delivered data and {blocked} were blocked or prompted. "
+            f"Delivery rate is {_brief_pct(delivery_rate)} and block rate is {_brief_pct(block_rate)}.{leader}"
+        )
+    else:
+        executive_summary.append("No paid-data demand was recorded in this window, so product usage is not yet proven by telemetry.")
+
+    executive_summary.append(
+        f"The payment funnel shows {prompts} x402 prompts, {proof_submissions} proof submissions, "
+        f"{paid_calls} paid/credit-backed calls, ${revenue_usdc:.4f} recognized revenue, and ${inflow_usdc:.4f} wallet inflows."
+    )
+    executive_summary.append(
+        f"Acquisition telemetry recorded {registry_requests} registry requests across {active_registry_sources} attributed registry sources. "
+        f"{len(unconfigured_platforms)} onboarded platform metric feed(s) are still not ingested."
+    )
+    executive_summary.append(
+        f"Raw evidence review found {evidence_events} evidence-bearing events, "
+        f"{synthetic_evidence_events} synthetic/test events, and {proof_hash_events} transaction/proof-hash event(s)."
+    )
+
+    what_works: list[dict[str, str]] = []
+    if delivered:
+        detail = f"{delivered} calls returned data"
+        if top_delivered:
+            detail += f"; strongest delivered item is {top_delivered.get('service')} / {top_delivered.get('subject')}"
+        what_works.append({"title": "Data delivery is producing usable output", "detail": detail, "tone": "good"})
+    if proof_submissions or verified_payments or credit_successes:
+        what_works.append(
+            {
+                "title": "Paid usage path has activity",
+                "detail": f"{proof_submissions} proof submissions, {verified_payments} verified direct payments, and {credit_successes} credit-backed successes.",
+                "tone": "good",
+            }
+        )
+    if registry_requests or active_registry_sources:
+        what_works.append(
+            {
+                "title": "Discovery telemetry is being captured",
+                "detail": f"{registry_requests} registry requests and {active_registry_sources} attributed registry sources are visible.",
+                "tone": "good",
+            }
+        )
+    if inflow_count:
+        what_works.append(
+            {
+                "title": "Wallet inflow tracking is working",
+                "detail": f"{inflow_count} verified inflows totaling ${inflow_usdc:.4f} are tied to transaction hashes.",
+                "tone": "good",
+            }
+        )
+    if not what_works:
+        what_works.append(
+            {
+                "title": "The dashboard is collecting baseline telemetry",
+                "detail": "Events are being summarized, but usage has not yet crossed into successful paid data delivery.",
+                "tone": "watch",
+            }
+        )
+
+    what_does_not: list[dict[str, str]] = []
+    if prompts and proof_submissions == 0:
+        what_does_not.append(
+            {
+                "title": "Payment prompts are not converting",
+                "detail": "Clients are seeing x402 challenges, but no payment proof is being submitted afterward.",
+                "tone": "bad",
+            }
+        )
+    if requested and delivered == 0:
+        what_does_not.append(
+            {
+                "title": "No paid-data delivery is visible",
+                "detail": "Demand exists, but the telemetry does not show a successful data return after payment or credits.",
+                "tone": "bad",
+            }
+        )
+    if blocked:
+        detail = f"{blocked} requests are blocked or payment-prompted"
+        if top_blocked:
+            detail += f"; biggest blocked item is {top_blocked.get('service')} / {top_blocked.get('subject')}"
+        what_does_not.append({"title": "Demand is being stopped before value is delivered", "detail": detail, "tone": "warn"})
+    if failed_after_credit:
+        what_does_not.append(
+            {
+                "title": "Some paid/credit-backed calls fail after charging",
+                "detail": f"{failed_after_credit} call(s) failed after credit drawdown and need refund or retry review.",
+                "tone": "bad",
+            }
+        )
+    if prompts and inflow_count == 0:
+        what_does_not.append(
+            {
+                "title": "No wallet inflows are tied to the payment prompts",
+                "detail": "The prompts look like unpaid challenges rather than completed payments.",
+                "tone": "warn",
+            }
+        )
+    if evidence_events and proof_hash_events == 0 and (prompts or delivered):
+        what_does_not.append(
+            {
+                "title": "Growth evidence is not payment-backed yet",
+                "detail": "Recent evidence includes endpoints and user agents, but no transaction or proof-hash events for the claim.",
+                "tone": "warn",
+            }
+        )
+    if unconfigured_platforms:
+        what_does_not.append(
+            {
+                "title": "Platform metrics are incomplete",
+                "detail": "External metric feeds are not ingested for: " + ", ".join(unconfigured_platforms[:5]) + ".",
+                "tone": "warn",
+            }
+        )
+    if not what_does_not:
+        what_does_not.append(
+            {
+                "title": "No critical breakage is visible in this window",
+                "detail": "Continue watching conversion, delivery, inflows, and registry attribution for drift.",
+                "tone": "good",
+            }
+        )
+
+    improvement_steps: list[dict[str, str]] = []
+    if prompts and proof_submissions == 0:
+        improvement_steps.append(
+            {
+                "priority": "P0",
+                "action": "Run an end-to-end x402 payment smoke test from the same client surfaces that are prompting.",
+                "why": "The current funnel stops at 402 challenge, so users may be unable or unwilling to complete payment.",
+                "check": "Expect payment_proof_submitted > 0, payment_verified > 0, and wallet inflows with transaction hashes.",
+            }
+        )
+    if requested and delivered == 0:
+        improvement_steps.append(
+            {
+                "priority": "P0",
+                "action": "Verify one protected data endpoint returns payload after a valid payment or credit drawdown.",
+                "why": "Demand without delivery means the product value is not reaching users.",
+                "check": "Expect Data Delivered to rise and Called Data Detail to show 'Data returned after payment or credits'.",
+            }
+        )
+    if top_blocked:
+        improvement_steps.append(
+            {
+                "priority": "P1",
+                "action": f"Review the purchase path for {top_blocked.get('service')} / {top_blocked.get('subject')}.",
+                "why": "This is the largest blocked demand signal and should be the first conversion target.",
+                "check": "Expect blocked demand to fall or proof submissions to rise for that data item.",
+            }
+        )
+    if unconfigured_platforms:
+        improvement_steps.append(
+            {
+                "priority": "P1",
+                "action": "Wire external marketplace metrics into the observability database.",
+                "why": "Local logs only prove traffic that reaches our server; marketplace performance pages can include upstream views or health checks.",
+                "check": "Expect platform coverage to show configured feeds for Pay.sh, Smithery, and other onboarded registries.",
+            }
+        )
+    if error_rate_float >= 0.01 or post_credit_failures:
+        improvement_steps.append(
+            {
+                "priority": "P1",
+                "action": "Audit recent failed/rejected events and add refunds or retries for charged failures.",
+                "why": "Reliability problems after a user pays are high trust-risk events.",
+                "check": "Expect server error rate below 1% and failed-after-credit count at 0.",
+            }
+        )
+    improvement_steps.append(
+        {
+            "priority": "P2",
+            "action": "Review this daily brief against the raw event trace before changing pricing or registry strategy.",
+            "why": "The honest read depends on separating synthetic monitors, registry crawlers, and real paid users.",
+            "check": "Expect source, user agent, endpoint, and transaction hash evidence to support any growth claim.",
+        }
+    )
+
+    checks = [
+        {
+            "name": "Data delivery",
+            "status": "pass" if delivered else "fail" if requested else "watch",
+            "value": f"{delivered}/{requested}",
+            "detail": "Delivered paid/credit-backed data calls divided by requested data signals.",
+        },
+        {
+            "name": "Payment proof submission",
+            "status": "pass" if proof_submissions else "fail" if prompts else "watch",
+            "value": f"{proof_submissions}/{prompts}",
+            "detail": "Proof submissions after x402 prompts; this is the first conversion checkpoint.",
+        },
+        {
+            "name": "Wallet inflows",
+            "status": "pass" if inflow_count else "fail" if prompts or verified_payments else "watch",
+            "value": f"{inflow_count} inflow(s), ${inflow_usdc:.4f}",
+            "detail": "Verified direct x402 payments and credit top-ups with transaction hashes.",
+        },
+        {
+            "name": "Registry attribution",
+            "status": "pass" if active_registry_sources else "watch",
+            "value": f"{active_registry_sources} source(s)",
+            "detail": "Traffic attributed to Glama, Pay.sh, Smithery, MCP Registry, x402 directories, or similar sources.",
+        },
+        {
+            "name": "External platform feeds",
+            "status": "pass" if platforms and not unconfigured_platforms else "fail" if unconfigured_platforms else "watch",
+            "value": f"{len(platforms) - len(unconfigured_platforms)}/{len(platforms)} configured",
+            "detail": "Marketplace-side metrics configured for onboarded platforms.",
+        },
+        {
+            "name": "HTTP reliability",
+            "status": "pass" if error_rate_float < 0.01 and not post_credit_failures else "fail",
+            "value": f"{_brief_pct(error_rate_float)} server; {post_credit_failures} post-credit failure(s)",
+            "detail": "HTTP 5xx rate plus charged-delivery failures. Payment prompts, auth challenges, rate limits and client/protocol responses are reported separately.",
+        },
+        {
+            "name": "Raw evidence",
+            "status": "pass" if proof_hash_events or not (prompts or delivered) else "watch",
+            "value": f"{proof_hash_events} proof/tx event(s), {synthetic_evidence_events} synthetic",
+            "detail": "Source, user agent, endpoint, and transaction/proof-hash support for growth claims.",
+        },
+    ]
+
+    return {
+        "title": "Daily Executive Brief",
+        "as_of": summary.get("generated_at"),
+        "window_days": summary.get("window_days"),
+        "latest_day": latest_day.get("date"),
+        "latest_day_events": int(latest_day.get("http_requests") or 0)
+        + int(latest_day.get("mcp_tool_calls") or 0)
+        + int(latest_day.get("registry_requests") or 0),
+        "status": status,
+        "status_label": status_label,
+        "executive_summary": executive_summary,
+        "what_works": what_works[:5],
+        "what_does_not": what_does_not[:6],
+        "improvement_steps": improvement_steps[:6],
+        "checks": checks,
+    }
+
+
+@app.post("/internal/observability/marketplace-metrics", include_in_schema=False)
+async def ingest_marketplace_metrics(request: Request) -> JSONResponse:
+    """Store a marketplace-side metrics snapshot for Platform Coverage."""
+    if not _observability_authorized(request):
+        return _observability_unauthorized()
+    if OBSERVABILITY is None:
+        return JSONResponse(
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Observability disabled"},
+        )
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse(status_code=400, content={"error": "Expected JSON object"})
+
+    platform_id = str(payload.get("platform_id") or "").strip()
+    platform_ids = {str(platform["id"]) for platform in DISTRIBUTION_PLATFORMS}
+    if platform_id not in platform_ids:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Unknown platform_id",
+                "allowed_platform_ids": sorted(platform_ids),
+            },
+        )
+
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return JSONResponse(status_code=400, content={"error": "metrics must be an object"})
+
+    OBSERVABILITY.record_marketplace_metrics(
+        platform_id=platform_id,
+        metrics=metrics,
+        source_url=str(payload.get("source_url") or "").strip() or None,
+        status=str(payload.get("status") or "ok").strip() or "ok",
+    )
+    return JSONResponse(
+        headers={"Cache-Control": "no-store"},
+        content={
+            "status": "ok",
+            "platform_id": platform_id,
+            "metrics_recorded": True,
+        },
+    )
 
 
 @app.get("/internal/observability/stats", include_in_schema=False)
@@ -4436,9 +6555,25 @@ async def observability_stats(
             headers={"Cache-Control": "no-store"},
             content={"error": "Observability disabled"},
         )
+    content = _with_external_observability_context(OBSERVABILITY.summarize(days=days))
+    credits = getattr(request.app.state, "credits", None)
+    if credits is not None and hasattr(credits, "wallet_inflow_summary"):
+        content["wallet_inflows"] = credits.wallet_inflow_summary(days=days)
+    else:
+        content["wallet_inflows"] = {
+            "window_days": days,
+            "total_inflows": 0,
+            "direct_x402_count": 0,
+            "credit_topup_count": 0,
+            "total_usdc": 0.0,
+            "latest_timestamp": None,
+            "rows": [],
+        }
+    content["daily_interpretation"] = _build_daily_observability_interpretation(content)
+    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status()
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
-        content=_with_external_observability_context(OBSERVABILITY.summarize(days=days)),
+        content=content,
     )
 
 
@@ -4695,6 +6830,21 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     .metric-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .metric-value { font-size: 28px; font-weight: 800; overflow-wrap: anywhere; }
     .metric-note { color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .summary-strip {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .summary-item {
+      min-width: 112px;
+      padding: 8px 10px;
+      border: 1px solid var(--soft-line);
+      border-radius: 6px;
+      background: var(--panel-soft);
+    }
+    .summary-item span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .summary-item strong { display: block; margin-top: 3px; font-size: 18px; }
     .headline {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -4720,6 +6870,103 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     .status-dot.bad { background: var(--red); }
     .status-item strong { display: block; font-size: 13px; }
     .status-item span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .brief-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+    .brief-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: var(--green);
+      font-weight: 800;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .brief-status.watch, .brief-status.quiet { background: var(--amber-soft); color: var(--amber); }
+    .brief-status.needs_attention { background: var(--red-soft); color: var(--red); }
+    .brief-summary {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .brief-summary div {
+      padding-left: 12px;
+      border-left: 3px solid var(--line);
+    }
+    .brief-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+    .brief-panel {
+      display: grid;
+      gap: 10px;
+      padding-top: 4px;
+    }
+    .brief-panel h3 { margin-bottom: 0; }
+    .brief-item {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr);
+      gap: 9px;
+      font-size: 13px;
+      line-height: 1.38;
+    }
+    .brief-item .status-dot { margin-top: 5px; width: 9px; height: 9px; }
+    .brief-item strong { display: block; }
+    .brief-item span { display: block; margin-top: 2px; color: var(--muted); }
+    .action-list {
+      display: grid;
+      gap: 10px;
+    }
+    .action-item {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--soft-line);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .priority {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 26px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .action-item strong { display: block; }
+    .action-item span { display: block; margin-top: 3px; color: var(--muted); }
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .check {
+      border: 1px solid var(--soft-line);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+      min-height: 112px;
+      align-content: start;
+    }
+    .check strong { font-size: 13px; }
+    .check span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .check .value { font-size: 18px; font-weight: 800; color: var(--ink); }
     .bars { display: grid; gap: 9px; }
     .bar-row {
       display: grid;
@@ -4860,7 +7107,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     @media (max-width: 760px) {
       main { padding: 18px; }
       header, .headline { grid-template-columns: 1fr; display: grid; }
-      .hero, .two, .three, .kpis { grid-template-columns: 1fr; }
+      .hero, .two, .three, .kpis, .brief-grid, .check-grid { grid-template-columns: 1fr; }
+      .brief-header { grid-template-columns: 1fr; }
       nav { grid-template-columns: 1fr 1fr; }
       .bar-row { grid-template-columns: minmax(95px, 1fr) 1fr 44px; }
     }
@@ -4875,8 +7123,13 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       </div>
       <nav>
         <a class="active" href="#overview">Overview</a>
+        <a href="#growth-funnel">Growth Funnel</a>
+        <a href="#daily-brief">Daily Brief</a>
+        <a href="#popularity">Popularity</a>
         <a href="#acquisition">Acquisition</a>
+        <a href="#platforms">Platforms</a>
         <a href="#monetization">Monetization</a>
+        <a href="#wallet-inflows">Wallet Inflows</a>
         <a href="#called-data">Called Data</a>
         <a href="#events">Event Trace</a>
       </nav>
@@ -4915,6 +7168,64 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         <div class="grid kpis" id="kpis"></div>
       </section>
 
+      <section class="card section" id="growth-funnel">
+        <div class="headline">
+          <div>
+            <h2>Growth Funnel</h2>
+            <div class="sub">Privacy-safe explicit identities from first discovery through live-price activation, seven-day repeat use, and paid conversion.</div>
+          </div>
+          <div class="summary-strip" id="growth-kpis"></div>
+        </div>
+        <div class="grid two">
+          <div>
+            <h3>Identity progression</h3>
+            <div id="growth-stages" class="bars"></div>
+          </div>
+          <div>
+            <h3>Operating targets</h3>
+            <div class="check-grid" id="growth-targets"></div>
+          </div>
+        </div>
+        <div class="metric-note" id="growth-boundary"></div>
+        <div class="headline" style="margin-top:18px">
+          <div>
+            <h3>Three-feed RWA pilot</h3>
+            <div class="sub">AAPL/USDC, PAXG/USDC and EURC/USDC candidate observations. Monitoring can never promote a feed automatically.</div>
+          </div>
+          <div class="summary-strip" id="rwa-pilot-kpis"></div>
+        </div>
+        <div class="scroll"><table id="rwa-pilot-table"></table></div>
+      </section>
+
+      <section class="card section" id="daily-brief">
+        <div class="brief-header">
+          <div>
+            <h2>Daily Executive Brief</h2>
+            <div class="sub" id="brief-meta">Critical interpretation of usage, payments, delivery, and platform coverage.</div>
+          </div>
+          <span class="brief-status quiet" id="brief-status">Waiting</span>
+        </div>
+        <div class="brief-summary" id="brief-summary"></div>
+        <div class="brief-grid">
+          <div class="brief-panel">
+            <h3>What Works</h3>
+            <div id="brief-works"></div>
+          </div>
+          <div class="brief-panel">
+            <h3>What Does Not Work</h3>
+            <div id="brief-gaps"></div>
+          </div>
+        </div>
+        <div class="brief-panel" style="margin-top:16px">
+          <h3>Improvement Steps</h3>
+          <div class="action-list" id="brief-actions"></div>
+        </div>
+        <div class="brief-panel" style="margin-top:16px">
+          <h3>Daily Checks</h3>
+          <div class="check-grid" id="brief-checks"></div>
+        </div>
+      </section>
+
       <section class="grid two section">
         <div class="card">
           <h2>Usage Trend</h2>
@@ -4942,11 +7253,49 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         </div>
       </section>
 
+      <section class="card section" id="popularity">
+        <div class="headline">
+          <div>
+            <h2>Data Popularity</h2>
+            <div class="sub">What was requested most, what actually returned data, and where demand is blocked by payment, credits, or errors.</div>
+          </div>
+          <div class="summary-strip" id="popularity-kpis"></div>
+        </div>
+        <div class="grid three">
+          <div><h3>Most Requested</h3><div id="popular-requested" class="bars"></div></div>
+          <div><h3>Data Delivered</h3><div id="popular-delivered" class="bars"></div></div>
+          <div><h3>Blocked Demand</h3><div id="popular-blocked" class="bars"></div></div>
+        </div>
+        <div class="scroll"><table id="popularity-table"></table></div>
+      </section>
+
+      <section class="card section" id="wallet-inflows">
+        <div class="headline">
+          <div>
+            <h2>Wallet Inflows</h2>
+            <div class="sub">Verified x402 payments and credit top-ups with transaction hashes for payment follow-up.</div>
+          </div>
+          <div class="summary-strip" id="wallet-inflow-kpis"></div>
+        </div>
+        <div class="scroll"><table id="wallet-inflow-table"></table></div>
+      </section>
+
       <section class="grid three section" id="acquisition">
-        <div class="card"><h2>Registry Sources</h2><div id="registry-sources" class="bars"></div></div>
+        <div class="card"><h2>Platform Sources</h2><div id="registry-sources" class="bars"></div></div>
+        <div class="card"><h2>Pay.sh Marketplace</h2><div id="pay-sh-source" class="source-card"></div></div>
         <div class="card"><h2>Smithery Hosted Activity</h2><div id="smithery-source" class="source-card"></div></div>
         <div class="card"><h2>Most Used Services</h2><div id="services" class="bars"></div></div>
         <div class="card"><h2>Origins and Clients</h2><div id="origins" class="bars"></div></div>
+      </section>
+
+      <section class="card section" id="platforms">
+        <div class="headline">
+          <div>
+            <h2>Platform Coverage</h2>
+            <div class="sub">Onboarded discovery and marketplace surfaces, what we observed locally, and which external metrics still require ingestion.</div>
+          </div>
+        </div>
+        <div class="scroll"><table id="platform-coverage"></table></div>
       </section>
 
       <section class="grid three section">
@@ -5021,6 +7370,117 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       return `<span class="badge ${cls}">${label}</span>`;
     }
 
+    function toneClass(tone) {
+      if (tone === "bad" || tone === "fail") return "bad";
+      if (tone === "warn" || tone === "watch") return "warn";
+      return "";
+    }
+
+    function briefItem(item) {
+      const cls = toneClass(item.tone || item.status);
+      return `<div class="brief-item">
+        <span class="status-dot ${cls}"></span>
+        <div><strong>${escapeAttr(item.title || item.name || "")}</strong><span>${escapeAttr(item.detail || "")}</span></div>
+      </div>`;
+    }
+
+    function renderDailyInterpretation(data) {
+      const brief = data.daily_interpretation || {};
+      const status = text(brief.status || "quiet");
+      const statusEl = document.getElementById("brief-status");
+      statusEl.className = `brief-status ${status}`;
+      statusEl.textContent = text(brief.status_label || "Quiet");
+      document.getElementById("brief-meta").textContent =
+        `Generated ${new Date(brief.as_of || data.generated_at).toLocaleString()} for latest day ${text(brief.latest_day)} inside the selected ${text(brief.window_days || data.window_days)} day window.`;
+      document.getElementById("brief-summary").innerHTML = (brief.executive_summary || [])
+        .map(line => `<div>${escapeAttr(line)}</div>`)
+        .join("") || `<div>No executive interpretation is available yet.</div>`;
+      document.getElementById("brief-works").innerHTML = (brief.what_works || [])
+        .map(briefItem)
+        .join("") || `<div class="empty">No working signals yet.</div>`;
+      document.getElementById("brief-gaps").innerHTML = (brief.what_does_not || [])
+        .map(briefItem)
+        .join("") || `<div class="empty">No gaps detected.</div>`;
+      document.getElementById("brief-actions").innerHTML = (brief.improvement_steps || [])
+        .map(step => `<div class="action-item">
+          <span class="priority">${escapeAttr(step.priority || "")}</span>
+          <div>
+            <strong>${escapeAttr(step.action || "")}</strong>
+            <span>${escapeAttr(step.why || "")}</span>
+            <span><strong>Check:</strong> ${escapeAttr(step.check || "")}</span>
+          </div>
+        </div>`)
+        .join("") || `<div class="empty">No improvement steps generated.</div>`;
+      document.getElementById("brief-checks").innerHTML = (brief.checks || [])
+        .map(check => `<div class="check">
+          ${rowBadge(check.status)}
+          <strong>${escapeAttr(check.name || "")}</strong>
+          <div class="value">${escapeAttr(check.value || "")}</div>
+          <span>${escapeAttr(check.detail || "")}</span>
+        </div>`)
+        .join("") || `<div class="empty">No checks generated.</div>`;
+    }
+
+    function renderGrowthFunnel(data) {
+      const funnel = data.growth_funnel || {};
+      const summary = funnel.summary || {};
+      const targets = funnel.targets || {};
+      document.getElementById("growth-kpis").innerHTML = [
+        summaryItem("Activated", fmt.format(summary.activated_identities || 0)),
+        summaryItem("Under 3 min", pct(summary.first_live_price_within_3m_rate)),
+        summaryItem("7-day repeat", pct(summary.repeat_7d_rate)),
+        summaryItem("Starter to paid", pct(summary.starter_to_paid_rate)),
+        summaryItem("Credits exhausted", fmt.format(summary.credits_exhausted_identities || 0)),
+      ].join("");
+      bars(
+        "growth-stages",
+        Object.fromEntries((funnel.stages || []).map(row => [row.stage, Number(row.identities || 0)])),
+        "blue",
+      );
+      const targetRows = [
+        ["First price under 3 min", summary.first_live_price_within_3m_rate, targets.first_live_price_within_3m_rate],
+        ["Seven-day repeat", summary.repeat_7d_rate, targets.repeat_7d_rate],
+        ["Starter to paid", summary.starter_to_paid_rate, targets.starter_to_paid_rate],
+      ];
+      document.getElementById("growth-targets").innerHTML = targetRows.map(([label, actual, target]) => {
+        const status = actual == null ? "watch" : Number(actual) >= Number(target) ? "pass" : "watch";
+        return `<div class="check">
+          ${rowBadge(status)}
+          <strong>${escapeAttr(label)}</strong>
+          <div class="value">${pct(actual)} / ${pct(target)}</div>
+          <span>Observed rate versus the provisional operating target.</span>
+        </div>`;
+      }).join("");
+      const boundary = funnel.definitions?.measurement_boundary || "Identity-attributed events in the selected window.";
+      const unattributed = Number(summary.unattributed_activation_events || 0);
+      document.getElementById("growth-boundary").textContent =
+        `${boundary} ${fmt.format(unattributed)} activation event${unattributed === 1 ? " is" : "s are"} currently unattributed.`;
+    }
+
+    function renderRwaPilot(data) {
+      const pilot = data.rwa_growth_pilot || {};
+      const capture = pilot.current_capture || {};
+      document.getElementById("rwa-pilot-kpis").innerHTML = [
+        summaryItem("Status", text(pilot.status)),
+        summaryItem("Latest capture", `${fmt.format(capture.succeeded || 0)}/${fmt.format(capture.attempted || 0)}`),
+        summaryItem("Monitoring ready", pilot.source_monitoring_ready ? "Yes" : "No"),
+        summaryItem("Promoted feeds", fmt.format(pilot.production_promoted_feed_count || 0)),
+      ].join("");
+      const rows = pilot.feeds || [];
+      document.getElementById("rwa-pilot-table").innerHTML =
+        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Monitoring</th></tr></thead><tbody>` +
+        (rows.length ? rows.map(row => `<tr>
+          <td><code>${escapeAttr(row.symbol || row.pilot_id)}</code></td>
+          <td>${escapeAttr(row.source_lane || row.venue)}</td>
+          <td>${fmt.format(row.sample_count || 0)}</td>
+          <td>${fmt.format(row.window_days || 0)} days</td>
+          <td>${pct(row.success_rate)}</td>
+          <td>${pct(row.freshness_rate)}</td>
+          <td>${rowBadge(row.source_monitoring_ready ? "pass" : "collecting")}</td>
+        </tr>`).join("") : `<tr><td colspan="7" class="empty">Pilot monitoring has not produced a persisted capture yet.</td></tr>`) +
+        `</tbody>`;
+    }
+
     function bars(target, data, color = "") {
       const entries = Object.entries(data || {}).slice(0, 8);
       const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
@@ -5037,11 +7497,12 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       "Pay.sh",
       "MCP Registry",
       "Smithery",
+      "x402scan",
+      "x402 Directory",
       "Awesome MCP",
       "GitHub",
       "GitLab",
       "OpenAPI crawlers",
-      "x402 Directory",
       "Listing asset crawler",
     ];
 
@@ -5080,6 +7541,135 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       `;
     }
 
+    function renderPayShSource(data) {
+      const pay = data.external_sources?.pay_sh || {};
+      const localCalls = Number(pay.local_recorded_calls || 0);
+      const configured = Boolean(pay.metrics_ingestion_configured);
+      const prompts = Number(data.event_counts?.payment_required || 0);
+      const paid = Number(data.overview?.paid_calls || 0);
+      const status = configured ? "Metrics feed configured" : "Catalog metrics not ingested";
+      const statusClass = configured ? "neutral" : "warn";
+      document.getElementById("pay-sh-source").innerHTML = `
+        <div>
+          <div class="big">${fmt.format(localCalls)}</div>
+          <div class="metric-note">Pay.sh-attributed calls recorded locally in this window</div>
+        </div>
+        <div>${rowBadge(status).replace('class="badge neutral"', `class="badge ${statusClass}"`)}</div>
+        <div class="source-row"><span>Listing</span><a href="${escapeAttr(pay.listing_url || "")}" target="_blank" rel="noreferrer">Pay.sh service</a></div>
+        <div class="source-row"><span>x402 prompts</span><strong>${fmt.format(prompts)}</strong></div>
+        <div class="source-row"><span>Paid calls</span><strong>${fmt.format(paid)}</strong></div>
+        <div class="metric-note">${text(pay.note)}</div>
+      `;
+    }
+
+    function renderPlatformCoverage(data) {
+      const platforms = data.external_sources?.platforms || [];
+      const table = document.getElementById("platform-coverage");
+      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
+        (platforms.length ? platforms.map(platform => {
+          const status = platform.external_metrics_configured ? "Configured" : "Not ingested";
+          const badgeClass = platform.external_metrics_configured ? "neutral" : "warn";
+          return `<tr>
+            <td><strong>${escapeAttr(platform.name)}</strong></td>
+            <td>${fmt.format(platform.local_recorded_calls || 0)}</td>
+            <td><span class="badge ${badgeClass}">${status}</span></td>
+            <td><a href="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">${escapeAttr(platform.listing_url || "n/a")}</a></td>
+            <td>${escapeAttr(platform.note || "")}</td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="5" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
+    }
+
+    function summaryItem(label, value) {
+      return `<div class="summary-item"><span>${escapeAttr(label)}</span><strong>${escapeAttr(value)}</strong></div>`;
+    }
+
+    function txExplorerUrl(network, txHash) {
+      const net = String(network || "").toLowerCase();
+      const hash = String(txHash || "").trim();
+      if (!hash) return "";
+      if (net.includes("solana") || net.includes("mainnet")) return `https://solscan.io/tx/${encodeURIComponent(hash)}`;
+      if (net.includes("base") || net.includes("8453")) return `https://basescan.org/tx/${encodeURIComponent(hash)}`;
+      return "";
+    }
+
+    function inflowKindLabel(kind) {
+      if (kind === "credit_topup") return "Credit top-up";
+      if (kind === "direct_x402") return "Direct x402";
+      return text(kind);
+    }
+
+    function renderWalletInflows(data) {
+      const inflows = data.wallet_inflows || {};
+      const rows = inflows.rows || [];
+      document.getElementById("wallet-inflow-kpis").innerHTML = [
+        summaryItem("Total", money.format(inflows.total_usdc || 0)),
+        summaryItem("Inflows", fmt.format(inflows.total_inflows || 0)),
+        summaryItem("Top-ups", fmt.format(inflows.credit_topup_count || 0)),
+        summaryItem("Direct x402", fmt.format(inflows.direct_x402_count || 0)),
+      ].join("");
+      const table = document.getElementById("wallet-inflow-table");
+      table.innerHTML = `<thead><tr><th>Time</th><th>Type</th><th>Network</th><th>Amount</th><th>Credits</th><th>Wallet / Recipient</th><th>Purpose</th><th>Transaction Hash</th></tr></thead><tbody>` +
+        (rows.length ? rows.slice(0, 50).map(row => {
+          const tx = text(row.tx_hash);
+          const url = txExplorerUrl(row.network, row.tx_hash);
+          const wallet = row.wallet || row.recipient || "n/a";
+          const txHtml = url
+            ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer"><code>${escapeAttr(tx)}</code></a>`
+            : `<code>${escapeAttr(tx)}</code>`;
+          return `<tr>
+            <td><code>${text(row.timestamp).slice(0, 19).replace("T", " ")}</code></td>
+            <td>${rowBadge(inflowKindLabel(row.kind))}</td>
+            <td>${text(row.network)}</td>
+            <td>${money.format(row.amount_usdc || 0)}</td>
+            <td>${row.credits_added == null ? "n/a" : fmt.format(row.credits_added)}</td>
+            <td><code>${escapeAttr(wallet)}</code></td>
+            <td><code>${escapeAttr(row.purpose || "")}</code></td>
+            <td>${txHtml}</td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="8" class="empty">No verified wallet inflows in this window.</td></tr>`) + `</tbody>`;
+    }
+
+    function popularityLabel(row) {
+      const subject = text(row.subject);
+      const service = text(row.service);
+      return subject === service ? service : `${service}:${subject}`;
+    }
+
+    function popularityMap(rows, field) {
+      return Object.fromEntries((rows || [])
+        .filter(row => Number(row[field] || 0) > 0)
+        .slice(0, 8)
+        .map(row => [popularityLabel(row), Number(row[field] || 0)]));
+    }
+
+    function renderPopularity(data) {
+      const popularity = data.popularity || {};
+      const rows = popularity.rows || [];
+      document.getElementById("popularity-kpis").innerHTML = [
+        summaryItem("Requested", fmt.format(popularity.total_requested || 0)),
+        summaryItem("Delivered", fmt.format(popularity.total_delivered || 0)),
+        summaryItem("Blocked", fmt.format(popularity.total_blocked || 0)),
+        summaryItem("Credits Used", fmt.format(popularity.total_credits_spent || 0)),
+      ].join("");
+      bars("popular-requested", popularityMap(rows, "requested"), "blue");
+      bars("popular-delivered", popularityMap(rows, "delivered"), "");
+      bars("popular-blocked", popularityMap(rows, "blocked"), "amber");
+      const table = document.getElementById("popularity-table");
+      table.innerHTML = `<thead><tr><th>Last Seen</th><th>Service</th><th>Data</th><th>Surface</th><th>Requested</th><th>Delivered</th><th>Credits</th><th>Blocked</th><th>Failed After Credit</th><th>Outcome</th></tr></thead><tbody>` +
+        (rows.length ? rows.slice(0, 30).map(row => `<tr>
+          <td><code>${text(row.last_seen).slice(0, 19).replace("T", " ")}</code></td>
+          <td><code>${escapeAttr(row.service)}</code></td>
+          <td><code>${escapeAttr(row.subject)}</code></td>
+          <td>${escapeAttr(row.surface)}</td>
+          <td>${fmt.format(row.requested || 0)}</td>
+          <td>${fmt.format(row.delivered || 0)}</td>
+          <td>${fmt.format(row.credits_spent || 0)}</td>
+          <td>${fmt.format(row.blocked || 0)}</td>
+          <td>${fmt.format(row.failed_after_credit || 0)}</td>
+          <td>${rowBadge(row.leading_outcome)}</td>
+        </tr>`).join("") : `<tr><td colspan="10" class="empty">No popularity signals in this window.</td></tr>`) + `</tbody>`;
+    }
+
     function shortDate(isoDate) {
       const [year, month, day] = String(isoDate || "").split("-");
       if (!month || !day) return text(isoDate);
@@ -5100,11 +7690,12 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         ["Pay.sh", "pay-sh", Number(sources?.["Pay.sh"] || 0)],
         ["MCP Registry", "mcp-registry", Number(sources?.["MCP Registry"] || 0)],
         ["Smithery", "smithery", Number(sources?.["Smithery"] || 0)],
+        ["x402scan", "x402-directory", Number(sources?.["x402scan"] || 0)],
+        ["x402 Directory", "x402-directory", Number(sources?.["x402 Directory"] || 0)],
         ["Awesome MCP", "awesome-mcp", Number(sources?.["Awesome MCP"] || 0)],
         ["GitHub", "github-source", Number(sources?.["GitHub"] || 0)],
         ["GitLab", "gitlab-source", Number(sources?.["GitLab"] || 0)],
         ["OpenAPI crawlers", "openapi-source", Number(sources?.["OpenAPI crawlers"] || 0)],
-        ["x402 Directory", "x402-directory", Number(sources?.["x402 Directory"] || 0)],
         ["Listing asset crawler", "listing-asset", Number(sources?.["Listing asset crawler"] || 0)],
       ];
       const known = new Set(ordered.map(([label]) => label));
@@ -5234,23 +7825,27 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       if (!res.ok) throw new Error(data.message || data.error || "Unable to load stats");
       currentData = data;
       const o = data.overview || {};
+      const g = data.growth_funnel?.summary || {};
       const prompts = Number(data.event_counts?.payment_required || 0);
       const paid = Number(o.paid_calls || 0);
       const conversion = prompts ? paid / prompts : null;
       document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}. ${live ? "Live refresh is on." : "Live refresh is paused."}`;
-      document.getElementById("headline-value").textContent = text(o.most_used_service || "No usage yet");
-      document.getElementById("headline-note").textContent = o.most_used_service ? "Most used service by called data volume in the selected window." : "No called data has been recorded in this window.";
+      document.getElementById("headline-value").textContent = g.activated_identities ? `${fmt.format(g.activated_identities)} activated` : "No activation yet";
+      document.getElementById("headline-note").textContent = g.activated_identities ? "Explicit identities that received their first live price in the selected window." : "No identity-attributed first live price has been recorded in this window.";
       document.getElementById("kpis").innerHTML = [
-        metric("Data Calls", fmt.format((data.data_called || []).reduce((sum, row) => sum + Number(row.calls || 0), 0)), "Called data subjects across API and MCP"),
-        metric("Payment Prompts", fmt.format(prompts), "x402 challenges shown"),
+        metric("Activation", pct(g.activation_rate), "First live price / eligible explicit identities"),
+        metric("Time to Value", g.median_time_to_first_live_price_seconds == null ? "n/a" : `${fmt.format(g.median_time_to_first_live_price_seconds)}s`, "Median discovery-to-first-live-price time"),
+        metric("7-Day Repeat", pct(g.repeat_7d_rate), "Mature activated identities with repeat delivery"),
+        metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to verified revenue"),
         metric("Paid Calls", fmt.format(paid), "Verified x402, credits, and MCP paid usage"),
         metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Direct x402 + bulk credit claims"),
-        metric("Registry Hits", fmt.format(o.registry_requests || 0), "Directory and metadata discovery"),
-        metric("MCP Tools", fmt.format(o.mcp_tool_calls || 0), "Tool-level activity"),
-        metric("Unique Clients", fmt.format(o.unique_client_fingerprints || 0), "Privacy-safe hashed fingerprints"),
-        metric("Prompt Conversion", pct(conversion), "Paid calls / payment prompts"),
+        metric("Server Errors", pct(data.reliability?.server_error_rate), "HTTP 5xx responses / all HTTP requests"),
+        metric("Unsupported Demand", fmt.format(o.unsupported_symbol_requests || 0), "Bounded zero-result symbol searches"),
       ].join("");
       renderAttention(data);
+      renderGrowthFunnel(data);
+      renderRwaPilot(data);
+      renderDailyInterpretation(data);
       timeline(data.timeline || []);
       bars("funnel", {
         "payment prompts": prompts,
@@ -5259,8 +7854,12 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         "credit drawdowns": data.event_counts?.credit_drawdown_success || 0,
         "bulk claims": data.event_counts?.bulk_credit_claimed || 0,
       }, "amber");
+      renderPopularity(data);
+      renderWalletInflows(data);
       registrySourceBars(data.registry_source_mix);
+      renderPayShSource(data);
       renderSmitherySource(data);
+      renderPlatformCoverage(data);
       bars("services", data.service_mix);
       bars("origins", data.origin_mix, "blue");
       bars("mcp", data.mcp_tool_mix, "blue");
@@ -5686,6 +8285,14 @@ async def health_check() -> dict[str, Any]:
             "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
             "upgrade_path": "x402 payment or prepaid credit top-ups",
         },
+        "equities": {
+            "positioning": "Supported equity tickers are first-class Blocksize symbols.",
+            "discovery": "/v1/search?q=AAPL&asset_class=equity",
+            "live_endpoint_template": "/v1/bidask/{ticker}",
+            "example_endpoint": "/v1/bidask/AAPL",
+            "credit_cost": 1,
+            "price_usdc": str(settings.pricing.equities),
+        },
         "links": {
             "remote_mcp": REMOTE_MCP_URL,
             "manifest": MCP_MANIFEST_URL,
@@ -5693,6 +8300,16 @@ async def health_check() -> dict[str, Any]:
             "sitemap": SITEMAP_URL,
             "llms_txt": LLMS_TXT_URL,
             "quickstart": QUICKSTART_URL,
+            "first_price_quickstart": FIRST_PRICE_QUICKSTART_URL,
+            "agent_framework_integrations": AGENT_FRAMEWORK_INTEGRATIONS_URL,
+            "category_hubs_json": CATEGORY_HUBS_JSON_URL,
+            "rwa_market_data": f"{PUBLIC_BASE_URL.rstrip('/')}/rwa-market-data",
+            "market_data_licensing": f"{PUBLIC_BASE_URL.rstrip('/')}/market-data-licensing",
+            "signed_oracle_feeds": f"{PUBLIC_BASE_URL.rstrip('/')}/signed-oracle-feeds",
+            "rwa_coverage_index": RWA_COVERAGE_INDEX_URL,
+            "rwa_coverage_index_pdf": RWA_COVERAGE_INDEX_PDF_URL,
+            "oracle_lineage_index": ORACLE_LINEAGE_INDEX_URL,
+            "oracle_lineage_index_pdf": ORACLE_LINEAGE_INDEX_PDF_URL,
             "prompt_examples": PROMPT_EXAMPLES_URL,
             "privacy_policy": PRIVACY_POLICY_URL,
             "support": SUPPORT_URL,
@@ -5712,6 +8329,7 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": ANTHROPIC_TOOL_COSTS,
+            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
             "submission_docs": CLAUDE_CONNECTOR_URL,
         },
         "cursor_connector": {
@@ -5721,6 +8339,7 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": CURSOR_TOOL_COSTS,
+            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
         },
     }
 

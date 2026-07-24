@@ -1,0 +1,459 @@
+{
+  "category_counts": [
+    {
+      "category": "Tokenized Issuer",
+      "providers": 9
+    },
+    {
+      "category": "Oracle",
+      "providers": 7
+    },
+    {
+      "category": "Venue",
+      "providers": 7
+    },
+    {
+      "category": "Commercial Market-Data Partner",
+      "providers": 2
+    },
+    {
+      "category": "Managed Rpc Infrastructure",
+      "providers": 2
+    },
+    {
+      "category": "Oracle Commercial",
+      "providers": 2
+    },
+    {
+      "category": "Tokenized Issuer Platform",
+      "providers": 2
+    },
+    {
+      "category": "Oracle Publisher",
+      "providers": 1
+    },
+    {
+      "category": "Oracle Publisher Vendor",
+      "providers": 1
+    },
+    {
+      "category": "Tokenized Issuer Broker",
+      "providers": 1
+    }
+  ],
+  "claims_boundary": {
+    "internal_vs_external": "The internal rights register is a policy-state input; it is not substituted for externally documented contractual permission in this index.",
+    "lineage": "Lineage groups identify economically dependent observations so aggregates, component venues, marks, and oracle references are not double-counted as independent sources.",
+    "rights": "Public technical access and onchain availability do not themselves grant commercial redistribution rights."
+  },
+  "external_status": [
+    {
+      "evidence_status": "Not externally documented",
+      "providers": 25
+    },
+    {
+      "evidence_status": "Agreement or license required",
+      "providers": 6
+    },
+    {
+      "evidence_status": "Restricted / not granted",
+      "providers": 3
+    }
+  ],
+  "generated_at": "2026-07-22T00:00:00Z",
+  "internal_readiness": [
+    {
+      "providers": 14,
+      "readiness": "Production access ready"
+    },
+    {
+      "providers": 10,
+      "readiness": "Production access not ready"
+    }
+  ],
+  "lineage_rows": [
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Strong executable candidate. Do not count HIP-3 oracle/index and native order book as independent sources; verify each market's deployer/oracle definition.",
+      "documented_rights_text": "Unknown; written venue clearance required",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "hyperliquid_native_book; each HIP-3 dex and its deployer oracle must retain separate lineage",
+      "official_sources": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits|https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions|https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals|https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees",
+      "price_semantics": "Native L2 book and trades; separate allMids, oracle, mark, funding. HIP-3 deployer defines oracle and contract specs",
+      "provider": "Hyperliquid / HIP-3"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Best build candidate because the book can be reconstructed and replayed from exact accounts/slots. Exclude indicative quotes from firm executable depth or cap separately.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "drift_dlob; vAMM and indicative-quote components must remain tagged and not counted as independent",
+      "official_sources": "https://docs.drift.trade/developers/drift-sdk/dlob|https://docs.drift.trade/developers/market-makers/indicative-quotes|https://docs.drift.trade/developers/market-makers/quickstart",
+      "price_semantics": "Locally reconstructed onchain DLOB L2/L3; committed resting orders; optional vAMM/fallback liquidity; separate oracle/mark. Indicative quotes are explicitly non-firm",
+      "provider": "Drift"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Strong executable candidate. Implement snapshot+prevTs sequencing and preserve the shared-liquidity lineage across broker front ends.",
+      "documented_rights_text": "Unknown; written Orderly clearance required",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "orderly_shared_clob; all front ends share the same liquidity and must not be counted as independent venues",
+      "official_sources": "https://orderly.network/docs/build-on-omnichain/introduction|https://orderly.network/docs/build-on-omnichain/websocket-api/public/order-book-update|https://orderly.network/docs/build-on-omnichain/restful-api/public/get-market-trades|https://orderly.network/docs/introduction/trade-on-orderly/trade-on-orderly|https://orderly.network/docs/introduction/trade-on-orderly/trading-basics/trading-fees",
+      "price_semantics": "Shared offchain CLOB order book/trades; separate index, mark and funding",
+      "provider": "Orderly"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Useful reference/bid-ask candidate, but not native L2 and not independently sourced until its upstream oracle lineage is documented.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "ostium_protocol_quote; underlying oracle lineage must be mapped before independence claims",
+      "official_sources": "https://docs.ostium.com/developer/builder-api/overview|https://docs.ostium.com/developer/reference/get-pairs|https://docs.ostium.com/developer/sdk/overview",
+      "price_semantics": "Builder API exposes bid/mid/ask and market caps; no documented native L2. Treat any inferred depth as synthetic/protocol capacity, not order-book depth",
+      "provider": "Ostium"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Good high-frequency reference lane. Never label as BidAsk or block-size VWAP.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "gains_don_reference; do not treat pair price as venue book depth",
+      "official_sources": "https://docs.gains.trade/developer/integrators/price-feed|https://docs.gains.trade/developer/integrators",
+      "price_semantics": "Protocol/DON reference prices and OHLC; not an executable order book",
+      "provider": "Gains Network"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Executable candidate for listed instruments, but current RWA breadth and redistribution rights need confirmation.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "aevo_native_book; options and perps separate from external index/oracle lineage",
+      "official_sources": "https://api-docs.aevo.xyz/reference/overview|https://api-docs.aevo.xyz/reference/getorderbook|https://api-docs.aevo.xyz/reference/operations",
+      "price_semantics": "Native offchain order book/trades; instrument types PERPETUAL and OPTION; USD prices and contract amounts",
+      "provider": "Aevo"
+    },
+    {
+      "category": "venue",
+      "category_label": "Venue",
+      "decision_note": "Executable candidate. Pin V3 schema and capture exchangeInfo multipliers/ticks before coverage claims.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "aster_native_book; do not conflate Aster source with upstream oracle/index",
+      "official_sources": "https://github.com/asterdex/api-docs|https://github.com/asterdex/aster-skills-hub",
+      "price_semantics": "Public REST depth/trades/tickers/funding and WebSocket market streams; separate mark/index where exposed",
+      "provider": "Aster"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "High-coverage exact identity/reference lane. Preserve ISIN, underlying symbol, multiplier and halt state. No executable semantics or native timestamp should be invented.",
+      "documented_rights_text": "Unknown; integrator audience is not an express redistribution license",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "backed_issuer_reference; every chain deployment/wrapper is one economic source",
+      "official_sources": "https://api.backed.fi/api-docs/|https://docs.xstocks.fi|https://assets.backed.fi/legal-documentation",
+      "price_semantics": "Underlying reference price, token multiplier/contract metadata, corporate actions; soft/firm issuance-redemption quote endpoints separately authenticated. Public token payload is not L2 depth",
+      "provider": "xStocks / Backed"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Partner, do not scrape. Treat soft quote as non-binding and display price as reference-only.",
+      "documented_rights_text": "No for the documented display endpoints; explicit display-only wording",
+      "external_redistribution_evidence": "Restricted / not granted",
+      "lineage_group": "ondo_issuer_primary; underlying market data and token primary price share issuer lineage",
+      "official_sources": "https://docs.ondo.finance/api-reference/overview|https://docs.ondo.finance/api-reference/assets/get-current-prices-for-all-supported-assets|https://docs.ondo.finance/api-reference/quickstart|https://docs.ondo.finance/api-reference/limits/get-trading-limits",
+      "price_semantics": "Display-only latest/market/OHLC prices; separate non-binding soft quote and signed mint/redemption attestations; primary token price and underlying-market price distinguished",
+      "provider": "Ondo Global Markets"
+    },
+    {
+      "category": "tokenized_issuer_broker",
+      "category_label": "Tokenized Issuer Broker",
+      "decision_note": "Not a lawful replacement input for Blocksize analytics/oracle under the cited US NBBO terms. Could be an execution/partner display lane only under a negotiated agreement.",
+      "documented_rights_text": "Only as licensed display through Dinari; not a general resale grant",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "dinari_sip_or_dfn; official-exchange lineage, not independent from CTA/UTP or other SIP vendors",
+      "official_sources": "https://docs.dinari.com/docs/us|https://docs.dinari.com/docs/pricing-quotes|https://docs.dinari.com/docs/websockets",
+      "price_semantics": "Licensed NBBO bid/ask for pre-trade display; WebSocket draft lists DFN L2/top-of-book; Dinari says its standard feeds are official exchange data, not onchain dShare trading",
+      "provider": "Dinari"
+    },
+    {
+      "category": "tokenized_issuer_platform",
+      "category_label": "Tokenized Issuer Platform",
+      "decision_note": "Partner/API discovery required. Do not infer prices from token state or catalog metadata.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "swarm_platform; exact asset and venue/pool lineage required",
+      "official_sources": "https://swarm.com/platform/|https://docs.swarm.com/reference/authorized-assets",
+      "price_semantics": "Platform/API and smart-contract solution for issuance/trading; no public price/NAV feed contract located in reviewed official docs",
+      "provider": "Swarm"
+    },
+    {
+      "category": "tokenized_issuer_platform",
+      "category_label": "Tokenized Issuer Platform",
+      "decision_note": "Use as issuer/TA integration, not as a generic price provider. Request exact NAV/webhook fields and rights per fund.",
+      "documented_rights_text": "Unknown; agreement required",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "securitize_transfer_agent_or_issuer; NAV may originate with each fund administrator",
+      "official_sources": "https://issuersupport.securitize.io/hc/en-us/articles/33015702531863-Getting-Started-with-the-Securitize-APIs|https://sec-connect-api-docs.securitize.io/|https://sec-connect-api-docs.securitize.io/scope-of-access",
+      "price_semantics": "Connect/Domain APIs cover identity, wallets, tokens and investment flows; no general public market-price/NAV feed found",
+      "provider": "Securitize"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "High-value partner target: official identifiers and NAV history exist. Keep official NAV separate from 24/7 dealer quote/executable price.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "wisdomtree_official_nav; dealer execution and official NAV are distinct semantics but same issuer family",
+      "official_sources": "https://docs.wisdomtreeconnect.com/|https://docs.wisdomtreeconnect.com/dataspan/nav|https://docs.wisdomtreeconnect.com/dataspan/aggregates|https://www.wisdomtreeconnect.com/terms-of-service",
+      "price_semantics": "Official daily NAV, shares, AUM, accruals, performance and holdings; separate subscription/redemption/order workflows and WTGXX 24/7 dealer settlement",
+      "provider": "WisdomTree Connect"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Authoritative NAV candidate, not independent twice when read from both Spiko and Chainlink contracts.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "spiko_caceis_nav; Spiko relayer and Chainlink publication are correlated representations of the same CACEIS NAV",
+      "official_sources": "https://tech.spiko.io/posts/spiko-smart-contracts/|https://www.spiko.io/blog/spiko-in-collaboration-with-caceis-integrates-chainlink-infrastructure-to-bring-nav-data-onchain|https://www.spiko.io/blog/spiko-chainlink-ccip",
+      "price_semantics": "Official NAV calculated daily by CACEIS; onchain Oracle/Chainlink AggregatorV3-compatible feed; NAV is not market BidAsk",
+      "provider": "Spiko"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Strong authoritative NAV/redemption-rate lane. Label continuous price as extrapolated NAV, not an exchange price.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "superstate_nav; continuous extrapolation and daily Chainlink/Pyth representations remain one issuer-NAV lineage",
+      "official_sources": "https://docs.superstate.com/introduction-to-superstate/api|https://docs.superstate.com/welcome-to-superstate/smart-contracts|https://docs.superstate.com/superstate-funds/ustb/income-fees-and-yield",
+      "price_semantics": "Daily NAV/AUM/yield API; USTB continuous price extrapolated from latest two NAV checkpoints; daily Chainlink NAV/S; onchain redemption/subscription calculators",
+      "provider": "Superstate"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Partner for official NAV/TA data. Token balance and daily yield minting are not standalone market prices.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "franklin_transfer_agent_nav; all chain deployments are one fund/TA source",
+      "official_sources": "https://digitalassets.franklintempleton.com/benji/|https://digitalassets.franklintempleton.com/benji/benji-contracts/|https://www.franklintempleton.com/press-releases/news-room/2026/franklin-templeton-stellar-development-foundation-mark-five-years-of-benji-the-first-u.s.-registered-tokenized-money-market-fund",
+      "price_semantics": "Official fund share record; BENJI represents a fund share and accrues yield; no public executable quote/book or public NAV API schema located",
+      "provider": "Franklin Templeton / Benji"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Authoritative NAV candidate only. Preserve valuation date and do not infer continuous executable liquidity from 24/7 contract settlement.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "openeden_fund_nav; administrator report and onchain oracle are one fund lineage",
+      "official_sources": "https://docs.openeden.com/tbill/token-price|https://docs.openeden.com/tbill/trust-and-transparency|https://docs.openeden.com/tbill/subscriptions|https://docs.openeden.com/tbill/faq",
+      "price_semantics": "NAV per token; onchain price oracle used for subscriptions; daily/monthly administrator NAV; no executable market depth",
+      "provider": "OpenEden"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Reference/primary quote candidate after exact contract mapping. Website quote is not evidence of API/redistribution rights.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "matrixdock_issuer_quote; external Chainlink XAU/USD or SmartData may be upstream and must be tagged",
+      "official_sources": "https://www.matrixdock.com/xaum|https://www.matrixdock.com/transparency/underlying-assets|https://www.matrixdock.com/blog/announcements/gold-token-xaum",
+      "price_semantics": "Issuer mint/redeem quote and reserve/transparency data; XAUm unit is one troy ounce; no public general price API found",
+      "provider": "Matrixdock"
+    },
+    {
+      "category": "tokenized_issuer",
+      "category_label": "Tokenized Issuer",
+      "decision_note": "Useful exact redemption/reference lane. Keep explicit disclaimer that oracle is reference and redemption amount may differ.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "midas_reference_oracle; verification agent and issuer oracle are not separate price sources",
+      "official_sources": "https://docs.midas.app/defi-integration/price-oracle|https://docs.midas.app/protocol-mechanics/smart-contracts|https://docs.midas.app/tokens/mtbill/independent-reporting",
+      "price_semantics": "Issuer/reference-value oracle; daily independent verification; instant redemption uses designated oracle price but issuer redemption amount may differ",
+      "provider": "Midas"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Good reference/guardrail input, not block-size VWAP. Treat publisher count as robustness metadata, not accessible independent inputs.",
+      "documented_rights_text": "Unknown for a commercial offchain API built from Pyth",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "pyth_aggregate; one Pyth feed counts as one lineage regardless of publisher count; do not count NOBI/TTMzero separately without publisher-level observations",
+      "official_sources": "https://docs.pyth.network/price-feeds|https://docs.pyth.network/price-feeds/core/how-pyth-works|https://docs.pyth.network/price-feeds/core/current-fees|https://docs.pyth.network/price-feeds/core/fetch-price-updates|https://docs.pyth.network/price-feeds/core/best-practices",
+      "price_semantics": "Robust aggregate price plus confidence; not executable depth. Publisher contributions aggregated on Pythnet; market hours/status matter",
+      "provider": "Pyth Core"
+    },
+    {
+      "category": "oracle_commercial",
+      "category_label": "Oracle Commercial",
+      "decision_note": "Potential partner substitute for client-used TradFi symbols, but obtain written redistribution, raw retention and onchain-publication rights. Experimental bid/ask is not production depth.",
+      "documented_rights_text": "Agreement-scoped",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "pyth_pro_aggregate; correlated with Pyth Core where same publisher set/instrument",
+      "official_sources": "https://docs.pyth.network/price-feeds/pro|https://docs.pyth.network/price-feeds/pro/pyth-terminal|https://docs.pyth.network/price-feeds/pro/payload-reference|https://docs.pyth.network/price-feeds/pro/rate-limits|https://docs.pyth.network/price-feeds/pro/subscribe-to-prices",
+      "price_semantics": "Aggregate price/confidence/publisherCount; optional experimental best bid/ask; market-session state; signed EVM/Solana payloads; funding-rate feed types",
+      "provider": "Pyth Pro"
+    },
+    {
+      "category": "oracle_publisher",
+      "category_label": "Oracle Publisher",
+      "decision_note": "Do not infer how NOBI licenses or derives TradFi data. Public evidence does not establish reproducible upstream lineage or copyable rights.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "nobi_proprietary; if observed only inside Pyth aggregate, cannot be counted separately",
+      "official_sources": "https://labs.usenobi.com/|https://www.pyth.network/blog/new-pyth-data-provider-nobi|https://legacy.pyth.network/publishers",
+      "price_semantics": "Publisher claims real-time feeds and 24/7 commodity coverage; Pyth announced NOBI contributes proprietary data. Exact aggregation and upstream construction are not public",
+      "provider": "NOBI Labs"
+    },
+    {
+      "category": "oracle_publisher_vendor",
+      "category_label": "Oracle Publisher Vendor",
+      "decision_note": "Plausible partner for evaluated TradFi prices, but methodology, source list, licenses and rights are contract-specific. Do not copy or infer upstream arrangements.",
+      "documented_rights_text": "Agreement-scoped",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "ttmzero_evaluated; Pyth observation is not independent from direct TTMzero for overlapping instruments",
+      "official_sources": "https://ttmzero.com/about-us/|https://ttmzero.com/|https://www.pyth.network/blog/new-pyth-data-provider",
+      "price_semantics": "Model-driven evaluated prices/indications and valuations; TTMzero says it has direct access to major exchanges, broker platforms and interbank markets",
+      "provider": "TTMzero"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Strong reference/NAV source. Never label as executable; verify heartbeat, deviation, session and deprecation state per exact feed.",
+      "documented_rights_text": "Unknown for repackaged commercial API",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "chainlink_aggregate; SmartData/NAV must keep issuer administrator lineage; multiple chain deployments are not independent",
+      "official_sources": "https://chain.link/data-feeds|https://data.chain.link/|https://docs.chain.link/|https://chain.link/faqs",
+      "price_semantics": "Aggregated market-representative reference or issuer/fundamental/hybrid SmartData; push heartbeat/deviation; not executable depth",
+      "provider": "Chainlink Data Feeds / SmartData"
+    },
+    {
+      "category": "oracle_commercial",
+      "category_label": "Oracle Commercial",
+      "decision_note": "Partner candidate, not a rights shortcut. Obtain precise instrument list, session logic, retention and redistribution/onchain publication rights.",
+      "documented_rights_text": "Agreement-scoped",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "chainlink_streams; correlated with Chainlink feeds if overlapping upstreams",
+      "official_sources": "https://chain.link/data-streams|https://docs.chain.link/data-streams/release-notes|https://data.chain.link/streams",
+      "price_semantics": "Low-latency pull reports; prices, market status and some liquidity-weighted bid/ask; not a full L2 book",
+      "provider": "Chainlink Data Streams"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Potential RWA/oracle partner. Marketing claims do not disclose exact upstreams or license rights; require contract and methodology schedule.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "redstone_aggregate; custom feed and issuer NAV lineage must be preserved",
+      "official_sources": "https://blog.redstone.finance/2026/05/20/extended-chose-redstone-live-as-the-data-layer-behind-their-real-world-markets/|https://blog.redstone.finance/2025/02/06/introducing-redstone-distributed-data-association/",
+      "price_semantics": "Push/pull oracle reference; RedStone Live claims institutionally sourced, asset-specific weighted composites; not native L2",
+      "provider": "RedStone"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Reference candidate only. Pair coverage and rights must be verified under early-access agreement.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "supra_aggregate; source identities not exposed in aggregate",
+      "official_sources": "https://docs.supra.com/oracles/data-feeds|https://docs.supra.com/oracles/apis-real-time-and-historical-data|https://docs.supra.com/oracles/apis-real-time-and-historical-data/websocket-api|https://docs.supra.com/oracles/data-feeds/push-oracle",
+      "price_semantics": "DORA S-value: node medians clustered then mean; push/pull onchain reference; REST/WebSocket API includes real-time/historical crypto/OHLC",
+      "provider": "Supra DORA / API"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Low-cost reference candidate on EVM. Account for deliberate base-feed delay and exact provider set; not executable.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "api3_beacon_set; each API provider can be lineage-tagged, but an aggregate dAPI is one composite",
+      "official_sources": "https://docs.api3.org/dapps/integration/|https://docs.api3.org/dapps/quickstart/|https://docs.api3.org/oev/in-depth/data-feeds/|https://docs.api3.org/dapps/integration/security-considerations.html",
+      "price_semantics": "First-party API-provider signed beacons/beacon sets; base updates may be delayed 0-20 s for OEV; reference price not depth",
+      "provider": "API3"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Good for custom onchain publication plumbing, not a substitute for upstream rights. Exact job definition and sources are mandatory.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "switchboard_feed; custom job upstreams must be disclosed before independence claims",
+      "official_sources": "https://docs.switchboard.xyz/|https://docs.switchboard.xyz/ai-agents-llms/switchboard-agent-skill/switchboard-evm-feeds|https://docs.switchboard.xyz/docs-by-chain/solana-svm/surge/surge",
+      "price_semantics": "Permissionless customizable pull feed/TEEs; standard ~400 ms oracle and 2-5 ms paid Surge claims; reference values, not executable depth",
+      "provider": "Switchboard"
+    },
+    {
+      "category": "oracle",
+      "category_label": "Oracle",
+      "decision_note": "Use only after legal review: current terms retain data-feed rights and restrict scraping/competitive use. Native integration differs from commercial redistribution.",
+      "documented_rights_text": "Unknown",
+      "external_redistribution_evidence": "Not externally documented",
+      "lineage_group": "chronicle_aggregate; source identities/quality tier should remain attached",
+      "official_sources": "https://chroniclelabs.org/data|https://chroniclelabs.org/termsofuse|https://chroniclelabs.org/dashboard/oracle/ALUSD/USD",
+      "price_semantics": "Scribe onchain reference; dashboard labels market, fundamental or hybrid price type and risk tier; not executable depth",
+      "provider": "Chronicle"
+    },
+    {
+      "category": "commercial market-data partner",
+      "category_label": "Commercial Market-Data Partner",
+      "decision_note": "Best price-screen partner candidate for the client-used universe, but 11,472 symbols exceed advertised 10,000 WebSocket credits and commercial API redistribution/onchain publication remain quote and agreement gates. Default feed is not SIP/NBBO or executable full depth.",
+      "documented_rights_text": "Separate Redistribution Rights Add-On or written agreement required; full-market licensed access is quote required",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "twelve_data_default_us_venue_set or licensed_full_market_upstream; do not count the vendor and its component venues as independent without lineage",
+      "official_sources": "https://twelvedata.com/pricing-business|https://support.twelvedata.com/en/articles/9935903-us-equities-market-data|https://support.twelvedata.com/en/articles/5332349-commercial-and-personal-usage|https://twelvedata.com/terms",
+      "price_semantics": "Trade/quote/reference API data; default US feed is representative rather than consolidated full-market NBBO or L2 depth",
+      "provider": "Twelve Data Business / US Equities"
+    },
+    {
+      "category": "commercial market-data partner",
+      "category_label": "Commercial Market-Data Partner",
+      "decision_note": "Technically strong depth/replay partner, but current full US Equities price equals the assumed avoided subscription before extra rights. Use as benchmark for negotiations, not a demonstrated savings path.",
+      "documented_rights_text": "Plus advertises external distribution, subject to dataset/exchange licensing and actual questionnaire fees",
+      "external_redistribution_evidence": "Agreement or license required",
+      "lineage_group": "databento_dataset_plus_underlying_venues; a vendor composite is not independent from its licensed venue inputs",
+      "official_sources": "https://databento.com/pricing|https://databento.com/blog/updates-to-subscription-pricing|https://databento.com/docs/portal",
+      "price_semantics": "Dataset-dependent trades, MBP/L1-L3 books and historical replay; exact semantics depend on schema and licensed dataset",
+      "provider": "Databento US Equities"
+    },
+    {
+      "category": "managed RPC infrastructure",
+      "category_label": "Managed Rpc Infrastructure",
+      "decision_note": "Low-cost managed transport candidate for pilots. Select by measured request, log/archive, WebSocket, gRPC, storage and egress load; retain a second RPC for failover before production.",
+      "documented_rights_text": "Not a grant to redistribute upstream market data",
+      "external_redistribution_evidence": "Restricted / not granted",
+      "lineage_group": "quicknode_rpc_transport; preserve the underlying chain/protocol lineage",
+      "official_sources": "https://www.quicknode.com/pricing",
+      "price_semantics": "Transport for exact onchain state; RPC metadata is not a price",
+      "provider": "QuickNode"
+    },
+    {
+      "category": "managed RPC infrastructure",
+      "category_label": "Managed Rpc Infrastructure",
+      "decision_note": "Economical secondary or usage-based RPC candidate. Benchmark real method mix and Solana gRPC/egress before selecting; use independent transport for failover.",
+      "documented_rights_text": "Not a grant to redistribute upstream market data",
+      "external_redistribution_evidence": "Restricted / not granted",
+      "lineage_group": "alchemy_rpc_transport; preserve the underlying chain/protocol lineage",
+      "official_sources": "https://www.alchemy.com/pricing|https://www.alchemy.com/docs/reference/pricing-plans",
+      "price_semantics": "Transport for exact onchain state; RPC responses, balances and logs are not prices without a named pricing contract/pool simulation",
+      "provider": "Alchemy"
+    }
+  ],
+  "metrics": [
+    {
+      "distinct_lineage_groups": 34,
+      "externally_undocumented_redistribution": 25,
+      "internal_policy_rows": 24,
+      "internal_production_access_ready": 14,
+      "officially_researched_providers": 34
+    }
+  ]
+}

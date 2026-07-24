@@ -1,0 +1,1079 @@
+{
+  "generated_at": "2026-07-13T14:06:43.659285+00:00",
+  "inputs": {
+    "route_path": "reports/rwa_jupiter_route_allowlist.json",
+    "rpc_error": null,
+    "solana_rpc_configured": true
+  },
+  "policy": {
+    "promotion_rule": "Derived pool IDs and raw account hashes are replay evidence, but production still requires fee/tick/bin decoding plus live quality windows.",
+    "raw_payload_policy": "Account data is represented by hashes and metadata only; raw account bytes are not emitted in reports."
+  },
+  "pools": [
+    {
+      "active_bin": {
+        "data_length": 904,
+        "data_sha256": "bc4155fde617175c15b06ca75e9b825f6c409592fd53cca24149c6a1f654ff7b",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "allowlist_id": "dex:meteora_dlmm:USDY:USDC",
+      "asset_id": "USDY",
+      "base_mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093625,
+        432093626,
+        432093627
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 904,
+        "data_sha256": "bc4155fde617175c15b06ca75e9b825f6c409592fd53cca24149c6a1f654ff7b",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 7182725,
+        "owner": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "2gG6bGNZkg8PUiDjkvhNvCZNY6b58zDpTCMjF6UDg8zc",
+      "quote_asset": "USDC",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Meteora DLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:USDY:USDC"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "USDY/USDC",
+      "tick_arrays": null,
+      "tick_or_curve_state": null,
+      "venue": "meteora_dlmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:AAPLX:USD",
+      "asset_id": "AAPL",
+      "base_mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093524
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "05fcf1dc87ae860b7bb03d33fa3f59fc8dcd6627daed93a553785a85bc472227",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 3167034179,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:AAPLX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "AAPLX/USD",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "05fcf1dc87ae860b7bb03d33fa3f59fc8dcd6627daed93a553785a85bc472227",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:EURC:USDC",
+      "asset_id": "EURC",
+      "base_mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093542,
+        432093546
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "968fd91175dd38c711927fc4636a79e6b91aee8ced96cbf53ed9db2b784d6044",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5590032,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i",
+      "quote_asset": "USDC",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:EURC:USDC"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "EURC/USDC",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "968fd91175dd38c711927fc4636a79e6b91aee8ced96cbf53ed9db2b784d6044",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "ArisQNcbjXPJD7RgPRvysatX3xcfHPTbcTkfD8kDoZ9i"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:NVDAX:USD",
+      "asset_id": "NVDA",
+      "base_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093569,
+        432093573,
+        432093574
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "5633c8c1591270ee9e65a2dec3e3ece6dfe191628c13573676c30979f935cfc1",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5457138,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:NVDAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "NVDAX/USD",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "5633c8c1591270ee9e65a2dec3e3ece6dfe191628c13573676c30979f935cfc1",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "6R4r93V5fcMzc13CL2enEepDSYcr4Qx3ptZBDwudTXCo"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:SPYX:USD",
+      "asset_id": "SPY",
+      "base_mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093598
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "31fd59109149d0038152a20ab7cfa0f23b8717bac32e4fd115badc420a165781",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5456090,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "Fae5dWVntUt6zbWu2voXxioDpMii7SqQwtsxBmoVCsHR",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:SPYX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "SPYX/USD",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "31fd59109149d0038152a20ab7cfa0f23b8717bac32e4fd115badc420a165781",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "Fae5dWVntUt6zbWu2voXxioDpMii7SqQwtsxBmoVCsHR"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:SPYX:USD",
+      "asset_id": "SPY",
+      "base_mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093597,
+        432093598
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "45521b3a88cdb85cc8c865fc48082ab9bac11ecd2d127baceec69104e4f5f5fb",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5436760,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "gef4pD5g6GJSjX7hfXKUfhCVpE89BzX9TXnXJNW6kSt",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:SPYX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "SPYX/USD",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "45521b3a88cdb85cc8c865fc48082ab9bac11ecd2d127baceec69104e4f5f5fb",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "gef4pD5g6GJSjX7hfXKUfhCVpE89BzX9TXnXJNW6kSt"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:TSLAX:USD",
+      "asset_id": "TSLA",
+      "base_mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093619,
+        432093622,
+        432093623
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "f973423019f0870cc86ed2b446f2440c98a89050efc8e72eb1f5fec93c81672c",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5457178,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "9p7abUFv31ycgu9kckvnoqMMvBy67dqTDM2m6HP9xokN",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:TSLAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "TSLAX/USD",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "f973423019f0870cc86ed2b446f2440c98a89050efc8e72eb1f5fec93c81672c",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "9p7abUFv31ycgu9kckvnoqMMvBy67dqTDM2m6HP9xokN"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:orca_whirlpool:USDY:USDC",
+      "asset_id": "USDY",
+      "base_mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093626,
+        432093627
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 653,
+        "data_sha256": "7185d755ca7ceb29d8e015d5116c193734b244da93df00141d4e51a1f3b3b64a",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 5435768,
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "AGXrswVDRoUf62UX9voTXv6TCGw6fBUEwDpyUd9YdZfD",
+      "quote_asset": "USDC",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Whirlpool"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:USDY:USDC"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "USDY/USDC",
+      "tick_arrays": {
+        "data_length": 653,
+        "data_sha256": "7185d755ca7ceb29d8e015d5116c193734b244da93df00141d4e51a1f3b3b64a",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "tick_or_curve_state": null,
+      "venue": "orca_whirlpool",
+      "whirlpool_address": "AGXrswVDRoUf62UX9voTXv6TCGw6fBUEwDpyUd9YdZfD"
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:AAPLX:USD",
+      "asset_id": "AAPL",
+      "base_mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093521,
+        432093524
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "e8163db34eac7a232a730ff67eff0df6a83bb16e03b121ea52d3ad51c4a994e2",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11652135,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "CKwJZwm7oj3nu4653N1EpDrqXbXAYXoPFiPeEnLouF8y",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:AAPLX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "AAPLX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "e8163db34eac7a232a730ff67eff0df6a83bb16e03b121ea52d3ad51c4a994e2",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:AMZNX:USD",
+      "asset_id": "AMZN",
+      "base_mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093527,
+        432093539,
+        432093540
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "f23d7efa47633c621275d935db473c52b04573da7caff4f9c74ad66f1f2122a5",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11647332,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "6m5aXAve4uh6Kt4ytKyCLWNMjd8PYP5vujwNCtycrUiD",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:AMZNX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "AMZNX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "f23d7efa47633c621275d935db473c52b04573da7caff4f9c74ad66f1f2122a5",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:EURC:USDC",
+      "asset_id": "EURC",
+      "base_mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093546
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "c0994b6dd1f4c544a43aa3d9529fa6daa5c7fea0b7d83567fd9b3023357c08da",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11737287,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "2zVV22uNWdJNmkXpj5vCrMzwHGBoJdsyV7qACh29sK1w",
+      "quote_asset": "USDC",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:EURC:USDC"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "EURC/USDC",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "c0994b6dd1f4c544a43aa3d9529fa6daa5c7fea0b7d83567fd9b3023357c08da",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:METAX:USD",
+      "asset_id": "META",
+      "base_mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093549,
+        432093552,
+        432093555
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "1614f913fafff7fcfc47602773646d593342dd94987ce165b6fdffccd80716cb",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11658179,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "3L7KbPVaAQA4UTecaGQYsm6UCq5F3sZM9zAYkxqYt63j",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:METAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "METAX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "1614f913fafff7fcfc47602773646d593342dd94987ce165b6fdffccd80716cb",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:MSFTX:USD",
+      "asset_id": "MSFT",
+      "base_mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093565,
+        432093566,
+        432093567
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "b2d6812c8ef512d3061916a8bd34e88913d1a7928d5b372dbb620d386d2d967f",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11647205,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "CLu4kFM4nb67xrdN7vJnMxXXir8Z5hA4HJUzPFccXjsL",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:MSFTX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "MSFTX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "b2d6812c8ef512d3061916a8bd34e88913d1a7928d5b372dbb620d386d2d967f",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:MSFTX:USD",
+      "asset_id": "MSFT",
+      "base_mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093565,
+        432093567
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "ecf59c0fde709f74ec9a82e2360733640eea46b58636251116b3992a1398f544",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11637120,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "HrkeM8zFLiLp7ShhZKkM3b6Tvt8Aq2AKFcCvxRnfwKaq",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:MSFTX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "MSFTX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "ecf59c0fde709f74ec9a82e2360733640eea46b58636251116b3992a1398f544",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:NVDAX:USD",
+      "asset_id": "NVDA",
+      "base_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093574
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "6bea561bf1907c786d7cd8a4a3df54ffe75e6f1a50f4bb4c258e16396e7273fe",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11647124,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "49iMatQtoyabsYAQc8GafVq6aeBFVDxSRH44oiatyyw6",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:NVDAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "NVDAX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "6bea561bf1907c786d7cd8a4a3df54ffe75e6f1a50f4bb4c258e16396e7273fe",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:NVDAX:USD",
+      "asset_id": "NVDA",
+      "base_mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093573
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "bc10bf64c88b479f8d849164bd3820e02f5d2702095e74eff19b251d24c328e6",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11638120,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "GH5Jo3dRwkg6bYZcC7oPPrVRFu7KexBL7ncdgqVqGtnz",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:NVDAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "NVDAX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "bc10bf64c88b479f8d849164bd3820e02f5d2702095e74eff19b251d24c328e6",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:QQQX:USD",
+      "asset_id": "QQQ",
+      "base_mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093594
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "8df72c9f54343b0242626cb1fe1c9563d08195c2b2799f33239b6d17ca30a005",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11638120,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "EibwWLHyuFeqgU6fvi6g5FtDLF9kQsQL5HQXvcJNkDN8",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:QQQX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "QQQX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "8df72c9f54343b0242626cb1fe1c9563d08195c2b2799f33239b6d17ca30a005",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:QQQX:USD",
+      "asset_id": "QQQ",
+      "base_mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093594,
+        432093595
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "d0e7f076ec280096f71bbf402c091daaed3755635071a0232ae7a779625075b7",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11648123,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "FknDV1F5n6QaA7rLmjquDjuU6wcPMNm5RYq7zWbqhpZw",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:QQQX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "QQQX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "d0e7f076ec280096f71bbf402c091daaed3755635071a0232ae7a779625075b7",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:QQQX:USD",
+      "asset_id": "QQQ",
+      "base_mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093578,
+        432093594,
+        432093595
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "2ba1459535548e7b76785912ab2df979fd7dac0705646c2f6de8c95c35b22706",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11637122,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "GMjGLWzvK75LPetrgAmdeXnvxc4fUuQPwJxeQqTDU1aG",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:QQQX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "QQQX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "2ba1459535548e7b76785912ab2df979fd7dac0705646c2f6de8c95c35b22706",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:SPYX:USD",
+      "asset_id": "SPY",
+      "base_mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093597,
+        432093598
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "1585fc9382e1f44261fe92063c21ece79cd5fc4aacec00b68276ec87737d0c4b",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11638132,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "4pCZCVEiYyT4efNdXUdL2tJF8VGMgiMXrZWq6FiNXhRw",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:SPYX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "SPYX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "1585fc9382e1f44261fe92063c21ece79cd5fc4aacec00b68276ec87737d0c4b",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    },
+    {
+      "active_bin": null,
+      "allowlist_id": "dex:raydium_clmm:TSLAX:USD",
+      "asset_id": "TSLA",
+      "base_mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "chain": "solana",
+      "chain_id": "solana-mainnet",
+      "context_slots": [
+        432093619
+      ],
+      "fee_tier": null,
+      "fee_tier_status": "not_exposed_by_jupiter_route_plan",
+      "pool_account_state": {
+        "data_length": 1544,
+        "data_sha256": "dbac7a287cca6c23ed5e129529f7641c0b1a15e126bc557d0c7ffe23ac4a247a",
+        "encoding": "base64_hash_only",
+        "executable": false,
+        "lamports": 11648275,
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "rent_epoch": 18446744073709551615,
+        "slot": 432657777,
+        "status": "account_state_captured"
+      },
+      "pool_id": "HHQUnUbmWLrYzkscDY1C3deEFbGtiGBGoHjpANogmvum",
+      "quote_asset": "USD",
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "raw_payload_artifact": "reports/rwa_jupiter_route_allowlist.json",
+      "review_status": "pool_account_state_ready_pending_fee_and_tick_state_decode",
+      "route_labels": [
+        "Raydium CLMM"
+      ],
+      "route_plan_sources": [
+        "dex:jupiter_router:TSLAX:USD"
+      ],
+      "slot": 432657777,
+      "source": "derived_from_jupiter_route_plan",
+      "symbol": "TSLAX/USD",
+      "tick_arrays": null,
+      "tick_or_curve_state": {
+        "data_length": 1544,
+        "data_sha256": "dbac7a287cca6c23ed5e129529f7641c0b1a15e126bc557d0c7ffe23ac4a247a",
+        "decode_status": "raw_account_captured_pending_pool_decoder",
+        "owner": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+        "slot": 432657777,
+        "state_kind": "raw_pool_account_hash"
+      },
+      "venue": "raydium_clmm",
+      "whirlpool_address": null
+    }
+  ],
+  "product": "rwa_solana_pool_allowlist",
+  "summary": {
+    "by_status": {
+      "pool_account_state_ready_pending_fee_and_tick_state_decode": 21
+    },
+    "by_venue": {
+      "meteora_dlmm": 1,
+      "orca_whirlpool": 7,
+      "raydium_clmm": 13
+    },
+    "fee_tiers_missing": 21,
+    "missing_rpc_state": 0,
+    "pool_count": 21,
+    "rpc_state_captured": 21
+  }
+}

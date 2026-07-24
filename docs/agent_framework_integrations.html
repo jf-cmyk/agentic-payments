@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent framework integrations | Blocksize</title>
+  <meta name="description" content="Use live Blocksize market data in LangChain, LlamaIndex, Vercel AI SDK, OpenAI Agents SDK, GOAT, and Solana Agent Kit." />
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #071018; color: #eaf5f7; }
+    body { margin: 0; background: radial-gradient(circle at 80% 0%, #123446 0, #071018 42%); }
+    main { max-width: 1080px; margin: 0 auto; padding: 64px 24px 80px; }
+    a { color: #82e6dc; }
+    .eyebrow { color: #82e6dc; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { max-width: 780px; margin: 16px 0; font-size: clamp(38px, 6vw, 68px); line-height: 1.02; }
+    .lede { max-width: 760px; color: #b8cbd0; font-size: 19px; line-height: 1.65; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 28px 0 48px; }
+    .button { display: inline-block; border-radius: 10px; padding: 12px 18px; text-decoration: none; font-weight: 700; background: #82e6dc; color: #071018; }
+    .button.secondary { background: transparent; color: #eaf5f7; border: 1px solid #31515b; }
+    h2 { margin-top: 48px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    article { padding: 22px; border: 1px solid #24424d; border-radius: 14px; background: rgba(12, 31, 42, .82); }
+    article h3 { margin: 0 0 8px; }
+    article p { color: #b8cbd0; line-height: 1.55; }
+    code { color: #c7fff9; overflow-wrap: anywhere; }
+    .flow { margin-top: 48px; padding: 24px; border-left: 3px solid #82e6dc; background: #0c1f2a; }
+    .flow ol { line-height: 1.8; }
+    footer { margin-top: 56px; color: #8ca6ad; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">Blocksize for AI agents</div>
+    <h1>One market-data surface. Six supported agent frameworks.</h1>
+    <p class="lede">Use production Blocksize market data as read-only tools in LangChain, LlamaIndex, Vercel AI SDK, OpenAI Agents SDK, GOAT, and Solana Agent Kit. Each implementation preserves timestamps and provenance, uses a stable agent identity, and handles x402 explicitly.</p>
+    <div class="actions">
+      <a class="button" href="/quickstart/first-price">Get a first live price</a>
+      <a class="button secondary" href="/openapi.json">OpenAPI specification</a>
+    </div>
+    <h2>Choose your framework</h2>
+    <section class="grid">
+      <article><h3>LangChain</h3><p>Current <code>@tool</code> integration for VWAP and bid/ask requests.</p><code>integrations/langchain/blocksize_tool.py</code></article>
+      <article><h3>LlamaIndex</h3><p><code>FunctionTool</code> wrappers ready to add to an agent.</p><code>integrations/llamaindex/blocksize_tool.py</code></article>
+      <article><h3>OpenAI Agents SDK</h3><p>Typed <code>@function_tool</code> wrappers for production price calls.</p><code>integrations/openai_agents/blocksize_tool.py</code></article>
+      <article><h3>Vercel AI SDK</h3><p>Vercel-compatible tools with Zod input schemas and typed results.</p><code>integrations/vercel-ai-sdk/blocksize-tool.ts</code></article>
+      <article><h3>GOAT</h3><p>A <code>PluginBase</code> implementation using GOAT's current decorator pattern.</p><code>integrations/goat/blocksize.plugin.ts</code></article>
+      <article><h3>Solana Agent Kit</h3><p>Blocksize tools merged with Solana Agent Kit's Vercel AI tool set.</p><code>integrations/solana-agent-kit/blocksize-tools.ts</code></article>
+    </section>
+    <section class="flow">
+      <h2>Activation path</h2>
+      <ol>
+        <li>Use a stable <code>BLOCKSIZE_AGENT_ID</code>.</li>
+        <li>Request a live price with the starter allowance.</li>
+        <li>Inspect the source, timestamp, and provenance in the response.</li>
+        <li>On HTTP 402, pass the original x402 challenge to the payment flow or top up.</li>
+      </ol>
+    </section>
+    <footer>Implementation-ready examples are validated in the Blocksize repository. External framework marketplace publication is tracked separately.</footer>
+  </main>
+</body>
+</html>

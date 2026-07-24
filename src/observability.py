@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -23,6 +24,8 @@ REGISTRY_ENDPOINTS = {
     "/openapi.json": "openapi",
 }
 
+SYMBOL_OPPORTUNITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,31}$")
+
 
 def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -34,6 +37,20 @@ def fingerprint(value: str | None, *, salt_env: str = "OBSERVABILITY_HASH_SALT")
         return None
     salt = os.environ.get(salt_env, "blocksize-agentic-payments-observability")
     return hashlib.sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
+
+
+def normalize_symbol_opportunity(value: str | None) -> str | None:
+    """Return a bounded symbol-like query suitable for demand aggregation."""
+    if not value:
+        return None
+    clean = value.strip()
+    if not SYMBOL_OPPORTUNITY_RE.fullmatch(clean):
+        return None
+    # Keep market pairs such as BTC-USD, BTC/USD and BRK.B while rejecting
+    # prose-like slugs such as DATA-API-FOR-AI from the sourcing backlog.
+    if len(re.split(r"[-/:]", clean)) > 2:
+        return None
+    return clean.upper()
 
 
 def registry_name_for_path(path: str) -> str | None:
@@ -120,10 +137,60 @@ class UsageEventStore:
                 ON usage_events(surface)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS marketplace_metric_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    platform_id TEXT NOT NULL,
+                    source_url TEXT,
+                    status TEXT DEFAULT 'ok',
+                    metrics_json TEXT DEFAULT '{}'
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_marketplace_metrics_timestamp
+                ON marketplace_metric_snapshots(timestamp)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_marketplace_metrics_platform
+                ON marketplace_metric_snapshots(platform_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS event_milestones (
+                    event TEXT NOT NULL,
+                    identity_hash TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    PRIMARY KEY (event, identity_hash)
+                )
+                """
+            )
 
     def clear(self) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM usage_events")
+            conn.execute("DELETE FROM marketplace_metric_snapshots")
+            conn.execute("DELETE FROM event_milestones")
+
+    def claim_milestone(self, event: str, identity_hash: str) -> bool:
+        """Atomically claim a once-per-identity event milestone."""
+        if not event or not identity_hash:
+            return False
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO event_milestones (event, identity_hash, timestamp)
+                VALUES (?, ?, ?)
+                """,
+                (event, identity_hash, utc_now_iso()),
+            )
+        return cursor.rowcount == 1
 
     def record(
         self,
@@ -181,6 +248,58 @@ class UsageEventStore:
                 ),
             )
 
+    def record_marketplace_metrics(
+        self,
+        *,
+        platform_id: str,
+        metrics: dict[str, Any],
+        source_url: str | None = None,
+        status: str = "ok",
+    ) -> None:
+        metrics_json = json.dumps(metrics or {}, sort_keys=True, default=str)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO marketplace_metric_snapshots (
+                    timestamp, platform_id, source_url, status, metrics_json
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (utc_now_iso(), platform_id, source_url, status, metrics_json),
+            )
+
+    def marketplace_metrics_summary(self, *, days: int = 30) -> dict[str, Any]:
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, platform_id, source_url, status, metrics_json
+                FROM marketplace_metric_snapshots
+                WHERE timestamp >= ?
+                ORDER BY timestamp DESC, id DESC
+                """,
+                (cutoff.isoformat(),),
+            ).fetchall()
+
+        snapshots = []
+        latest_by_platform: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            data = dict(row)
+            try:
+                data["metrics"] = json.loads(data.pop("metrics_json") or "{}")
+            except json.JSONDecodeError:
+                data["metrics"] = {}
+            snapshots.append(data)
+            latest_by_platform.setdefault(str(data["platform_id"]), data)
+
+        return {
+            "window_days": days,
+            "total_snapshots": len(snapshots),
+            "platforms_configured": sorted(latest_by_platform),
+            "latest_by_platform": latest_by_platform,
+            "recent_snapshots": snapshots[:50],
+        }
+
     def recent_events(self, *, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -223,21 +342,26 @@ class UsageEventStore:
             event.get("wallet_hash")
             for event in events
             if event.get("wallet_hash")
-            and event["event"] in {"payment_verified", "credit_drawdown_success", "bulk_credit_claimed"}
+            and event["event"]
+            in {
+                "payment_verified",
+                "credit_drawdown_success",
+                "data_delivered",
+                "bulk_credit_claimed",
+            }
         }
 
         paid_call_events = {
-            "payment_verified",
-            "credit_drawdown_success",
+            "data_delivered",
             "mcp_credit_drawdown_success",
         }
         called_data_events = {
             "free_discovery_call",
             "mcp_tool_call",
             "payment_required",
-            "payment_verified",
-            "credit_drawdown_success",
             "mcp_credit_drawdown_success",
+            "data_delivered",
+            "charged_delivery_failed",
         }
         revenue_events = {"payment_verified", "bulk_credit_claimed"}
         paid_calls = sum(1 for event in events if event["event"] in paid_call_events)
@@ -285,7 +409,13 @@ class UsageEventStore:
         failure_reasons = Counter(
             event.get("reason") or "unknown"
             for event in events
-            if event["event"] in {"payment_failed", "credit_drawdown_failed", "mcp_tool_error"}
+            if event["event"]
+            in {
+                "payment_failed",
+                "credit_drawdown_failed",
+                "mcp_tool_error",
+                "charged_delivery_failed",
+            }
         )
         top_subjects = Counter(
             event.get("subject") or "unknown"
@@ -319,6 +449,11 @@ class UsageEventStore:
             if event.get("ip_hash") and event["event"] == "http_request"
         )
         data_called = self._data_called(events, called_data_events)
+        popularity = self._popularity(events)
+        growth_funnel = self._growth_funnel(events)
+        reliability = self._reliability_summary(events)
+        evidence = self._source_evidence(events)
+        unsupported_symbol_opportunities = self._unsupported_symbol_opportunities(events)
         most_used_service = service_mix.most_common(1)[0][0] if service_mix else None
 
         timeline = self._timeline(events, days)
@@ -336,7 +471,15 @@ class UsageEventStore:
                 "mcp_tool_calls": event_counts["mcp_tool_call"],
                 "registry_requests": event_counts["registry_request"],
                 "free_discovery_calls": event_counts["free_discovery_call"],
+                "first_live_price_deliveries": event_counts["first_live_price_delivered"],
+                "unsupported_symbol_requests": event_counts["unsupported_symbol_request"],
                 "http_error_rate": self._error_rate(events),
+                "http_error_rate_excluding_payment_required": self._error_rate(
+                    events,
+                    exclude_status_codes={402},
+                ),
+                "server_error_rate": reliability["server_error_rate"],
+                "post_credit_failure_rate": reliability["post_credit_failure_rate"],
                 "avg_latency_ms": round(mean(latencies), 2) if latencies else None,
                 "p95_latency_ms": self._percentile(latencies, 95),
                 "most_used_service": most_used_service,
@@ -356,6 +499,12 @@ class UsageEventStore:
             "user_agent_mix": dict(user_agent_mix.most_common(20)),
             "client_fingerprint_mix": dict(client_fingerprint_mix.most_common(20)),
             "data_called": data_called,
+            "popularity": popularity,
+            "growth_funnel": growth_funnel,
+            "reliability": reliability,
+            "source_evidence": evidence,
+            "unsupported_symbol_opportunities": unsupported_symbol_opportunities,
+            "marketplace_metrics": self.marketplace_metrics_summary(days=days),
             "failure_reasons": dict(failure_reasons.most_common(10)),
             "top_subjects": dict(top_subjects.most_common(20)),
             "timeline": timeline,
@@ -363,7 +512,279 @@ class UsageEventStore:
             "notes": [
                 "Client IPs, wallets, and payment proofs are stored only as salted hashes.",
                 "Credit drawdown calls count as paid product usage; revenue is counted when direct x402 payment or bulk credit purchase is verified.",
+                "First-live-price activation is counted once per privacy-safe explicit user, agent, wallet, device, or session identity.",
+                "Growth-funnel identity attribution uses salted identity hashes or wallet hashes; IP fingerprints are never used as funnel identities.",
+                "Unsupported-symbol opportunities include only bounded symbol-like searches with zero results; arbitrary free text is excluded.",
+                "Server reliability is measured from HTTP 5xx responses and charged-delivery failures; expected payment, auth, rate-limit, and client/protocol responses are reported separately.",
             ],
+        }
+
+    @staticmethod
+    def _reliability_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Separate server failures from expected payment and client/protocol responses."""
+        http_events = [event for event in events if event.get("event") == "http_request"]
+        status_counts = Counter(int(event.get("status_code") or 0) for event in http_events)
+        total = len(http_events)
+        server_errors = sum(count for status, count in status_counts.items() if status >= 500)
+        payment_required = status_counts[402]
+        auth_required = status_counts[401] + status_counts[403]
+        rate_limited = status_counts[429]
+        client_protocol_statuses = {400, 404, 405, 406, 416, 422}
+        client_protocol = sum(status_counts[status] for status in client_protocol_statuses)
+        other_http_errors = sum(
+            count
+            for status, count in status_counts.items()
+            if 400 <= status < 500
+            and status not in client_protocol_statuses | {401, 402, 403, 429}
+        )
+        successful_http = sum(count for status, count in status_counts.items() if 200 <= status < 400)
+        http_delivery_failures = sum(
+            1 for event in events if event.get("event") == "charged_delivery_failed"
+        )
+        http_delivery_successes = sum(
+            1 for event in events if event.get("event") == "data_delivered"
+        )
+        mcp_drawdowns = sum(
+            1 for event in events if event.get("event") == "mcp_credit_drawdown_success"
+        )
+        mcp_delivery_failures = sum(
+            1 for event in events if event.get("event") == "mcp_tool_error"
+        )
+        # MCP drawdown success is recorded before the provider call, so a later
+        # tool error converts that attempt into a failure instead of creating a
+        # second delivery attempt.
+        mcp_delivery_successes = max(0, mcp_drawdowns - mcp_delivery_failures)
+        charged_delivery_failures = http_delivery_failures + mcp_delivery_failures
+        charged_delivery_successes = http_delivery_successes + mcp_delivery_successes
+        charged_delivery_attempts = charged_delivery_successes + charged_delivery_failures
+        return {
+            "http_requests": total,
+            "successful_http_responses": successful_http,
+            "payment_required_responses": payment_required,
+            "auth_required_responses": auth_required,
+            "rate_limited_responses": rate_limited,
+            "client_protocol_responses": client_protocol,
+            "other_http_errors": other_http_errors,
+            "server_errors": server_errors,
+            "server_error_rate": round(server_errors / total, 6) if total else None,
+            "charged_delivery_successes": charged_delivery_successes,
+            "charged_delivery_failures": charged_delivery_failures,
+            "post_credit_failure_rate": (
+                round(charged_delivery_failures / charged_delivery_attempts, 6)
+                if charged_delivery_attempts
+                else None
+            ),
+            "definitions": {
+                "server_error_rate": "HTTP 5xx responses divided by all HTTP requests.",
+                "post_credit_failure_rate": "Charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries.",
+                "client_protocol_responses": "HTTP 400, 404, 405, 406, 416 and 422 responses; visible for diagnosis but excluded from the server-error KPI.",
+            },
+        }
+
+    @staticmethod
+    def _growth_identity(event: dict[str, Any]) -> str | None:
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        identity_hash = str(metadata.get("identity_hash") or "").strip()
+        if identity_hash:
+            return identity_hash
+        wallet_hash = str(event.get("wallet_hash") or "").strip()
+        if wallet_hash:
+            return wallet_hash
+        return None
+
+    @staticmethod
+    def _event_time(event: dict[str, Any]) -> datetime | None:
+        value = str(event.get("timestamp") or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @classmethod
+    def _growth_funnel(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build privacy-safe activation, retention, and monetization cohorts."""
+        eligible_event_names = {
+            "free_discovery_call",
+            "mcp_tool_call",
+            "payment_required",
+            "credit_drawdown_success",
+        }
+        delivery_event_names = {"data_delivered", "mcp_credit_drawdown_success"}
+        conversion_event_names = {"payment_verified", "bulk_credit_claimed"}
+
+        eligible_first_seen: dict[str, datetime] = {}
+        activations: dict[str, datetime] = {}
+        activation_modes: dict[str, str] = {}
+        deliveries: dict[str, list[datetime]] = {}
+        conversions: dict[str, list[datetime]] = {}
+        exhausted: set[str] = set()
+        activation_events = 0
+
+        for event in events:
+            event_name = str(event.get("event") or "")
+            event_time = cls._event_time(event)
+            identity = cls._growth_identity(event)
+            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+            if event_name == "first_live_price_delivered":
+                activation_events += 1
+            if identity is None or event_time is None:
+                continue
+            if event_name in eligible_event_names:
+                eligible_first_seen.setdefault(identity, event_time)
+            if event_name == "first_live_price_delivered":
+                activations.setdefault(identity, event_time)
+                activation_modes.setdefault(identity, str(metadata.get("payment_mode") or "unknown"))
+            if event_name in delivery_event_names:
+                deliveries.setdefault(identity, []).append(event_time)
+            if event_name in conversion_event_names:
+                conversions.setdefault(identity, []).append(event_time)
+            if (
+                event_name == "credit_drawdown_failed"
+                and str(event.get("reason") or "") == "insufficient_credits"
+                and float(metadata.get("credits_remaining") or 0) <= 0
+            ):
+                exhausted.add(identity)
+
+        activated_identities = set(activations)
+        eligible_identities = set(eligible_first_seen) | activated_identities
+        activation_rate = (
+            len(activated_identities) / len(eligible_identities)
+            if eligible_identities
+            else None
+        )
+
+        time_to_value_seconds: list[float] = []
+        for identity, activated_at in activations.items():
+            started_at = eligible_first_seen.get(identity)
+            if started_at is not None and started_at <= activated_at:
+                time_to_value_seconds.append((activated_at - started_at).total_seconds())
+        within_three_minutes = sum(value <= 180 for value in time_to_value_seconds)
+        within_three_minutes_rate = (
+            within_three_minutes / len(time_to_value_seconds)
+            if time_to_value_seconds
+            else None
+        )
+
+        observed_at = datetime.now(UTC)
+        matured_activations = {
+            identity
+            for identity, activated_at in activations.items()
+            if activated_at <= observed_at - timedelta(days=7)
+        }
+        repeated_within_seven_days = {
+            identity
+            for identity in matured_activations
+            if sum(
+                activations[identity] <= delivered_at <= activations[identity] + timedelta(days=7)
+                for delivered_at in deliveries.get(identity, [])
+            ) >= 2
+        }
+        repeat_rate = (
+            len(repeated_within_seven_days) / len(matured_activations)
+            if matured_activations
+            else None
+        )
+
+        starter_activated = {
+            identity
+            for identity, mode in activation_modes.items()
+            if mode == "starter_credit"
+        }
+        starter_converted = {
+            identity
+            for identity in starter_activated
+            if any(converted_at >= activations[identity] for converted_at in conversions.get(identity, []))
+        }
+        starter_to_paid_rate = (
+            len(starter_converted) / len(starter_activated)
+            if starter_activated
+            else None
+        )
+
+        median_time_to_value = None
+        if time_to_value_seconds:
+            ordered = sorted(time_to_value_seconds)
+            midpoint = len(ordered) // 2
+            median_time_to_value = (
+                ordered[midpoint]
+                if len(ordered) % 2
+                else (ordered[midpoint - 1] + ordered[midpoint]) / 2
+            )
+
+        return {
+            "summary": {
+                "eligible_identities": len(eligible_identities),
+                "activated_identities": len(activated_identities),
+                "activation_rate": activation_rate,
+                "activation_events": activation_events,
+                "unattributed_activation_events": max(0, activation_events - len(activated_identities)),
+                "median_time_to_first_live_price_seconds": median_time_to_value,
+                "first_live_price_within_3m_rate": within_three_minutes_rate,
+                "repeat_7d_eligible_identities": len(matured_activations),
+                "repeat_7d_identities": len(repeated_within_seven_days),
+                "repeat_7d_rate": repeat_rate,
+                "starter_activated_identities": len(starter_activated),
+                "starter_to_paid_identities": len(starter_converted),
+                "starter_to_paid_rate": starter_to_paid_rate,
+                "credits_exhausted_identities": len(exhausted),
+            },
+            "stages": [
+                {"stage": "Eligible explicit identities", "identities": len(eligible_identities)},
+                {"stage": "First live price", "identities": len(activated_identities)},
+                {"stage": "Repeated within 7 days", "identities": len(repeated_within_seven_days)},
+                {"stage": "Converted after starter", "identities": len(starter_converted)},
+            ],
+            "targets": {
+                "first_live_price_within_3m_rate": 0.5,
+                "repeat_7d_rate": 0.25,
+                "starter_to_paid_rate": 0.05,
+            },
+            "definitions": {
+                "eligible_identity": "Salted explicit user, agent, wallet, device, or session identity observed in discovery, MCP use, a payment prompt, or credit drawdown.",
+                "activation": "First successfully delivered live price, recorded once per explicit identity.",
+                "repeat_7d": "At least two successful paid or starter-credit delivery events during the seven days beginning at activation; only mature seven-day cohorts enter the denominator.",
+                "starter_to_paid": "Starter-credit activated identity later observed with a verified x402 payment or claimed prepaid credit purchase in the selected window.",
+                "measurement_boundary": "Rates include attributable explicit identities observed inside the selected dashboard window; legacy events without identity attribution remain visible as unattributed activation events.",
+            },
+        }
+
+    @staticmethod
+    def _unsupported_symbol_opportunities(events: list[dict[str, Any]]) -> dict[str, Any]:
+        rows: dict[tuple[str, str], dict[str, Any]] = {}
+        for event in events:
+            if event.get("event") != "unsupported_symbol_request":
+                continue
+            subject = normalize_symbol_opportunity(str(event.get("subject") or ""))
+            if subject is None:
+                continue
+            asset_class = str(event.get("asset_class") or "all")
+            key = (subject, asset_class)
+            row = rows.setdefault(
+                key,
+                {
+                    "symbol": subject,
+                    "asset_class": asset_class,
+                    "request_count": 0,
+                    "surfaces": set(),
+                    "first_seen": event.get("timestamp"),
+                    "last_seen": event.get("timestamp"),
+                },
+            )
+            row["request_count"] += 1
+            row["surfaces"].add(str(event.get("surface") or "unknown"))
+            row["last_seen"] = event.get("timestamp")
+
+        ranked = []
+        for row in rows.values():
+            ranked.append({**row, "surfaces": sorted(row["surfaces"])})
+        ranked.sort(key=lambda row: (-row["request_count"], row["symbol"], row["asset_class"]))
+        return {
+            "total_requests": sum(row["request_count"] for row in ranked),
+            "unique_symbol_asset_class_pairs": len(ranked),
+            "rows": ranked[:100],
         }
 
     @staticmethod
@@ -442,7 +863,10 @@ class UsageEventStore:
                 "pay.sh",
                 "pay-sh",
                 "paysh",
+                "pay-skills",
+                "solana-foundation/pay-skills",
                 "smithery",
+                "x402scan",
                 "modelcontextprotocol",
                 "mcp-registry",
                 "awesome-mcp",
@@ -456,8 +880,12 @@ class UsageEventStore:
             return "Glama"
         if "pay.sh" in haystack or "pay-sh" in haystack or "paysh" in haystack:
             return "Pay.sh"
+        if "pay-skills" in haystack or "solana-foundation/pay-skills" in haystack:
+            return "Pay.sh"
         if "smithery" in haystack:
             return "Smithery"
+        if "x402scan" in haystack:
+            return "x402scan"
         if "awesome-mcp" in haystack:
             return "Awesome MCP"
         if "modelcontextprotocol" in haystack or "mcp-registry" in haystack:
@@ -491,7 +919,10 @@ class UsageEventStore:
                 "pay.sh",
                 "pay-sh",
                 "paysh",
+                "pay-skills",
+                "solana-foundation/pay-skills",
                 "smithery",
+                "x402scan",
                 "modelcontextprotocol",
                 "mcp-registry",
                 "awesome-mcp",
@@ -570,12 +1001,16 @@ class UsageEventStore:
                 row["payment_prompted"] = True
                 row["prompt_price_usdc"] = float(event.get("price_usdc") or 0.0)
             if event["event"] in {
-                "payment_verified",
-                "credit_drawdown_success",
+                "data_delivered",
                 "mcp_credit_drawdown_success",
             }:
                 row["paid_successes"] += 1
-            if event["event"] == "payment_verified":
+            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+            if (
+                event["event"] == "data_delivered"
+                and metadata.get("payment_mode") == "x402"
+                and event.get("price_usdc") is not None
+            ):
                 row["revenue_usdc"] += float(event.get("price_usdc") or 0.0)
 
         rows = list(grouped.values())
@@ -586,14 +1021,223 @@ class UsageEventStore:
         rows.sort(key=lambda row: (-int(row["calls"]), row["service"], row["subject"]))
         return rows[:50]
 
+    @classmethod
+    def _popularity(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+        request_events = {
+            "free_discovery_call",
+            "mcp_tool_call",
+            "payment_required",
+            "mcp_credit_drawdown_success",
+            "data_delivered",
+        }
+        delivered_events = {
+            "data_delivered",
+            "mcp_credit_drawdown_success",
+        }
+        blocked_events = {
+            "payment_required",
+            "credit_drawdown_failed",
+            "mcp_credit_drawdown_failed",
+            "payment_failed",
+        }
+        failed_after_credit_events = {"mcp_tool_error", "charged_delivery_failed"}
+
+        for event in events:
+            event_name = str(event.get("event") or "")
+            if event_name not in request_events | blocked_events | failed_after_credit_events:
+                continue
+            service = cls._service_for_event(event)
+            subject = str(
+                event.get("subject")
+                or event.get("endpoint")
+                or event.get("tool_name")
+                or "unknown"
+            )
+            surface = str(event.get("surface") or "unknown")
+            key = (service, subject, surface)
+            row = grouped.setdefault(
+                key,
+                {
+                    "service": service,
+                    "subject": subject,
+                    "surface": surface,
+                    "requested": 0,
+                    "payment_prompts": 0,
+                    "delivered": 0,
+                    "blocked": 0,
+                    "failed_after_credit": 0,
+                    "credits_spent": 0.0,
+                    "estimated_revenue_usdc": 0.0,
+                    "synthetic_events": 0,
+                    "first_seen": event.get("timestamp"),
+                    "last_seen": event.get("timestamp"),
+                    "latest_outcome": cls._outcome_for_event(event),
+                },
+            )
+            if str(event.get("timestamp") or "") < str(row["first_seen"] or ""):
+                row["first_seen"] = event.get("timestamp")
+            if str(event.get("timestamp") or "") >= str(row["last_seen"] or ""):
+                row["last_seen"] = event.get("timestamp")
+                row["latest_outcome"] = cls._outcome_for_event(event)
+
+            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+            if (
+                event_name in request_events
+                or event_name in blocked_events
+                or event_name == "charged_delivery_failed"
+            ):
+                row["requested"] += 1
+            if event_name == "payment_required":
+                row["payment_prompts"] += 1
+            if event_name in delivered_events:
+                row["delivered"] += 1
+                if event_name == "data_delivered" and metadata.get("payment_mode") == "x402":
+                    row["estimated_revenue_usdc"] += float(event.get("price_usdc") or 0.0)
+            if event_name in blocked_events:
+                row["blocked"] += 1
+            if event_name in failed_after_credit_events:
+                row["failed_after_credit"] += 1
+            if event_name in {"credit_drawdown_success", "mcp_credit_drawdown_success"}:
+                row["credits_spent"] += float(metadata.get("credits_spent") or 0.0)
+            if cls._is_synthetic_event(event):
+                row["synthetic_events"] += 1
+
+        rows = list(grouped.values())
+        for row in rows:
+            row["delivered"] = max(
+                0,
+                int(row["delivered"]) - int(row["failed_after_credit"]),
+            )
+            row["credits_spent"] = round(float(row["credits_spent"] or 0.0), 3)
+            row["estimated_revenue_usdc"] = round(float(row["estimated_revenue_usdc"] or 0.0), 6)
+            row["popularity_score"] = (
+                int(row["requested"])
+                + (2 * int(row["delivered"]))
+                + float(row["credits_spent"] or 0.0)
+                - int(row["failed_after_credit"])
+            )
+            if int(row["delivered"]) > 0:
+                row["leading_outcome"] = "Data delivered"
+            elif int(row["blocked"]) > 0:
+                row["leading_outcome"] = "Blocked or prompted"
+            elif int(row["failed_after_credit"]) > 0:
+                row["leading_outcome"] = "Credit used then failed"
+            else:
+                row["leading_outcome"] = row["latest_outcome"]
+
+        rows.sort(
+            key=lambda row: (
+                -float(row["popularity_score"]),
+                -int(row["requested"]),
+                row["service"],
+                row["subject"],
+            )
+        )
+        return {
+            "total_requested": sum(int(row["requested"]) for row in rows),
+            "total_delivered": sum(int(row["delivered"]) for row in rows),
+            "total_blocked": sum(int(row["blocked"]) for row in rows),
+            "total_failed_after_credit": sum(int(row["failed_after_credit"]) for row in rows),
+            "total_credits_spent": round(sum(float(row["credits_spent"] or 0.0) for row in rows), 3),
+            "synthetic_events": sum(int(row["synthetic_events"]) for row in rows),
+            "rows": rows[:50],
+        }
+
+    @staticmethod
+    def _is_synthetic_event(event: dict[str, Any]) -> bool:
+        metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+        user_agent = str(event.get("user_agent") or "").lower()
+        subject = str(event.get("subject") or "").lower()
+        return (
+            "testclient" in user_agent
+            or bool(metadata.get("mock"))
+            or subject.startswith("mock_")
+            or subject.startswith("test_")
+        )
+
+    @classmethod
+    def _source_evidence(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        evidence_events = [
+            event
+            for event in events
+            if event.get("event")
+            in {
+                "payment_required",
+                "payment_proof_submitted",
+                "payment_verified",
+                "payment_failed",
+                "data_delivered",
+                "charged_delivery_failed",
+                "credit_drawdown_success",
+                "credit_drawdown_failed",
+                "registry_request",
+                "mcp_tool_call",
+                "mcp_tool_error",
+            }
+        ]
+        synthetic_count = sum(1 for event in evidence_events if cls._is_synthetic_event(event))
+        registry_count = sum(1 for event in evidence_events if event.get("event") == "registry_request")
+        paid_evidence_count = sum(
+            1
+            for event in evidence_events
+            if event.get("event")
+            in {"payment_proof_submitted", "payment_verified", "data_delivered"}
+        )
+        tx_hash_evidence_count = sum(
+            1
+            for event in evidence_events
+            if (
+                isinstance(event.get("metadata"), dict)
+                and (
+                    event["metadata"].get("tx_hash")
+                    or event["metadata"].get("proof_hash")
+                )
+            )
+        )
+        rows = []
+        for event in reversed(evidence_events[-25:]):
+            metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+            rows.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "event": event.get("event"),
+                    "surface": event.get("surface"),
+                    "endpoint": event.get("endpoint"),
+                    "subject": event.get("subject"),
+                    "status_code": event.get("status_code"),
+                    "source": cls._registry_source_for_event(event)
+                    or cls._origin_for_event(event),
+                    "user_agent_family": cls._user_agent_family(event.get("user_agent")),
+                    "referrer_host": cls._referrer_host(event.get("referrer")),
+                    "has_transaction_or_proof_hash": bool(
+                        metadata.get("tx_hash") or metadata.get("proof_hash")
+                    ),
+                    "synthetic": cls._is_synthetic_event(event),
+                }
+            )
+
+        return {
+            "events_reviewed": len(evidence_events),
+            "synthetic_events": synthetic_count,
+            "registry_events": registry_count,
+            "paid_evidence_events": paid_evidence_count,
+            "transaction_or_proof_hash_events": tx_hash_evidence_count,
+            "recent_rows": rows,
+        }
+
     @staticmethod
     def _outcome_for_event(event: dict[str, Any]) -> str:
         event_name = str(event.get("event") or "")
         status_code = event.get("status_code")
         if event_name == "payment_required" or status_code == 402:
             return "Prompted to pay; no data returned"
-        if event_name in {"payment_verified", "credit_drawdown_success", "mcp_credit_drawdown_success"}:
+        if event_name in {"data_delivered", "mcp_credit_drawdown_success"}:
             return "Data returned after payment or credits"
+        if event_name == "charged_delivery_failed":
+            return "Charged or credited call failed; refund or retry needed"
+        if event_name in {"payment_verified", "credit_drawdown_success"}:
+            return "Payment or credits accepted; waiting for delivery result"
         if event_name == "payment_failed":
             return "Payment failed; no data returned"
         if isinstance(status_code, int) and status_code >= 500:
@@ -607,8 +1251,19 @@ class UsageEventStore:
         return "Observed"
 
     @staticmethod
-    def _error_rate(events: list[dict[str, Any]]) -> float | None:
+    def _error_rate(
+        events: list[dict[str, Any]],
+        *,
+        exclude_status_codes: set[int] | None = None,
+    ) -> float | None:
+        exclude_status_codes = exclude_status_codes or set()
         http_events = [event for event in events if event["event"] == "http_request"]
+        if exclude_status_codes:
+            http_events = [
+                event
+                for event in http_events
+                if int(event.get("status_code") or 0) not in exclude_status_codes
+            ]
         if not http_events:
             return None
         errors = sum(1 for event in http_events if int(event.get("status_code") or 0) >= 400)
@@ -687,3 +1342,17 @@ def record_usage_event(event: str, **kwargs: Any) -> None:
     except Exception:
         # Telemetry must never break the product path.
         return
+
+
+def record_usage_event_once(event: str, identity_hash: str | None, **kwargs: Any) -> bool:
+    """Record a milestone once per privacy-safe identity without affecting product flow."""
+    store = get_global_store()
+    if store is None or not identity_hash:
+        return False
+    try:
+        if not store.claim_milestone(event, identity_hash):
+            return False
+        store.record(event, **kwargs)
+        return True
+    except Exception:
+        return False
