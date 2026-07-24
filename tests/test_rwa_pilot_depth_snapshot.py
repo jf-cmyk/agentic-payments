@@ -179,6 +179,7 @@ def test_pool_tick_and_swap_replay_is_measured_without_opening_promotion_gate():
                 "sell": [full_fill],
             },
             "volume_window": {
+                "status": "ok",
                 "quote_volume_usd": 250_000.0,
                 "window_coverage_seconds": 86_400,
             },

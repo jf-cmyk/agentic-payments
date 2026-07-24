@@ -40,6 +40,7 @@ The runtime data boundary is explicit:
 
 - AAPL book and rolling volume come directly from Hyperliquid public Info endpoints.
 - PAXG and EURC pool state, initialized liquidity ticks and Swap events come from EVM JSON-RPC.
+- When an RPC plan limits log ranges, a per-pool cache on the Railway volume starts with a bounded 30-minute window and appends only unseen blocks each cycle. It cannot count as a complete 24-hour window until at least 23 hours are continuously covered.
 - Tiingo is not used by any of the three runtime lanes.
 - Synthetic pool levels are excluded from executable-depth evidence.
 - A failed 24-hour log backfill does not erase successfully captured block-pinned tick replay; the missing volume window remains a separate failed gate.
@@ -54,7 +55,9 @@ Monitoring thresholds:
 
 Even when every monitoring threshold passes, promotion remains blocked until independent benchmark alignment, depth/manipulation review, source-independence review, rights/redistribution signoff and explicit human approval are complete. The scheduler cannot promote a feed.
 
-The live pre-deployment validation on 2026-07-24 captured both EVM pool states and exact initialized-tick replay. EURC also produced a complete 24-hour decoded Swap-event window with more than $3.2 million in quote turnover and passed the point-in-time $10,000 block check. AAPL reported zero venue-native 24-hour volume and insufficient point-in-time depth. PAXG retained a 128-tick replay, while its 24-hour log backfill remained blocked by the configured Ethereum provider plan and public-fallback availability. These observations do not complete a sustained gate; production-promoted expansion feeds remain zero.
+The live pre-deployment validation on 2026-07-24 captured both EVM pool states and exact initialized-tick replay. EURC also produced a complete 24-hour decoded Swap-event window with more than $3.2 million in quote turnover and passed the point-in-time $10,000 block check. AAPL reported zero venue-native 24-hour volume and insufficient point-in-time depth. PAXG retained a 128-tick replay. Its provider permits five-block log ranges, so production accumulates the 24-hour window incrementally instead of treating the missing backfill as zero volume. These observations do not complete a sustained gate; production-promoted expansion feeds remain zero.
+
+Blocksize reference snapshots are captured concurrently with the pilot observations. Depth and tick replay run afterward so their latency cannot create an artificial benchmark timestamp gap. A comparison still fails alignment when the benchmark's own source timestamp is stale; thresholds are not relaxed to conceal source cadence.
 
 ## Weekly cadence
 

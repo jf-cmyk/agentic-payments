@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from unittest.mock import AsyncMock
 
 from src.rwa_adapters import EVMPoolStateAdapter, RWAAdapterBlockedError, XStocksPublicPriceAdapter
 
@@ -74,3 +75,123 @@ def test_evm_pool_adapter_uses_configured_rpc_fallbacks_before_public(monkeypatc
         ("public_fallback:https://mainnet.base.org", "https://mainnet.base.org"),
         ("public_fallback:https://base-rpc.publicnode.com", "https://base-rpc.publicnode.com"),
     ]
+
+
+def _swap_log(block_number: int, log_index: int = 0) -> dict[str, str | list[str]]:
+    return {
+        "blockNumber": hex(block_number),
+        "transactionHash": f"0x{block_number:064x}",
+        "logIndex": hex(log_index),
+        "topics": ["0xtopic"],
+        "data": "0x",
+    }
+
+
+@pytest.mark.asyncio
+async def test_evm_swap_cache_bootstraps_provider_limited_window_and_extends_it(tmp_path) -> None:
+    adapter = EVMPoolStateAdapter(
+        venue_id="uniswap_v3_v4",
+        swap_cache_dir=tmp_path,
+    )
+    adapter._start_block_for_window = AsyncMock(
+        return_value=(100, 0, 2_000, "env:EVM_RPC_ETHEREUM_URL")
+    )
+    adapter._block_timestamp = AsyncMock(
+        side_effect=lambda chain, block: (
+            2_000 + (block - 1_000) * 12,
+            "env:EVM_RPC_ETHEREUM_URL",
+        )
+    )
+    calls = []
+
+    async def first_swap_logs(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("chunk_size") is None:
+            raise RWAAdapterBlockedError(
+                "evm_rpc_and_pool_state",
+                "eth_getLogs is limited to a 5 range",
+            )
+        return [_swap_log(kwargs["end_block"])], ["env:EVM_RPC_ETHEREUM_URL"]
+
+    adapter._swap_logs = first_swap_logs
+    logs, window, _ = await adapter._collect_swap_log_window(
+        chain="ethereum",
+        contract="0x" + "1" * 40,
+        end_block=1_000,
+        lookback_seconds=86_400,
+    )
+
+    assert calls[-1]["start_block"] == 850
+    assert calls[-1]["chunk_size"] == 5
+    assert logs[0]["blockNumber"] == hex(1_000)
+    assert window["status"] == "collecting"
+    assert window["window_coverage_seconds"] == 1_800
+    assert window["provider_chunk_size"] == 5
+    assert window["cache_persisted"] is True
+
+    reloaded = EVMPoolStateAdapter(
+        venue_id="uniswap_v3_v4",
+        swap_cache_dir=tmp_path,
+    )
+    reloaded._start_block_for_window = AsyncMock(
+        return_value=(100, 0, 3_800, "env:EVM_RPC_ETHEREUM_URL")
+    )
+    reloaded._block_timestamp = AsyncMock(
+        side_effect=lambda chain, block: (
+            2_000 + (block - 1_000) * 12,
+            "env:EVM_RPC_ETHEREUM_URL",
+        )
+    )
+    incremental_calls = []
+
+    async def incremental_swap_logs(**kwargs):
+        incremental_calls.append(kwargs)
+        return [_swap_log(kwargs["end_block"])], ["env:EVM_RPC_ETHEREUM_URL"]
+
+    reloaded._swap_logs = incremental_swap_logs
+    logs, window, _ = await reloaded._collect_swap_log_window(
+        chain="ethereum",
+        contract="0x" + "1" * 40,
+        end_block=1_150,
+        lookback_seconds=86_400,
+    )
+
+    assert incremental_calls == [
+        {
+            "chain": "ethereum",
+            "contract": "0x" + "1" * 40,
+            "start_block": 1_001,
+            "end_block": 1_150,
+            "chunk_size": 5,
+        }
+    ]
+    assert len(logs) == 2
+    assert window["status"] == "collecting"
+    assert window["window_coverage_seconds"] == 3_600
+
+
+@pytest.mark.asyncio
+async def test_evm_swap_cache_marks_complete_full_window_as_ok(tmp_path) -> None:
+    adapter = EVMPoolStateAdapter(
+        venue_id="aerodrome_slipstream",
+        swap_cache_dir=tmp_path,
+    )
+    adapter._start_block_for_window = AsyncMock(
+        return_value=(100, 13_600, 100_000, "public_fallback")
+    )
+    adapter._block_timestamp = AsyncMock(
+        return_value=(13_600, "public_fallback")
+    )
+    adapter._swap_logs = AsyncMock(
+        return_value=([_swap_log(1_000)], ["public_fallback"])
+    )
+
+    _, window, _ = await adapter._collect_swap_log_window(
+        chain="base",
+        contract="0x" + "2" * 40,
+        end_block=1_000,
+        lookback_seconds=86_400,
+    )
+
+    assert window["status"] == "ok"
+    assert window["window_coverage_seconds"] == 86_400
