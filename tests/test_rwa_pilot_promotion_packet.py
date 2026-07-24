@@ -25,6 +25,9 @@ def test_promotion_packet_records_evidence_but_never_auto_promotes(tmp_path):
             {
                 **feed,
                 "point_in_time_volume_window_observed": True,
+                "point_in_time_tick_replay_observed": (
+                    feed["source_lane"] != "venue_api_order_book"
+                ),
                 "point_in_time_quality_pass": True,
             }
             for feed in PILOT_FEEDS
@@ -41,6 +44,7 @@ def test_promotion_packet_records_evidence_but_never_auto_promotes(tmp_path):
         assert row["production_promoted"] is False
         assert row["gates"]["human_promotion_approval"] is False
         assert "human_promotion_approval" in row["blocking_gates"]
+        assert row["gates"]["initialized_tick_replay_snapshot"] is True
 
     paths = persist_promotion_packet(
         packet,
