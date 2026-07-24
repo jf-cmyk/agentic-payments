@@ -241,6 +241,7 @@ def persist_capture(
     status_output: Path | None = None,
     observation_store: Any | None = None,
     alignment_report: dict[str, Any] | None = None,
+    depth_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append replayable observations and write the latest readiness status."""
     history = _load_history(history_path)
@@ -260,12 +261,18 @@ def persist_capture(
         for row in ((alignment_report or {}).get("rows") or [])
         if isinstance(row, dict) and row.get("pilot_id")
     }
+    depth_by_pilot = {
+        str(row.get("pilot_id")): row
+        for row in ((depth_report or {}).get("rows") or [])
+        if isinstance(row, dict) and row.get("pilot_id")
+    }
     if observation_store is not None:
         for capture in captures:
             observation = capture.get("raw_observation")
             if capture.get("status") != "ok" or not isinstance(observation, dict):
                 continue
             alignment = alignment_by_pilot.get(str(capture.get("pilot_id")), {})
+            depth_evidence = depth_by_pilot.get(str(capture.get("pilot_id")), {})
             benchmark_evidence = {
                 key: alignment.get(key)
                 for key in (
@@ -292,7 +299,10 @@ def persist_capture(
                         "source_type": capture.get("source_lane") or observation.get("source_type"),
                         "raw_payload": observation,
                         "normalized_observation": observation,
-                        "realtime_quality": capture.get("checks", {}),
+                        "realtime_quality": {
+                            **capture.get("checks", {}),
+                            "liquidity_depth_evidence": depth_evidence,
+                        },
                         "blocksize_benchmark": benchmark_evidence,
                         "promotion": {
                             "production_promoted": False,
@@ -319,6 +329,16 @@ def persist_capture(
             "status": alignment_report.get("status"),
             "summary": alignment_report.get("summary", {}),
             "gate_assessment": alignment_report.get("gate_assessment", {}),
+        }
+    if depth_report is not None:
+        report["current_capture"]["depth_and_manipulation_evidence"] = depth_report.get(
+            "summary", {}
+        )
+        report["depth_and_manipulation_latest"] = {
+            "generated_at": depth_report.get("generated_at"),
+            "status": depth_report.get("status"),
+            "summary": depth_report.get("summary", {}),
+            "gate_assessment": depth_report.get("gate_assessment", {}),
         }
     if observation_store is not None:
         report["observation_ledger"] = observation_store.summary()

@@ -103,6 +103,20 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
                 }
             ],
         },
+        depth_report={
+            "generated_at": checked_at,
+            "status": "point_in_time_evidence_candidate_only",
+            "summary": {"feeds_attempted": 1, "executable_depth_observed_feed_count": 1},
+            "gate_assessment": {"manipulation_and_depth_review_complete": False},
+            "rows": [
+                {
+                    "pilot_id": PILOT_FEEDS[0]["pilot_id"],
+                    "evidence_class": "native_l2_point_in_time",
+                    "point_in_time_depth_observed": True,
+                    "manipulation_review_complete": False,
+                }
+            ],
+        },
     )
 
     assert report["current_capture"]["ledger_persisted"] == 1
@@ -113,6 +127,12 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
     assert rows[0]["symbol"] == "AAPL/USDC"
     assert rows[0]["promotion"]["production_promoted"] is False
     assert rows[0]["blocksize_benchmark"]["evidence_decision"] == "pass"
+    assert rows[0]["realtime_quality"]["liquidity_depth_evidence"][
+        "point_in_time_depth_observed"
+    ] is True
     assert report["benchmark_alignment_latest"]["gate_assessment"] == {
         "independent_benchmark_alignment_complete": False,
+    }
+    assert report["depth_and_manipulation_latest"]["gate_assessment"] == {
+        "manipulation_and_depth_review_complete": False,
     }
