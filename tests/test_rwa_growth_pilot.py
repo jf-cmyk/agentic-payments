@@ -81,6 +81,28 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
         captures,
         status_output=tmp_path / "status.json",
         observation_store=store,
+        alignment_report={
+            "generated_at": checked_at,
+            "status": "point_in_time_evidence",
+            "summary": {
+                "feeds_attempted": 1,
+                "timestamp_aligned_comparisons": 1,
+            },
+            "gate_assessment": {
+                "independent_benchmark_alignment_complete": False,
+            },
+            "rows": [
+                {
+                    "pilot_id": PILOT_FEEDS[0]["pilot_id"],
+                    "status": "ok",
+                    "benchmark_service": "bidask",
+                    "benchmark_symbol": "AAPL",
+                    "comparison": {"decision": "pass", "basis_bps": 2.0},
+                    "timestamp_alignment": {"pass": True, "gap_seconds": 1.0},
+                    "evidence_decision": "pass",
+                }
+            ],
+        },
     )
 
     assert report["current_capture"]["ledger_persisted"] == 1
@@ -90,3 +112,7 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
     rows = store.list_observations()
     assert rows[0]["symbol"] == "AAPL/USDC"
     assert rows[0]["promotion"]["production_promoted"] is False
+    assert rows[0]["blocksize_benchmark"]["evidence_decision"] == "pass"
+    assert report["benchmark_alignment_latest"]["gate_assessment"] == {
+        "independent_benchmark_alignment_complete": False,
+    }

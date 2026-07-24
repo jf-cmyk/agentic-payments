@@ -190,8 +190,17 @@ from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
 from src.cursor_mcp_server import cursor_mcp
 from src.public_mcp_server import public_mcp
 from scripts.run_rwa_growth_pilot import capture_pilot, persist_capture
+from scripts.run_rwa_pilot_alignment_snapshot import (
+    capture_blocksize_benchmarks,
+    evaluate_alignment,
+    persist_alignment_report,
+)
 
 logger = logging.getLogger(__name__)
+# httpx INFO records include full request URLs. Configured RPC URLs can contain
+# credential material in their path, so retain only warning/error records.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 DOCS_DIR = Path("docs")
 PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
@@ -229,8 +238,26 @@ def _rwa_growth_pilot_paths() -> tuple[Path, Path]:
     )
 
 
+def _rwa_growth_pilot_alignment_paths() -> tuple[Path, Path]:
+    return (
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_ALIGNMENT_HISTORY_PATH",
+                "/data/rwa_growth_pilot_alignment_history.jsonl",
+            )
+        ),
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_ALIGNMENT_STATUS_PATH",
+                "/data/rwa_growth_pilot_alignment_latest.json",
+            )
+        ),
+    )
+
+
 def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
     _, status_path = _rwa_growth_pilot_paths()
+    _, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     if not status_path.exists():
         return {
             "status": "not_started",
@@ -248,6 +275,12 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             "feeds": [],
         }
     current = report.get("current_capture") if isinstance(report.get("current_capture"), dict) else {}
+    alignment = report.get("benchmark_alignment_latest", {})
+    if alignment_status_path.exists():
+        try:
+            alignment = json.loads(alignment_status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            alignment = {"status": "status_unreadable"}
     return {
         "status": report.get("status", "candidate_monitoring"),
         "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
@@ -262,6 +295,12 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             "ledger_observation_ids": current.get("ledger_observation_ids", []),
         },
         "observation_ledger": report.get("observation_ledger", {}),
+        "benchmark_alignment": {
+            "generated_at": alignment.get("generated_at"),
+            "status": alignment.get("status"),
+            "summary": alignment.get("summary", {}),
+            "gate_assessment": alignment.get("gate_assessment", {}),
+        },
         "thresholds": report.get("thresholds", {}),
         "non_monitoring_gates": report.get("non_monitoring_gates", {}),
         "feeds": report.get("feeds", []),
@@ -274,23 +313,35 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     interval = max(300.0, float(os.environ.get("RWA_GROWTH_PILOT_INTERVAL_SECONDS", "1800")))
     timeout = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_TIMEOUT_SECONDS", "20")))
     history_path, status_path = _rwa_growth_pilot_paths()
+    alignment_history_path, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     await asyncio.sleep(initial_delay)
     while True:
         try:
             registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
             captures = await capture_pilot(registry, timeout_seconds=timeout)
+            benchmarks = await capture_blocksize_benchmarks(app.state.blocksize)
+            alignment = evaluate_alignment(captures, benchmarks)
+            await asyncio.to_thread(
+                persist_alignment_report,
+                alignment,
+                history_path=alignment_history_path,
+                latest_path=alignment_status_path,
+            )
             report = await asyncio.to_thread(
                 persist_capture,
                 history_path,
                 captures,
                 status_output=status_path,
                 observation_store=getattr(app.state, "rwa_store", None),
+                alignment_report=alignment,
             )
             logger.info(
-                "RWA growth pilot captured %s/%s feeds; persisted=%s; promotion_ready=%s",
+                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; promotion_ready=%s",
                 report["current_capture"]["succeeded"],
                 report["current_capture"]["attempted"],
                 report["current_capture"]["ledger_persisted"],
+                alignment["summary"]["timestamp_aligned_comparisons"],
+                alignment["summary"]["feeds_attempted"],
                 report["promotion_ready"],
             )
         except asyncio.CancelledError:

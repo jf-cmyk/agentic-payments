@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 
@@ -153,6 +154,10 @@ class TestSecurityHeaders:
 
 
 class TestPublicListingSurfaces:
+    def test_http_client_loggers_do_not_emit_credential_bearing_urls(self):
+        assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+        assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+
     def test_anthropic_only_mode_blocks_non_anthropic_surfaces(self, test_client, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_ONLY_MODE", "true")
 

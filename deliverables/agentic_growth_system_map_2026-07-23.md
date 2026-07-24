@@ -40,7 +40,7 @@ flowchart LR
     subgraph RWA["6. RWA evidence lane — monitored, not promoted"]
       R1["AAPL: Hyperliquid venue API"]:::live
       R2["PAXG: Ethereum RPC · EURC: Base RPC"]:::live
-      R3["30-min replay + queryable candidate ledger · live"]:::release
+      R3["30-min replay + queryable ledger<br/>+ timestamp-aware comparisons"]:::release
       R4["14 days · 672 samples · ≥99% success/freshness"]:::gate
       R5["Benchmark · depth · independence · rights"]:::blocked
       R6["Named human promotion approval"]:::blocked
