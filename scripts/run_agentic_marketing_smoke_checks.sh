@@ -30,6 +30,7 @@ check_contains() {
 
 check_status "/health" "200"
 check_status "/quickstart/first-price" "200"
+check_status "/integrations/agent-frameworks" "200"
 check_status "/rwa-market-data" "200"
 check_status "/market-data-licensing" "200"
 check_status "/signed-oracle-feeds" "200"
@@ -40,6 +41,8 @@ check_status "/pdf/Blocksize_RWA_Coverage_Index.pdf" "200"
 check_status "/pdf/Blocksize_Oracle_Lineage_Index.pdf" "200"
 
 check_contains "/quickstart/first-price" "Get a live Blocksize price"
+check_contains "/quickstart/first-price" "Get my first live price"
+check_contains "/integrations/agent-frameworks" "Six supported agent frameworks"
 check_contains "/rwa-market-data" "existing"
 check_contains "/category-hubs.json" "evidence_indexes"
 check_contains "/llms.txt" "RWA Coverage Index"

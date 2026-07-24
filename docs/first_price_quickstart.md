@@ -2,6 +2,8 @@
 
 Blocksize has two integration layers. The authenticated Claude and Cursor MCP connectors can return live read-only market data using included server-side credits. The public ChatGPT-compatible MCP endpoint currently provides discovery and endpoint construction only; use the HTTP call below for the live price.
 
+The hosted quickstart at `https://mcp.blocksize.info/quickstart/first-price` also includes a one-click live BTC-USD request. It keeps one browser-scoped agent identity in local storage so the starter allowance cannot be silently reset on every click.
+
 ## Claude
 
 1. Add `https://mcp.blocksize.info/anthropic/mcp/` as a custom connector.

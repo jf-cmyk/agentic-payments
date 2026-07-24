@@ -2460,6 +2460,10 @@ class EVMPoolStateAdapter:
         "pharos": "EVM_RPC_PHAROS_URL",
         "zksync-era": "EVM_RPC_ZKSYNC_URL",
     }
+    _RPC_URLS_ENV_BY_CHAIN = {
+        chain: f"{env_name.removesuffix('_URL')}_URLS"
+        for chain, env_name in _RPC_ENV_BY_CHAIN.items()
+    }
     _PUBLIC_RPC_FALLBACKS = {
         "base": ("https://mainnet.base.org", "https://base-rpc.publicnode.com"),
     }
@@ -2621,11 +2625,29 @@ class EVMPoolStateAdapter:
         env_name = self._RPC_ENV_BY_CHAIN.get(chain)
         if env_name and os.getenv(env_name):
             candidates.append((f"env:{env_name}", str(os.getenv(env_name))))
+        urls_env_name = self._RPC_URLS_ENV_BY_CHAIN.get(chain)
+        if urls_env_name:
+            configured_urls = [
+                url.strip()
+                for url in str(os.getenv(urls_env_name) or "").replace("\n", ",").split(",")
+                if url.strip()
+            ]
+            candidates.extend(
+                (f"env:{urls_env_name}[{index}]", url)
+                for index, url in enumerate(configured_urls, start=1)
+            )
         if os.getenv("RWA_EVM_DISABLE_PUBLIC_RPC_FALLBACKS", "").strip().lower() not in {"1", "true", "yes"}:
             candidates.extend(
                 (f"public_fallback:{url}", url) for url in self._PUBLIC_RPC_FALLBACKS.get(chain, ())
             )
-        return candidates
+        unique: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for source, url in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            unique.append((source, url))
+        return unique
 
     async def _json_rpc(self, rpc_url: str, method: str, params: list[Any]) -> Any:
         async def _request(client: httpx.AsyncClient) -> Any:

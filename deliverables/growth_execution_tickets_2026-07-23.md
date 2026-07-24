@@ -12,12 +12,17 @@ This pack translates the approved growth plan into two operating epics: the agen
 - Full local integration regression from discovery through starter exhaustion and verified x402 delivery.
 - Three-feed RWA capture, raw replay history, monitoring thresholds and non-automatic promotion policy.
 - Production background scheduler enabled at a 30-minute interval with observations persisted on the Railway volume.
+- Successful scheduled RWA captures are written to the queryable observation ledger as candidate-monitoring records; they cannot auto-promote.
+- Configured Ethereum/Base RPC fallback lists are tried before public fallback RPCs.
+- One-click first-live-price activation uses a stable browser agent identity and preserves the honest HTTP 402 upgrade path.
+- Implementation-ready integrations for LangChain, LlamaIndex, Vercel AI SDK, OpenAI Agents SDK, GOAT and Solana Agent Kit pass repository validation.
+- Six public discovery listings were reachable on 2026-07-23; the Awesome MCP submission is merged.
 - Weekly growth operating runbook.
 
 ## External actions
 
 - Jira import/reconciliation needs the Atlassian project and issue keys.
-- Directory submissions need the corresponding signed-in accounts.
+- Future directory listing edits need the corresponding signed-in accounts; current public listing URLs are live.
 - Marketplace-side metrics need APIs or reviewed exports.
 - Real post-starter payment validation needs a fresh acquisition environment or a signed payment proof.
 - RWA rights and promotion decisions require legal, commercial and named human approval.

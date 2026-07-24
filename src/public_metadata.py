@@ -60,6 +60,7 @@ ORACLE_LINEAGE_INDEX_PDF_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Oracle_Lineage_
 
 QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/remote-mcp"
 FIRST_PRICE_QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/first-price"
+AGENT_FRAMEWORK_INTEGRATIONS_URL = f"{PUBLIC_BASE_URL}/integrations/agent-frameworks"
 CLAUDE_CONNECTOR_URL = f"{PUBLIC_BASE_URL}/claude-connector"
 PROMPT_EXAMPLES_URL = f"{PUBLIC_BASE_URL}/prompt-examples"
 PRIVACY_POLICY_URL = f"{PUBLIC_BASE_URL}/privacy"
@@ -2217,6 +2218,24 @@ STATIC_DOCUMENTS = {
         "text": (
             "Installation guide for the public Blocksize remote MCP discovery server "
             "using the streamable HTTP transport."
+        ),
+    },
+    "agent-framework-integrations": {
+        "title": "Agent Framework Integrations",
+        "url": AGENT_FRAMEWORK_INTEGRATIONS_URL,
+        "keywords": [
+            "langchain",
+            "llamaindex",
+            "vercel ai sdk",
+            "openai agents sdk",
+            "goat",
+            "solana agent kit",
+            "market data tools",
+        ],
+        "text": (
+            "Implementation-ready Blocksize market-data tools for LangChain, "
+            "LlamaIndex, the Vercel AI SDK, the OpenAI Agents SDK, GOAT, and "
+            "Solana Agent Kit, with stable agent identity and explicit x402 handling."
         ),
     },
     "pricing": {

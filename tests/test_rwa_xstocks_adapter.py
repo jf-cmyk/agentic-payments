@@ -53,3 +53,24 @@ def test_evm_pool_adapter_rejects_uniswap_v4_pool_id_as_contract() -> None:
                 "pool_id": "0x" + "12" * 32,
             }
         )
+
+
+def test_evm_pool_adapter_uses_configured_rpc_fallbacks_before_public(monkeypatch) -> None:
+    monkeypatch.setenv("EVM_RPC_BASE_URL", "https://primary.example")
+    monkeypatch.setenv(
+        "EVM_RPC_BASE_URLS",
+        "https://fallback-one.example, https://fallback-two.example,https://primary.example",
+    )
+
+    adapter = EVMPoolStateAdapter(venue_id="aerodrome_slipstream")
+    candidates = adapter._rpc_candidates("base")
+
+    assert candidates[:3] == [
+        ("env:EVM_RPC_BASE_URL", "https://primary.example"),
+        ("env:EVM_RPC_BASE_URLS[1]", "https://fallback-one.example"),
+        ("env:EVM_RPC_BASE_URLS[2]", "https://fallback-two.example"),
+    ]
+    assert candidates[-2:] == [
+        ("public_fallback:https://mainnet.base.org", "https://mainnet.base.org"),
+        ("public_fallback:https://base-rpc.publicnode.com", "https://base-rpc.publicnode.com"),
+    ]

@@ -90,6 +90,7 @@ from src.observability import (
     surface_for_path,
 )
 from src.public_metadata import (
+    AGENT_FRAMEWORK_INTEGRATIONS_URL,
     AGENT_MANUAL_URL,
     APP_VERSION,
     CLAUDE_CONNECTOR_URL,
@@ -257,7 +258,10 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
         "current_capture": {
             "attempted": int(current.get("attempted") or 0),
             "succeeded": int(current.get("succeeded") or 0),
+            "ledger_persisted": int(current.get("ledger_persisted") or 0),
+            "ledger_observation_ids": current.get("ledger_observation_ids", []),
         },
+        "observation_ledger": report.get("observation_ledger", {}),
         "thresholds": report.get("thresholds", {}),
         "non_monitoring_gates": report.get("non_monitoring_gates", {}),
         "feeds": report.get("feeds", []),
@@ -280,11 +284,13 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                 history_path,
                 captures,
                 status_output=status_path,
+                observation_store=getattr(app.state, "rwa_store", None),
             )
             logger.info(
-                "RWA growth pilot captured %s/%s feeds; promotion_ready=%s",
+                "RWA growth pilot captured %s/%s feeds; persisted=%s; promotion_ready=%s",
                 report["current_capture"]["succeeded"],
                 report["current_capture"]["attempted"],
+                report["current_capture"]["ledger_persisted"],
                 report["promotion_ready"],
             )
         except asyncio.CancelledError:
@@ -778,6 +784,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         "/privacy",
         "/prompt-examples",
         "/quickstart/first-price",
+        "/integrations/agent-frameworks",
         "/support",
         "/claude-connector",
         "/robots.txt",
@@ -864,6 +871,16 @@ async def get_remote_quickstart():
 async def get_first_price_quickstart():
     """Serve the shortest honest path to a first live Blocksize price."""
     return _serve_doc("first_price_quickstart.html", "First price quickstart")
+
+
+@app.api_route(
+    "/integrations/agent-frameworks",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_agent_framework_integrations():
+    """Serve the public agent-framework integration guide."""
+    return _serve_doc("agent_framework_integrations.html", "Agent framework integrations")
 
 
 @app.api_route("/prompt-examples", methods=["GET", "HEAD"], include_in_schema=False)
@@ -8284,6 +8301,7 @@ async def health_check() -> dict[str, Any]:
             "llms_txt": LLMS_TXT_URL,
             "quickstart": QUICKSTART_URL,
             "first_price_quickstart": FIRST_PRICE_QUICKSTART_URL,
+            "agent_framework_integrations": AGENT_FRAMEWORK_INTEGRATIONS_URL,
             "category_hubs_json": CATEGORY_HUBS_JSON_URL,
             "rwa_market_data": f"{PUBLIC_BASE_URL.rstrip('/')}/rwa-market-data",
             "market_data_licensing": f"{PUBLIC_BASE_URL.rstrip('/')}/market-data-licensing",

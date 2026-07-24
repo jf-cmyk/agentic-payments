@@ -165,6 +165,7 @@ class TestPublicListingSurfaces:
         support_response = test_client.get("/support")
         prompt_examples_response = test_client.get("/prompt-examples")
         first_price_response = test_client.get("/quickstart/first-price")
+        integrations_response = test_client.get("/integrations/agent-frameworks")
 
         assert paid_response.status_code == 404
         assert paid_response.json()["error_code"] == "ANTHROPIC_ONLY_MODE"
@@ -176,6 +177,11 @@ class TestPublicListingSurfaces:
         assert support_response.status_code == 200
         assert prompt_examples_response.status_code == 200
         assert first_price_response.status_code == 200
+        assert "Get my first live price" in first_price_response.text
+        assert "blocksize_first_price_agent_id" in first_price_response.text
+        assert 'fetch("/v1/vwap/btc-usd"' in first_price_response.text
+        assert integrations_response.status_code == 200
+        assert "Six supported agent frameworks" in integrations_response.text
 
     def test_manifest_exposes_remote_mcp_url(self, test_client):
         response = test_client.get("/mcp/manifest.json")

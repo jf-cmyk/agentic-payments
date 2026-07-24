@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@goat-sdk/core": ["./node_modules/@goat-sdk/core"],
+      "ai": ["./node_modules/ai"],
+      "solana-agent-kit": ["./node_modules/solana-agent-kit"],
+      "zod": ["./node_modules/zod"]
+    },
+    "strict": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "./*.ts",
+    "../vercel-ai-sdk/*.ts",
+    "../goat/*.ts",
+    "../solana-agent-kit/*.ts"
+  ]
+}

@@ -239,6 +239,7 @@ def persist_capture(
     captures: list[dict[str, Any]],
     *,
     status_output: Path | None = None,
+    observation_store: Any | None = None,
 ) -> dict[str, Any]:
     """Append replayable observations and write the latest readiness status."""
     history = _load_history(history_path)
@@ -252,6 +253,41 @@ def persist_capture(
         "succeeded": sum(row.get("status") == "ok" for row in captures),
         "rows": captures,
     }
+    ledger_rows: list[dict[str, Any]] = []
+    if observation_store is not None:
+        for capture in captures:
+            observation = capture.get("raw_observation")
+            if capture.get("status") != "ok" or not isinstance(observation, dict):
+                continue
+            ledger_rows.append(
+                observation_store.store_observation(
+                    {
+                        "created_at": capture.get("checked_at"),
+                        "symbol": capture.get("symbol"),
+                        "venue": capture.get("venue"),
+                        "asset_class": observation.get("asset_class"),
+                        "source_type": capture.get("source_lane") or observation.get("source_type"),
+                        "raw_payload": observation,
+                        "normalized_observation": observation,
+                        "realtime_quality": capture.get("checks", {}),
+                        "promotion": {
+                            "production_promoted": False,
+                            "status": "candidate_monitoring",
+                        },
+                        "metadata": {
+                            "pilot_id": capture.get("pilot_id"),
+                            "source_lane": capture.get("source_lane"),
+                            "replay_history_path": str(history_path),
+                        },
+                    }
+                )
+            )
+    report["current_capture"]["ledger_persisted"] = len(ledger_rows)
+    report["current_capture"]["ledger_observation_ids"] = [
+        row["observation_id"] for row in ledger_rows
+    ]
+    if observation_store is not None:
+        report["observation_ledger"] = observation_store.summary()
     if status_output is not None:
         status_output.parent.mkdir(parents=True, exist_ok=True)
         status_output.write_text(

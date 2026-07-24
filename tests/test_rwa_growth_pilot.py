@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
-from scripts.run_rwa_growth_pilot import PILOT_FEEDS, evaluate_history
+from scripts.run_rwa_growth_pilot import PILOT_FEEDS, evaluate_history, persist_capture
+from src.rwa_store import RWAObservationStore
 
 
 def test_growth_pilot_never_auto_promotes_after_source_monitoring_passes():
@@ -45,3 +46,47 @@ def test_growth_pilot_requires_complete_success_and_freshness_history():
     assert first["sample_count"] == 1
     assert first["success_rate"] == 0.0
     assert first["source_monitoring_ready"] is False
+
+
+def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_path):
+    checked_at = datetime.now(UTC).isoformat()
+    store = RWAObservationStore(str(tmp_path / "rwa.db"))
+    captures = [
+        {
+            **PILOT_FEEDS[0],
+            "checked_at": checked_at,
+            "status": "ok",
+            "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
+            "raw_observation": {
+                "symbol": "AAPL/USDC",
+                "venue": "hyperliquid_rwa_spot",
+                "asset_class": "equity",
+                "source_type": "native_l2",
+                "bid": 201.0,
+                "ask": 201.1,
+                "timestamp": checked_at,
+                "metadata": {"raw_payload": {"levels": []}},
+            },
+        },
+        {
+            **PILOT_FEEDS[1],
+            "checked_at": checked_at,
+            "status": "error",
+            "checks": {"freshness_pass": False, "bidask_sanity_pass": False},
+        },
+    ]
+
+    report = persist_capture(
+        tmp_path / "history.jsonl",
+        captures,
+        status_output=tmp_path / "status.json",
+        observation_store=store,
+    )
+
+    assert report["current_capture"]["ledger_persisted"] == 1
+    assert len(report["current_capture"]["ledger_observation_ids"]) == 1
+    assert report["observation_ledger"]["total_observations"] == 1
+    assert report["production_promoted_feed_count"] == 0
+    rows = store.list_observations()
+    assert rows[0]["symbol"] == "AAPL/USDC"
+    assert rows[0]["promotion"]["production_promoted"] is False
