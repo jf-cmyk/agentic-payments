@@ -80,6 +80,13 @@ def _evidence_inputs():
                     {"price": 199.8, "size": 60.0},
                 ],
             },
+            "activity": {
+                "captured_at": now,
+                "window_seconds": 86_400,
+                "base_volume": 1_250.0,
+                "notional_volume_usd": 250_000.0,
+                "source_type": "native_venue_rolling_stats",
+            },
         }
     }
     return captures, books
@@ -135,6 +142,60 @@ def test_native_l2_is_indicative_when_required_block_cannot_fill():
     assert equity["quality_decision"] == "indicative_only_exclude"
     assert "required_block_partial_fill" in equity["risk_flags"]
     assert equity["replay_evidence"]["raw_depth_payload_hash"].startswith("sha256:")
+
+
+def test_native_l2_is_indicative_when_organic_volume_is_below_threshold():
+    captures, books = _evidence_inputs()
+    books[PILOT_FEEDS[0]["pilot_id"]]["activity"]["notional_volume_usd"] = 0.0
+
+    report = evaluate_depth_evidence(captures, books)
+
+    equity = report["rows"][0]
+    assert equity["point_in_time_depth_observed"] is True
+    assert equity["point_in_time_quality_pass"] is False
+    assert equity["quality_decision"] == "indicative_only_exclude"
+    assert "organic_volume_below_threshold" in equity["risk_flags"]
+
+
+def test_pool_tick_and_swap_replay_is_measured_without_opening_promotion_gate():
+    captures, books = _evidence_inputs()
+    pool_id = PILOT_FEEDS[1]["pilot_id"]
+    full_fill = {
+        "target_notional_usd": 10_000.0,
+        "filled_notional_usd": 10_000.0,
+        "fill_ratio": 1.0,
+        "slippage_bps": 10.0,
+        "captured_range_sufficient": True,
+    }
+    books[pool_id] = {
+        "pool_replay": {
+            "block_number": 22_000_000,
+            "tick_word_range": [-2, 2],
+            "tick_word_count": 5,
+            "initialized_tick_count": 4,
+            "initialized_ticks_truncated": False,
+            "target_fills": {
+                "buy": [full_fill],
+                "sell": [full_fill],
+            },
+            "volume_window": {
+                "quote_volume_usd": 250_000.0,
+                "window_coverage_seconds": 86_400,
+            },
+            "replay_payload": {"bitmap_words": [], "initialized_ticks": [], "swap_logs": []},
+            "semantics": {"depth": "bounded_exact_input_replay"},
+        }
+    }
+
+    report = evaluate_depth_evidence(captures, books)
+    pool = next(row for row in report["rows"] if row["pilot_id"] == pool_id)
+
+    assert pool["evidence_class"] == "block_pinned_clmm_tick_and_swap_replay"
+    assert pool["point_in_time_tick_replay_observed"] is True
+    assert pool["point_in_time_volume_window_observed"] is True
+    assert pool["point_in_time_quality_pass"] is True
+    assert report["gate_assessment"]["tick_liquidity_replay_complete"] is False
+    assert report["gate_assessment"]["production_promotion_allowed"] is False
 
 
 def test_depth_report_persists_history_and_latest(tmp_path):

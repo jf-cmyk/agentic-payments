@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Capture defensible depth and manipulation-proxy evidence for the RWA pilot.
+"""Capture defensible volume, depth, and manipulation evidence for the RWA pilot.
 
-The Hyperliquid lane is evaluated from native L2 levels. EVM CLMM lanes are
-evaluated only as block-pinned pool state: synthetic levels are deliberately
-excluded from executable-depth evidence. Nothing in this module promotes a
-feed or completes a sustained manipulation review.
+The Hyperliquid lane uses native L2 plus venue-native rolling volume. EVM CLMM
+lanes use block-pinned pool state, decoded Swap logs, and bounded initialized-
+tick replay. Synthetic levels are excluded. Nothing here promotes a feed or
+completes a sustained manipulation review.
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ MAX_SIDE_IMBALANCE = 0.90
 MAX_BOOK_TIMESTAMP_GAP_SECONDS = 5.0
 MAX_NATIVE_SPREAD_BPS = 75.0
 REQUIRED_NATIVE_BLOCK_USD = 10_000.0
+MINIMUM_ORGANIC_24H_VOLUME_USD = 100_000.0
+MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS = 100.0
 
 
 def _finite(value: Any) -> float | None:
@@ -131,6 +133,7 @@ def _native_l2_evidence(
 ) -> dict[str, Any]:
     buy_book = books.get("buy") if isinstance(books.get("buy"), dict) else None
     sell_book = books.get("sell") if isinstance(books.get("sell"), dict) else None
+    activity = books.get("activity") if isinstance(books.get("activity"), dict) else None
     base = {
         **feed,
         "evidence_class": "native_l2_point_in_time",
@@ -159,13 +162,18 @@ def _native_l2_evidence(
         else None
     )
     spread_bps = _spread_bps(capture.get("raw_observation") or {})
+    organic_volume = _finite((activity or {}).get("notional_volume_usd"))
     required_buy = next(
         row for row in buy["target_fills"] if row["target_notional_usd"] == REQUIRED_NATIVE_BLOCK_USD
     )
     required_sell = next(
         row for row in sell["target_fills"] if row["target_notional_usd"] == REQUIRED_NATIVE_BLOCK_USD
     )
-    flags = ["single_venue_dependency", "trade_volume_window_missing", "sustained_depth_window_missing"]
+    flags = ["single_venue_dependency", "sustained_depth_window_missing"]
+    if activity is None:
+        flags.append("trade_volume_window_missing")
+    elif organic_volume is None or organic_volume < MINIMUM_ORGANIC_24H_VOLUME_USD:
+        flags.append("organic_volume_below_threshold")
     if crossed:
         flags.append("crossed_book")
     if timestamp_gap is None or timestamp_gap > MAX_BOOK_TIMESTAMP_GAP_SECONDS:
@@ -194,6 +202,8 @@ def _native_l2_evidence(
         and spread_bps <= MAX_NATIVE_SPREAD_BPS
         and required_buy["fill_ratio"] == 1
         and required_sell["fill_ratio"] == 1
+        and organic_volume is not None
+        and organic_volume >= MINIMUM_ORGANIC_24H_VOLUME_USD
         and not any(flag in flags for flag in ("top_level_concentration_high", "side_imbalance_high"))
     )
     raw_depth_payload = {"buy": buy_book, "sell": sell_book}
@@ -208,6 +218,7 @@ def _native_l2_evidence(
         "book_timestamp_gap_seconds": timestamp_gap,
         "book_sides_sane": not crossed,
         "visible_depth": {"buy": buy, "sell": sell, "side_imbalance": side_imbalance},
+        "organic_volume": activity,
         "replay_evidence": {
             "raw_depth_payload_hash": _payload_hash(raw_depth_payload),
             "raw_depth_payload": raw_depth_payload,
@@ -221,7 +232,11 @@ def _native_l2_evidence(
     }
 
 
-def _onchain_state_evidence(feed: dict[str, Any], capture: dict[str, Any]) -> dict[str, Any]:
+def _onchain_state_evidence(
+    feed: dict[str, Any],
+    capture: dict[str, Any],
+    inputs: dict[str, Any],
+) -> dict[str, Any]:
     observation = capture.get("raw_observation") if isinstance(capture.get("raw_observation"), dict) else {}
     metadata = observation.get("metadata") if isinstance(observation.get("metadata"), dict) else {}
     required = {
@@ -234,15 +249,83 @@ def _onchain_state_evidence(feed: dict[str, Any], capture: dict[str, Any]) -> di
     }
     state_observed = capture.get("status") == "ok" and all(required.values())
     raw_pool_state = metadata.get("raw_payload") if isinstance(metadata.get("raw_payload"), dict) else {}
+    replay = inputs.get("pool_replay") if isinstance(inputs.get("pool_replay"), dict) else None
+    replay_error = inputs.get("error")
+    fills = replay.get("target_fills") if isinstance(replay, dict) else {}
+    buy_fills = fills.get("buy") if isinstance(fills, dict) and isinstance(fills.get("buy"), list) else []
+    sell_fills = fills.get("sell") if isinstance(fills, dict) and isinstance(fills.get("sell"), list) else []
+    required_buy = next(
+        (row for row in buy_fills if row.get("target_notional_usd") == REQUIRED_NATIVE_BLOCK_USD),
+        None,
+    )
+    required_sell = next(
+        (row for row in sell_fills if row.get("target_notional_usd") == REQUIRED_NATIVE_BLOCK_USD),
+        None,
+    )
+    tick_replay_observed = bool(
+        replay
+        and replay.get("initialized_tick_count", 0) > 0
+        and required_buy
+        and required_sell
+    )
+    required_block_pass = bool(
+        tick_replay_observed
+        and required_buy.get("fill_ratio") == 1
+        and required_sell.get("fill_ratio") == 1
+        and required_buy.get("captured_range_sufficient") is True
+        and required_sell.get("captured_range_sufficient") is True
+        and _finite(required_buy.get("slippage_bps")) is not None
+        and _finite(required_sell.get("slippage_bps")) is not None
+        and abs(float(required_buy["slippage_bps"])) <= MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS
+        and abs(float(required_sell["slippage_bps"])) <= MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS
+    )
+    volume_window = replay.get("volume_window") if isinstance(replay, dict) else None
+    organic_volume = _finite((volume_window or {}).get("quote_volume_usd"))
+    volume_window_observed = bool(
+        volume_window and (volume_window.get("window_coverage_seconds") or 0) >= 82_800
+    )
+    organic_volume_pass = bool(
+        volume_window_observed
+        and organic_volume is not None
+        and organic_volume >= MINIMUM_ORGANIC_24H_VOLUME_USD
+    )
+    point_in_time_quality_pass = required_block_pass and organic_volume_pass
+    risk_flags = [
+        "lp_or_holder_concentration_missing",
+        "single_pool_dependency",
+        "route_diversity_missing",
+        "sustained_depth_window_missing",
+    ]
+    if not tick_replay_observed:
+        risk_flags.append("synthetic_depth_excluded")
+        risk_flags.append("tick_bitmap_and_liquidity_replay_missing")
+    if not volume_window_observed:
+        risk_flags.append("swap_volume_window_missing")
+    elif not organic_volume_pass:
+        risk_flags.append("organic_volume_below_threshold")
+    if tick_replay_observed and not required_block_pass:
+        risk_flags.append("required_block_fill_or_slippage_failed")
     return {
         **feed,
         "status": "warn" if state_observed else "error",
-        "evidence_class": "block_pinned_pool_state_not_executable_depth",
+        "evidence_class": (
+            "block_pinned_clmm_tick_and_swap_replay"
+            if tick_replay_observed
+            else "block_pinned_pool_state_not_executable_depth"
+        ),
         "production_promoted": False,
         "point_in_time_pool_state_observed": state_observed,
-        "point_in_time_depth_observed": False,
-        "point_in_time_quality_pass": False,
-        "quality_decision": "pool_state_only_executable_depth_unverified",
+        "point_in_time_depth_observed": tick_replay_observed,
+        "point_in_time_tick_replay_observed": tick_replay_observed,
+        "point_in_time_volume_window_observed": volume_window_observed,
+        "point_in_time_quality_pass": point_in_time_quality_pass,
+        "quality_decision": (
+            "candidate_snapshot_pass"
+            if point_in_time_quality_pass
+            else "candidate_replay_failed_quality"
+            if tick_replay_observed
+            else "pool_state_only_executable_depth_unverified"
+        ),
         "manipulation_review_complete": False,
         "spread_bps": _spread_bps(observation),
         "pool_state": {
@@ -255,27 +338,75 @@ def _onchain_state_evidence(feed: dict[str, Any], capture: dict[str, Any]) -> di
             "discovery_liquidity_usd": metadata.get("discovery_liquidity_usd"),
             "required_fields": required,
         },
+        "exact_tick_replay": {
+            key: replay.get(key)
+            for key in (
+                "block_number",
+                "tick_word_range",
+                "tick_word_count",
+                "initialized_tick_count",
+                "initialized_ticks_truncated",
+                "target_fills",
+                "volume_window",
+                "semantics",
+            )
+        } if replay else None,
+        "replay_error": replay_error,
+        "volume_replay_error": (
+            volume_window.get("error")
+            if isinstance(volume_window, dict) and volume_window.get("status") == "error"
+            else None
+        ),
         "replay_evidence": {
             "raw_pool_state_payload_hash": _payload_hash(raw_pool_state) if raw_pool_state else None,
             "raw_pool_state_payload": raw_pool_state,
+            "tick_and_swap_payload_hash": (
+                _payload_hash(replay.get("replay_payload")) if replay else None
+            ),
+            "tick_and_swap_payload": replay.get("replay_payload") if replay else None,
         },
-        "risk_flags": [
-            "synthetic_depth_excluded",
-            "tick_bitmap_and_liquidity_replay_missing",
-            "swap_volume_window_missing",
-            "lp_or_holder_concentration_missing",
-            "single_pool_dependency",
-            "route_diversity_missing",
-        ],
+        "risk_flags": sorted(set(risk_flags)),
         "limitations": [
             "Current active liquidity is not USD executable depth.",
-            "Exact block-size VWAP needs initialized-tick replay or a verified quote simulation.",
+            "Exact replay is bounded by the captured bitmap range and remains partial beyond it.",
             "Pool and holder concentration require additional onchain indexing and history.",
         ],
     }
 
 
 def _history_stats(history: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def metric(row: dict[str, Any], name: str) -> float | None:
+        if name == "volume":
+            native = row.get("organic_volume") if isinstance(row.get("organic_volume"), dict) else {}
+            replay = row.get("exact_tick_replay") if isinstance(row.get("exact_tick_replay"), dict) else {}
+            window = replay.get("volume_window") if isinstance(replay.get("volume_window"), dict) else {}
+            value = native.get("notional_volume_usd")
+            if value is None:
+                value = window.get("quote_volume_usd")
+            return _finite(value)
+        pool = row.get("pool_state") if isinstance(row.get("pool_state"), dict) else {}
+        return _finite(pool.get("active_liquidity_units"))
+
+    def robust(values: list[float], current_value: float | None) -> dict[str, Any]:
+        median = statistics.median(values) if values else None
+        mad = (
+            statistics.median(abs(value - median) for value in values)
+            if median is not None
+            else None
+        )
+        threshold = max(abs(median or 0) * 0.05, 6 * (mad or 0))
+        return {
+            "median": median,
+            "mad": mad,
+            "current": current_value,
+            "current_robust_outlier": bool(
+                len(values) >= 5
+                and current_value is not None
+                and median is not None
+                and abs(current_value - median) > threshold
+            ),
+        }
+
     result = []
     for feed in PILOT_FEEDS:
         pilot_id = str(feed["pilot_id"])
@@ -291,6 +422,10 @@ def _history_stats(history: list[dict[str, Any]], rows: list[dict[str, Any]]) ->
         median = statistics.median(spreads) if spreads else None
         mad = statistics.median(abs(value - median) for value in spreads) if median is not None else None
         current_spread = _finite(current.get("spread_bps"))
+        volumes = [value for row in all_rows if (value := metric(row, "volume")) is not None]
+        liquidities = [
+            value for row in all_rows if (value := metric(row, "liquidity")) is not None
+        ]
         result.append(
             {
                 "pilot_id": pilot_id,
@@ -304,6 +439,11 @@ def _history_stats(history: list[dict[str, Any]], rows: list[dict[str, Any]]) ->
                     and median is not None
                     and mad is not None
                     and current_spread > median + max(1.0, 6 * mad)
+                ),
+                "organic_volume": robust(volumes, metric(current, "volume")),
+                "active_liquidity": robust(
+                    liquidities,
+                    metric(current, "liquidity"),
                 ),
             }
         )
@@ -323,9 +463,15 @@ def evaluate_depth_evidence(
         if feed["source_lane"] == "venue_api_order_book":
             rows.append(_native_l2_evidence(feed, capture, books_by_pilot.get(pilot_id, {})))
         else:
-            rows.append(_onchain_state_evidence(feed, capture))
+            rows.append(
+                _onchain_state_evidence(
+                    feed,
+                    capture,
+                    books_by_pilot.get(pilot_id, {}),
+                )
+            )
     native = [row for row in rows if row["evidence_class"] == "native_l2_point_in_time"]
-    pool = [row for row in rows if row["evidence_class"].startswith("block_pinned_pool_state")]
+    pool = [row for row in rows if row["source_lane"].endswith("rpc_pool_state")]
     return {
         "product": "rwa_pilot_depth_and_manipulation_evidence",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -338,6 +484,14 @@ def evaluate_depth_evidence(
             ),
             "pool_state_observed": sum(
                 row.get("point_in_time_pool_state_observed") is True for row in pool
+            ),
+            "point_in_time_tick_replay_observed": sum(
+                row.get("point_in_time_tick_replay_observed") is True for row in pool
+            ),
+            "point_in_time_volume_window_observed": sum(
+                row.get("point_in_time_volume_window_observed") is True for row in rows
+            ) + sum(
+                isinstance(row.get("organic_volume"), dict) for row in native
             ),
             "executable_depth_observed_feed_count": sum(
                 row.get("point_in_time_depth_observed") is True for row in rows
@@ -355,9 +509,17 @@ def evaluate_depth_evidence(
                 for row in rows
             ),
             "sustained_depth_window_complete": False,
+            "point_in_time_volume_evidence_collected": all(
+                row.get("point_in_time_volume_window_observed") is True
+                or isinstance(row.get("organic_volume"), dict)
+                for row in rows
+            ),
             "organic_volume_review_complete": False,
             "route_and_source_diversity_complete": False,
             "pool_or_holder_concentration_complete": False,
+            "point_in_time_tick_liquidity_replay_collected": all(
+                row.get("point_in_time_tick_replay_observed") is True for row in pool
+            ),
             "tick_liquidity_replay_complete": False,
             "manipulation_and_depth_review_complete": False,
             "production_promotion_allowed": False,
@@ -369,7 +531,12 @@ def evaluate_depth_evidence(
             "maximum_book_timestamp_gap_seconds": MAX_BOOK_TIMESTAMP_GAP_SECONDS,
             "maximum_native_spread_bps": MAX_NATIVE_SPREAD_BPS,
             "required_native_block_usd": REQUIRED_NATIVE_BLOCK_USD,
+            "minimum_organic_24h_volume_usd": MINIMUM_ORGANIC_24H_VOLUME_USD,
+            "maximum_required_block_slippage_bps": MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS,
             "robust_spread_outlier_rule": "current > median + max(1 bps, 6 * MAD), after 5 samples",
+            "robust_volume_liquidity_outlier_rule": (
+                "absolute deviation > max(5% of median, 6 * MAD), after 5 samples"
+            ),
         },
         "history_statistics": _history_stats(history or [], rows),
         "rows": rows,
@@ -388,32 +555,41 @@ async def capture_depth_inputs(
     timeout_seconds: float = 20.0,
 ) -> dict[str, dict[str, Any]]:
     """Capture native L2 sides; pool lanes reuse their block-pinned capture."""
-    results: dict[str, dict[str, Any]] = {}
-    for feed in PILOT_FEEDS:
+    async def capture_feed(feed: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         pilot_id = str(feed["pilot_id"])
-        if feed["source_lane"] != "venue_api_order_book":
-            results[pilot_id] = {"source": "pilot_pool_state_capture"}
-            continue
         capture = next((row for row in captures if row.get("pilot_id") == pilot_id), None)
         if not capture or capture.get("status") != "ok":
-            results[pilot_id] = {"error": "pilot capture unavailable"}
-            continue
+            return pilot_id, {"error": "pilot capture unavailable"}
         try:
             adapter = registry.get(feed["venue"])
-            buy, sell = await asyncio.gather(
-                asyncio.wait_for(
-                    adapter.fetch_order_book(feed["symbol"], side="buy", depth=20),
-                    timeout=timeout_seconds,
+            if feed["source_lane"] == "venue_api_order_book":
+                buy, sell, activity = await asyncio.gather(
+                    asyncio.wait_for(
+                        adapter.fetch_order_book(feed["symbol"], side="buy", depth=20),
+                        timeout=timeout_seconds,
+                    ),
+                    asyncio.wait_for(
+                        adapter.fetch_order_book(feed["symbol"], side="sell", depth=20),
+                        timeout=timeout_seconds,
+                    ),
+                    asyncio.wait_for(
+                        adapter.fetch_market_activity(feed["symbol"]),
+                        timeout=timeout_seconds,
+                    ),
+                )
+                return pilot_id, {"buy": buy, "sell": sell, "activity": activity}
+            replay = await asyncio.wait_for(
+                adapter.fetch_pool_replay_evidence(
+                    feed["symbol"],
+                    capture["raw_observation"],
                 ),
-                asyncio.wait_for(
-                    adapter.fetch_order_book(feed["symbol"], side="sell", depth=20),
-                    timeout=timeout_seconds,
-                ),
+                timeout=max(60.0, timeout_seconds * 4),
             )
-            results[pilot_id] = {"buy": buy, "sell": sell}
+            return pilot_id, {"pool_replay": replay}
         except Exception as exc:
-            results[pilot_id] = {"error": f"{type(exc).__name__}: {str(exc)[:1000]}"}
-    return results
+            return pilot_id, {"error": f"{type(exc).__name__}: {str(exc)[:1000]}"}
+
+    return dict(await asyncio.gather(*(capture_feed(feed) for feed in PILOT_FEEDS)))
 
 
 def load_depth_history(path: Path) -> list[dict[str, Any]]:
