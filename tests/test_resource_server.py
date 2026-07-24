@@ -2596,6 +2596,23 @@ class TestPaymentGate:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/info"
             payload = json.loads(request.content.decode())
+            if payload == {"type": "spotMetaAndAssetCtxs"}:
+                return httpx.Response(
+                    200,
+                    json=[
+                        {"universe": [{"name": "@268", "index": 0}]},
+                        [
+                            {
+                                "coin": "@268",
+                                "dayBaseVlm": "12.5",
+                                "dayNtlVlm": "3950.25",
+                                "markPx": "315.90",
+                                "midPx": "315.58",
+                                "prevDayPx": "312.00",
+                            }
+                        ],
+                    ],
+                )
             assert payload == {"type": "l2Book", "coin": "@268"}
             return httpx.Response(
                 200,
@@ -2621,6 +2638,7 @@ class TestPaymentGate:
             bidask = await adapter.fetch_bidask("AAPL/USD")
             buy_book = await adapter.fetch_order_book("@268", side="buy", depth=2)
             sell_book = await adapter.fetch_order_book("AAPL/USDC", side="sell", depth=2)
+            activity = await adapter.fetch_market_activity("AAPL/USDC")
 
         assert bidask["symbol"] == "AAPL/USDC"
         assert bidask["bid"] == 314.48
@@ -2636,6 +2654,10 @@ class TestPaymentGate:
             {"price": 314.48, "size": 7.5},
             {"price": 314.2, "size": 4.0},
         ]
+        assert activity["window_seconds"] == 86_400
+        assert activity["base_volume"] == 12.5
+        assert activity["notional_volume_usd"] == 3950.25
+        assert activity["metadata"]["hyperliquid_coin"] == "@268"
 
     @pytest.mark.asyncio
     async def test_hyperliquid_spot_adapter_rejects_unsupported_symbol(self):

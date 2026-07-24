@@ -201,6 +201,10 @@ from scripts.run_rwa_pilot_depth_snapshot import (
     load_depth_history,
     persist_depth_report,
 )
+from scripts.build_rwa_pilot_promotion_packet import (
+    build_promotion_packet,
+    persist_promotion_packet,
+)
 
 logger = logging.getLogger(__name__)
 # httpx INFO records include full request URLs. Configured RPC URLs can contain
@@ -278,10 +282,28 @@ def _rwa_growth_pilot_depth_paths() -> tuple[Path, Path]:
     )
 
 
+def _rwa_growth_pilot_promotion_paths() -> tuple[Path, Path]:
+    return (
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_PROMOTION_HISTORY_PATH",
+                "/data/rwa_growth_pilot_promotion_history.jsonl",
+            )
+        ),
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_PROMOTION_STATUS_PATH",
+                "/data/rwa_growth_pilot_promotion_latest.json",
+            )
+        ),
+    )
+
+
 def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
     _, status_path = _rwa_growth_pilot_paths()
     _, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     _, depth_status_path = _rwa_growth_pilot_depth_paths()
+    _, promotion_status_path = _rwa_growth_pilot_promotion_paths()
     if not status_path.exists():
         return {
             "status": "not_started",
@@ -311,6 +333,12 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             depth = json.loads(depth_status_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             depth = {"status": "status_unreadable"}
+    promotion = {}
+    if promotion_status_path.exists():
+        try:
+            promotion = json.loads(promotion_status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            promotion = {"status": "status_unreadable"}
     return {
         "status": report.get("status", "candidate_monitoring"),
         "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
@@ -337,6 +365,13 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             "summary": depth.get("summary", {}),
             "gate_assessment": depth.get("gate_assessment", {}),
         },
+        "promotion_packet": {
+            "generated_at": promotion.get("generated_at"),
+            "status": promotion.get("status", "not_started"),
+            "summary": promotion.get("summary", {}),
+            "feeds": promotion.get("feeds", []),
+            "policy": promotion.get("policy", {}),
+        },
         "thresholds": report.get("thresholds", {}),
         "non_monitoring_gates": report.get("non_monitoring_gates", {}),
         "feeds": report.get("feeds", []),
@@ -351,6 +386,7 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     history_path, status_path = _rwa_growth_pilot_paths()
     alignment_history_path, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     depth_history_path, depth_status_path = _rwa_growth_pilot_depth_paths()
+    promotion_history_path, promotion_status_path = _rwa_growth_pilot_promotion_paths()
     await asyncio.sleep(initial_delay)
     while True:
         try:
@@ -386,8 +422,15 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                 alignment_report=alignment,
                 depth_report=depth,
             )
+            promotion_packet = build_promotion_packet(report, alignment, depth)
+            await asyncio.to_thread(
+                persist_promotion_packet,
+                promotion_packet,
+                history_path=promotion_history_path,
+                latest_path=promotion_status_path,
+            )
             logger.info(
-                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; depth_or_state=%s/%s; promotion_ready=%s",
+                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; depth_or_state=%s/%s; promotion_ready=%s; promotion_blockers=%s",
                 report["current_capture"]["succeeded"],
                 report["current_capture"]["attempted"],
                 report["current_capture"]["ledger_persisted"],
@@ -399,6 +442,7 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                 ),
                 depth["summary"]["feeds_attempted"],
                 report["promotion_ready"],
+                promotion_packet["summary"]["blocking_gate_count"],
             )
         except asyncio.CancelledError:
             raise
@@ -7567,16 +7611,23 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     function renderRwaPilot(data) {
       const pilot = data.rwa_growth_pilot || {};
       const capture = pilot.current_capture || {};
+      const depth = pilot.depth_and_manipulation_evidence?.summary || {};
+      const packet = pilot.promotion_packet || {};
+      const packetByPilot = Object.fromEntries((packet.feeds || []).map(row => [row.pilot_id, row]));
       document.getElementById("rwa-pilot-kpis").innerHTML = [
         summaryItem("Status", text(pilot.status)),
         summaryItem("Latest capture", `${fmt.format(capture.succeeded || 0)}/${fmt.format(capture.attempted || 0)}`),
         summaryItem("Monitoring ready", pilot.source_monitoring_ready ? "Yes" : "No"),
+        summaryItem("Volume windows", fmt.format(depth.point_in_time_volume_window_observed || 0)),
+        summaryItem("Tick replays", fmt.format(depth.point_in_time_tick_replay_observed || 0)),
         summaryItem("Promoted feeds", fmt.format(pilot.production_promoted_feed_count || 0)),
       ].join("");
       const rows = pilot.feeds || [];
       document.getElementById("rwa-pilot-table").innerHTML =
-        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Monitoring</th></tr></thead><tbody>` +
-        (rows.length ? rows.map(row => `<tr>
+        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Monitoring</th><th>Gate progress</th><th>Decision</th></tr></thead><tbody>` +
+        (rows.length ? rows.map(row => {
+          const readiness = packetByPilot[row.pilot_id] || {};
+          return `<tr>
           <td><code>${escapeAttr(row.symbol || row.pilot_id)}</code></td>
           <td>${escapeAttr(row.source_lane || row.venue)}</td>
           <td>${fmt.format(row.sample_count || 0)}</td>
@@ -7584,7 +7635,10 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
           <td>${pct(row.success_rate)}</td>
           <td>${pct(row.freshness_rate)}</td>
           <td>${rowBadge(row.source_monitoring_ready ? "pass" : "collecting")}</td>
-        </tr>`).join("") : `<tr><td colspan="7" class="empty">Pilot monitoring has not produced a persisted capture yet.</td></tr>`) +
+          <td>${fmt.format(readiness.passed_gate_count || 0)}/${fmt.format(readiness.required_gate_count || 0)}</td>
+          <td title="${escapeAttr((readiness.blocking_gates || []).join(", "))}">${rowBadge("hold")}</td>
+        </tr>`;
+        }).join("") : `<tr><td colspan="9" class="empty">Pilot monitoring has not produced a persisted capture yet.</td></tr>`) +
         `</tbody>`;
     }
 

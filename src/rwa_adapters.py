@@ -25,6 +25,12 @@ from src.rwa_hyperliquid_discovery import (
     HYPERLIQUID_SPOT_VENUE_ID,
     load_hyperliquid_tradeable_coverage_rows,
 )
+from src.rwa_clmm_replay import (
+    decode_signed_word,
+    encode_signed_argument,
+    simulate_exact_input,
+    summarize_swap_logs,
+)
 
 
 JUPITER_DEFAULT_TOKEN_MINTS: dict[str, dict[str, Any]] = {
@@ -804,6 +810,7 @@ class HyperliquidSpotRWAAdapter:
             implementation="src.rwa_adapters.HyperliquidSpotRWAAdapter",
             notes=[
                 "Uses Hyperliquid public info endpoint with spot l2Book @index symbols.",
+                "Uses spotMetaAndAssetCtxs for native 24-hour base/notional volume.",
                 f"Seeded with {len(HYPERLIQUID_RWA_SPOT_SYMBOLS)} RWA/traditional spot candidates; {unverified_count} require manual identity review.",
                 "The public l2Book endpoint returns at most 20 levels per side.",
                 "Rows are supplemental until identity, issuer, liquidity, and benchmark checks pass.",
@@ -894,6 +901,59 @@ class HyperliquidSpotRWAAdapter:
             "levels": self._levels_for_side(payload, clean_side, depth),
             "timestamp": self._timestamp_from_payload(payload),
             "metadata": metadata,
+        }
+
+    async def fetch_market_activity(self, symbol: str) -> dict[str, Any]:
+        """Return Hyperliquid-native rolling 24-hour spot activity."""
+        row = self.resolve_symbol(symbol)
+        coin = str(row["hyperliquid_coin"])
+        payload = await self._post_info({"type": "spotMetaAndAssetCtxs"})
+        if not isinstance(payload, list) or len(payload) < 2:
+            raise ValueError("Hyperliquid spot contexts response was not a two-item list")
+        meta = payload[0] if isinstance(payload[0], dict) else {}
+        contexts = payload[1] if isinstance(payload[1], list) else []
+        context = next(
+            (
+                item
+                for item in contexts
+                if isinstance(item, dict) and str(item.get("coin") or "") == coin
+            ),
+            None,
+        )
+        if context is None:
+            universe = meta.get("universe") if isinstance(meta.get("universe"), list) else []
+            market = next(
+                (
+                    item
+                    for item in universe
+                    if isinstance(item, dict) and str(item.get("name") or "") == coin
+                ),
+                None,
+            )
+            market_index = market.get("index") if isinstance(market, dict) else None
+            if isinstance(market_index, int) and 0 <= market_index < len(contexts):
+                candidate = contexts[market_index]
+                context = candidate if isinstance(candidate, dict) else None
+        if context is None:
+            raise ValueError(f"Hyperliquid spot context was unavailable for {coin}")
+        return {
+            "symbol": row["display_pair"],
+            "venue": self.venue_id,
+            "source_type": "native_venue_rolling_stats",
+            "window_seconds": 86_400,
+            "captured_at": _iso_now(),
+            "base_volume": _float_value(context.get("dayBaseVlm")),
+            "notional_volume_usd": _float_value(context.get("dayNtlVlm")),
+            "mark_price": _float_value(context.get("markPx")),
+            "mid_price": _float_value(context.get("midPx")),
+            "previous_day_price": _float_value(context.get("prevDayPx")),
+            "trade_count": None,
+            "metadata": {
+                "hyperliquid_coin": coin,
+                "endpoint": "Hyperliquid /info spotMetaAndAssetCtxs",
+                "volume_semantics": "venue_native_rolling_24h_notional_and_base_volume",
+                "raw_context": context,
+            },
         }
 
 
@@ -2418,16 +2478,14 @@ class OstiumBuilderPriceAdapter:
 
 
 class EVMPoolStateAdapter:
-    """Candidate EVM CLMM pool-state adapter.
-
-    This adapter prices a verified pool from block-tagged `slot0` state and
-    emits conservative synthetic depth from observed pool liquidity. It is a
-    live pool-state candidate, not production L2 replay: full promotion still
-    needs tick bitmap/liquidity replay and manipulation/depth windows.
-    """
+    """Candidate EVM CLMM state, swap-volume, and bounded tick-replay adapter."""
 
     source_type = "onchain_clmm_pool"
     _DECIMALS_SELECTOR = "0x313ce567"
+    _TICK_BITMAP_SELECTOR = "0x5339c296"
+    _TICKS_SELECTOR = "0xf30dba93"
+    _SWAP_EVENT_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+    _AVERAGE_BLOCK_SECONDS = {"ethereum": 12.0, "base": 2.0}
     _POOL_SELECTORS = {
         "token0": "0x0dfe1681",
         "token1": "0xd21220a7",
@@ -2465,6 +2523,10 @@ class EVMPoolStateAdapter:
         for chain, env_name in _RPC_ENV_BY_CHAIN.items()
     }
     _PUBLIC_RPC_FALLBACKS = {
+        "ethereum": (
+            "https://ethereum-rpc.publicnode.com",
+            "https://eth.llamarpc.com",
+        ),
         "base": ("https://mainnet.base.org", "https://base-rpc.publicnode.com"),
     }
     _KNOWN_DECIMALS = {
@@ -2492,6 +2554,8 @@ class EVMPoolStateAdapter:
         self._client = client
         self._aliases = self._load_aliases()
         self._decimals_cache: dict[tuple[str, str], int] = {}
+        self._rpc_rate_lock = asyncio.Lock()
+        self._rpc_last_call = 0.0
 
     def metadata(self) -> dict[str, Any]:
         row_count = len({id(row) for row in self._aliases.values()})
@@ -2508,8 +2572,8 @@ class EVMPoolStateAdapter:
             notes=[
                 f"Loaded {row_count} aliases from {self.pool_path}.",
                 "Reads EVM pool slot0/liquidity/token metadata through configured RPC.",
-                "Depth is conservative synthetic depth from pool liquidity, not full tick-range replay.",
-                "Production promotion still requires tick bitmap/liquidity replay, raw payload retention, benchmark alignment, and manipulation/depth windows.",
+                "Captures Swap logs plus a bounded initialized-tick range for exact-input replay.",
+                "Synthetic levels remain excluded; bounded replay remains candidate evidence until sustained manipulation/depth, benchmark, rights, and human gates pass.",
             ],
         ).as_dict()
 
@@ -2673,10 +2737,30 @@ class EVMPoolStateAdapter:
     async def _call_first_rpc(self, chain: str, method: str, params: list[Any]) -> tuple[Any, str]:
         errors: list[str] = []
         for source, url in self._rpc_candidates(chain):
-            try:
-                return await self._json_rpc(url, method, params), source
-            except ValueError as exc:
-                errors.append(f"{source}: {exc}")
+            retry_attempts = max(1, int(os.getenv("RWA_EVM_RPC_RETRY_ATTEMPTS", "4")))
+            for attempt in range(retry_attempts):
+                minimum_interval = max(
+                    0.0,
+                    float(os.getenv("RWA_EVM_RPC_MIN_INTERVAL_SECONDS", "0.09")),
+                )
+                async with self._rpc_rate_lock:
+                    loop = asyncio.get_running_loop()
+                    wait_seconds = self._rpc_last_call + minimum_interval - loop.time()
+                    if wait_seconds > 0:
+                        await asyncio.sleep(wait_seconds)
+                    self._rpc_last_call = loop.time()
+                    try:
+                        return await self._json_rpc(url, method, params), source
+                    except ValueError as exc:
+                        message = str(exc)
+                transient = any(
+                    marker in message.lower()
+                    for marker in ("429", "rate limit", "too many requests", "timeout")
+                )
+                errors.append(f"{source}: {message}")
+                if not transient or attempt + 1 >= retry_attempts:
+                    break
+                await asyncio.sleep(min(4.0, 0.5 * 2**attempt))
         raise RWAAdapterBlockedError(
             "evm_rpc_and_pool_state",
             f"No working EVM RPC for chain={chain}; errors={errors[:3]}",
@@ -2684,6 +2768,74 @@ class EVMPoolStateAdapter:
 
     async def _eth_call(self, chain: str, contract: str, data: str, block_tag: str) -> tuple[Any, str]:
         return await self._call_first_rpc(chain, "eth_call", [{"to": contract, "data": data}, block_tag])
+
+    async def _block_timestamp(self, chain: str, block_number: int) -> tuple[int, str]:
+        payload, source = await self._call_first_rpc(
+            chain,
+            "eth_getBlockByNumber",
+            [hex(block_number), False],
+        )
+        timestamp = self._hex_to_int(payload.get("timestamp")) if isinstance(payload, dict) else None
+        if timestamp is None:
+            raise ValueError(f"Could not decode timestamp for {chain} block {block_number}")
+        return timestamp, source
+
+    async def _start_block_for_window(
+        self,
+        chain: str,
+        end_block: int,
+        lookback_seconds: int,
+    ) -> tuple[int, int, int, str]:
+        end_timestamp, source = await self._block_timestamp(chain, end_block)
+        target_timestamp = max(0, end_timestamp - lookback_seconds)
+        average_seconds = self._AVERAGE_BLOCK_SECONDS.get(chain, 3.0)
+        estimated_span = max(1, int(lookback_seconds / average_seconds * 1.5))
+        low = max(0, end_block - estimated_span)
+        low_timestamp, source = await self._block_timestamp(chain, low)
+        while low > 0 and low_timestamp > target_timestamp:
+            estimated_span *= 2
+            low = max(0, end_block - estimated_span)
+            low_timestamp, source = await self._block_timestamp(chain, low)
+        high = end_block
+        while low < high:
+            mid = (low + high) // 2
+            timestamp, source = await self._block_timestamp(chain, mid)
+            if timestamp < target_timestamp:
+                low = mid + 1
+            else:
+                high = mid
+        start_timestamp, source = await self._block_timestamp(chain, low)
+        return low, start_timestamp, end_timestamp, source
+
+    async def _swap_logs(
+        self,
+        *,
+        chain: str,
+        contract: str,
+        start_block: int,
+        end_block: int,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        chunk_size = max(100, int(os.getenv("RWA_EVM_LOG_BLOCK_CHUNK_SIZE", "5000")))
+        logs: list[dict[str, Any]] = []
+        sources: list[str] = []
+        for chunk_start in range(start_block, end_block + 1, chunk_size):
+            chunk_end = min(end_block, chunk_start + chunk_size - 1)
+            payload, source = await self._call_first_rpc(
+                chain,
+                "eth_getLogs",
+                [
+                    {
+                        "address": contract,
+                        "fromBlock": hex(chunk_start),
+                        "toBlock": hex(chunk_end),
+                        "topics": [self._SWAP_EVENT_TOPIC],
+                    }
+                ],
+            )
+            if isinstance(payload, list):
+                logs.extend(row for row in payload if isinstance(row, dict))
+            sources.append(source)
+        return logs, sorted(set(sources))
 
     async def _token_decimals(self, chain: str, token: str, block_tag: str) -> int:
         token_key = self._token_key(token)
@@ -2832,6 +2984,8 @@ class EVMPoolStateAdapter:
             "rpc_sources": state["call_sources"],
             "token0": state["token0"],
             "token1": state["token1"],
+            "base_token": str(row.get("base_token") or ""),
+            "quote_token": str(row.get("quote_token") or ""),
             "decimals0": state["decimals0"],
             "decimals1": state["decimals1"],
             "fee_tier": state.get("fee_tier"),
@@ -2850,6 +3004,189 @@ class EVMPoolStateAdapter:
             "production_gate": "candidate_only_pending_tick_bitmap_liquidity_replay_depth_manipulation_benchmark_rights",
             "discovery_liquidity_usd": row.get("liquidity_usd"),
             "discovery_url": row.get("url"),
+        }
+
+    async def fetch_pool_replay_evidence(
+        self,
+        symbol: str,
+        observation: dict[str, Any],
+        *,
+        lookback_seconds: int = 86_400,
+        word_radius: int = 2,
+        max_initialized_ticks: int = 128,
+        target_notionals_usd: tuple[float, ...] = (1_000.0, 10_000.0, 50_000.0),
+    ) -> dict[str, Any]:
+        """Capture swap volume and bounded initialized-tick replay at one block."""
+        row = self.resolve_symbol(symbol)
+        metadata = observation.get("metadata") if isinstance(observation.get("metadata"), dict) else {}
+        chain = str(metadata.get("chain") or self._chain(row))
+        contract = str(metadata.get("pool_contract") or self._pool_contract(row))
+        block_number = int(metadata.get("block_number"))
+        block_tag = str(metadata.get("block_tag") or hex(block_number))
+        tick = int(metadata.get("tick"))
+        tick_spacing = int(metadata.get("tick_spacing"))
+        if tick_spacing <= 0:
+            raise ValueError("tick spacing must be positive")
+        compressed = tick // tick_spacing
+        current_word = compressed >> 8
+        radius = max(1, min(int(word_radius), 8))
+        word_positions = list(range(current_word - radius, current_word + radius + 1))
+
+        async def fetch_bitmap(word_position: int) -> tuple[int, int, str]:
+            data = f"{self._TICK_BITMAP_SELECTOR}{encode_signed_argument(word_position, 16)}"
+            result, source = await self._eth_call(chain, contract, data, block_tag)
+            bitmap = self._hex_to_int(result)
+            if bitmap is None:
+                raise ValueError(f"Could not decode tick bitmap word {word_position}")
+            return word_position, bitmap, source
+
+        bitmap_rows = await asyncio.gather(*(fetch_bitmap(word) for word in word_positions))
+        initialized_tick_numbers = sorted(
+            (word << 8 | bit) * tick_spacing
+            for word, bitmap, _ in bitmap_rows
+            for bit in range(256)
+            if bitmap & (1 << bit)
+        )
+        ticks_truncated = len(initialized_tick_numbers) > max_initialized_ticks
+        if ticks_truncated:
+            initialized_tick_numbers = sorted(
+                sorted(initialized_tick_numbers, key=lambda value: abs(value - tick))[
+                    :max_initialized_ticks
+                ]
+            )
+
+        async def fetch_tick(tick_number: int) -> dict[str, Any]:
+            data = f"{self._TICKS_SELECTOR}{encode_signed_argument(tick_number, 24)}"
+            result, source = await self._eth_call(chain, contract, data, block_tag)
+            raw = str(result or "")
+            if not raw.startswith("0x") or len(raw) < 2 + 64 * 2:
+                raise ValueError(f"Could not decode initialized tick {tick_number}")
+            words = [raw[2 + index * 64 : 2 + (index + 1) * 64] for index in range(2)]
+            return {
+                "tick": tick_number,
+                "liquidity_gross": int(words[0], 16),
+                "liquidity_net": decode_signed_word(words[1]),
+                "initialized": int(words[0], 16) > 0,
+                "rpc_source": source,
+            }
+
+        initialized_ticks: list[dict[str, Any]] = []
+        for offset in range(0, len(initialized_tick_numbers), 16):
+            initialized_ticks.extend(
+                await asyncio.gather(
+                    *(fetch_tick(value) for value in initialized_tick_numbers[offset : offset + 16])
+                )
+            )
+
+        raw_logs: list[dict[str, Any]] = []
+        log_sources: list[str] = []
+        block_source: str | None = None
+        volume_window: dict[str, Any]
+        try:
+            start_block, start_timestamp, end_timestamp, block_source = (
+                await self._start_block_for_window(chain, block_number, lookback_seconds)
+            )
+            raw_logs, log_sources = await self._swap_logs(
+                chain=chain,
+                contract=contract,
+                start_block=start_block,
+                end_block=block_number,
+            )
+            volume = summarize_swap_logs(
+                raw_logs,
+                token0=str(metadata.get("token0")),
+                token1=str(metadata.get("token1")),
+                decimals0=int(metadata.get("decimals0")),
+                decimals1=int(metadata.get("decimals1")),
+                base_token=str(metadata.get("base_token") or row.get("base_token")),
+                quote_token=str(metadata.get("quote_token") or row.get("quote_token")),
+            )
+            volume_window = {
+                **{key: value for key, value in volume.items() if key != "decoded_swaps"},
+                "status": "ok",
+                "lookback_seconds": lookback_seconds,
+                "start_block": start_block,
+                "end_block": block_number,
+                "start_timestamp": datetime.fromtimestamp(start_timestamp, tz=UTC).isoformat(),
+                "end_timestamp": datetime.fromtimestamp(end_timestamp, tz=UTC).isoformat(),
+                "window_coverage_seconds": end_timestamp - start_timestamp,
+            }
+        except Exception as exc:
+            volume_window = {
+                "status": "error",
+                "lookback_seconds": lookback_seconds,
+                "end_block": block_number,
+                "quote_volume_usd": None,
+                "window_coverage_seconds": 0,
+                "error": f"{type(exc).__name__}: {str(exc)[:1000]}",
+            }
+        replay_state = {
+            "token0": str(metadata.get("token0")),
+            "token1": str(metadata.get("token1")),
+            "base_token": str(metadata.get("base_token") or row.get("base_token")),
+            "quote_token": str(metadata.get("quote_token") or row.get("quote_token")),
+            "decimals0": int(metadata.get("decimals0")),
+            "decimals1": int(metadata.get("decimals1")),
+            "fee_tier": int(metadata.get("fee_tier") or 0),
+            "sqrt_price_x96": int(metadata.get("sqrt_price_x96")),
+            "tick": tick,
+            "tick_spacing": tick_spacing,
+            "liquidity": int(metadata.get("liquidity")),
+            "price": (float(observation["bid"]) + float(observation["ask"])) / 2,
+            "initialized_ticks": initialized_ticks,
+            "max_ticks_crossed": max_initialized_ticks,
+        }
+        target_fills = {
+            side: [
+                simulate_exact_input(
+                    replay_state,
+                    side=side,
+                    target_notional_usd=target,
+                )
+                for target in target_notionals_usd
+            ]
+            for side in ("buy", "sell")
+        }
+        return {
+            "symbol": self._display_symbol(row),
+            "venue": self.venue_id,
+            "source_type": "block_pinned_clmm_tick_and_swap_replay",
+            "captured_at": _iso_now(),
+            "chain": chain,
+            "pool_contract": contract,
+            "block_number": block_number,
+            "block_tag": block_tag,
+            "tick_word_range": [word_positions[0], word_positions[-1]],
+            "tick_word_count": len(word_positions),
+            "initialized_tick_count": len(initialized_ticks),
+            "initialized_ticks_truncated": ticks_truncated,
+            "initialized_ticks": initialized_ticks,
+            "target_fills": target_fills,
+            "volume_window": volume_window,
+            "replay_payload": {
+                "bitmap_words": [
+                    {"word_position": word, "bitmap": hex(bitmap)}
+                    for word, bitmap, _ in bitmap_rows
+                ],
+                "initialized_ticks": initialized_ticks,
+                "swap_logs": raw_logs,
+            },
+            "rpc_sources": sorted(
+                {
+                    *(source for source in (block_source,) if source),
+                    *log_sources,
+                    *(source for _, _, source in bitmap_rows),
+                    *(str(item["rpc_source"]) for item in initialized_ticks),
+                }
+            ),
+            "semantics": {
+                "depth": "bounded_exact_input_replay_from_block_pinned_tick_bitmap_and_liquidity_net",
+                "volume": "decoded_pool_Swap_events_over_timestamp_bounded_window",
+                "limitations": (
+                    "Replay is conservative outside the captured bitmap range; partial fills remain partial. "
+                    "Sender/recipient counts are routing proxies, not unique beneficial traders."
+                ),
+            },
         }
 
     async def fetch_bidask(self, symbol: str) -> dict[str, Any]:

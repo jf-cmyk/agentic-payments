@@ -30,11 +30,19 @@ The pilot contains exactly three candidate feeds:
 
 | Feed | Runtime source | Monitoring lane |
 | --- | --- | --- |
-| AAPL/USDC | Hyperliquid public order-book API | Venue API order book |
-| PAXG/USDC | Uniswap pool state through Ethereum RPC | Ethereum onchain pool state |
-| EURC/USDC | Aerodrome pool state through Base RPC | Base onchain pool state |
+| AAPL/USDC | Hyperliquid public order-book API and venue-native rolling activity | Native L2 plus 24-hour base/notional volume |
+| PAXG/USDC | Uniswap pool state through Ethereum RPC | Block-pinned state, initialized ticks and decoded Swap logs |
+| EURC/USDC | Aerodrome pool state through Base RPC | Block-pinned state, initialized ticks and decoded Swap logs |
 
-`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume. Each cycle also records a timestamp-aware comparison against Blocksize AAPL, XAU/USD and EUR/USD references. These comparisons are evidence inputs only: proxy semantics, stale timestamps, lineage, independence and rights remain explicit blockers and the scheduler cannot complete a promotion gate.
+`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume. Each cycle also records a timestamp-aware comparison against Blocksize AAPL, XAU/USD and EUR/USD references, captures volume/depth evidence, applies robust spread/volume/liquidity drift checks after enough samples, and writes a per-feed promotion packet. These are evidence inputs only: proxy semantics, stale timestamps, lineage, independence and rights remain explicit blockers and the scheduler cannot complete a promotion gate.
+
+The runtime data boundary is explicit:
+
+- AAPL book and rolling volume come directly from Hyperliquid public Info endpoints.
+- PAXG and EURC pool state, initialized liquidity ticks and Swap events come from EVM JSON-RPC.
+- Tiingo is not used by any of the three runtime lanes.
+- Synthetic pool levels are excluded from executable-depth evidence.
+- A failed 24-hour log backfill does not erase successfully captured block-pinned tick replay; the missing volume window remains a separate failed gate.
 
 Monitoring thresholds:
 
@@ -46,7 +54,7 @@ Monitoring thresholds:
 
 Even when every monitoring threshold passes, promotion remains blocked until independent benchmark alignment, depth/manipulation review, source-independence review, rights/redistribution signoff and explicit human approval are complete. The scheduler cannot promote a feed.
 
-The latest production capture on 2026-07-23 succeeded for all three feeds. The first production PAXG attempt failed because the Ethereum RPC variable was absent; the configured RPC was added and the following capture passed 3/3. This proves current reachability only; the sample/window gates remain open and production-promoted expansion feeds remain zero.
+The live pre-deployment validation on 2026-07-24 captured both EVM pool states and exact initialized-tick replay. EURC also produced a complete 24-hour decoded Swap-event window with more than $3.2 million in quote turnover and passed the point-in-time $10,000 block check. AAPL reported zero venue-native 24-hour volume and insufficient point-in-time depth. PAXG retained a 128-tick replay, while its 24-hour log backfill remained blocked by the configured Ethereum provider plan and public-fallback availability. These observations do not complete a sustained gate; production-promoted expansion feeds remain zero.
 
 ## Weekly cadence
 
