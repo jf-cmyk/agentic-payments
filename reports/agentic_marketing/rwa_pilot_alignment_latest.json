@@ -1,0 +1,208 @@
+{
+  "gate_assessment": {
+    "benchmark_rights_confirmed": false,
+    "benchmark_source_independence_confirmed": false,
+    "independent_benchmark_alignment_complete": false,
+    "point_in_time_alignment_observed": false,
+    "production_promotion_allowed": false,
+    "sustained_alignment_window_complete": false
+  },
+  "generated_at": "2026-07-24T04:55:39.383834+00:00",
+  "next_required_evidence": [
+    "Repeat timestamp-aligned comparisons across the full monitoring window.",
+    "Replace or supplement proxies with directly matched, independently licensed references.",
+    "Document benchmark lineage, independence, rights, and redistribution terms.",
+    "Keep every feed candidate-only until depth/manipulation and human approval gates pass."
+  ],
+  "policy": {
+    "automatic_promotion": false,
+    "benchmark_note": "Blocksize references are comparison inputs. Their upstream lineage and rights must be confirmed before they can satisfy an independent benchmark gate.",
+    "pilot_runtime_tiingo_dependency": false,
+    "production_promoted_feed_count": 0
+  },
+  "product": "rwa_pilot_alignment_snapshot",
+  "rows": [
+    {
+      "benchmark": {
+        "data": {
+          "ask": 320.45735722,
+          "bid": 319.81708278,
+          "mid": 320.13722
+        },
+        "endpoint": "bidask_getSnapshot",
+        "service": "bidask",
+        "status": "ok",
+        "symbol": "AAPL",
+        "timestamp": "2026-07-24T04:01:00.737043+00:00",
+        "value": 320.13722
+      },
+      "benchmark_relationship": "direct_equity_underlying_proxy_usdc_vs_usd",
+      "benchmark_service": "bidask",
+      "benchmark_symbol": "AAPL",
+      "capture_checked_at": "2026-07-24T04:55:36.468059+00:00",
+      "capture_checks": {
+        "bidask_sanity_pass": true,
+        "freshness_limit_seconds": 90.0,
+        "freshness_pass": true,
+        "freshness_seconds": 0.483059
+      },
+      "comparison": {
+        "abs_basis_bps": 81.145829,
+        "basis_bps": 81.145829,
+        "benchmark": {
+          "endpoint": "bidask_getSnapshot",
+          "service": "bidask",
+          "symbol": "AAPL",
+          "timestamp": "2026-07-24T04:01:00.737043+00:00"
+        },
+        "blocksize_value": 320.13722,
+        "decision": "warn",
+        "observation_value": 322.735,
+        "source_type": "native_l1",
+        "symbol": "AAPL/USDC",
+        "venue": "hyperliquid_rwa_spot"
+      },
+      "evidence_decision": "not_timestamp_aligned",
+      "limitations": "Tokenized AAPL/USDC can diverge from the underlying equity and USDC/USD.",
+      "max_timestamp_gap_seconds": 90,
+      "pilot_id": "aapl_hyperliquid_spot",
+      "production_promoted": false,
+      "source_lane": "venue_api_order_book",
+      "status": "ok",
+      "symbol": "AAPL/USDC",
+      "timestamp_alignment": {
+        "benchmark_timestamp": "2026-07-24T04:01:00.737043+00:00",
+        "capture_timestamp": "2026-07-24T04:55:35.985000+00:00",
+        "gap_seconds": 3275.247957,
+        "maximum_gap_seconds": 90,
+        "pass": false
+      },
+      "venue": "hyperliquid_rwa_spot"
+    },
+    {
+      "benchmark": {
+        "data": {
+          "currency": "USD",
+          "price": 4027.3
+        },
+        "endpoint": "bidask_getSnapshot",
+        "service": "metal",
+        "status": "ok",
+        "symbol": "XAUUSD",
+        "timestamp": "2026-07-24T04:55:36.843719+00:00",
+        "value": 4027.3
+      },
+      "benchmark_relationship": "gold_spot_proxy_for_paxg_token",
+      "benchmark_service": "metal",
+      "benchmark_symbol": "XAUUSD",
+      "capture_checked_at": "2026-07-24T04:55:38.106432+00:00",
+      "capture_checks": {
+        "bidask_sanity_pass": true,
+        "freshness_limit_seconds": 30.0,
+        "freshness_pass": true,
+        "freshness_seconds": 2.6e-05
+      },
+      "comparison": {
+        "abs_basis_bps": 9.129334,
+        "basis_bps": -9.129334,
+        "benchmark": {
+          "endpoint": "bidask_getSnapshot",
+          "service": "metal",
+          "symbol": "XAUUSD",
+          "timestamp": "2026-07-24T04:55:36.843719+00:00"
+        },
+        "blocksize_value": 4027.3,
+        "decision": "pass",
+        "observation_value": 4023.6233432411354,
+        "source_type": "onchain_clmm_pool",
+        "symbol": "PAXG/USDC",
+        "venue": "uniswap_v3_v4"
+      },
+      "evidence_decision": "pass",
+      "limitations": "XAU/USD is not PAXG; issuer, tokenization, venue, and USDC basis remain.",
+      "max_timestamp_gap_seconds": 30,
+      "pilot_id": "paxg_uniswap_ethereum",
+      "production_promoted": false,
+      "source_lane": "ethereum_rpc_pool_state",
+      "status": "ok",
+      "symbol": "PAXG/USDC",
+      "timestamp_alignment": {
+        "benchmark_timestamp": "2026-07-24T04:55:36.843719+00:00",
+        "capture_timestamp": "2026-07-24T04:55:38.106406+00:00",
+        "gap_seconds": 1.262687,
+        "maximum_gap_seconds": 30,
+        "pass": true
+      },
+      "venue": "uniswap_v3_v4"
+    },
+    {
+      "benchmark": {
+        "data": {
+          "ask": 1.1378357642085963,
+          "bid": 1.137792901482221,
+          "mid": 1.1378143328454087
+        },
+        "endpoint": "bidask_getSnapshot",
+        "service": "fx",
+        "status": "ok",
+        "symbol": "EURUSD",
+        "timestamp": "2026-07-24T04:55:36.943700+00:00",
+        "value": 1.1378143328454087
+      },
+      "benchmark_relationship": "eurusd_proxy_for_eurc_usdc",
+      "benchmark_service": "fx",
+      "benchmark_symbol": "EURUSD",
+      "capture_checked_at": "2026-07-24T04:55:39.383493+00:00",
+      "capture_checks": {
+        "bidask_sanity_pass": true,
+        "freshness_limit_seconds": 30.0,
+        "freshness_pass": true,
+        "freshness_seconds": 3.9e-05
+      },
+      "comparison": {
+        "abs_basis_bps": 0.858095,
+        "basis_bps": 0.858095,
+        "benchmark": {
+          "endpoint": "bidask_getSnapshot",
+          "service": "fx",
+          "symbol": "EURUSD",
+          "timestamp": "2026-07-24T04:55:36.943700+00:00"
+        },
+        "blocksize_value": 1.1378143328454087,
+        "decision": "pass",
+        "observation_value": 1.137911968147898,
+        "source_type": "onchain_clmm_pool",
+        "symbol": "EURC/USDC",
+        "venue": "aerodrome_slipstream"
+      },
+      "evidence_decision": "pass",
+      "limitations": "EUR/USD is not EURC/USDC; both stablecoins can trade away from fiat parities.",
+      "max_timestamp_gap_seconds": 30,
+      "pilot_id": "eurc_aerodrome_base",
+      "production_promoted": false,
+      "source_lane": "base_rpc_pool_state",
+      "status": "ok",
+      "symbol": "EURC/USDC",
+      "timestamp_alignment": {
+        "benchmark_timestamp": "2026-07-24T04:55:36.943700+00:00",
+        "capture_timestamp": "2026-07-24T04:55:39.383454+00:00",
+        "gap_seconds": 2.439754,
+        "maximum_gap_seconds": 30,
+        "pass": true
+      },
+      "venue": "aerodrome_slipstream"
+    }
+  ],
+  "status": "point_in_time_evidence",
+  "summary": {
+    "comparisons_failed": 0,
+    "comparisons_succeeded": 3,
+    "evidence_decisions": {
+      "not_timestamp_aligned": 1,
+      "pass": 2
+    },
+    "feeds_attempted": 3,
+    "timestamp_aligned_comparisons": 2,
+    "timestamp_misaligned_comparisons": 1
+  }
+}

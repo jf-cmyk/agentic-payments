@@ -34,7 +34,7 @@ The pilot contains exactly three candidate feeds:
 | PAXG/USDC | Uniswap pool state through Ethereum RPC | Ethereum onchain pool state |
 | EURC/USDC | Aerodrome pool state through Base RPC | Base onchain pool state |
 
-`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume.
+`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume. Each cycle also records a timestamp-aware comparison against Blocksize AAPL, XAU/USD and EUR/USD references. These comparisons are evidence inputs only: proxy semantics, stale timestamps, lineage, independence and rights remain explicit blockers and the scheduler cannot complete a promotion gate.
 
 Monitoring thresholds:
 

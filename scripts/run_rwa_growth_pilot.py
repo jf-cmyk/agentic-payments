@@ -240,6 +240,7 @@ def persist_capture(
     *,
     status_output: Path | None = None,
     observation_store: Any | None = None,
+    alignment_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append replayable observations and write the latest readiness status."""
     history = _load_history(history_path)
@@ -254,11 +255,33 @@ def persist_capture(
         "rows": captures,
     }
     ledger_rows: list[dict[str, Any]] = []
+    alignment_by_pilot = {
+        str(row.get("pilot_id")): row
+        for row in ((alignment_report or {}).get("rows") or [])
+        if isinstance(row, dict) and row.get("pilot_id")
+    }
     if observation_store is not None:
         for capture in captures:
             observation = capture.get("raw_observation")
             if capture.get("status") != "ok" or not isinstance(observation, dict):
                 continue
+            alignment = alignment_by_pilot.get(str(capture.get("pilot_id")), {})
+            benchmark_evidence = {
+                key: alignment.get(key)
+                for key in (
+                    "status",
+                    "benchmark_service",
+                    "benchmark_symbol",
+                    "benchmark_relationship",
+                    "limitations",
+                    "comparison",
+                    "timestamp_alignment",
+                    "evidence_decision",
+                    "benchmark",
+                    "error",
+                )
+                if alignment.get(key) is not None
+            }
             ledger_rows.append(
                 observation_store.store_observation(
                     {
@@ -270,6 +293,7 @@ def persist_capture(
                         "raw_payload": observation,
                         "normalized_observation": observation,
                         "realtime_quality": capture.get("checks", {}),
+                        "blocksize_benchmark": benchmark_evidence,
                         "promotion": {
                             "production_promoted": False,
                             "status": "candidate_monitoring",
@@ -286,6 +310,16 @@ def persist_capture(
     report["current_capture"]["ledger_observation_ids"] = [
         row["observation_id"] for row in ledger_rows
     ]
+    if alignment_report is not None:
+        report["current_capture"]["benchmark_alignment"] = alignment_report.get(
+            "summary", {}
+        )
+        report["benchmark_alignment_latest"] = {
+            "generated_at": alignment_report.get("generated_at"),
+            "status": alignment_report.get("status"),
+            "summary": alignment_report.get("summary", {}),
+            "gate_assessment": alignment_report.get("gate_assessment", {}),
+        }
     if observation_store is not None:
         report["observation_ledger"] = observation_store.summary()
     if status_output is not None:
