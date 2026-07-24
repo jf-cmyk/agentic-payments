@@ -195,6 +195,12 @@ from scripts.run_rwa_pilot_alignment_snapshot import (
     evaluate_alignment,
     persist_alignment_report,
 )
+from scripts.run_rwa_pilot_depth_snapshot import (
+    capture_depth_inputs,
+    evaluate_depth_evidence,
+    load_depth_history,
+    persist_depth_report,
+)
 
 logger = logging.getLogger(__name__)
 # httpx INFO records include full request URLs. Configured RPC URLs can contain
@@ -255,9 +261,27 @@ def _rwa_growth_pilot_alignment_paths() -> tuple[Path, Path]:
     )
 
 
+def _rwa_growth_pilot_depth_paths() -> tuple[Path, Path]:
+    return (
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_DEPTH_HISTORY_PATH",
+                "/data/rwa_growth_pilot_depth_history.jsonl",
+            )
+        ),
+        Path(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_DEPTH_STATUS_PATH",
+                "/data/rwa_growth_pilot_depth_latest.json",
+            )
+        ),
+    )
+
+
 def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
     _, status_path = _rwa_growth_pilot_paths()
     _, alignment_status_path = _rwa_growth_pilot_alignment_paths()
+    _, depth_status_path = _rwa_growth_pilot_depth_paths()
     if not status_path.exists():
         return {
             "status": "not_started",
@@ -281,6 +305,12 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             alignment = json.loads(alignment_status_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             alignment = {"status": "status_unreadable"}
+    depth = report.get("depth_and_manipulation_latest", {})
+    if depth_status_path.exists():
+        try:
+            depth = json.loads(depth_status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            depth = {"status": "status_unreadable"}
     return {
         "status": report.get("status", "candidate_monitoring"),
         "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
@@ -301,6 +331,12 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             "summary": alignment.get("summary", {}),
             "gate_assessment": alignment.get("gate_assessment", {}),
         },
+        "depth_and_manipulation_evidence": {
+            "generated_at": depth.get("generated_at"),
+            "status": depth.get("status"),
+            "summary": depth.get("summary", {}),
+            "gate_assessment": depth.get("gate_assessment", {}),
+        },
         "thresholds": report.get("thresholds", {}),
         "non_monitoring_gates": report.get("non_monitoring_gates", {}),
         "feeds": report.get("feeds", []),
@@ -314,11 +350,25 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     timeout = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_TIMEOUT_SECONDS", "20")))
     history_path, status_path = _rwa_growth_pilot_paths()
     alignment_history_path, alignment_status_path = _rwa_growth_pilot_alignment_paths()
+    depth_history_path, depth_status_path = _rwa_growth_pilot_depth_paths()
     await asyncio.sleep(initial_delay)
     while True:
         try:
             registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
             captures = await capture_pilot(registry, timeout_seconds=timeout)
+            depth_inputs = await capture_depth_inputs(
+                registry,
+                captures,
+                timeout_seconds=timeout,
+            )
+            depth_history = await asyncio.to_thread(load_depth_history, depth_history_path)
+            depth = evaluate_depth_evidence(captures, depth_inputs, history=depth_history)
+            await asyncio.to_thread(
+                persist_depth_report,
+                depth,
+                history_path=depth_history_path,
+                latest_path=depth_status_path,
+            )
             benchmarks = await capture_blocksize_benchmarks(app.state.blocksize)
             alignment = evaluate_alignment(captures, benchmarks)
             await asyncio.to_thread(
@@ -334,14 +384,20 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                 status_output=status_path,
                 observation_store=getattr(app.state, "rwa_store", None),
                 alignment_report=alignment,
+                depth_report=depth,
             )
             logger.info(
-                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; promotion_ready=%s",
+                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; depth_or_state=%s/%s; promotion_ready=%s",
                 report["current_capture"]["succeeded"],
                 report["current_capture"]["attempted"],
                 report["current_capture"]["ledger_persisted"],
                 alignment["summary"]["timestamp_aligned_comparisons"],
                 alignment["summary"]["feeds_attempted"],
+                (
+                    depth["summary"]["native_l2_point_in_time_depth_observed"]
+                    + depth["summary"]["pool_state_observed"]
+                ),
+                depth["summary"]["feeds_attempted"],
                 report["promotion_ready"],
             )
         except asyncio.CancelledError:
