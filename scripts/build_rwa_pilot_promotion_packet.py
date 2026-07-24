@@ -46,6 +46,10 @@ def build_promotion_packet(
                 liquidity.get("point_in_time_volume_window_observed") is True
                 or isinstance(liquidity.get("organic_volume"), dict)
             ),
+            "initialized_tick_replay_snapshot": (
+                source_lane == "venue_api_order_book"
+                or liquidity.get("point_in_time_tick_replay_observed") is True
+            ),
             "required_block_depth_snapshot": (
                 liquidity.get("point_in_time_quality_pass") is True
             ),
@@ -63,6 +67,8 @@ def build_promotion_packet(
             next_actions.append("Capture a fresh timestamp-aligned Blocksize comparison.")
         if not gates["organic_volume_snapshot"]:
             next_actions.append("Capture venue-native or decoded onchain 24-hour organic volume.")
+        if not gates["initialized_tick_replay_snapshot"]:
+            next_actions.append("Capture initialized CLMM ticks and exact-input replay at one block.")
         if not gates["required_block_depth_snapshot"]:
             next_actions.append("Pass the $10k fill and slippage snapshot with complete captured depth.")
         if not gates["rpc_credentials_rotated"]:
