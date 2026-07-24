@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2543,6 +2544,7 @@ class EVMPoolStateAdapter:
         *,
         venue_id: str,
         pool_path: str | Path | None = None,
+        swap_cache_dir: str | Path | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.venue_id = venue_id
@@ -2552,6 +2554,11 @@ class EVMPoolStateAdapter:
             or DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.json"
         )
         self._client = client
+        self.swap_cache_dir = Path(
+            swap_cache_dir
+            or os.getenv("RWA_EVM_SWAP_CACHE_DIR", "")
+            or "/data/rwa_evm_swap_cache"
+        )
         self._aliases = self._load_aliases()
         self._decimals_cache: dict[tuple[str, str], int] = {}
         self._rpc_rate_lock = asyncio.Lock()
@@ -2814,12 +2821,17 @@ class EVMPoolStateAdapter:
         contract: str,
         start_block: int,
         end_block: int,
+        chunk_size: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        chunk_size = max(100, int(os.getenv("RWA_EVM_LOG_BLOCK_CHUNK_SIZE", "5000")))
+        effective_chunk_size = (
+            max(1, int(chunk_size))
+            if chunk_size is not None
+            else max(100, int(os.getenv("RWA_EVM_LOG_BLOCK_CHUNK_SIZE", "5000")))
+        )
         logs: list[dict[str, Any]] = []
         sources: list[str] = []
-        for chunk_start in range(start_block, end_block + 1, chunk_size):
-            chunk_end = min(end_block, chunk_start + chunk_size - 1)
+        for chunk_start in range(start_block, end_block + 1, effective_chunk_size):
+            chunk_end = min(end_block, chunk_start + effective_chunk_size - 1)
             payload, source = await self._call_first_rpc(
                 chain,
                 "eth_getLogs",
@@ -2836,6 +2848,182 @@ class EVMPoolStateAdapter:
                 logs.extend(row for row in payload if isinstance(row, dict))
             sources.append(source)
         return logs, sorted(set(sources))
+
+    def _swap_cache_path(self, chain: str, contract: str) -> Path:
+        safe_contract = contract.lower().replace("0x", "", 1)
+        return self.swap_cache_dir / f"{chain}-{safe_contract}.json"
+
+    def _load_swap_cache(self, chain: str, contract: str) -> dict[str, Any]:
+        payload = _read_json_file(self._swap_cache_path(chain, contract))
+        if (
+            payload.get("chain") != chain
+            or str(payload.get("pool_contract") or "").lower() != contract.lower()
+            or not isinstance(payload.get("logs"), list)
+        ):
+            return {}
+        return payload
+
+    def _persist_swap_cache(
+        self,
+        chain: str,
+        contract: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        path = self._swap_cache_path(chain, contract)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps(payload, sort_keys=True, default=str) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        except OSError:
+            return False
+        return True
+
+    @staticmethod
+    def _provider_log_range_limit(exc: Exception) -> int | None:
+        match = re.search(r"limited to an?\s+(\d+)\s+range", str(exc), re.IGNORECASE)
+        return max(1, int(match.group(1))) if match else None
+
+    @staticmethod
+    def _deduplicate_logs(logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique: dict[tuple[str, str], dict[str, Any]] = {}
+        for log in logs:
+            key = (
+                str(log.get("transactionHash") or ""),
+                str(log.get("logIndex") or ""),
+            )
+            unique[key] = log
+        return sorted(
+            unique.values(),
+            key=lambda log: (
+                int(str(log.get("blockNumber") or "0x0"), 16),
+                int(str(log.get("logIndex") or "0x0"), 16),
+            ),
+        )
+
+    async def _collect_swap_log_window(
+        self,
+        *,
+        chain: str,
+        contract: str,
+        end_block: int,
+        lookback_seconds: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+        """Collect a full window or extend a persistent provider-limited cache."""
+        target_start, _, end_timestamp, block_source = await self._start_block_for_window(
+            chain,
+            end_block,
+            lookback_seconds,
+        )
+        cache = self._load_swap_cache(chain, contract)
+        cached_start = int(cache.get("start_block") or 0) if cache else 0
+        cached_end = int(cache.get("end_block") or -1) if cache else -1
+        cached_logs = [row for row in (cache.get("logs") or []) if isinstance(row, dict)]
+        provider_chunk_size = int(cache.get("provider_chunk_size") or 0) if cache else 0
+        sources = [str(value) for value in (cache.get("rpc_sources") or []) if value]
+        collection_error: str | None = None
+
+        if cache and cached_start <= cached_end <= end_block:
+            if cached_end < end_block:
+                try:
+                    new_logs, new_sources = await self._swap_logs(
+                        chain=chain,
+                        contract=contract,
+                        start_block=cached_end + 1,
+                        end_block=end_block,
+                        chunk_size=provider_chunk_size or None,
+                    )
+                    cached_logs.extend(new_logs)
+                    sources.extend(new_sources)
+                    cached_end = end_block
+                except Exception as exc:
+                    collection_error = f"{type(exc).__name__}: {str(exc)[:1000]}"
+        else:
+            cache = {}
+            cached_logs = []
+            try:
+                cached_logs, new_sources = await self._swap_logs(
+                    chain=chain,
+                    contract=contract,
+                    start_block=target_start,
+                    end_block=end_block,
+                )
+                sources.extend(new_sources)
+                cached_start = target_start
+                cached_end = end_block
+            except Exception as exc:
+                provider_chunk_size = self._provider_log_range_limit(exc) or 0
+                if not provider_chunk_size:
+                    raise
+                bootstrap_seconds = max(
+                    300,
+                    min(
+                        lookback_seconds,
+                        int(os.getenv("RWA_EVM_SWAP_CACHE_BOOTSTRAP_SECONDS", "1800")),
+                    ),
+                )
+                average_seconds = self._AVERAGE_BLOCK_SECONDS.get(chain, 3.0)
+                bootstrap_blocks = max(1, int(bootstrap_seconds / average_seconds))
+                cached_start = max(target_start, end_block - bootstrap_blocks)
+                cached_logs, new_sources = await self._swap_logs(
+                    chain=chain,
+                    contract=contract,
+                    start_block=cached_start,
+                    end_block=end_block,
+                    chunk_size=provider_chunk_size,
+                )
+                sources.extend(new_sources)
+                cached_end = end_block
+
+        retained_start = max(target_start, cached_start)
+        retained_logs = self._deduplicate_logs(
+            [
+                log
+                for log in cached_logs
+                if int(str(log.get("blockNumber") or "0x0"), 16) >= retained_start
+            ]
+        )
+        coverage_end = min(cached_end, end_block)
+        start_timestamp, start_source = await self._block_timestamp(chain, retained_start)
+        if coverage_end == end_block:
+            coverage_end_timestamp = end_timestamp
+        else:
+            coverage_end_timestamp, _ = await self._block_timestamp(chain, coverage_end)
+        sources.extend([block_source, start_source])
+        complete = retained_start <= target_start and coverage_end >= end_block
+        cache_payload = {
+            "schema_version": 1,
+            "chain": chain,
+            "pool_contract": contract.lower(),
+            "start_block": retained_start,
+            "end_block": coverage_end,
+            "provider_chunk_size": provider_chunk_size or None,
+            "rpc_sources": sorted(set(sources)),
+            "logs": retained_logs,
+            "updated_at": _iso_now(),
+        }
+        cache_persisted = self._persist_swap_cache(chain, contract, cache_payload)
+        window = {
+            "status": "ok" if complete and collection_error is None else "collecting",
+            "lookback_seconds": lookback_seconds,
+            "start_block": retained_start,
+            "end_block": coverage_end,
+            "target_start_block": target_start,
+            "target_end_block": end_block,
+            "start_timestamp": datetime.fromtimestamp(start_timestamp, tz=UTC).isoformat(),
+            "end_timestamp": datetime.fromtimestamp(
+                coverage_end_timestamp,
+                tz=UTC,
+            ).isoformat(),
+            "window_coverage_seconds": max(0, coverage_end_timestamp - start_timestamp),
+            "provider_chunk_size": provider_chunk_size or None,
+            "cache_persisted": cache_persisted,
+            "collection_error": collection_error,
+        }
+        return retained_logs, window, sorted(set(sources))
 
     async def _token_decimals(self, chain: str, token: str, block_tag: str) -> int:
         token_key = self._token_key(token)
@@ -3080,17 +3268,13 @@ class EVMPoolStateAdapter:
 
         raw_logs: list[dict[str, Any]] = []
         log_sources: list[str] = []
-        block_source: str | None = None
         volume_window: dict[str, Any]
         try:
-            start_block, start_timestamp, end_timestamp, block_source = (
-                await self._start_block_for_window(chain, block_number, lookback_seconds)
-            )
-            raw_logs, log_sources = await self._swap_logs(
+            raw_logs, collection_window, log_sources = await self._collect_swap_log_window(
                 chain=chain,
                 contract=contract,
-                start_block=start_block,
                 end_block=block_number,
+                lookback_seconds=lookback_seconds,
             )
             volume = summarize_swap_logs(
                 raw_logs,
@@ -3103,13 +3287,7 @@ class EVMPoolStateAdapter:
             )
             volume_window = {
                 **{key: value for key, value in volume.items() if key != "decoded_swaps"},
-                "status": "ok",
-                "lookback_seconds": lookback_seconds,
-                "start_block": start_block,
-                "end_block": block_number,
-                "start_timestamp": datetime.fromtimestamp(start_timestamp, tz=UTC).isoformat(),
-                "end_timestamp": datetime.fromtimestamp(end_timestamp, tz=UTC).isoformat(),
-                "window_coverage_seconds": end_timestamp - start_timestamp,
+                **collection_window,
             }
         except Exception as exc:
             volume_window = {
@@ -3173,7 +3351,6 @@ class EVMPoolStateAdapter:
             },
             "rpc_sources": sorted(
                 {
-                    *(source for source in (block_source,) if source),
                     *log_sources,
                     *(source for _, _, source in bitmap_rows),
                     *(str(item["rpc_source"]) for item in initialized_ticks),

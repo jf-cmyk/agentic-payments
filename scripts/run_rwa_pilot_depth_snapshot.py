@@ -282,7 +282,9 @@ def _onchain_state_evidence(
     volume_window = replay.get("volume_window") if isinstance(replay, dict) else None
     organic_volume = _finite((volume_window or {}).get("quote_volume_usd"))
     volume_window_observed = bool(
-        volume_window and (volume_window.get("window_coverage_seconds") or 0) >= 82_800
+        volume_window
+        and volume_window.get("status") == "ok"
+        and (volume_window.get("window_coverage_seconds") or 0) >= 82_800
     )
     organic_volume_pass = bool(
         volume_window_observed
@@ -382,6 +384,8 @@ def _history_stats(history: list[dict[str, Any]], rows: list[dict[str, Any]]) ->
             window = replay.get("volume_window") if isinstance(replay.get("volume_window"), dict) else {}
             value = native.get("notional_volume_usd")
             if value is None:
+                if window.get("status") != "ok":
+                    return None
                 value = window.get("quote_volume_usd")
             return _finite(value)
         pool = row.get("pool_state") if isinstance(row.get("pool_state"), dict) else {}

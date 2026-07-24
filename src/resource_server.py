@@ -391,7 +391,10 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     while True:
         try:
             registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
-            captures = await capture_pilot(registry, timeout_seconds=timeout)
+            captures, benchmarks = await asyncio.gather(
+                capture_pilot(registry, timeout_seconds=timeout),
+                capture_blocksize_benchmarks(app.state.blocksize),
+            )
             depth_inputs = await capture_depth_inputs(
                 registry,
                 captures,
@@ -405,7 +408,6 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                 history_path=depth_history_path,
                 latest_path=depth_status_path,
             )
-            benchmarks = await capture_blocksize_benchmarks(app.state.blocksize)
             alignment = evaluate_alignment(captures, benchmarks)
             await asyncio.to_thread(
                 persist_alignment_report,
