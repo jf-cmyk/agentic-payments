@@ -1,7 +1,7 @@
 [project]
 name = "blocksize-mcp-x402"
-version = "0.6.1"
-description = "Blocksize Capital MCP Server with x402 Micropayment Integration — Institutional-grade crypto market data for AI agents"
+version = "0.6.3"
+description = "Blocksize live multi-asset market data for AI agents with provenance, starter credits, and x402 payments"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

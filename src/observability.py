@@ -362,6 +362,7 @@ class UsageEventStore:
             "mcp_credit_drawdown_success",
             "data_delivered",
             "charged_delivery_failed",
+            "refunded_delivery_failed",
         }
         revenue_events = {"payment_verified", "bulk_credit_claimed"}
         paid_calls = sum(1 for event in events if event["event"] in paid_call_events)
@@ -415,6 +416,7 @@ class UsageEventStore:
                 "credit_drawdown_failed",
                 "mcp_tool_error",
                 "charged_delivery_failed",
+                "refunded_delivery_failed",
             }
         )
         top_subjects = Counter(
@@ -541,6 +543,9 @@ class UsageEventStore:
         http_delivery_failures = sum(
             1 for event in events if event.get("event") == "charged_delivery_failed"
         )
+        refunded_http_delivery_failures = sum(
+            1 for event in events if event.get("event") == "refunded_delivery_failed"
+        )
         http_delivery_successes = sum(
             1 for event in events if event.get("event") == "data_delivered"
         )
@@ -569,6 +574,7 @@ class UsageEventStore:
             "server_error_rate": round(server_errors / total, 6) if total else None,
             "charged_delivery_successes": charged_delivery_successes,
             "charged_delivery_failures": charged_delivery_failures,
+            "refunded_delivery_failures": refunded_http_delivery_failures,
             "post_credit_failure_rate": (
                 round(charged_delivery_failures / charged_delivery_attempts, 6)
                 if charged_delivery_attempts
@@ -576,7 +582,7 @@ class UsageEventStore:
             ),
             "definitions": {
                 "server_error_rate": "HTTP 5xx responses divided by all HTTP requests.",
-                "post_credit_failure_rate": "Charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries.",
+                "post_credit_failure_rate": "Unrecovered charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries; refunded HTTP failures are reported separately.",
                 "client_protocol_responses": "HTTP 400, 404, 405, 406, 416 and 422 responses; visible for diagnosis but excluded from the server-error KPI.",
             },
         }
@@ -1041,11 +1047,18 @@ class UsageEventStore:
             "mcp_credit_drawdown_failed",
             "payment_failed",
         }
-        failed_after_credit_events = {"mcp_tool_error", "charged_delivery_failed"}
+        failed_after_credit_events = {
+            "mcp_tool_error",
+            "charged_delivery_failed",
+            "refunded_delivery_failed",
+        }
+        accounting_events = {"credit_drawdown_success"}
 
         for event in events:
             event_name = str(event.get("event") or "")
-            if event_name not in request_events | blocked_events | failed_after_credit_events:
+            if event_name not in (
+                request_events | blocked_events | failed_after_credit_events | accounting_events
+            ):
                 continue
             service = cls._service_for_event(event)
             subject = str(
@@ -1067,6 +1080,7 @@ class UsageEventStore:
                     "delivered": 0,
                     "blocked": 0,
                     "failed_after_credit": 0,
+                    "refunded_after_credit": 0,
                     "credits_spent": 0.0,
                     "estimated_revenue_usdc": 0.0,
                     "synthetic_events": 0,
@@ -1085,7 +1099,7 @@ class UsageEventStore:
             if (
                 event_name in request_events
                 or event_name in blocked_events
-                or event_name == "charged_delivery_failed"
+                or event_name in {"charged_delivery_failed", "refunded_delivery_failed"}
             ):
                 row["requested"] += 1
             if event_name == "payment_required":
@@ -1098,8 +1112,12 @@ class UsageEventStore:
                 row["blocked"] += 1
             if event_name in failed_after_credit_events:
                 row["failed_after_credit"] += 1
+            if event_name == "refunded_delivery_failed":
+                row["refunded_after_credit"] += 1
             if event_name in {"credit_drawdown_success", "mcp_credit_drawdown_success"}:
                 row["credits_spent"] += float(metadata.get("credits_spent") or 0.0)
+            if event_name == "refunded_delivery_failed":
+                row["credits_spent"] -= float(metadata.get("credits_refunded") or 0.0)
             if cls._is_synthetic_event(event):
                 row["synthetic_events"] += 1
 
@@ -1139,6 +1157,7 @@ class UsageEventStore:
             "total_delivered": sum(int(row["delivered"]) for row in rows),
             "total_blocked": sum(int(row["blocked"]) for row in rows),
             "total_failed_after_credit": sum(int(row["failed_after_credit"]) for row in rows),
+            "total_refunded_after_credit": sum(int(row["refunded_after_credit"]) for row in rows),
             "total_credits_spent": round(sum(float(row["credits_spent"] or 0.0) for row in rows), 3),
             "synthetic_events": sum(int(row["synthetic_events"]) for row in rows),
             "rows": rows[:50],
@@ -1169,6 +1188,7 @@ class UsageEventStore:
                 "payment_failed",
                 "data_delivered",
                 "charged_delivery_failed",
+                "refunded_delivery_failed",
                 "credit_drawdown_success",
                 "credit_drawdown_failed",
                 "registry_request",
@@ -1235,7 +1255,9 @@ class UsageEventStore:
         if event_name in {"data_delivered", "mcp_credit_drawdown_success"}:
             return "Data returned after payment or credits"
         if event_name == "charged_delivery_failed":
-            return "Charged or credited call failed; refund or retry needed"
+            return "Charged call failed; recovery or retry needed"
+        if event_name == "refunded_delivery_failed":
+            return "Delivery failed; starter credits were refunded and retry is safe"
         if event_name in {"payment_verified", "credit_drawdown_success"}:
             return "Payment or credits accepted; waiting for delivery result"
         if event_name == "payment_failed":

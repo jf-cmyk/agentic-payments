@@ -81,6 +81,7 @@
         <p>Add <code>https://mcp.blocksize.info/mcp/server/</code> for discovery and endpoint construction. For the live response now:</p>
         <pre><code>curl -sS \
   -H 'X-AGENT-ID: chatgpt-quickstart-0001' \
+  -H 'X-BLOCKSIZE-ACTIVATION-SOURCE: chatgpt-quickstart' \
   'https://mcp.blocksize.info/v1/vwap/btc-usd'</code></pre>
         <p>Eligible new identities start with 50 live-data credits; otherwise the route returns its x402 payment challenge.</p>
       </section>
@@ -111,14 +112,18 @@
       result.textContent = "";
       try {
         const response = await fetch("/v1/vwap/btc-usd", {
-          headers: { "X-AGENT-ID": browserAgentId() },
+          headers: {
+            "X-AGENT-ID": browserAgentId(),
+            "X-BLOCKSIZE-ACTIVATION-SOURCE": "first-price-browser",
+          },
           cache: "no-store",
         });
         const payload = await response.json();
         if (response.ok) {
           const data = payload.data || {};
           const remaining = response.headers.get("X-Blocksize-Credits-Remaining");
-          state.textContent = `Live response received${remaining ? ` · ${remaining} credits remain` : ""}.`;
+          const activation = response.headers.get("X-Blocksize-Activation");
+          state.textContent = `${activation ? "First live price activated" : "Live response received"}${remaining ? ` · ${remaining} credits remain` : ""}.`;
           result.textContent = JSON.stringify({
             pair: data.pair,
             vwap: data.vwap,

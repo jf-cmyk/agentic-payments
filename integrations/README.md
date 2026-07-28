@@ -4,12 +4,12 @@ These examples expose Blocksize production market data as read-only tools for si
 
 | Framework | Example | Runtime |
 | --- | --- | --- |
-| LangChain | `langchain/blocksize_tool.py` | Python |
-| LlamaIndex | `llamaindex/blocksize_tool.py` | Python |
-| OpenAI Agents SDK | `openai_agents/blocksize_tool.py` | Python |
-| Vercel AI SDK | `vercel-ai-sdk/blocksize-tool.ts` | TypeScript |
-| GOAT | `goat/blocksize.plugin.ts` | TypeScript |
-| Solana Agent Kit | `solana-agent-kit/blocksize-tools.ts` | TypeScript |
+| LangChain | [langchain/blocksize_tool.py](langchain/blocksize_tool.py) | Python |
+| LlamaIndex | [llamaindex/blocksize_tool.py](llamaindex/blocksize_tool.py) | Python |
+| OpenAI Agents SDK | [openai_agents/blocksize_tool.py](openai_agents/blocksize_tool.py) | Python |
+| Vercel AI SDK | [vercel-ai-sdk/blocksize-tool.ts](vercel-ai-sdk/blocksize-tool.ts) | TypeScript |
+| GOAT | [goat/blocksize.plugin.ts](goat/blocksize.plugin.ts) | TypeScript |
+| Solana Agent Kit | [solana-agent-kit/blocksize-tools.ts](solana-agent-kit/blocksize-tools.ts) | TypeScript |
 
 The shared clients live in `python/blocksize_http.py` and `typescript/blocksize.ts`. Start with a stable `BLOCKSIZE_AGENT_ID`; eligible new identities receive the standard starter allowance. When it is unavailable or exhausted, the same request returns an x402 challenge.
 
