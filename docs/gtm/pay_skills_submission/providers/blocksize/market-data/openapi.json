@@ -196,6 +196,23 @@
                 "summary": "Run Pre-Trade Sanity Check",
                 "description": "Return a read-only spread, freshness, and reference-price guardrail check before execution elsewhere.",
                 "operationId": "runPreTradeSanityCheck",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["symbol"],
+                                "properties": {
+                                    "symbol": {"type": "string", "example": "BTC-USD"},
+                                    "side": {"type": "string", "example": "buy"},
+                                    "notional_usd": {"type": "number", "example": 1000}
+                                }
+                            },
+                            "example": {"symbol": "BTC-USD", "side": "buy", "notional_usd": 1000}
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "Pre-trade sanity check response."
@@ -219,6 +236,22 @@
                 "summary": "Create Audit-Grade Price Receipt",
                 "description": "Return a price lookup plus receipt id, request hash, response hash, and source provenance.",
                 "operationId": "createPriceReceipt",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["symbol"],
+                                "properties": {
+                                    "symbol": {"type": "string", "example": "BTC-USD"},
+                                    "service": {"type": "string", "example": "vwap"}
+                                }
+                            },
+                            "example": {"symbol": "BTC-USD", "service": "vwap"}
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "Audit-grade price receipt response."
@@ -288,6 +321,21 @@
                 "summary": "Create Token Market Quality Indicator",
                 "description": "Return a transparent trader-grade token quality score from live VWAP, bid/ask, optional state_pool price, and closing-price window data where available.",
                 "operationId": "createTokenMarketQualityIndicator",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["symbol"],
+                                "properties": {
+                                    "symbol": {"type": "string", "example": "BTC-USD"}
+                                }
+                            },
+                            "example": {"symbol": "BTC-USD"}
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "Token market quality indicator response."
@@ -311,6 +359,21 @@
                 "summary": "Create Oracle / State Price Divergence Indicator",
                 "description": "Compare live market VWAP and bid/ask mid against Blocksize state_pool price for symbols with state_instruments pool coverage.",
                 "operationId": "createStateDivergenceIndicator",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["symbol"],
+                                "properties": {
+                                    "symbol": {"type": "string", "example": "MSOLUSD"}
+                                }
+                            },
+                            "example": {"symbol": "MSOLUSD"}
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "State divergence indicator response."
