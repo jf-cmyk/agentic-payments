@@ -11,7 +11,7 @@ Target registry path:
 Current validation status:
 
 - `pay catalog check providers/blocksize/market-data/PAY.md --no-probe` passes with 16 endpoints walked.
-- `pay catalog check providers/blocksize/market-data/PAY.md -v --probe-timeout 20` passes against the live service with 16/16 Solana-compatible x402 gates.
+- `pay catalog check providers/blocksize/market-data/PAY.md -v --probe-timeout 20` passes against the live service. The sidecar includes valid example bodies for required-symbol POST routes so probes are rejected before payment only when the client omits required input.
 
 Commands used:
 
