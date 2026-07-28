@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "info.blocksize.mcp/agentic-payments",
-  "title": "Blocksize Live Market Data for AI Agents",
-  "description": "Discover live crypto, equity, FX, and metals data with source timestamps, provenance, starter credits, x402 HTTP access, and six agent-framework examples.",
+  "title": "Blocksize Agentic Market Intelligence",
+  "description": "Live multi-asset market data for AI agents with provenance, starter credits, x402, and examples.",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
   "version": "0.6.3",
