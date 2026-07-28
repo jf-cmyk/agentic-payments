@@ -629,13 +629,20 @@ app.add_middleware(
         "X-PAYMENT-RESPONSE",
         "X-Blocksize-Provider",
         "X-Blocksize-Citation",
+        "X-Blocksize-Activation",
+        "X-Blocksize-Credits-Remaining",
+        "X-Blocksize-Credits-Refunded",
+        "X-Blocksize-Delivery-Status",
+        "X-Blocksize-Retry-Safe",
     ],
 )
 
 
 X402_EXPOSE_HEADERS = (
     "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, "
-    "X-Blocksize-Provider, X-Blocksize-Citation"
+    "X-Blocksize-Provider, X-Blocksize-Citation, X-Blocksize-Activation, "
+    "X-Blocksize-Credits-Remaining, X-Blocksize-Credits-Refunded, "
+    "X-Blocksize-Delivery-Status, X-Blocksize-Retry-Safe"
 )
 SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
@@ -791,7 +798,11 @@ def _growth_identity_metadata(request: Request) -> dict[str, str]:
     if identity is None:
         return {}
     identity_hash, identity_type = identity
-    return {"identity_hash": identity_hash, "identity_type": identity_type}
+    metadata = {"identity_hash": identity_hash, "identity_type": identity_type}
+    activation_source = request.headers.get("X-BLOCKSIZE-ACTIVATION-SOURCE", "").strip().lower()
+    if re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", activation_source):
+        metadata["activation_source"] = activation_source
+    return metadata
 
 
 def _is_live_price_delivery_path(path: str) -> bool:
@@ -858,8 +869,16 @@ def _record_product_event(
     )
 
 
-def _delivery_event_for_response(response: Response) -> str:
-    return "data_delivered" if response.status_code < 400 else "charged_delivery_failed"
+def _delivery_event_for_response(
+    response: Response,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    if response.status_code < 400:
+        return "data_delivered"
+    if (metadata or {}).get("refund_status") == "refunded":
+        return "refunded_delivery_failed"
+    return "charged_delivery_failed"
 
 
 def _record_charged_delivery_outcome(
@@ -871,8 +890,8 @@ def _record_charged_delivery_outcome(
     network: str | None = None,
     wallet_hash: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
-    event = _delivery_event_for_response(response)
+) -> bool:
+    event = _delivery_event_for_response(response, metadata=metadata)
     outcome_metadata = {
         "payment_mode": payment_mode,
         "response_status_code": response.status_code,
@@ -891,18 +910,20 @@ def _record_charged_delivery_outcome(
         activation_identity = _activation_identity_hash(request)
         if activation_identity is not None:
             identity_hash, identity_type = activation_identity
-            record_usage_event_once(
+            return record_usage_event_once(
                 "first_live_price_delivered",
                 identity_hash,
                 **_request_event_fields(request, status_code=response.status_code),
                 price_usdc=str(price_usdc) if price_usdc is not None else None,
                 network=network,
                 metadata={
+                    **_growth_identity_metadata(request),
                     "identity_hash": identity_hash,
                     "identity_type": identity_type,
                     "payment_mode": payment_mode,
                 },
             )
+    return False
 
 
 @app.middleware("http")
@@ -2066,7 +2087,64 @@ def _apply_credit_response_headers(response: Response, request: Request) -> Resp
         response.headers["X-Blocksize-Credits-Remaining"] = str(context["credits_remaining"])
         response.headers["X-Blocksize-Starter-Allowance"] = str(STARTER_CREDIT_ALLOWANCE)
         response.headers["X-Blocksize-Upgrade-Path"] = "x402-or-prepaid-credits"
+        if context.get("credits_refunded"):
+            response.headers["X-Blocksize-Credits-Refunded"] = str(context["credits_refunded"])
+            response.headers["X-Blocksize-Delivery-Status"] = "failed-refunded"
+            response.headers["X-Blocksize-Retry-Safe"] = "true"
     return response
+
+
+async def _validate_paid_request_before_charge(request: Request) -> JSONResponse | None:
+    """Reject malformed paid request bodies before credits or payment proofs are used."""
+    if request.method.upper() not in {"POST", "PUT", "PATCH"}:
+        return None
+
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Bad Request",
+                "message": "A valid JSON request body is required; no credits or payment were used.",
+            },
+        )
+    if not isinstance(payload, dict):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "Unprocessable Entity",
+                "message": "The JSON request body must be an object; no credits or payment were used.",
+            },
+        )
+
+    required_symbol_paths = {
+        "/v1/checks/pre-trade",
+        "/v1/receipts/price",
+        "/v1/indicators/token-quality",
+        "/v1/indicators/state-divergence",
+    }
+    if request.url.path in required_symbol_paths:
+        symbol = str(payload.get("symbol") or "").strip()
+        if not symbol:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Bad Request",
+                    "message": "symbol is required; no credits or payment were used.",
+                },
+            )
+        try:
+            _normalise_symbol(symbol, "symbol")
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Bad Request",
+                    "message": f"{exc}; no credits or payment were used.",
+                },
+            )
+    return None
 
 
 def _utc_now_iso() -> str:
@@ -3040,6 +3118,16 @@ async def x402_payment_middleware(request: Request, call_next):
     if price is None:
         return await call_next(request)
 
+    invalid_request = await _validate_paid_request_before_charge(request)
+    if invalid_request is not None:
+        _record_product_event(
+            "paid_request_rejected_preflight",
+            request,
+            price_usdc=price,
+            reason=f"http_{invalid_request.status_code}",
+        )
+        return _apply_x402_cors_headers(request, invalid_request)
+
     try:
         credit_subject = _starter_credit_subject(request)
     except ValueError as e:
@@ -3130,7 +3218,14 @@ async def x402_payment_middleware(request: Request, call_next):
                     "refund_status": "refunded" if refunded else "refund_failed",
                     "credits_remaining_after_refund": mgr.get_balance(subject),
                 }
-            _record_charged_delivery_outcome(
+                if refunded:
+                    request.state.starter_credit_context.update(
+                        {
+                            "credits_refunded": credit_cost,
+                            "credits_remaining": mgr.get_balance(subject),
+                        }
+                    )
+            first_activation = _record_charged_delivery_outcome(
                 request,
                 response,
                 price_usdc=price,
@@ -3143,6 +3238,8 @@ async def x402_payment_middleware(request: Request, call_next):
                     **refund_metadata,
                 },
             )
+            if first_activation:
+                response.headers["X-Blocksize-Activation"] = "first-live-price"
             return _apply_credit_response_headers(response, request)
         else:
             logger.warning("INSUFFICIENT CREDITS: %s:%s for %s", subject_type, subject, path)
@@ -3287,7 +3384,7 @@ async def x402_payment_middleware(request: Request, call_next):
         metadata={"mock": bool(verification.get("mock"))},
     )
     response = await call_next(request)
-    _record_charged_delivery_outcome(
+    first_activation = _record_charged_delivery_outcome(
         request,
         response,
         price_usdc=price,
@@ -3295,6 +3392,8 @@ async def x402_payment_middleware(request: Request, call_next):
         network=network,
         metadata={"mock": bool(verification.get("mock"))},
     )
+    if first_activation:
+        response.headers["X-Blocksize-Activation"] = "first-live-price"
 
     # Settle payment (best-effort)
     try:

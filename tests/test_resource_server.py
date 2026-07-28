@@ -187,6 +187,9 @@ class TestPublicListingSurfaces:
         assert 'fetch("/v1/vwap/btc-usd"' in first_price_response.text
         assert integrations_response.status_code == 200
         assert "Six supported agent frameworks" in integrations_response.text
+        assert integrations_response.text.count("raw.githubusercontent.com/jf-cmyk/agentic-payments") == 6
+        assert integrations_response.text.count(">Download</a>") == 6
+        assert "X-BLOCKSIZE-ACTIVATION-SOURCE" in first_price_response.text
 
     def test_manifest_exposes_remote_mcp_url(self, test_client):
         response = test_client.get("/mcp/manifest.json")
@@ -3075,6 +3078,7 @@ class TestObservabilityDashboard:
                 "X-AGENT-ID": "activation-agent-12345678",
                 "X-DEVICE-ID": "activation-device-12345678",
                 "X-SESSION-ID": "activation-session-12345678",
+                "X-BLOCKSIZE-ACTIVATION-SOURCE": "framework-quickstart",
             }
             first = test_client.get("/v1/vwap/btc-usd", headers=headers)
             second = test_client.get("/v1/vwap/btc-usd", headers=headers)
@@ -3083,6 +3087,8 @@ class TestObservabilityDashboard:
 
         assert first.status_code == 200
         assert second.status_code == 200
+        assert first.headers["X-Blocksize-Activation"] == "first-live-price"
+        assert "X-Blocksize-Activation" not in second.headers
         stats = observability_store.summarize(days=1)
         assert stats["event_counts"]["data_delivered"] == 2
         assert stats["event_counts"]["first_live_price_delivered"] == 1
@@ -3094,6 +3100,7 @@ class TestObservabilityDashboard:
         )
         assert activation["metadata"]["identity_type"] == "agent"
         assert activation["metadata"]["payment_mode"] == "starter_credit"
+        assert activation["metadata"]["activation_source"] == "framework-quickstart"
         assert activation["metadata"]["identity_hash"]
         funnel = stats["growth_funnel"]
         assert funnel["summary"]["eligible_identities"] == 1
@@ -3259,12 +3266,19 @@ class TestObservabilityDashboard:
 
         assert response.status_code == 502
         assert manager.get_balance("agent-failure-12345678") == 50.0
+        assert response.headers["X-Blocksize-Credits-Refunded"] == "1.0"
+        assert response.headers["X-Blocksize-Delivery-Status"] == "failed-refunded"
+        assert response.headers["X-Blocksize-Retry-Safe"] == "true"
         stats = observability_store.summarize(days=1)
         assert stats["event_counts"]["credit_drawdown_success"] == 1
-        assert stats["event_counts"]["charged_delivery_failed"] == 1
+        assert stats["event_counts"].get("charged_delivery_failed", 0) == 0
+        assert stats["event_counts"]["refunded_delivery_failed"] == 1
         assert stats["event_counts"].get("data_delivered", 0) == 0
         assert stats["overview"]["paid_calls"] == 0
+        assert stats["reliability"]["charged_delivery_failures"] == 0
+        assert stats["reliability"]["refunded_delivery_failures"] == 1
         assert stats["popularity"]["total_failed_after_credit"] == 1
+        assert stats["popularity"]["total_refunded_after_credit"] == 1
         failed = next(
             row
             for row in stats["popularity"]["rows"]
@@ -3272,6 +3286,60 @@ class TestObservabilityDashboard:
         )
         assert failed["delivered"] == 0
         assert failed["failed_after_credit"] == 1
+        assert failed["refunded_after_credit"] == 1
+        assert failed["credits_spent"] == 0.0
+
+    def test_paid_post_preflight_rejects_missing_symbol_before_credit_drawdown(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+    ):
+        previous_manager = app.state.credits
+        manager = CreditManager(str(tmp_path / "preflight_credits.db"))
+        app.state.credits = manager
+
+        try:
+            response = test_client.post(
+                "/v1/checks/pre-trade",
+                headers={"X-AGENT-ID": "preflight-agent-12345678"},
+                json={"side": "buy", "notional_usd": 1000},
+            )
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 400
+        assert "no credits or payment were used" in response.json()["message"]
+        assert manager.get_balance("preflight-agent-12345678") == 0.0
+        stats = observability_store.summarize(days=1)
+        assert stats["event_counts"]["paid_request_rejected_preflight"] == 1
+        assert stats["event_counts"].get("credit_drawdown_success", 0) == 0
+        assert stats["event_counts"].get("payment_verified", 0) == 0
+
+    def test_paid_post_preflight_rejects_invalid_json_before_x402_verification(
+        self,
+        observability_store,
+        test_client,
+    ):
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+        ) as verify_payment:
+            response = test_client.post(
+                "/v1/checks/pre-trade",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-PAYMENT": "must-not-be-verified",
+                },
+                content="{not-json",
+            )
+
+        assert response.status_code == 400
+        assert "no credits or payment were used" in response.json()["message"]
+        verify_payment.assert_not_awaited()
+        stats = observability_store.summarize(days=1)
+        assert stats["event_counts"]["paid_request_rejected_preflight"] == 1
+        assert stats["event_counts"].get("payment_proof_submitted", 0) == 0
 
     def test_dashboard_token_can_protect_internal_stats(
         self,

@@ -8,10 +8,11 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.2"
+APP_VERSION = "0.6.3"
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
 PUBLIC_REGISTRY_DESCRIPTION = (
-    "Read-only MCP discovery for live crypto, equities, FX, metals, state prices, VWAP windows, trader indicators, and x402 HTTP endpoints."
+    "Discover Blocksize live crypto, equity, FX, and metals data with source timestamps, "
+    "provenance, starter credits, x402 HTTP access, and six agent-framework examples."
 )
 PUBLIC_DESCRIPTION = (
     "Read-only MCP discovery for Blocksize live crypto, supported equity ticker, "

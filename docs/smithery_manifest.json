@@ -1,7 +1,7 @@
 {
-  "name": "Blocksize Real Time Market Data",
-  "version": "0.6.2",
-  "description": "Read-only MCP discovery for Blocksize real-time crypto, supported equity ticker, FX, and metals market data. Find instruments, inspect pricing, read integration docs, and build x402-paid HTTP API requests.",
+  "name": "Blocksize Live Market Data for AI Agents",
+  "version": "0.6.3",
+  "description": "Discover Blocksize live crypto, equity, FX, and metals data with source timestamps, provenance, starter credits, x402 HTTP access, and downloadable examples for six agent frameworks.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
   "license": "MIT",
