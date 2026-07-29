@@ -1,6 +1,6 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Discover Blocksize live crypto, equity, FX, and metals data with source timestamps, provenance, starter credits, x402 HTTP access, and downloadable examples for six agent frameworks.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",

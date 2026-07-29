@@ -50,6 +50,9 @@ Canonical intent pages:
 - MCP market data server: `https://mcp.blocksize.info/mcp-market-data-server`
 - Accountless market data API: `https://mcp.blocksize.info/accountless-market-data-api`
 - Price data API examples: `https://mcp.blocksize.info/price-data-api-examples`
+- Market data API comparison: `https://mcp.blocksize.info/market-data-api-comparison`
+- Crypto market data API alternatives: `https://mcp.blocksize.info/crypto-market-data-api-alternatives`
+- Oracle data API for AI agents: `https://mcp.blocksize.info/oracle-data-api-for-ai-agents`
 
 Recommended repository topics and listing keywords:
 

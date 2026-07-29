@@ -5,7 +5,7 @@
   "description": "Live multi-asset market data for AI agents with provenance, starter credits, x402, and examples.",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",

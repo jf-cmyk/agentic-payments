@@ -599,6 +599,22 @@ class TestPublicListingSurfaces:
         assert "Market Data API for AI Agents" in agent_page.text
         assert "/data-packages.json" in agent_page.text
         assert "application/ld+json" in agent_page.text
+        assert "/go/free-trial?utm_source=mcp.blocksize.info" in agent_page.text
+        assert "Verify the claim before production use" in agent_page.text
+
+        comparison_page = test_client.get("/market-data-api-comparison")
+        assert comparison_page.status_code == 200
+        assert "How to evaluate this category" in comparison_page.text
+        assert "No competitor capability is asserted" in comparison_page.text
+        assert "ItemList" in comparison_page.text
+
+        alternatives_page = test_client.get("/crypto-market-data-api-alternatives")
+        assert alternatives_page.status_code == 200
+        assert "Crypto Market Data API Alternatives" in alternatives_page.text
+
+        oracle_page = test_client.get("/oracle-data-api-for-ai-agents")
+        assert oracle_page.status_code == 200
+        assert "Oracle Data API for AI Agents" in oracle_page.text
 
         vwap_page = test_client.get("/crypto-vwap-api")
         assert vwap_page.status_code == 200
@@ -2823,6 +2839,46 @@ class TestDiscoveryRateLimit:
 
 
 class TestObservabilityDashboard:
+    def test_campaign_attribution_and_outbound_clicks_are_summarized(
+        self,
+        observability_store,
+        test_client,
+    ):
+        landing = test_client.get(
+            "/market-data-api-comparison"
+            "?utm_source=google&utm_medium=organic&utm_campaign=market-data-comparison"
+        )
+        redirect = test_client.get(
+            "/go/free-trial"
+            "?utm_source=mcp.blocksize.info&utm_medium=organic_landing"
+            "&utm_campaign=market-data-api-comparison",
+            follow_redirects=False,
+        )
+        rejected = test_client.get(
+            "/go/not-allowlisted?utm_campaign=ignored",
+            follow_redirects=False,
+        )
+
+        assert landing.status_code == 200
+        assert redirect.status_code == 307
+        assert rejected.status_code == 404
+        assert redirect.headers["location"].startswith("https://matrix.blocksize.capital/")
+        assert "utm_campaign=market-data-api-comparison" in redirect.headers["location"]
+
+        stats = observability_store.summarize(days=1)
+        assert stats["campaign_mix"]["market-data-comparison"] == 1
+        assert stats["campaign_mix"]["market-data-api-comparison"] == 1
+        assert stats["campaign_source_mix"]["google"] == 1
+        assert stats["outbound_destination_mix"]["free-trial"] == 1
+
+        redirect_event = next(
+            event
+            for event in stats["recent_events"]
+            if event["event"] == "outbound_conversion_click"
+        )
+        assert "utm_campaign" in redirect_event["metadata"]
+        assert "token" not in redirect_event["metadata"]
+
     def test_reliability_separates_protocol_responses_from_server_failures(
         self,
         observability_store,
@@ -2852,8 +2908,26 @@ class TestObservabilityDashboard:
         assert reliability["server_error_rate"] == pytest.approx(1 / 6, abs=0.000001)
         assert reliability["charged_delivery_successes"] == 2
         assert reliability["charged_delivery_failures"] == 2
+        assert reliability["charged_delivery_failures_last_24h"] == 2
+        assert reliability["latest_charged_delivery_failure_at"]
         assert reliability["post_credit_failure_rate"] == 0.5
         assert stats["overview"]["server_error_rate"] == reliability["server_error_rate"]
+
+    def test_reliability_keeps_historical_failure_without_marking_it_recent(self):
+        old_timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        reliability = UsageEventStore._reliability_summary(
+            [
+                {
+                    "event": "charged_delivery_failed",
+                    "timestamp": old_timestamp,
+                    "status_code": 502,
+                }
+            ]
+        )
+
+        assert reliability["charged_delivery_failures"] == 1
+        assert reliability["charged_delivery_failures_last_24h"] == 0
+        assert reliability["latest_charged_delivery_failure_at"] == old_timestamp
 
     def test_unsupported_demand_rejects_prose_like_slug(self, observability_store):
         observability_store.record(
