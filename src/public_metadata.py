@@ -8,7 +8,7 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.3"
+APP_VERSION = "0.6.4"
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
 PUBLIC_REGISTRY_DESCRIPTION = (
     "Live multi-asset market data for AI agents with provenance, starter credits, "
@@ -58,6 +58,15 @@ RWA_COVERAGE_INDEX_URL = f"{PUBLIC_BASE_URL}/evidence/rwa-coverage-index.html"
 ORACLE_LINEAGE_INDEX_URL = f"{PUBLIC_BASE_URL}/evidence/oracle-lineage-index.html"
 RWA_COVERAGE_INDEX_PDF_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_RWA_Coverage_Index.pdf"
 ORACLE_LINEAGE_INDEX_PDF_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Oracle_Lineage_Index.pdf"
+
+
+def tracked_marketing_url(destination: str, campaign: str) -> str:
+    """Build a first-party, allowlisted conversion link with bounded attribution."""
+    return (
+        f"/go/{quote_plus(destination)}?utm_source=mcp.blocksize.info"
+        f"&utm_medium=organic_landing&utm_campaign={quote_plus(campaign)}"
+    )
+
 
 QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/remote-mcp"
 FIRST_PRICE_QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/first-price"
@@ -1257,6 +1266,78 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
         ),
         "intent": "Use this page for trader alpha-style metrics, watchlist scoring, crypto signal packs, and agent-ready market intelligence.",
     },
+    "market-data-api-comparison": {
+        "title": "Market Data API Comparison Guide",
+        "headline": "Market Data API Comparison",
+        "package_id": "x402-market-data",
+        "primary_query": "market data API comparison",
+        "description": (
+            "A verification-first framework for comparing market data APIs by "
+            "coverage, readiness, agent discovery, access model, and evidence quality."
+        ),
+        "intent": "Use this page when evaluating market data API options for agents, automation, or production trading-data workflows.",
+        "decision_guide": [
+            {
+                "criterion": "Agent discovery",
+                "blocksize": "MCP, OpenAPI, llms.txt, sitemap, and package JSON are published as first-party discovery surfaces.",
+                "verify": "Open the linked machine-readable resources and confirm the intended client can resolve them.",
+            },
+            {
+                "criterion": "Coverage and readiness",
+                "blocksize": "Catalog, candidate, and production-ready states are kept distinct.",
+                "verify": "Check live cache status and dated coverage evidence before relying on a symbol or venue.",
+            },
+            {
+                "criterion": "Access model",
+                "blocksize": "Discovery is inspectable before paid access; live calls can use starter credits, x402, or wallet credits.",
+                "verify": "Inspect pricing and run a small supported request before production integration.",
+            },
+            {
+                "criterion": "Evidence and rights",
+                "blocksize": "Lineage, methodology, and redistribution boundaries are documented separately from availability.",
+                "verify": "Review the evidence indexes and confirm rights for the intended use case.",
+            },
+        ],
+    },
+    "crypto-market-data-api-alternatives": {
+        "title": "Crypto Market Data API Alternatives",
+        "headline": "Crypto Market Data API Alternatives",
+        "package_id": "crypto-vwap",
+        "primary_query": "crypto market data API alternatives",
+        "description": (
+            "A neutral decision guide for teams comparing crypto market data API "
+            "approaches for AI agents, automated workflows, and live price retrieval."
+        ),
+        "intent": "Use this page for alternative and comparison searches where buyers need a transparent evaluation checklist rather than unsupported competitor claims.",
+        "decision_guide": [
+            {
+                "criterion": "Data product",
+                "blocksize": "VWAP, bid/ask, fixed-window VWAP, state price, and derived briefs are separate packages.",
+                "verify": "Match the decision to the exact route and avoid substituting a spot quote for a calculated VWAP.",
+            },
+            {
+                "criterion": "Freshness",
+                "blocksize": "Readiness and cache status are exposed independently from catalog availability.",
+                "verify": "Set a freshness threshold and test behavior when a source is stale or unavailable.",
+            },
+            {
+                "criterion": "Automation fit",
+                "blocksize": "Agents can discover routes over MCP and call paid HTTP endpoints without an account-first workflow.",
+                "verify": "Test discovery, payment challenge handling, delivery, and failure recovery end to end.",
+            },
+        ],
+    },
+    "oracle-data-api-for-ai-agents": {
+        "title": "Oracle Data API for AI Agents",
+        "headline": "Oracle Data API for AI Agents",
+        "package_id": "state-divergence-indicator",
+        "primary_query": "oracle data API for AI agents",
+        "description": (
+            "State-price, lineage, and divergence resources for AI agents that need "
+            "to evaluate market prices against oracle or protocol reference values."
+        ),
+        "intent": "Use this page for oracle data, state-price comparison, price lineage, stale-feed risk, and AI-agent verification workflows.",
+    },
 }
 
 SEO_LANDING_PAGE_URLS = tuple(
@@ -1620,6 +1701,9 @@ def build_seo_landing_page(slug: str) -> str:
     asset_classes = [str(item) for item in package["asset_classes"]]
     og_image_url = f"{PUBLIC_BASE_URL}/og/{slug}.svg"
     request_examples = PACKAGE_REQUEST_EXAMPLES.get(str(package["id"]), ())
+    free_trial_url = tracked_marketing_url("free-trial", slug)
+    pricing_url = tracked_marketing_url("pricing", slug)
+    contact_url = tracked_marketing_url("contact", slug)
 
     json_ld = {
         "@context": "https://schema.org",
@@ -1832,6 +1916,50 @@ def build_seo_landing_page(slug: str) -> str:
     </section>
 """
 
+    decision_guide = page.get("decision_guide", [])
+    decision_guide_html = ""
+    if isinstance(decision_guide, list) and decision_guide:
+        decision_cards = "".join(
+            (
+                '<article class="surface-card decision-card">'
+                '<div><div class="coverage-state">{criterion}</div>'
+                '<h3>Blocksize setup</h3><p>{blocksize}</p></div>'
+                '<div><h3>How to verify</h3><p>{verify}</p></div></article>'
+            ).format(
+                criterion=escape(str(item.get("criterion", "Evaluation criterion"))),
+                blocksize=escape(str(item.get("blocksize", ""))),
+                verify=escape(str(item.get("verify", ""))),
+            )
+            for item in decision_guide
+            if isinstance(item, dict)
+        )
+        decision_guide_html = f"""
+    <section class="evidence-section">
+      <div class="section-inner">
+        <div class="section-title">
+          <h2>How to evaluate this category.</h2>
+          <p>Compare verifiable product boundaries and run the same acceptance tests against every option. No competitor capability is asserted on this page.</p>
+        </div>
+        <div class="grid grid-wide">{decision_cards}</div>
+      </div>
+    </section>
+"""
+        json_ld["@graph"].append(
+            {
+                "@type": "ItemList",
+                "name": f"{page['title']} evaluation criteria",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": index,
+                        "name": str(item.get("criterion", "Evaluation criterion")),
+                    }
+                    for index, item in enumerate(decision_guide, start=1)
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+
     example_chips = "".join(
         f"<span class=\"chip\">{escape(example)}</span>" for example in examples
     )
@@ -2026,6 +2154,8 @@ def build_seo_landing_page(slug: str) -> str:
     .evidence-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3rem; }}
     .coverage-card strong {{ display: block; font-size: clamp(2.8rem, 5vw, 4.8rem); line-height: 1; margin: 0.8rem 0 1rem; }}
     .coverage-state {{ color: var(--purple); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .decision-card {{ min-height: 245px; gap: 1.4rem; }}
+    .decision-card h3 {{ margin-top: 0.7rem; }}
     .as-of {{ margin-top: 1.25rem; font-size: 0.88rem; }}
     .evidence-grid h2 {{ font-size: clamp(2rem, 3vw, 3.2rem); }}
     .evidence-list {{ margin: 1.5rem 0 0; padding-left: 1.3rem; color: var(--paragraph); }}
@@ -2068,7 +2198,7 @@ def build_seo_landing_page(slug: str) -> str:
       <div class="nav-actions">
         <a class="nav-action-link" href="/docs">API Docs</a>
         <a class="nav-action-link" href="/llms.txt">llms.txt</a>
-        <a class="nav-action-button" href="https://matrix.blocksize.capital/" target="_blank" rel="noreferrer">Data Free-Trial</a>
+        <a class="nav-action-button" href="{escape(free_trial_url)}">Data Free-Trial</a>
       </div>
     </div>
   </nav>
@@ -2080,6 +2210,7 @@ def build_seo_landing_page(slug: str) -> str:
         <p class="hero-copy">{escape(description)}</p>
         <div class="hero-actions">
           <a class="btn-nav" href="/docs">Open Market Intelligence API</a>
+          <a class="btn-nav" href="{escape(free_trial_url)}">Start with live data</a>
           <a class="btn-nav btn-ghost" href="/data-packages.json">Read Package JSON</a>
           <a class="btn-nav btn-ghost" href="/v1/cache/status">Live Feed Status</a>
         </div>
@@ -2116,7 +2247,26 @@ def build_seo_landing_page(slug: str) -> str:
         </div>
       </div>
     </section>
+    {decision_guide_html}
     {category_hub_html}
+    <section class="evidence-section">
+      <div class="section-inner">
+        <div class="section-title">
+          <h2>Verify the claim before production use.</h2>
+          <p>Live status, dated coverage, lineage, and licensing evidence are published separately so catalog visibility is never presented as production readiness.</p>
+        </div>
+        <div class="grid grid-wide">
+          <a class="package-link" href="/v1/cache/status"><span>Live feed status</span><small>Inspect current cache readiness and freshness.</small></a>
+          <a class="package-link" href="/evidence/rwa-coverage-index.html"><span>RWA coverage evidence</span><small>Review dated coverage states and qualification boundaries.</small></a>
+          <a class="package-link" href="/evidence/oracle-lineage-index.html"><span>Oracle lineage evidence</span><small>Review source lineage and verification boundaries.</small></a>
+          <a class="package-link" href="/category-hubs.json"><span>Machine-readable claims</span><small>Read category definitions, methods, rights, and citation guidance.</small></a>
+        </div>
+        <div class="hero-actions">
+          <a class="btn-nav" href="{escape(pricing_url)}">Review pricing</a>
+          <a class="btn-nav btn-ghost" href="{escape(contact_url)}">Discuss production access</a>
+        </div>
+      </div>
+    </section>
     <section class="callout">
       <div class="section-inner">
         <div class="section-title">

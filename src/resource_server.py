@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Deque
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -101,6 +102,8 @@ from src.public_metadata import (
     GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
     LLMS_TXT_URL,
+    MAIN_WEBSITE_CONTACT_URL,
+    MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
     MCP_REGISTRY_AUTH_CONTENT,
     MCP_REGISTRY_AUTH_URL,
@@ -235,6 +238,19 @@ PAY_SH_SERVICE_URL = os.getenv(
     "https://pay.sh/services/blocksize/market-data",
 )
 PAY_SH_METRICS_API_URL = os.getenv("PAY_SH_METRICS_API_URL", "").strip()
+OUTBOUND_DESTINATIONS = {
+    "free-trial": "https://matrix.blocksize.capital/",
+    "pricing": MAIN_WEBSITE_PRICING_URL.split("?", 1)[0],
+    "contact": MAIN_WEBSITE_CONTACT_URL.split("?", 1)[0],
+}
+ATTRIBUTION_QUERY_KEYS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+)
+ATTRIBUTION_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:/+ -]{0,95}$")
 
 
 def _env_enabled(name: str, default: str = "false") -> bool:
@@ -777,6 +793,16 @@ def _request_event_fields(
     }
 
 
+def _request_attribution_metadata(request: Request) -> dict[str, str]:
+    """Retain bounded campaign labels without storing arbitrary query strings."""
+    metadata: dict[str, str] = {}
+    for key in ATTRIBUTION_QUERY_KEYS:
+        value = (request.query_params.get(key) or "").strip()
+        if value and ATTRIBUTION_VALUE_RE.fullmatch(value):
+            metadata[key] = value
+    return metadata
+
+
 def _activation_identity_hash(request: Request) -> tuple[str, str] | None:
     """Resolve an explicit activation identity without retaining its raw value."""
     for header_name, identity_type in (
@@ -828,20 +854,21 @@ def _record_http_usage(request: Request, status_code: int, latency_ms: float) ->
         status_code=status_code,
         latency_ms=latency_ms,
     )
-    record_usage_event("http_request", **fields)
+    attribution = _request_attribution_metadata(request)
+    record_usage_event("http_request", **fields, metadata=attribution)
 
     registry_name = registry_name_for_path(request.url.path)
     if registry_name:
         record_usage_event(
             "registry_request",
             **fields,
-            metadata={"registry": registry_name},
+            metadata={"registry": registry_name, **attribution},
         )
     elif _is_discovery_rate_limited_path(request.url.path):
         record_usage_event(
             "free_discovery_call",
             **fields,
-            metadata=_growth_identity_metadata(request),
+            metadata={**attribution, **_growth_identity_metadata(request)},
         )
 
 
@@ -858,7 +885,11 @@ def _record_product_event(
     fields = _request_event_fields(request)
     if wallet_hash is not None:
         fields["wallet_hash"] = wallet_hash
-    event_metadata = {**_growth_identity_metadata(request), **(metadata or {})}
+    event_metadata = {
+        **_request_attribution_metadata(request),
+        **_growth_identity_metadata(request),
+        **(metadata or {}),
+    }
     record_usage_event(
         event,
         **fields,
@@ -982,6 +1013,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         clean_path in allowed_exact_paths
         or clean_path in seo_paths
         or clean_path.startswith("/anthropic/mcp")
+        or clean_path.startswith("/go/")
         or clean_path.startswith("/og/")
     )
 
@@ -1178,6 +1210,31 @@ for _seo_slug in SEO_LANDING_PAGES:
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
+
+
+@app.api_route("/go/{destination}", methods=["GET", "HEAD"], include_in_schema=False)
+async def tracked_outbound_redirect(destination: str, request: Request) -> RedirectResponse:
+    """Record an allowlisted conversion click and forward bounded campaign labels."""
+    target = OUTBOUND_DESTINATIONS.get(destination)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Outbound destination not found")
+    attribution = _request_attribution_metadata(request)
+    _record_product_event(
+        "outbound_conversion_click",
+        request,
+        metadata={"destination": destination, **attribution},
+    )
+    parsed = urlsplit(target)
+    location = urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(attribution),
+            parsed.fragment,
+        )
+    )
+    return RedirectResponse(location, status_code=307)
 
 
 @app.get("/.well-known/glama.json", include_in_schema=False)
@@ -6466,6 +6523,10 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         error_rate = overview.get("server_error_rate")
     error_rate_float = float(error_rate) if error_rate is not None else 0.0
     post_credit_failures = int(reliability.get("charged_delivery_failures") or failed_after_credit)
+    recent_post_credit_failures = int(
+        reliability.get("charged_delivery_failures_last_24h") or 0
+    )
+    latest_post_credit_failure_at = reliability.get("latest_charged_delivery_failure_at")
     delivery_rate = _brief_ratio(delivered, requested)
     block_rate = _brief_ratio(blocked, requested)
     active_registry_sources = sum(1 for value in summary.get("registry_source_mix", {}).values() if value)
@@ -6488,7 +6549,7 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     elif requested and (delivery_rate is not None and delivery_rate < 0.5):
         status = "watch"
         status_label = "Watch closely"
-    elif error_rate_float >= 0.01 or post_credit_failures:
+    elif error_rate_float >= 0.01 or recent_post_credit_failures:
         status = "watch"
         status_label = "Watch closely"
     elif requested or registry_requests:
@@ -6587,12 +6648,23 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         if top_blocked:
             detail += f"; biggest blocked item is {top_blocked.get('service')} / {top_blocked.get('subject')}"
         what_does_not.append({"title": "Demand is being stopped before value is delivered", "detail": detail, "tone": "warn"})
-    if failed_after_credit:
+    if recent_post_credit_failures:
         what_does_not.append(
             {
                 "title": "Some paid/credit-backed calls fail after charging",
-                "detail": f"{failed_after_credit} call(s) failed after credit drawdown and need refund or retry review.",
+                "detail": f"{recent_post_credit_failures} unrecovered charged call(s) failed during the trailing 24 hours and need refund or retry review.",
                 "tone": "bad",
+            }
+        )
+    elif post_credit_failures:
+        what_does_not.append(
+            {
+                "title": "A historical charged failure remains in this reporting window",
+                "detail": (
+                    f"No unrecovered charged failure was observed in the trailing 24 hours; "
+                    f"the latest selected-window failure was {latest_post_credit_failure_at or 'not timestamped'}."
+                ),
+                "tone": "warn",
             }
         )
     if prompts and inflow_count == 0:
@@ -6665,7 +6737,7 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
                 "check": "Expect platform coverage to show configured feeds for Pay.sh, Smithery, and other onboarded registries.",
             }
         )
-    if error_rate_float >= 0.01 or post_credit_failures:
+    if error_rate_float >= 0.01 or recent_post_credit_failures:
         improvement_steps.append(
             {
                 "priority": "P1",
@@ -6716,9 +6788,12 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "HTTP reliability",
-            "status": "pass" if error_rate_float < 0.01 and not post_credit_failures else "fail",
-            "value": f"{_brief_pct(error_rate_float)} server; {post_credit_failures} post-credit failure(s)",
-            "detail": "HTTP 5xx rate plus charged-delivery failures. Payment prompts, auth challenges, rate limits and client/protocol responses are reported separately.",
+            "status": "pass" if error_rate_float < 0.01 and not recent_post_credit_failures else "fail",
+            "value": (
+                f"{_brief_pct(error_rate_float)} server; "
+                f"{recent_post_credit_failures} trailing-24h / {post_credit_failures} selected-window post-credit failure(s)"
+            ),
+            "detail": "HTTP 5xx rate plus recent charged-delivery failures. Historical failures remain visible without making a repaired path look currently broken.",
         },
         {
             "name": "Raw evidence",
@@ -7534,6 +7609,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
 
       <section class="grid three section" id="acquisition">
         <div class="card"><h2>Platform Sources</h2><div id="registry-sources" class="bars"></div></div>
+        <div class="card"><h2>Campaigns</h2><div id="campaigns" class="bars"></div></div>
+        <div class="card"><h2>Conversion Destinations</h2><div id="outbound-destinations" class="bars"></div></div>
         <div class="card"><h2>Pay.sh Marketplace</h2><div id="pay-sh-source" class="source-card"></div></div>
         <div class="card"><h2>Smithery Hosted Activity</h2><div id="smithery-source" class="source-card"></div></div>
         <div class="card"><h2>Most Used Services</h2><div id="services" class="bars"></div></div>
@@ -8119,6 +8196,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       renderPopularity(data);
       renderWalletInflows(data);
       registrySourceBars(data.registry_source_mix);
+      bars("campaigns", data.campaign_mix, "blue");
+      bars("outbound-destinations", data.outbound_destination_mix, "amber");
       renderPayShSource(data);
       renderSmitherySource(data);
       renderPlatformCoverage(data);

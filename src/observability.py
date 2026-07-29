@@ -70,6 +70,8 @@ def surface_for_path(path: str) -> str:
         return "cursor_mcp"
     if registry_name_for_path(path):
         return "registry"
+    if path == "/go" or path.startswith("/go/"):
+        return "marketing_redirect"
     if path.startswith("/v1/"):
         return "http_api"
     if path in {"/", "/quickstart/remote-mcp", "/prompt-examples", "/support", "/privacy"}:
@@ -440,6 +442,31 @@ class UsageEventStore:
             for event in events
             if event.get("referrer")
         )
+        campaign_mix = Counter(
+            str(event["metadata"].get("utm_campaign"))
+            for event in events
+            if event["event"] == "http_request"
+            and isinstance(event.get("status_code"), int)
+            and 200 <= int(event["status_code"]) < 400
+            and isinstance(event.get("metadata"), dict)
+            and event["metadata"].get("utm_campaign")
+        )
+        campaign_source_mix = Counter(
+            str(event["metadata"].get("utm_source"))
+            for event in events
+            if event["event"] == "http_request"
+            and isinstance(event.get("status_code"), int)
+            and 200 <= int(event["status_code"]) < 400
+            and isinstance(event.get("metadata"), dict)
+            and event["metadata"].get("utm_source")
+        )
+        outbound_destination_mix = Counter(
+            str(event["metadata"].get("destination") or event.get("subject"))
+            for event in events
+            if event["event"] == "outbound_conversion_click"
+            and isinstance(event.get("metadata"), dict)
+            and (event["metadata"].get("destination") or event.get("subject"))
+        )
         user_agent_mix = Counter(
             self._user_agent_family(event.get("user_agent"))
             for event in events
@@ -498,6 +525,9 @@ class UsageEventStore:
             "service_mix": dict(service_mix.most_common(20)),
             "origin_mix": dict(origin_mix.most_common(20)),
             "referrer_mix": dict(referrer_mix.most_common(20)),
+            "campaign_mix": dict(campaign_mix.most_common(20)),
+            "campaign_source_mix": dict(campaign_source_mix.most_common(20)),
+            "outbound_destination_mix": dict(outbound_destination_mix.most_common(20)),
             "user_agent_mix": dict(user_agent_mix.most_common(20)),
             "client_fingerprint_mix": dict(client_fingerprint_mix.most_common(20)),
             "data_called": data_called,
@@ -517,12 +547,13 @@ class UsageEventStore:
                 "First-live-price activation is counted once per privacy-safe explicit user, agent, wallet, device, or session identity.",
                 "Growth-funnel identity attribution uses salted identity hashes or wallet hashes; IP fingerprints are never used as funnel identities.",
                 "Unsupported-symbol opportunities include only bounded symbol-like searches with zero results; arbitrary free text is excluded.",
+                "Campaign attribution retains only bounded allowlisted UTM values; full query strings are never stored.",
                 "Server reliability is measured from HTTP 5xx responses and charged-delivery failures; expected payment, auth, rate-limit, and client/protocol responses are reported separately.",
             ],
         }
 
-    @staticmethod
-    def _reliability_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    @classmethod
+    def _reliability_summary(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
         """Separate server failures from expected payment and client/protocol responses."""
         http_events = [event for event in events if event.get("event") == "http_request"]
         status_counts = Counter(int(event.get("status_code") or 0) for event in http_events)
@@ -540,21 +571,24 @@ class UsageEventStore:
             and status not in client_protocol_statuses | {401, 402, 403, 429}
         )
         successful_http = sum(count for status, count in status_counts.items() if 200 <= status < 400)
-        http_delivery_failures = sum(
-            1 for event in events if event.get("event") == "charged_delivery_failed"
-        )
-        refunded_http_delivery_failures = sum(
-            1 for event in events if event.get("event") == "refunded_delivery_failed"
-        )
+        http_delivery_failure_events = [
+            event for event in events if event.get("event") == "charged_delivery_failed"
+        ]
+        refunded_http_delivery_failure_events = [
+            event for event in events if event.get("event") == "refunded_delivery_failed"
+        ]
+        http_delivery_failures = len(http_delivery_failure_events)
+        refunded_http_delivery_failures = len(refunded_http_delivery_failure_events)
         http_delivery_successes = sum(
             1 for event in events if event.get("event") == "data_delivered"
         )
         mcp_drawdowns = sum(
             1 for event in events if event.get("event") == "mcp_credit_drawdown_success"
         )
-        mcp_delivery_failures = sum(
-            1 for event in events if event.get("event") == "mcp_tool_error"
-        )
+        mcp_delivery_failure_events = [
+            event for event in events if event.get("event") == "mcp_tool_error"
+        ]
+        mcp_delivery_failures = len(mcp_delivery_failure_events)
         # MCP drawdown success is recorded before the provider call, so a later
         # tool error converts that attempt into a failure instead of creating a
         # second delivery attempt.
@@ -562,6 +596,31 @@ class UsageEventStore:
         charged_delivery_failures = http_delivery_failures + mcp_delivery_failures
         charged_delivery_successes = http_delivery_successes + mcp_delivery_successes
         charged_delivery_attempts = charged_delivery_successes + charged_delivery_failures
+        charged_delivery_failure_events = [
+            *http_delivery_failure_events,
+            *mcp_delivery_failure_events,
+        ]
+        recent_cutoff = datetime.now(UTC) - timedelta(hours=24)
+        charged_delivery_failures_last_24h = sum(
+            1
+            for event in charged_delivery_failure_events
+            if (event_time := cls._event_time(event)) is not None
+            and event_time >= recent_cutoff
+        )
+        refunded_delivery_failures_last_24h = sum(
+            1
+            for event in refunded_http_delivery_failure_events
+            if (event_time := cls._event_time(event)) is not None
+            and event_time >= recent_cutoff
+        )
+        latest_charged_delivery_failure_at = max(
+            (str(event.get("timestamp")) for event in charged_delivery_failure_events),
+            default=None,
+        )
+        latest_refunded_delivery_failure_at = max(
+            (str(event.get("timestamp")) for event in refunded_http_delivery_failure_events),
+            default=None,
+        )
         return {
             "http_requests": total,
             "successful_http_responses": successful_http,
@@ -575,6 +634,10 @@ class UsageEventStore:
             "charged_delivery_successes": charged_delivery_successes,
             "charged_delivery_failures": charged_delivery_failures,
             "refunded_delivery_failures": refunded_http_delivery_failures,
+            "charged_delivery_failures_last_24h": charged_delivery_failures_last_24h,
+            "refunded_delivery_failures_last_24h": refunded_delivery_failures_last_24h,
+            "latest_charged_delivery_failure_at": latest_charged_delivery_failure_at,
+            "latest_refunded_delivery_failure_at": latest_refunded_delivery_failure_at,
             "post_credit_failure_rate": (
                 round(charged_delivery_failures / charged_delivery_attempts, 6)
                 if charged_delivery_attempts
@@ -583,6 +646,7 @@ class UsageEventStore:
             "definitions": {
                 "server_error_rate": "HTTP 5xx responses divided by all HTTP requests.",
                 "post_credit_failure_rate": "Unrecovered charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries; refunded HTTP failures are reported separately.",
+                "charged_delivery_failures_last_24h": "Unrecovered charged HTTP delivery failures observed during the trailing 24 hours.",
                 "client_protocol_responses": "HTTP 400, 404, 405, 406, 416 and 422 responses; visible for diagnosis but excluded from the server-error KPI.",
             },
         }
