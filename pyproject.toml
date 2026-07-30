@@ -72,6 +72,7 @@ packages = ["src"]
 "docs/developer_portal.html" = "share/blocksize-mcp/docs/developer_portal.html"
 "docs/remote_mcp_quickstart.html" = "share/blocksize-mcp/docs/remote_mcp_quickstart.html"
 "docs/first_price_quickstart.html" = "share/blocksize-mcp/docs/first_price_quickstart.html"
+"docs/agent_framework_integrations.html" = "share/blocksize-mcp/docs/agent_framework_integrations.html"
 "docs/prompt_examples.html" = "share/blocksize-mcp/docs/prompt_examples.html"
 "docs/privacy_policy.html" = "share/blocksize-mcp/docs/privacy_policy.html"
 "docs/support.html" = "share/blocksize-mcp/docs/support.html"

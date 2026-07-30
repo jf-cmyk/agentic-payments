@@ -22,6 +22,7 @@ REQUIRED_MEMBERS = (
     "share/blocksize-mcp/docs/developer_portal.html",
     "share/blocksize-mcp/docs/remote_mcp_quickstart.html",
     "share/blocksize-mcp/docs/first_price_quickstart.html",
+    "share/blocksize-mcp/docs/agent_framework_integrations.html",
     "share/blocksize-mcp/docs/prompt_examples.html",
     "share/blocksize-mcp/docs/privacy_policy.html",
     "share/blocksize-mcp/docs/support.html",
@@ -41,6 +42,7 @@ REQUIRED_MEMBERS = (
     "share/blocksize-mcp/docs/evidence/oracle-lineage-index.html",
 )
 PUBLIC_HTML_FILES = {
+    "share/blocksize-mcp/docs/agent_framework_integrations.html",
     "share/blocksize-mcp/docs/developer_portal.html",
     "share/blocksize-mcp/docs/remote_mcp_quickstart.html",
     "share/blocksize-mcp/docs/first_price_quickstart.html",
