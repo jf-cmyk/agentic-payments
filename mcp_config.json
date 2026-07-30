@@ -1,15 +1,8 @@
 {
   "mcpServers": {
-    "blocksize-data-economy": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-http",
-        "https://mcp.blocksize.info/mcp/manifest.json"
-      ],
-      "env": {
-        "X402_ENABLED": "true"
-      }
+    "blocksize-market-data-public": {
+      "type": "http",
+      "url": "https://mcp.blocksize.info/mcp/server/"
     }
   }
 }

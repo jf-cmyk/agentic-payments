@@ -6,7 +6,10 @@ from collections import Counter
 from typing import Any
 
 from src.rwa_blocksize_benchmark import resolve_blocksize_benchmark
-from src.rwa_coverage import build_rwa_asset_matrix
+from src.rwa_coverage import (
+    build_rwa_asset_matrix,
+    iter_asset_venue_instruments,
+)
 
 
 NON_CRYPTO_ASSET_CLASSES = {
@@ -85,6 +88,7 @@ def _feed_record(
     asset: dict[str, Any],
     venue_id: str,
     venue_data: dict[str, Any],
+    venue_instrument_count: int,
 ) -> dict[str, Any]:
     symbol = str(venue_data["symbol"])
     source_type = str(venue_data["source_type"])
@@ -97,11 +101,20 @@ def _feed_record(
             "source_type": source_type,
         }
     )
+    legacy_feed_id = f"rwa_{kind}:{venue_id}:{asset['asset_id']}:{source_type}"
+    instrument_id = str(venue_data.get("instrument_id") or "")
+    feed_id = (
+        f"{legacy_feed_id}:{instrument_id.rsplit(':', 1)[-1]}"
+        if venue_instrument_count > 1 and instrument_id
+        else legacy_feed_id
+    )
     record = {
-        "feed_id": f"rwa_{kind}:{venue_id}:{asset['asset_id']}:{source_type}",
+        "feed_id": feed_id,
         "kind": kind,
         "asset_id": asset["asset_id"],
         "asset_classes": asset["asset_classes"],
+        "asset_class": asset_class,
+        "instrument_id": instrument_id or None,
         "symbol": symbol,
         "venue": venue_id,
         "source_type": source_type,
@@ -132,20 +145,38 @@ def build_non_crypto_feed_catalog(
     exclude_tokenized_stocks: bool = True,
     asset_class: str | None = None,
     venue: str | None = None,
+    asset_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return all sourceable non-crypto VWAP and bid/ask feed definitions."""
-    matrix = build_rwa_asset_matrix(asset_class=asset_class, venue=venue)
+    if asset_matrix is not None and (asset_class is not None or venue is not None):
+        raise ValueError(
+            "asset_matrix can only be supplied for an unfiltered feed catalog"
+        )
+    matrix = asset_matrix or build_rwa_asset_matrix(
+        asset_class=asset_class,
+        venue=venue,
+    )
     vwap_feeds: list[dict[str, Any]] = []
     bidask_feeds: list[dict[str, Any]] = []
     excluded_rows: list[dict[str, Any]] = []
 
     for asset in matrix["assets"]:
-        for venue_id, venue_data in asset["venues"].items():
-            row_asset_classes = set(asset["asset_classes"])
-            if not row_asset_classes.intersection(NON_CRYPTO_ASSET_CLASSES):
+        for venue_id, venue_data in iter_asset_venue_instruments(asset):
+            row_asset_class = str(
+                venue_data.get("asset_class")
+                or (
+                    asset["asset_classes"][0]
+                    if asset.get("asset_classes")
+                    else "unknown"
+                )
+            )
+            if row_asset_class not in NON_CRYPTO_ASSET_CLASSES:
                 continue
             source_type = str(venue_data["source_type"])
-            row_asset_class = str(asset["asset_classes"][0]) if asset.get("asset_classes") else "unknown"
+            venue_instrument_count = int(
+                (asset["venues"].get(venue_id) or {}).get("instrument_count")
+                or 1
+            )
             tokenized_stock = _is_tokenized_stock_row(
                 row_asset_class,
                 str(venue_data["symbol"]),
@@ -165,11 +196,23 @@ def build_non_crypto_feed_catalog(
                 continue
             if _supports_vwap(venue_data):
                 vwap_feeds.append(
-                    _feed_record(kind="vwap", asset=asset, venue_id=venue_id, venue_data=venue_data)
+                    _feed_record(
+                        kind="vwap",
+                        asset=asset,
+                        venue_id=venue_id,
+                        venue_data=venue_data,
+                        venue_instrument_count=venue_instrument_count,
+                    )
                 )
             if _supports_bidask(venue_data):
                 bidask_feeds.append(
-                    _feed_record(kind="bidask", asset=asset, venue_id=venue_id, venue_data=venue_data)
+                    _feed_record(
+                        kind="bidask",
+                        asset=asset,
+                        venue_id=venue_id,
+                        venue_data=venue_data,
+                        venue_instrument_count=venue_instrument_count,
+                    )
                 )
 
     all_feeds = [*vwap_feeds, *bidask_feeds]
@@ -182,6 +225,7 @@ def build_non_crypto_feed_catalog(
     by_kind = Counter(feed["kind"] for feed in all_feeds)
     by_benchmark = Counter(feed["blocksize_benchmark"]["status"] for feed in all_feeds)
     return {
+        "source_snapshot_manifest": matrix["source_snapshot_manifest"],
         "summary": {
             "feed_count": len(all_feeds),
             "vwap_feed_count": len(vwap_feeds),

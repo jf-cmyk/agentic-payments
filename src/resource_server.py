@@ -21,7 +21,7 @@ Endpoints:
   GET /v1/rwa/blocker-resolution  — RWA blocker resolution ledger (FREE)
   GET /v1/rwa/source-rights       — RWA rights-to-source register (FREE)
   GET /v1/rwa/replay-inventory    — RWA route/pool replay inventory (FREE)
-  POST /v1/rwa/observations/store — Replayable RWA observation ledger (FREE)
+  POST /v1/rwa/observations/store — Operator-only replayable RWA evidence ledger
   GET /v1/search?q={query}        — Pair search (FREE)
   GET /v1/instruments/{service}   — Instrument list (FREE)
   GET /health                     — Health check (FREE)
@@ -33,18 +33,25 @@ import asyncio
 import os
 import base64
 import binascii
+import csv
+import hashlib
+import io
 import json
 import logging
 import re
 import secrets
+import sqlite3
+import sysconfig
 import time
+import tomllib
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any, Deque
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -66,12 +73,18 @@ from src.blocksize_client import (
     BlocksizeClient,
 )
 from src.blocksize_stream_cache import BlocksizeStreamCache
+from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
 from src.config import TOP_250_CRYPTO, settings
 from src.credit_manager import (
     CREDIT_COSTS,
     STARTER_CREDIT_ALLOWANCE,
     CreditManager,
     BULK_TIERS,
+    MAX_CACHED_PAYMENT_RESPONSE_BYTES,
+)
+from src.entitlement_manager import (
+    connector_entitlement_db_path,
+    connector_entitlement_manager,
 )
 from src.models import (
     BidAskResponse,
@@ -140,12 +153,16 @@ from src.public_metadata import (
 )
 from src.rwa_coverage import (
     QUALITY_ALIGNMENT,
+    RWA_ASSET_MATRIX_DEFAULT_LIMIT,
+    RWA_COLLECTION_DEFAULT_LIMIT,
+    RWA_COLLECTION_MAX_LIMIT,
     build_dex_venue_quality_plan,
     build_oracle_parity_matrix,
     build_rwa_asset_matrix,
     build_rwa_build_plan,
     build_rwa_coverage_overview,
 )
+from src.rwa_api_collections import paginate_rows
 from src.rwa_dex_allowlist import build_dex_allowlist
 from src.rwa_derivative_venues import build_derivative_venue_report
 from src.rwa_asset_identity import build_rwa_ticker_identity_audit
@@ -156,13 +173,12 @@ from src.rwa_aggregator import (
     evaluate_feed_promotion,
 )
 from src.rwa_realtime_quality import build_realtime_requirements, evaluate_realtime_quality
-from src.rwa_adapters import RWA_ADAPTER_REGISTRY
+from src.rwa_adapters import KrakenSpotAdapter, KrakenXStocksAdapter, RWA_ADAPTER_REGISTRY, build_default_registry
 from src.rwa_sourcing import build_sourcing_jobs
-from src.rwa_sourcing_runner import probe_sourcing_jobs
+from src.rwa_sourcing_runner import probe_sourcing_jobs, warm_sourcing_job_cache
 from src.rwa_symbol_registry import (
     build_rwa_registry_overview,
-    build_rwa_venue_registry,
-    normalize_venue_alias,
+    build_rwa_venue_registry_page,
     resolve_rwa_symbol,
 )
 from src.rwa_non_crypto_feeds import build_non_crypto_feed_catalog
@@ -182,17 +198,55 @@ from src.rwa_oracle_streams import build_oracle_stream_coverage
 from src.rwa_provider_catalog import build_provider_catalog
 from src.rwa_consensus import build_consensus_source_plan, calculate_consensus_metric
 from src.rwa_source_readiness import build_source_readiness
-from src.rwa_store import RWAObservationStore
+from src.rwa_store import RWAObservationStore, RWA_STORE_SCHEMA_VERSION
+from src.security_config import (
+    dashboard_token,
+    install_sensitive_query_log_filter,
+    is_production_environment,
+    is_strong_secret,
+    security_configuration_status,
+    trusted_identity_configuration_status,
+)
+from src.payment_security import (
+    FacilitatorAdapter,
+    ParsedPayment,
+    PaymentSecurityError,
+    parse_payment_signature,
+    payment_security_status,
+)
+from src.rwa_models import RWAObservationEnvelope, RWAProbeRequest
+from src.rwa_security import (
+    RWARequestBodyLimitMiddleware,
+    configured_rwa_observation_db_path,
+    database_paths_collide,
+    require_rwa_operator,
+    rwa_database_collisions,
+    rwa_security_status,
+    rwa_store_lock_timeout_seconds,
+)
 from src.rwa_daily_feed_agent import build_daily_feed_agent_view
 from src.rwa_xyz_monitor import build_rwa_xyz_monitor_view
 from src import anthropic_auth
 from src import cursor_auth
+from src import openai_auth
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
 from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
 from src.cursor_mcp_server import cursor_mcp
+from src.openai_mcp_server import TOOL_COSTS as OPENAI_TOOL_COSTS
+from src.openai_mcp_server import openai_mcp
+from src.mcp_server import (
+    DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    DISCOVERY_INSTRUMENT_MAX_LIMIT,
+    build_catalog_snapshot_metadata,
+)
 from src.public_mcp_server import public_mcp
-from scripts.run_rwa_growth_pilot import capture_pilot, persist_capture
+from scripts.run_rwa_growth_pilot import (
+    PILOT_STALE_AFTER_SECONDS,
+    capture_pilot,
+    evaluate_store,
+    persist_capture,
+)
 from scripts.run_rwa_pilot_alignment_snapshot import (
     capture_blocksize_benchmarks,
     evaluate_alignment,
@@ -214,10 +268,163 @@ logger = logging.getLogger(__name__)
 # credential material in their path, so retain only warning/error records.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-DOCS_DIR = Path("docs")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_INSTALLATION_PACKAGE_ROOTS = {
+    Path(path).resolve()
+    for path in (sysconfig.get_path("purelib"), sysconfig.get_path("platlib"))
+    if path
+}
+_MODULE_PATH = Path(__file__).resolve()
+
+
+def _record_hash_matches(path: Path, hash_spec: str, size_text: str) -> bool:
+    """Verify an installed data file against its wheel RECORD entry."""
+    if not path.is_file() or not hash_spec.startswith("sha256="):
+        return False
+    try:
+        expected_size = int(size_text)
+        payload = path.read_bytes()
+    except (OSError, ValueError):
+        return False
+    digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=")
+    return len(payload) == expected_size and digest.decode("ascii") == hash_spec[7:]
+
+
+def _installed_distribution_layout() -> tuple[bool, Path | None]:
+    """Locate this module's signed wheel data across prefix/target/user schemes."""
+    try:
+        package_distribution = distribution("blocksize-mcp-x402")
+    except PackageNotFoundError:
+        return False, None
+    recorded_module = Path(
+        package_distribution.locate_file("src/resource_server.py")
+    ).resolve(strict=False)
+    if recorded_module != _MODULE_PATH:
+        return False, None
+
+    record_text = package_distribution.read_text("RECORD") or ""
+    server_record = next(
+        (
+            row
+            for row in csv.reader(io.StringIO(record_text))
+            if len(row) >= 3
+            and row[0].replace("\\", "/").endswith(
+                "share/blocksize-mcp/server.json"
+            )
+        ),
+        None,
+    )
+    distribution_root = Path(package_distribution.locate_file("")).resolve(
+        strict=False
+    )
+    if server_record is None:
+        return True, distribution_root / ".blocksize-mcp-package-data-missing"
+
+    record_path, hash_spec, size_text = server_record[:3]
+    candidates = [
+        Path(package_distribution.locate_file(record_path)).resolve(strict=False),
+        distribution_root / "share" / "blocksize-mcp" / "server.json",
+        (
+            Path(sysconfig.get_path("data"))
+            / "share"
+            / "blocksize-mcp"
+            / "server.json"
+        ).resolve(strict=False),
+    ]
+    for candidate in dict.fromkeys(candidates):
+        if _record_hash_matches(candidate, hash_spec, size_text):
+            return True, candidate.parent
+    return True, distribution_root / ".blocksize-mcp-package-data-invalid"
+
+
+_DISTRIBUTION_INSTALLED, _DISTRIBUTION_DATA_ROOT = _installed_distribution_layout()
+
+
+def _validated_source_checkout() -> bool:
+    manifest_path = PROJECT_ROOT / "pyproject.toml"
+    if (PROJECT_ROOT / "src" / "resource_server.py").resolve() != _MODULE_PATH:
+        return False
+    try:
+        project = tomllib.loads(manifest_path.read_text(encoding="utf-8"))["project"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return False
+    return (
+        project.get("name") == "blocksize-mcp-x402"
+        and project.get("version") == APP_VERSION
+    )
+
+
+SOURCE_CHECKOUT = not _DISTRIBUTION_INSTALLED and _validated_source_checkout()
+INSTALLED_DISTRIBUTION = not SOURCE_CHECKOUT
+PACKAGED_DATA_ROOT = (
+    _DISTRIBUTION_DATA_ROOT
+    if _DISTRIBUTION_DATA_ROOT is not None
+    else (
+        _MODULE_PATH.parent.parent / ".blocksize-mcp-package-data-missing"
+        if INSTALLED_DISTRIBUTION
+        else (
+        Path(sysconfig.get_path("data")) / "share" / "blocksize-mcp"
+        ).resolve(strict=False)
+    )
+)
+
+
+def _resolve_docs_dir() -> Path:
+    """Resolve static documentation independently of the process working directory."""
+    configured = os.environ.get("BLOCKSIZE_DOCS_DIR", "").strip()
+    if configured:
+        # An explicit operator path is authoritative even when it is missing;
+        # readiness must expose the error instead of silently using other data.
+        return Path(configured).expanduser().resolve()
+    if SOURCE_CHECKOUT:
+        return (PROJECT_ROOT / "docs").resolve()
+    # Installed releases must use data from their own installation prefix. An
+    # unrelated ``site-packages/docs`` directory must never mask a broken wheel.
+    return (PACKAGED_DATA_ROOT / "docs").resolve()
+
+
+DOCS_DIR = _resolve_docs_dir()
+SERVER_JSON_PATHS = (
+    (PROJECT_ROOT / "server.json",)
+    if SOURCE_CHECKOUT
+    else (PACKAGED_DATA_ROOT / "server.json",)
+)
+READINESS_REQUIRED_DOC_PATHS = (
+    "developer_portal.html",
+    "remote_mcp_quickstart.html",
+    "first_price_quickstart.html",
+    "prompt_examples.html",
+    "privacy_policy.html",
+    "support.html",
+    "claude_connector.html",
+    "assets/favicon.ico",
+    "assets/favicon.png",
+    "assets/logo-square.svg",
+    "pdf/Blocksize_Agent_Manual.pdf",
+    "evidence/rwa-coverage-index.html",
+    "evidence/oracle-lineage-index.html",
+)
+
+
+def _load_release_build() -> dict[str, Any]:
+    """Load CI-stamped, non-secret release provenance."""
+    path = Path(__file__).with_name("_release_build.json")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    env_commit = os.environ.get("RELEASE_COMMIT_SHA", "").strip().lower()
+    if env_commit:
+        payload["commit_sha"] = env_commit
+        payload["stamped"] = True
+    return payload
+
+
+RELEASE_BUILD = _load_release_build()
 PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
+OPENAI_MCP_HTTP_APP = openai_mcp.http_app(path="/", transport="streamable-http")
 OBSERVABILITY = (
     UsageEventStore(settings.server.observability_db_path)
     if settings.server.observability_enabled
@@ -257,11 +464,17 @@ def _env_enabled(name: str, default: str = "false") -> bool:
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _rwa_growth_pilot_paths() -> tuple[Path, Path]:
-    return (
-        Path(os.environ.get("RWA_GROWTH_PILOT_HISTORY_PATH", "/data/rwa_growth_pilot_history.jsonl")),
-        Path(os.environ.get("RWA_GROWTH_PILOT_STATUS_PATH", "/data/rwa_growth_pilot_status.json")),
-    )
+def _rwa_growth_pilot_stale_after_seconds() -> float:
+    try:
+        configured = float(
+            os.environ.get(
+                "RWA_GROWTH_PILOT_STALE_AFTER_SECONDS",
+                str(PILOT_STALE_AFTER_SECONDS),
+            )
+        )
+    except ValueError:
+        configured = PILOT_STALE_AFTER_SECONDS
+    return min(604_800.0, max(1.0, configured))
 
 
 def _rwa_growth_pilot_alignment_paths() -> tuple[Path, Path]:
@@ -315,28 +528,35 @@ def _rwa_growth_pilot_promotion_paths() -> tuple[Path, Path]:
     )
 
 
-def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
-    _, status_path = _rwa_growth_pilot_paths()
+def _rwa_growth_pilot_dashboard_status(target_app: FastAPI) -> dict[str, Any]:
+    """Derive core readiness from SQLite and attach optional evidence reports."""
     _, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     _, depth_status_path = _rwa_growth_pilot_depth_paths()
     _, promotion_status_path = _rwa_growth_pilot_promotion_paths()
-    if not status_path.exists():
+    enabled = _env_enabled("RWA_GROWTH_PILOT_ENABLED")
+    store = getattr(target_app.state, "rwa_store", None)
+    if not isinstance(store, RWAObservationStore):
         return {
-            "status": "not_started",
-            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "status": "ledger_unavailable",
+            "enabled": enabled,
+            "source_of_truth": "rwa_observation_store",
             "production_promoted_feed_count": 0,
             "feeds": [],
         }
     try:
-        report = json.loads(status_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        report = evaluate_store(
+            store,
+            stale_after_seconds=_rwa_growth_pilot_stale_after_seconds(),
+        )
+    except (OSError, sqlite3.Error, ValueError):
+        logger.exception("RWA growth pilot ledger status is unavailable")
         return {
-            "status": "status_unreadable",
-            "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
+            "status": "ledger_unavailable",
+            "enabled": enabled,
+            "source_of_truth": "rwa_observation_store",
             "production_promoted_feed_count": 0,
             "feeds": [],
         }
-    current = report.get("current_capture") if isinstance(report.get("current_capture"), dict) else {}
     alignment = report.get("benchmark_alignment_latest", {})
     if alignment_status_path.exists():
         try:
@@ -355,20 +575,18 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             promotion = json.loads(promotion_status_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             promotion = {"status": "status_unreadable"}
-    return {
-        "status": report.get("status", "candidate_monitoring"),
-        "enabled": _env_enabled("RWA_GROWTH_PILOT_ENABLED"),
-        "generated_at": report.get("generated_at"),
-        "source_monitoring_ready": bool(report.get("source_monitoring_ready")),
-        "promotion_ready": bool(report.get("promotion_ready")),
-        "production_promoted_feed_count": int(report.get("production_promoted_feed_count") or 0),
-        "current_capture": {
-            "attempted": int(current.get("attempted") or 0),
-            "succeeded": int(current.get("succeeded") or 0),
-            "ledger_persisted": int(current.get("ledger_persisted") or 0),
-            "ledger_observation_ids": current.get("ledger_observation_ids", []),
-        },
-        "observation_ledger": report.get("observation_ledger", {}),
+    freshness_feeds = report.get("freshness", {}).get("feeds", [])
+    latest_outcomes = [
+        row for row in freshness_feeds if row.get("last_status") != "missing"
+    ]
+    succeeded = sum(row.get("last_status") == "ok" for row in latest_outcomes)
+    report["current_capture"] = {
+        "attempted": len(latest_outcomes),
+        "succeeded": succeeded,
+        "failed": len(latest_outcomes) - succeeded,
+        "derived_from": "latest_ledger_outcome_per_feed",
+    }
+    supplemental = {
         "benchmark_alignment": {
             "generated_at": alignment.get("generated_at"),
             "status": alignment.get("status"),
@@ -388,18 +606,14 @@ def _rwa_growth_pilot_dashboard_status() -> dict[str, Any]:
             "feeds": promotion.get("feeds", []),
             "policy": promotion.get("policy", {}),
         },
-        "thresholds": report.get("thresholds", {}),
-        "non_monitoring_gates": report.get("non_monitoring_gates", {}),
-        "feeds": report.get("feeds", []),
-        "policy": report.get("policy", {}),
     }
+    return {**report, **supplemental, "enabled": enabled}
 
 
 async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     initial_delay = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_INITIAL_DELAY_SECONDS", "15")))
     interval = max(300.0, float(os.environ.get("RWA_GROWTH_PILOT_INTERVAL_SECONDS", "1800")))
     timeout = max(1.0, float(os.environ.get("RWA_GROWTH_PILOT_TIMEOUT_SECONDS", "20")))
-    history_path, status_path = _rwa_growth_pilot_paths()
     alignment_history_path, alignment_status_path = _rwa_growth_pilot_alignment_paths()
     depth_history_path, depth_status_path = _rwa_growth_pilot_depth_paths()
     promotion_history_path, promotion_status_path = _rwa_growth_pilot_promotion_paths()
@@ -407,61 +621,80 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
     while True:
         try:
             registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
-            captures, benchmarks = await asyncio.gather(
-                capture_pilot(registry, timeout_seconds=timeout),
-                capture_blocksize_benchmarks(app.state.blocksize),
-            )
-            depth_inputs = await capture_depth_inputs(
-                registry,
-                captures,
-                timeout_seconds=timeout,
-            )
-            depth_history = await asyncio.to_thread(load_depth_history, depth_history_path)
-            depth = evaluate_depth_evidence(captures, depth_inputs, history=depth_history)
-            await asyncio.to_thread(
-                persist_depth_report,
-                depth,
-                history_path=depth_history_path,
-                latest_path=depth_status_path,
-            )
-            alignment = evaluate_alignment(captures, benchmarks)
-            await asyncio.to_thread(
-                persist_alignment_report,
-                alignment,
-                history_path=alignment_history_path,
-                latest_path=alignment_status_path,
-            )
+            captures = await capture_pilot(registry, timeout_seconds=timeout)
+            store = getattr(app.state, "rwa_store", None)
+            if not isinstance(store, RWAObservationStore):
+                raise RuntimeError("RWA growth pilot ledger is unavailable")
+            alignment: dict[str, Any] | None = None
+            depth: dict[str, Any] | None = None
+            blocksize = getattr(app.state, "blocksize", None)
+            if blocksize is not None:
+                benchmarks = await capture_blocksize_benchmarks(blocksize)
+                depth_inputs = await capture_depth_inputs(
+                    registry,
+                    captures,
+                    timeout_seconds=timeout,
+                )
+                depth_history = await asyncio.to_thread(
+                    load_depth_history,
+                    depth_history_path,
+                )
+                depth = evaluate_depth_evidence(
+                    captures,
+                    depth_inputs,
+                    history=depth_history,
+                )
+                alignment = evaluate_alignment(captures, benchmarks)
             report = await asyncio.to_thread(
                 persist_capture,
-                history_path,
+                store,
                 captures,
-                status_output=status_path,
-                observation_store=getattr(app.state, "rwa_store", None),
+                observation_store=store,
                 alignment_report=alignment,
                 depth_report=depth,
+                stale_after_seconds=_rwa_growth_pilot_stale_after_seconds(),
             )
-            promotion_packet = build_promotion_packet(report, alignment, depth)
-            await asyncio.to_thread(
-                persist_promotion_packet,
-                promotion_packet,
-                history_path=promotion_history_path,
-                latest_path=promotion_status_path,
-            )
-            logger.info(
-                "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; depth_or_state=%s/%s; promotion_ready=%s; promotion_blockers=%s",
-                report["current_capture"]["succeeded"],
-                report["current_capture"]["attempted"],
-                report["current_capture"]["ledger_persisted"],
-                alignment["summary"]["timestamp_aligned_comparisons"],
-                alignment["summary"]["feeds_attempted"],
-                (
-                    depth["summary"]["native_l2_point_in_time_depth_observed"]
-                    + depth["summary"]["pool_state_observed"]
-                ),
-                depth["summary"]["feeds_attempted"],
-                report["promotion_ready"],
-                promotion_packet["summary"]["blocking_gate_count"],
-            )
+            if alignment is not None and depth is not None:
+                promotion_packet = build_promotion_packet(report, alignment, depth)
+                await asyncio.to_thread(
+                    persist_depth_report,
+                    depth,
+                    history_path=depth_history_path,
+                    latest_path=depth_status_path,
+                )
+                await asyncio.to_thread(
+                    persist_alignment_report,
+                    alignment,
+                    history_path=alignment_history_path,
+                    latest_path=alignment_status_path,
+                )
+                await asyncio.to_thread(
+                    persist_promotion_packet,
+                    promotion_packet,
+                    history_path=promotion_history_path,
+                    latest_path=promotion_status_path,
+                )
+                logger.info(
+                    "RWA growth pilot captured %s/%s feeds; persisted=%s; aligned=%s/%s; depth_or_state=%s/%s; promotion_ready=%s; promotion_blockers=%s",
+                    report["current_capture"]["succeeded"],
+                    report["current_capture"]["attempted"],
+                    report["current_capture"].get("ledger_persisted", 0),
+                    alignment["summary"]["timestamp_aligned_comparisons"],
+                    alignment["summary"]["feeds_attempted"],
+                    (
+                        depth["summary"]["native_l2_point_in_time_depth_observed"]
+                        + depth["summary"]["pool_state_observed"]
+                    ),
+                    depth["summary"]["feeds_attempted"],
+                    report["promotion_ready"],
+                    promotion_packet["summary"]["blocking_gate_count"],
+                )
+            else:
+                logger.info(
+                    "RWA growth pilot captured %s/%s feeds in the authoritative ledger",
+                    report["current_capture"]["succeeded"],
+                    report["current_capture"]["attempted"],
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -495,6 +728,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "Pay.sh",
         "listing_url": PAY_SH_SERVICE_URL,
         "metric_status": "external_metrics_not_ingested",
+        "release_status": "verified_live_baseline",
+        "observed_version": "4-route x402 catalog",
+        "audited_at": "2026-07-30",
         "note": "Pay.sh catalog and pay-skills validation are tracked locally only when traffic reaches this service with Pay.sh attribution.",
     },
     {
@@ -504,6 +740,9 @@ DISTRIBUTION_PLATFORMS = [
         "listing_url": SMITHERY_LISTING_URL,
         "hosted_endpoint": SMITHERY_HOSTED_MCP_ENDPOINT,
         "metric_status": "external_metrics_not_ingested",
+        "release_status": "external_claims_stale",
+        "observed_version": None,
+        "audited_at": "2026-07-30",
         "note": "Smithery hosted performance is separate unless a metrics feed or hosted endpoint logs are wired into this observability database.",
     },
     {
@@ -512,6 +751,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "Glama",
         "listing_url": "https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments",
         "metric_status": "local_attribution_only",
+        "release_status": "external_claims_stale",
+        "observed_version": None,
+        "audited_at": "2026-07-30",
         "note": "Glama claim and connector traffic are recorded when they hit instrumented registry or MCP surfaces.",
     },
     {
@@ -520,6 +762,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "MCP Registry",
         "listing_url": "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize",
         "metric_status": "local_attribution_only",
+        "release_status": "version_behind_candidate",
+        "observed_version": "0.6.3",
+        "audited_at": "2026-07-30",
         "note": "Official registry discovery is recorded through /server.json and domain-verification traffic.",
     },
     {
@@ -529,14 +774,20 @@ DISTRIBUTION_PLATFORMS = [
         "secondary_source_label": "x402 Directory",
         "listing_url": "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66",
         "metric_status": "local_attribution_only",
+        "release_status": "catalog_stale",
+        "observed_version": "4 routes; last updated 2026-04-29",
+        "audited_at": "2026-07-30",
         "note": "x402scan and x402 discovery calls are tracked when they request /.well-known/x402 or send an identifiable referrer.",
     },
     {
         "id": "github_package",
         "name": "GitHub Package",
         "source_label": "GitHub",
-        "listing_url": "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp",
+        "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
+        "release_status": "version_behind_candidate",
+        "observed_version": "0.6.4",
+        "audited_at": "2026-07-30",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
@@ -545,15 +796,21 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitLab",
         "listing_url": "https://gitlab.com/jfocke/agentic-payments",
         "metric_status": "repository_referral_only",
-        "note": "GitLab activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
+        "release_status": "stale_mirror_not_install_source",
+        "observed_version": "server 0.6.2 / project 0.6.1",
+        "audited_at": "2026-07-30",
+        "note": "Historical stale mirror; it is not a release or package-install source. Referral activity is recorded only when it reaches instrumented Blocksize surfaces.",
     },
     {
         "id": "awesome_mcp",
         "name": "Awesome MCP",
         "source_label": "Awesome MCP",
         "listing_url": "https://github.com/punkpeye/awesome-mcp-servers/pull/7790",
-        "metric_status": "submission_referral_only",
-        "note": "Awesome MCP submission traffic is tracked when identifiable referrers reach the service.",
+        "metric_status": "listing_referral_only",
+        "release_status": "merged_listing_stale_wrapper",
+        "observed_version": "wrapper 0.1.1",
+        "audited_at": "2026-07-30",
+        "note": "The listing is merged, but its wrapper repository still carries stale product claims. Identifiable referral traffic is tracked locally.",
     },
 ]
 
@@ -577,6 +834,362 @@ class _SlashlessMountEndpoint:
         await self.mounted_app(child_scope, receive, send)
 
 
+def _facilitator_support_required() -> bool:
+    """Return whether this process must prove facilitator capabilities."""
+    hosted = any(
+        os.environ.get(name)
+        for name in (
+            "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_PROJECT_ID",
+            "RAILWAY_SERVICE_ID",
+        )
+    )
+    production = bool(security_configuration_status()["production"])
+    anthropic_only = _env_enabled("ANTHROPIC_ONLY_MODE")
+    return not anthropic_only and (hosted or production)
+
+
+def _facilitator_configuration_fingerprint() -> str:
+    """Fingerprint payment capability inputs without exposing credentials."""
+    x402 = settings.x402
+    material = {
+        "facilitator_url": x402.facilitator_url,
+        "facilitator_bearer_token": x402.facilitator_bearer_token,
+        "cdp_api_key_id": x402.cdp_api_key_id,
+        "cdp_api_key_secret": x402.cdp_api_key_secret,
+        "solana_network": x402.solana_network,
+        "solana_asset": x402.solana_usdc_address,
+        "solana_recipient": x402.solana_wallet_address,
+        "base_network": x402.base_network,
+        "base_asset": x402.base_usdc_address,
+        "base_asset_name": x402.base_usdc_name,
+        "base_asset_version": x402.base_usdc_version,
+        "base_recipient": x402.evm_wallet_address,
+    }
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _facilitator_probe_timeout_seconds() -> float:
+    try:
+        configured = float(
+            os.environ.get("X402_FACILITATOR_READINESS_TIMEOUT_SECONDS", "5")
+        )
+    except ValueError:
+        configured = 5.0
+    return min(15.0, max(0.5, configured))
+
+
+def _facilitator_probe_max_age_seconds() -> float:
+    try:
+        configured = float(
+            os.environ.get("X402_FACILITATOR_READINESS_MAX_AGE_SECONDS", "180")
+        )
+    except ValueError:
+        configured = 180.0
+    return min(900.0, max(30.0, configured))
+
+
+async def _probe_facilitator_support() -> dict[str, Any]:
+    """Fetch a safe capability snapshot when payments are deployment-critical."""
+    fingerprint = _facilitator_configuration_fingerprint()
+    if not _facilitator_support_required():
+        return {
+            "checked": False,
+            "available": False,
+            "required": False,
+            "reason": "not_required",
+            "kinds": [],
+            "checked_at": None,
+            "configuration_fingerprint": fingerprint,
+        }
+    try:
+        adapter = FacilitatorAdapter(
+            settings.x402.facilitator_url,
+            bearer_token=settings.x402.facilitator_bearer_token or None,
+            cdp_api_key_id=settings.x402.cdp_api_key_id or None,
+            cdp_api_key_secret=settings.x402.cdp_api_key_secret or None,
+            timeout_seconds=_facilitator_probe_timeout_seconds(),
+            production=bool(security_configuration_status()["production"]),
+        )
+    except PaymentSecurityError:
+        return {
+            "checked": True,
+            "available": False,
+            "required": True,
+            "reason": "facilitator_configuration_unsafe",
+            "kinds": [],
+            "checked_at": time.time(),
+            "configuration_fingerprint": fingerprint,
+        }
+
+    try:
+        result = await asyncio.wait_for(
+            adapter.supported(),
+            timeout=_facilitator_probe_timeout_seconds(),
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        result = {
+            "checked": True,
+            "available": False,
+            "reason": "timeout",
+            "kinds": [],
+        }
+    result["required"] = True
+    result["checked_at"] = time.time()
+    result["configuration_fingerprint"] = fingerprint
+    if result.get("available") is True:
+        for kind in result.get("kinds", []):
+            if (
+                kind.get("x402Version") == 2
+                and kind.get("scheme") == "exact"
+                and kind.get("network") == settings.x402.solana_network
+            ):
+                fee_payer = (kind.get("extra") or {}).get("feePayer")
+                if isinstance(fee_payer, str) and fee_payer:
+                    settings.x402.solana_fee_payer = fee_payer
+                    break
+    return result
+
+
+def _facilitator_support_readiness(
+    snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    required = _facilitator_support_required()
+    if not required:
+        return {
+            "ready": True,
+            "required": False,
+            "checked": bool(snapshot and snapshot.get("checked")),
+            "available": bool(snapshot and snapshot.get("available")),
+            "age_seconds": None,
+            "reason": "not_required",
+        }
+    if not isinstance(snapshot, dict):
+        return {
+            "ready": False,
+            "required": True,
+            "checked": False,
+            "available": False,
+            "age_seconds": None,
+            "max_age_seconds": _facilitator_probe_max_age_seconds(),
+            "reason": "not_checked",
+        }
+    checked_at = snapshot.get("checked_at")
+    try:
+        age_seconds = max(0.0, time.time() - float(checked_at)) if checked_at else None
+    except (TypeError, ValueError):
+        age_seconds = None
+    reason = snapshot.get("reason")
+    if snapshot.get("configuration_fingerprint") != _facilitator_configuration_fingerprint():
+        reason = "configuration_changed_since_probe"
+    elif age_seconds is None or age_seconds > _facilitator_probe_max_age_seconds():
+        reason = "probe_stale"
+    ready = (
+        snapshot.get("checked") is True
+        and snapshot.get("available") is True
+        and reason is None
+    )
+    return {
+        "ready": ready,
+        "required": True,
+        "checked": snapshot.get("checked") is True,
+        "available": snapshot.get("available") is True,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "max_age_seconds": _facilitator_probe_max_age_seconds(),
+        "reason": reason,
+    }
+
+
+async def _run_facilitator_support_probe_loop(app: FastAPI) -> None:
+    """Keep the cached payment capability snapshot bounded and fresh."""
+    interval = max(15.0, _facilitator_probe_max_age_seconds() / 3)
+    while True:
+        await asyncio.sleep(interval)
+        app.state.facilitator_support = await _probe_facilitator_support()
+
+
+def _hosted_environment() -> bool:
+    return any(
+        os.environ.get(name)
+        for name in (
+            "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_PROJECT_ID",
+            "RAILWAY_SERVICE_ID",
+        )
+    )
+
+
+def _blocksize_dependency_required() -> bool:
+    return _hosted_environment() or is_production_environment()
+
+
+def _blocksize_configuration_fingerprint(client: BlocksizeClient) -> str:
+    """Fingerprint dependency configuration without exposing credentials."""
+    material = f"{getattr(client, '_rest_url', '')}\0{getattr(client, '_api_key', '')}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _blocksize_probe_timeout_seconds() -> float:
+    try:
+        configured = float(os.environ.get("BLOCKSIZE_READINESS_TIMEOUT_SECONDS", "5"))
+    except ValueError:
+        configured = 5.0
+    return min(15.0, max(0.5, configured))
+
+
+def _blocksize_probe_max_age_seconds() -> float:
+    try:
+        configured = float(os.environ.get("BLOCKSIZE_READINESS_MAX_AGE_SECONDS", "180"))
+    except ValueError:
+        configured = 180.0
+    return min(900.0, max(30.0, configured))
+
+
+async def _probe_blocksize_dependency(client: BlocksizeClient) -> dict[str, Any]:
+    """Run one bounded authenticated upstream probe and retain no response data."""
+    required = _blocksize_dependency_required()
+    base = {
+        "required": required,
+        "checked": False,
+        "available": False,
+        "checked_at": None,
+        "reason": "not_required",
+        "configuration_fingerprint": _blocksize_configuration_fingerprint(client),
+    }
+    if not required:
+        return base
+    if not str(getattr(client, "_api_key", "")).strip():
+        return {
+            **base,
+            "checked": True,
+            "checked_at": time.time(),
+            "reason": "api_key_missing",
+        }
+    try:
+        instruments = await asyncio.wait_for(
+            client.list_vwap_instruments(),
+            timeout=_blocksize_probe_timeout_seconds(),
+        )
+    except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
+        reason = "timeout"
+    except httpx.HTTPStatusError as exc:
+        reason = "authentication_failed" if exc.response.status_code in {401, 403} else "http_error"
+    except (httpx.HTTPError, BlocksizeAPIError, OSError, ValueError, TypeError):
+        reason = "upstream_error"
+    else:
+        if instruments:
+            return {
+                **base,
+                "checked": True,
+                "available": True,
+                "checked_at": time.time(),
+                "reason": None,
+            }
+        reason = "empty_catalog"
+    return {
+        **base,
+        "checked": True,
+        "checked_at": time.time(),
+        "reason": reason,
+    }
+
+
+async def _run_blocksize_dependency_probe_loop(app: FastAPI) -> None:
+    """Refresh the cached dependency result without probing on each readiness call."""
+    interval = max(15.0, _blocksize_probe_max_age_seconds() / 3)
+    while True:
+        await asyncio.sleep(interval)
+        app.state.blocksize_dependency = await _probe_blocksize_dependency(app.state.blocksize)
+
+
+def _blocksize_dependency_readiness(client: BlocksizeClient | None) -> dict[str, Any]:
+    required = _blocksize_dependency_required()
+    snapshot = getattr(app.state, "blocksize_dependency", None)
+    if not required:
+        return {
+            "ready": True,
+            "required": False,
+            "checked": bool(snapshot and snapshot.get("checked")),
+            "available": bool(snapshot and snapshot.get("available")),
+            "age_seconds": None,
+            "reason": "not_required",
+        }
+    if client is None or not isinstance(snapshot, dict):
+        return {
+            "ready": False,
+            "required": True,
+            "checked": False,
+            "available": False,
+            "age_seconds": None,
+            "reason": "not_checked",
+        }
+    checked_at = snapshot.get("checked_at")
+    age_seconds = max(0.0, time.time() - float(checked_at)) if checked_at else None
+    reason = snapshot.get("reason")
+    if snapshot.get("configuration_fingerprint") != _blocksize_configuration_fingerprint(client):
+        reason = "configuration_changed_since_probe"
+    elif age_seconds is None or age_seconds > _blocksize_probe_max_age_seconds():
+        reason = "probe_stale"
+    ready = (
+        snapshot.get("checked") is True
+        and snapshot.get("available") is True
+        and reason is None
+    )
+    return {
+        "ready": ready,
+        "required": True,
+        "checked": snapshot.get("checked") is True,
+        "available": snapshot.get("available") is True,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "max_age_seconds": _blocksize_probe_max_age_seconds(),
+        "reason": reason,
+    }
+
+
+def _facilitator_supported_requirements(
+    requirements: list[dict],
+    support: dict[str, Any] | None,
+) -> list[dict]:
+    """Return only requirements backed by an exact v2 facilitator kind."""
+    snapshot = support or {}
+    if _facilitator_support_required() and not _facilitator_support_readiness(
+        snapshot
+    )["ready"]:
+        return []
+    if snapshot.get("checked") is not True:
+        return requirements if not _facilitator_support_required() else []
+    if snapshot.get("available") is not True:
+        return []
+
+    kinds = snapshot.get("kinds")
+    if not isinstance(kinds, list):
+        return []
+    supported: list[dict] = []
+    for requirement in requirements:
+        matching_kind = next(
+            (
+                kind
+                for kind in kinds
+                if isinstance(kind, dict)
+                and kind.get("x402Version") == 2
+                and kind.get("scheme") == requirement.get("scheme")
+                and kind.get("network") == requirement.get("network")
+            ),
+            None,
+        )
+        if matching_kind is None:
+            continue
+        candidate = {**requirement, "extra": dict(requirement.get("extra") or {})}
+        if _network_kind(str(candidate.get("network") or "")) == "solana":
+            fee_payer = (matching_kind.get("extra") or {}).get("feePayer")
+            if not isinstance(fee_payer, str) or not fee_payer:
+                continue
+            candidate["extra"]["feePayer"] = fee_payer
+        supported.append(candidate)
+    return supported
+
+
 # ---------------------------------------------------------------------------
 # Application Lifecycle
 # ---------------------------------------------------------------------------
@@ -584,29 +1197,147 @@ class _SlashlessMountEndpoint:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the Blocksize client and Credit manager lifecycle."""
+    install_sensitive_query_log_filter()
+    app.state.security_configuration = security_configuration_status()
+    if not app.state.security_configuration["ready"]:
+        logger.error(
+            "Security configuration is not ready; protected observability remains fail-closed"
+        )
+    hosted = _hosted_environment()
+    production = is_production_environment()
+    connector_prefixes = ["ANTHROPIC"]
+    if not _anthropic_only_mode():
+        connector_prefixes.extend(["CURSOR", "OPENAI"])
+    app.state.connector_entitlement_statuses = {
+        prefix: _connector_entitlement_readiness(
+            prefix,
+            hosted=hosted,
+            production=production,
+            initialize=hosted or production,
+        )
+        for prefix in connector_prefixes
+    }
+    app.state.facilitator_support = await _probe_facilitator_support()
+    app.state.facilitator_support_task = None
+    if (
+        app.state.facilitator_support.get("required")
+        and not app.state.facilitator_support.get("available")
+    ):
+        logger.error("Payment facilitator capabilities are unavailable")
     app.state.blocksize = BlocksizeClient()
+    app.state.blocksize_dependency = await _probe_blocksize_dependency(app.state.blocksize)
+    app.state.blocksize_dependency_task = None
+    if (
+        app.state.blocksize_dependency.get("required")
+        and not app.state.blocksize_dependency.get("available")
+    ):
+        logger.error(
+            "Blocksize upstream dependency is unavailable: %s",
+            app.state.blocksize_dependency.get("reason"),
+        )
     app.state.stream_cache = BlocksizeStreamCache(rest_client=app.state.blocksize)
-    app.state.credits = CreditManager()
-    app.state.rwa_store = RWAObservationStore(
-        os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
+    kraken_symbols = [
+        item.strip()
+        for item in os.environ.get("KRAKEN_XSTOCKS_WS_SYMBOLS", "").split(",")
+        if item.strip()
+    ]
+    kraken_spot_symbols = [
+        item.strip()
+        for item in os.environ.get("KRAKEN_SPOT_WS_SYMBOLS", "").split(",")
+        if item.strip()
+    ]
+    app.state.cex_book_cache = CEXBookCache(
+        ttl_seconds=float(os.environ.get("CEX_STREAM_TTL_SECONDS", "10"))
     )
+    app.state.kraken_book_stream = None
+    app.state.kraken_spot_stream = None
+    app.state.rwa_adapter_registry = build_default_registry()
+    warm_sourcing_job_cache()
+    if kraken_symbols:
+        app.state.rwa_adapter_registry.register(
+            KrakenXStocksAdapter(stream_cache=app.state.cex_book_cache)
+        )
+        app.state.kraken_book_stream = KrakenV2BookStream(
+            app.state.cex_book_cache,
+            symbols=kraken_symbols,
+            depth=int(os.environ.get("KRAKEN_XSTOCKS_WS_DEPTH", "100")),
+        )
+    if kraken_spot_symbols:
+        app.state.rwa_adapter_registry.register(
+            KrakenSpotAdapter(stream_cache=app.state.cex_book_cache)
+        )
+        app.state.kraken_spot_stream = KrakenV2BookStream(
+            app.state.cex_book_cache,
+            symbols=kraken_spot_symbols,
+            venue_id="kraken_spot",
+            depth=int(os.environ.get("KRAKEN_SPOT_WS_DEPTH", "100")),
+        )
+    app.state.credits = CreditManager()
+    rwa_db_path = configured_rwa_observation_db_path()
+    if rwa_database_collisions(
+        rwa_db_path,
+        settings.server.observability_db_path,
+        {"credits_runtime": app.state.credits.db_path},
+    ):
+        app.state.rwa_store = None
+        logger.error("RWA evidence store is disabled because its database path is not isolated")
+    else:
+        app.state.rwa_store = RWAObservationStore(rwa_db_path)
+    app.state.store_readiness_snapshots = {}
+    app.state.store_readiness_task = None
+    await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
+    if _facilitator_support_required():
+        app.state.facilitator_support_task = asyncio.create_task(
+            _run_facilitator_support_probe_loop(app),
+            name="facilitator-readiness-probe",
+        )
+    if _blocksize_dependency_required():
+        app.state.blocksize_dependency_task = asyncio.create_task(
+            _run_blocksize_dependency_probe_loop(app),
+            name="blocksize-readiness-probe",
+        )
+    app.state.store_readiness_task = asyncio.create_task(
+        _run_store_readiness_probe_loop(app),
+        name="store-readiness-probe",
+    )
+    if app.state.kraken_book_stream is not None:
+        await app.state.kraken_book_stream.start()
+    if app.state.kraken_spot_stream is not None:
+        await app.state.kraken_spot_stream.start()
     if _env_enabled("RWA_GROWTH_PILOT_ENABLED"):
         app.state.rwa_growth_pilot_task = asyncio.create_task(_run_rwa_growth_pilot_loop(app))
     try:
         async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
             async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
                 async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
-                    yield
+                    async with OPENAI_MCP_HTTP_APP.lifespan(OPENAI_MCP_HTTP_APP):
+                        yield
     finally:
+        if app.state.facilitator_support_task is not None:
+            app.state.facilitator_support_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.facilitator_support_task
+        if app.state.blocksize_dependency_task is not None:
+            app.state.blocksize_dependency_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.blocksize_dependency_task
+        if app.state.store_readiness_task is not None:
+            app.state.store_readiness_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.store_readiness_task
         if app.state.rwa_growth_pilot_task is not None:
             app.state.rwa_growth_pilot_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.rwa_growth_pilot_task
+    if app.state.kraken_book_stream is not None:
+        await app.state.kraken_book_stream.stop()
+    if app.state.kraken_spot_stream is not None:
+        await app.state.kraken_spot_stream.stop()
     await app.state.stream_cache.stop()
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
@@ -617,8 +1348,9 @@ app = FastAPI(
     version=APP_VERSION,
     description=f"""
 Institutional-grade real-time market data gateway for autonomous AI agents.
-Supports x402 USDC settlement, wallet credits, and a public read-only remote
-MCP discovery surface for directory listings and client onboarding.
+Supports direct x402 USDC settlement, authenticated connector starter credits,
+and a public read-only remote MCP discovery surface for directory listings and
+client onboarding.
 
 ### Public Integration Surfaces
 - **Developer Portal**: [Homepage]({PUBLIC_BASE_URL}/)
@@ -652,6 +1384,7 @@ app.add_middleware(
         "X-Blocksize-Retry-Safe",
     ],
 )
+app.add_middleware(RWARequestBodyLimitMiddleware)
 
 
 X402_EXPOSE_HEADERS = (
@@ -667,6 +1400,42 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
 
+_INDEXABLE_PUBLIC_PATHS = {
+    "/",
+    "/docs",
+    "/openapi.json",
+    "/mcp/manifest.json",
+    "/server.json",
+    "/llms.txt",
+    "/data-packages.json",
+    "/category-hubs.json",
+    "/quickstart/remote-mcp",
+    "/quickstart/first-price",
+    "/prompt-examples",
+    "/claude-connector",
+    "/support",
+    "/privacy",
+    "/evidence/rwa-coverage-index.html",
+    "/evidence/oracle-lineage-index.html",
+    "/pdf/Blocksize_RWA_Coverage_Index.pdf",
+    "/pdf/Blocksize_Oracle_Lineage_Index.pdf",
+    "/pdf/Blocksize_Pricing_Guide.pdf",
+    "/pdf/Blocksize_Data_Catalog.pdf",
+    "/pdf/Blocksize_Agent_Manual.pdf",
+    *{f"/{slug}" for slug in SEO_LANDING_PAGES},
+}
+_NOINDEX_PATH_PREFIXES = (
+    "/v1/",
+    "/internal/",
+    "/mcp/server",
+    "/anthropic/mcp",
+    "/cursor/mcp",
+    "/openai/mcp",
+    "/.well-known/",
+    "/go/",
+    "/og/",
+)
+
 
 def _apply_security_headers(response: Any) -> Any:
     for name, value in SECURITY_HEADERS.items():
@@ -680,7 +1449,7 @@ def _apply_security_headers(response: Any) -> Any:
     return response
 
 
-def _apply_x402_cors_headers(request: Request, response: JSONResponse) -> JSONResponse:
+def _apply_x402_cors_headers(request: Request, response: Response) -> Response:
     """Expose payment challenge details on early paid-route responses."""
     _apply_security_headers(response)
     response.headers.setdefault("Cache-Control", "no-store")
@@ -709,9 +1478,12 @@ def _apply_x402_cors_headers(request: Request, response: JSONResponse) -> JSONRe
 
 
 def _request_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
+    """Use only Uvicorn's proxy-normalized peer address.
+
+    ProxyHeadersMiddleware rewrites request.client only when the direct peer is
+    in FORWARDED_ALLOW_IPS. Re-reading X-Forwarded-For here would bypass that
+    trust decision and let callers select their own rate-limit/trial identity.
+    """
     return request.client.host if request.client else "unknown"
 
 
@@ -738,6 +1510,8 @@ def _endpoint_label(path: str) -> str:
         return "/anthropic/mcp"
     if path == "/cursor/mcp" or path.startswith("/cursor/mcp/"):
         return "/cursor/mcp"
+    if path == "/openai/mcp" or path.startswith("/openai/mcp/"):
+        return "/openai/mcp"
     return path
 
 
@@ -787,7 +1561,7 @@ def _request_event_fields(
         "ip_hash": fingerprint(_request_client_ip(request)),
         "user_agent": request.headers.get("user-agent"),
         "referrer": request.headers.get("referer") or request.headers.get("referrer"),
-        "wallet_hash": _wallet_hash(request.headers.get("X-AGENT-WALLET")),
+        "wallet_hash": getattr(request.state, "trusted_wallet_hash", None),
         "subject": _subject_for_request(request),
         "asset_class": _asset_class_for_request(request),
     }
@@ -804,18 +1578,16 @@ def _request_attribution_metadata(request: Request) -> dict[str, str]:
 
 
 def _activation_identity_hash(request: Request) -> tuple[str, str] | None:
-    """Resolve an explicit activation identity without retaining its raw value."""
-    for header_name, identity_type in (
-        ("X-AUTHENTICATED-USER", "user"),
-        ("X-USER-ID", "user"),
-        ("X-AGENT-ID", "agent"),
-        ("X-AGENT-WALLET", "wallet"),
-        ("X-DEVICE-ID", "device"),
-        ("X-SESSION-ID", "session"),
+    """Resolve only an identity asserted by a trusted server-side verifier."""
+    identity_hash = getattr(request.state, "trusted_identity_hash", None)
+    identity_type = getattr(request.state, "trusted_identity_type", None)
+    identity_trust = getattr(request.state, "trusted_identity_trust", None)
+    if (
+        isinstance(identity_hash, str)
+        and isinstance(identity_type, str)
+        and identity_trust == "verified_x402"
     ):
-        value = request.headers.get(header_name)
-        if value and (identity_hash := fingerprint(f"{identity_type}:{value.strip()}")):
-            return identity_hash, identity_type
+        return identity_hash, identity_type
     return None
 
 
@@ -824,11 +1596,27 @@ def _growth_identity_metadata(request: Request) -> dict[str, str]:
     if identity is None:
         return {}
     identity_hash, identity_type = identity
-    metadata = {"identity_hash": identity_hash, "identity_type": identity_type}
+    metadata = {
+        "identity_hash": identity_hash,
+        "identity_type": identity_type,
+        "identity_trust": "verified_x402",
+    }
     activation_source = request.headers.get("X-BLOCKSIZE-ACTIVATION-SOURCE", "").strip().lower()
     if re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", activation_source):
         metadata["activation_source"] = activation_source
     return metadata
+
+
+def _anonymous_growth_identity_metadata(request: Request) -> dict[str, str]:
+    """Attribute anonymous discovery only to the trusted client-IP fingerprint."""
+    identity_hash = fingerprint(f"ip:{_request_client_ip(request)}")
+    if not identity_hash:
+        return {}
+    return {
+        "identity_hash": identity_hash,
+        "identity_type": "ip",
+        "identity_trust": "anonymous_ip",
+    }
 
 
 def _is_live_price_delivery_path(path: str) -> bool:
@@ -868,7 +1656,7 @@ def _record_http_usage(request: Request, status_code: int, latency_ms: float) ->
         record_usage_event(
             "free_discovery_call",
             **fields,
-            metadata={**attribution, **_growth_identity_metadata(request)},
+            metadata={**attribution, **_anonymous_growth_identity_metadata(request)},
         )
 
 
@@ -948,9 +1736,8 @@ def _record_charged_delivery_outcome(
                 price_usdc=str(price_usdc) if price_usdc is not None else None,
                 network=network,
                 metadata={
+                    **_request_attribution_metadata(request),
                     **_growth_identity_metadata(request),
-                    "identity_hash": identity_hash,
-                    "identity_type": identity_type,
                     "payment_mode": payment_mode,
                 },
             )
@@ -960,7 +1747,24 @@ def _record_charged_delivery_outcome(
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
-    return _apply_security_headers(response)
+    response = _apply_security_headers(response)
+    path = request.url.path.rstrip("/") or "/"
+    if path in _INDEXABLE_PUBLIC_PATHS:
+        canonical_url = f"{PUBLIC_BASE_URL.rstrip('/')}{path if path != '/' else '/'}"
+        canonical_link = f'<{canonical_url}>; rel="canonical"'
+        existing_link = response.headers.get("Link", "")
+        if canonical_link not in existing_link:
+            response.headers["Link"] = (
+                f"{existing_link}, {canonical_link}"
+                if existing_link
+                else canonical_link
+            )
+        response.headers.setdefault("X-Robots-Tag", "index, follow")
+    elif path in {"/health", "/readyz"} or path.startswith(
+        _NOINDEX_PATH_PREFIXES
+    ):
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+    return response
 
 
 def _anthropic_only_mode() -> bool:
@@ -975,6 +1779,8 @@ def _root_oauth_connector() -> str:
         return "anthropic"
     if value == "cursor":
         return "cursor"
+    if value in {"openai", "chatgpt"}:
+        return "openai"
     logger.warning(
         "Invalid ROOT_OAUTH_CONNECTOR=%r; defaulting root OAuth metadata to Anthropic",
         value,
@@ -986,6 +1792,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
     clean_path = path.rstrip("/") or "/"
     allowed_exact_paths = {
         "/health",
+        "/readyz",
         "/privacy",
         "/prompt-examples",
         "/quickstart/first-price",
@@ -1165,10 +1972,12 @@ async def get_products() -> dict[str, Any]:
     return {
         "status": "ok",
         "starter_allowance": {
-            "positioning": "Start with 50 live data credits",
+            "positioning": "Authenticated connectors receive up to 50 live data credits.",
+            "eligibility": "authenticated_connector_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "not_free_forever": True,
-            "upgrade_path": "x402 payment or prepaid credit top-ups",
+            "direct_public_http": "Signed x402 payment is required per live-data request.",
+            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
         },
         "credit_costs": CREDIT_COSTS,
         "catalog": catalog,
@@ -1237,32 +2046,90 @@ async def tracked_outbound_redirect(destination: str, request: Request) -> Redir
     return RedirectResponse(location, status_code=307)
 
 
-@app.get("/.well-known/glama.json", include_in_schema=False)
-async def get_glama_well_known() -> dict[str, object]:
+def _cacheable_metadata_response(
+    request: Request,
+    payload: dict[str, object],
+    *,
+    max_age_seconds: int = 300,
+) -> Response:
+    """Return deterministic public metadata with bounded caching and ETag support."""
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    etag = f'"{hashlib.sha256(canonical).hexdigest()}"'
+    headers = {
+        "Cache-Control": f"public, max-age={max_age_seconds}",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match", "").strip() == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(payload, headers=headers)
+
+
+def _cacheable_text_metadata_response(
+    request: Request,
+    payload: str,
+    *,
+    max_age_seconds: int = 300,
+) -> Response:
+    encoded = payload.encode("utf-8")
+    etag = f'"{hashlib.sha256(encoded).hexdigest()}"'
+    headers = {
+        "Cache-Control": f"public, max-age={max_age_seconds}",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match", "").strip() == etag:
+        return Response(status_code=304, headers=headers)
+    return PlainTextResponse(payload, headers=headers)
+
+
+@app.api_route(
+    "/.well-known/glama.json",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_glama_well_known(request: Request) -> Response:
     """Serve the Glama connector claim file."""
-    return {
-        "$schema": "https://glama.ai/mcp/schemas/connector.json",
-        "maintainers": [{"email": GLAMA_MAINTAINER_EMAIL}],
-    }
+    return _cacheable_metadata_response(
+        request,
+        {
+            "$schema": "https://glama.ai/mcp/schemas/connector.json",
+            "maintainers": [{"email": GLAMA_MAINTAINER_EMAIL}],
+        },
+    )
 
 
-@app.get("/.well-known/mcp-registry-auth", include_in_schema=False)
-async def get_mcp_registry_auth() -> PlainTextResponse:
+@app.api_route(
+    "/.well-known/mcp-registry-auth",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_mcp_registry_auth(request: Request) -> Response:
     """Serve the MCP Registry HTTP domain verification file."""
-    return PlainTextResponse(MCP_REGISTRY_AUTH_CONTENT)
+    return _cacheable_text_metadata_response(request, MCP_REGISTRY_AUTH_CONTENT)
 
 
-@app.get("/.well-known/x402", include_in_schema=False)
-async def get_x402_well_known() -> dict[str, object]:
+@app.api_route(
+    "/.well-known/x402",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_x402_well_known(request: Request) -> Response:
     """Serve x402scan-compatible paid resource discovery."""
-    return {
-        "version": 1,
-        "resources": X402_WELL_KNOWN_RESOURCES,
-        "instructions": (
-            "Register the listed paid HTTP endpoints individually. "
-            "Public MCP discovery remains available at /mcp/server/."
-        ),
-    }
+    return _cacheable_metadata_response(
+        request,
+        {
+            "version": 1,
+            "resources": X402_WELL_KNOWN_RESOURCES,
+            "instructions": (
+                "Register the listed paid HTTP endpoints individually. "
+                "Public MCP discovery remains available at /mcp/server/."
+            ),
+        },
+    )
 
 
 def _connector_mcp_url(env_var: str, default_path: str) -> str:
@@ -1276,12 +2143,14 @@ def _oauth_protected_resource_metadata(
     *,
     mcp_url: str,
     scopes: list[str],
+    oauth_available: bool,
 ) -> dict[str, object]:
     return {
         "resource": f"{mcp_url}/",
-        "authorization_servers": [mcp_url],
+        "authorization_servers": [mcp_url] if oauth_available else [],
         "scopes_supported": scopes,
         "bearer_methods_supported": ["header"],
+        "oauth_available": oauth_available,
     }
 
 
@@ -1289,13 +2158,19 @@ def _oauth_authorization_server_metadata(
     *,
     mcp_url: str,
     scopes: list[str],
+    oauth_available: bool,
 ) -> dict[str, object]:
-    return {
+    metadata: dict[str, object] = {
         "issuer": mcp_url,
+        "oauth_available": oauth_available,
+        "scopes_supported": scopes,
+    }
+    if not oauth_available:
+        return metadata
+    metadata.update({
         "authorization_endpoint": f"{mcp_url}/authorize",
         "token_endpoint": f"{mcp_url}/token",
         "registration_endpoint": f"{mcp_url}/register",
-        "scopes_supported": scopes,
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": [
@@ -1304,7 +2179,13 @@ def _oauth_authorization_server_metadata(
         ],
         "code_challenge_methods_supported": ["S256"],
         "client_id_metadata_document_supported": True,
-    }
+    })
+    return metadata
+
+
+def _connector_local_oauth_available(prefix: str, connector: Any) -> bool:
+    provider = os.environ.get(f"{prefix}_AUTH_PROVIDER", "none").strip().lower()
+    return provider in {"clerk", "auth0"} and getattr(connector, "auth", None) is not None
 
 
 def _anthropic_mcp_url() -> str:
@@ -1315,80 +2196,239 @@ def _cursor_mcp_url() -> str:
     return _connector_mcp_url("CURSOR_MCP_PUBLIC_URL", "/cursor/mcp")
 
 
-@app.get("/.well-known/oauth-protected-resource/anthropic/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-protected-resource/anthropic/mcp/", include_in_schema=False)
-async def get_anthropic_oauth_protected_resource_metadata() -> dict[str, object]:
+def _openai_mcp_url() -> str:
+    return _connector_mcp_url("OPENAI_MCP_PUBLIC_URL", "/openai/mcp")
+
+
+@app.api_route(
+    "/.well-known/oauth-protected-resource/anthropic/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-protected-resource/anthropic/mcp/",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_anthropic_oauth_protected_resource_metadata(
+    request: Request,
+) -> Response:
     """Serve Claude MCP OAuth protected-resource metadata at the challenged URL."""
-    return _oauth_protected_resource_metadata(
-        mcp_url=_anthropic_mcp_url(),
-        scopes=anthropic_auth.oauth_scopes(),
+    return _cacheable_metadata_response(
+        request,
+        _oauth_protected_resource_metadata(
+            mcp_url=_anthropic_mcp_url(),
+            scopes=anthropic_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available(
+                "ANTHROPIC", anthropic_mcp
+            ),
+        ),
     )
 
 
-@app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
-async def get_root_oauth_protected_resource_metadata() -> dict[str, object]:
+@app.api_route(
+    "/.well-known/oauth-protected-resource",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_root_oauth_protected_resource_metadata(request: Request) -> Response:
     """Serve root protected-resource metadata for clients that ignore path scope."""
     if _anthropic_only_mode() or _root_oauth_connector() == "anthropic":
-        return _oauth_protected_resource_metadata(
+        payload = _oauth_protected_resource_metadata(
             mcp_url=_anthropic_mcp_url(),
             scopes=anthropic_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available(
+                "ANTHROPIC", anthropic_mcp
+            ),
         )
-    return _oauth_protected_resource_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
-    )
+    elif _root_oauth_connector() == "cursor":
+        payload = _oauth_protected_resource_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("CURSOR", cursor_mcp),
+        )
+    else:
+        payload = _oauth_protected_resource_metadata(
+            mcp_url=_openai_mcp_url(),
+            scopes=openai_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("OPENAI", openai_mcp),
+        )
+    return _cacheable_metadata_response(request, payload)
 
 
-@app.get("/.well-known/oauth-protected-resource/cursor/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-protected-resource/cursor/mcp/", include_in_schema=False)
-async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
+@app.api_route(
+    "/.well-known/oauth-protected-resource/cursor/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-protected-resource/cursor/mcp/",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_cursor_oauth_protected_resource_metadata(request: Request) -> Response:
     """Serve Cursor MCP OAuth protected-resource metadata at the challenged URL."""
-    return _oauth_protected_resource_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
+    return _cacheable_metadata_response(
+        request,
+        _oauth_protected_resource_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("CURSOR", cursor_mcp),
+        ),
     )
 
 
-@app.get("/anthropic/mcp/.well-known/openid-configuration", include_in_schema=False)
-@app.get("/.well-known/openid-configuration/anthropic/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-authorization-server/anthropic/mcp", include_in_schema=False)
-async def get_anthropic_oauth_authorization_server_metadata() -> dict[str, object]:
+@app.api_route(
+    "/.well-known/oauth-protected-resource/openai/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-protected-resource/openai/mcp/",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_openai_oauth_protected_resource_metadata(request: Request) -> Response:
+    """Serve OpenAI MCP OAuth protected-resource metadata."""
+    return _cacheable_metadata_response(
+        request,
+        _oauth_protected_resource_metadata(
+            mcp_url=_openai_mcp_url(),
+            scopes=openai_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("OPENAI", openai_mcp),
+        ),
+    )
+
+
+@app.api_route(
+    "/anthropic/mcp/.well-known/openid-configuration",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/openid-configuration/anthropic/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-authorization-server/anthropic/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_anthropic_oauth_authorization_server_metadata(
+    request: Request,
+) -> Response:
     """Serve Claude MCP OAuth server metadata for path-scoped discovery."""
-    return _oauth_authorization_server_metadata(
-        mcp_url=_anthropic_mcp_url(),
-        scopes=anthropic_auth.oauth_scopes(),
+    return _cacheable_metadata_response(
+        request,
+        _oauth_authorization_server_metadata(
+            mcp_url=_anthropic_mcp_url(),
+            scopes=anthropic_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available(
+                "ANTHROPIC", anthropic_mcp
+            ),
+        ),
     )
 
 
-@app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
-async def get_root_oauth_authorization_server_metadata() -> dict[str, object]:
+@app.api_route(
+    "/.well-known/oauth-authorization-server",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_root_oauth_authorization_server_metadata(request: Request) -> Response:
     """Serve root OAuth metadata for clients that ignore path-scoped discovery."""
     if _anthropic_only_mode() or _root_oauth_connector() == "anthropic":
-        return _oauth_authorization_server_metadata(
+        payload = _oauth_authorization_server_metadata(
             mcp_url=_anthropic_mcp_url(),
             scopes=anthropic_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("ANTHROPIC", anthropic_mcp),
         )
-    return _oauth_authorization_server_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
+    elif _root_oauth_connector() == "cursor":
+        payload = _oauth_authorization_server_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("CURSOR", cursor_mcp),
+        )
+    else:
+        payload = _oauth_authorization_server_metadata(
+            mcp_url=_openai_mcp_url(),
+            scopes=openai_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("OPENAI", openai_mcp),
+        )
+    return _cacheable_metadata_response(request, payload)
+
+
+@app.api_route(
+    "/cursor/mcp/.well-known/openid-configuration",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/openid-configuration/cursor/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-authorization-server/cursor/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_cursor_oauth_authorization_server_metadata(request: Request) -> Response:
+    """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
+    return _cacheable_metadata_response(
+        request,
+        _oauth_authorization_server_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("CURSOR", cursor_mcp),
+        ),
     )
 
 
-@app.get("/cursor/mcp/.well-known/openid-configuration", include_in_schema=False)
-@app.get("/.well-known/openid-configuration/cursor/mcp", include_in_schema=False)
-@app.get("/.well-known/oauth-authorization-server/cursor/mcp", include_in_schema=False)
-async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
-    """Serve Cursor MCP OAuth server metadata for clients probing the root path."""
-    return _oauth_authorization_server_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
+@app.api_route(
+    "/openai/mcp/.well-known/openid-configuration",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/openid-configuration/openai/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+@app.api_route(
+    "/.well-known/oauth-authorization-server/openai/mcp",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_openai_oauth_authorization_server_metadata(request: Request) -> Response:
+    """Serve OpenAI MCP OAuth authorization-server metadata."""
+    return _cacheable_metadata_response(
+        request,
+        _oauth_authorization_server_metadata(
+            mcp_url=_openai_mcp_url(),
+            scopes=openai_auth.oauth_scopes(),
+            oauth_available=_connector_local_oauth_available("OPENAI", openai_mcp),
+        ),
     )
 
 
 # Mount assets, PDFs, and the public remote MCP discovery server
-app.mount("/assets", StaticFiles(directory="docs/assets"), name="assets")
-app.mount("/pdf", StaticFiles(directory="docs/pdf"), name="pdf")
-app.mount("/evidence", StaticFiles(directory="docs/evidence", html=True), name="evidence")
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(DOCS_DIR / "assets"), check_dir=False),
+    name="assets",
+)
+app.mount(
+    "/pdf",
+    StaticFiles(directory=str(DOCS_DIR / "pdf"), check_dir=False),
+    name="pdf",
+)
+app.mount(
+    "/evidence",
+    StaticFiles(directory=str(DOCS_DIR / "evidence"), html=True, check_dir=False),
+    name="evidence",
+)
 app.add_route(
     REMOTE_MCP_PATH.rstrip("/"),
     _SlashlessMountEndpoint(PUBLIC_MCP_HTTP_APP, REMOTE_MCP_PATH),
@@ -1407,6 +2447,12 @@ app.add_route(
     include_in_schema=False,
 )
 app.mount("/cursor/mcp", CURSOR_MCP_HTTP_APP, name="cursor-mcp")
+app.add_route(
+    "/openai/mcp",
+    _SlashlessMountEndpoint(OPENAI_MCP_HTTP_APP, "/openai/mcp"),
+    include_in_schema=False,
+)
+app.mount("/openai/mcp", OPENAI_MCP_HTTP_APP, name="openai-mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -1480,6 +2526,7 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/cache/status": None,
     "/v1/provenance/": None,
     "/health": None,
+    "/readyz": None,
     "/v1/credits/": None,  # Credit endpoints define their own x402 challenges
 }
 
@@ -1489,6 +2536,8 @@ SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,32}$")
 WALLET_ID_RE = re.compile(r"^[A-Za-z0-9:._-]{20,128}$")
 STARTER_ID_RE = re.compile(r"^[A-Za-z0-9:._@-]{8,160}$")
 EVM_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+EVM_TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+SOLANA_SIGNATURE_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{80,90}$")
 DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/", "/v1/rwa/")
 # ---------------------------------------------------------------------------
 # Documentation & Schemas
@@ -1630,7 +2679,7 @@ def _x402_endpoint_description(path: str) -> str:
     if path.startswith("/v1/signals/trader-alpha-pack"):
         return "Trader alpha-style signal pack built from Blocksize price, bid/ask, state, and VWAP-window data."
     if path.startswith("/v1/credits/purchase"):
-        return "Bulk wallet credit purchase for Blocksize Capital paid data."
+        return "Local-QA-only legacy wallet credit purchase; unavailable in production."
     return "Blocksize Capital x402-protected market data."
 
 
@@ -1675,26 +2724,62 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
         "data": {},
         "meta": {"provider": "Blocksize Capital"},
     }
+    method = request.method.upper()
+    body_method = method in {"POST", "PUT", "PATCH"}
+    if body_method:
+        input_info = {
+            "type": "http",
+            "method": method,
+            "bodyType": "json",
+            "body": {},
+        }
+        input_properties = {
+            "type": {"type": "string", "const": "http"},
+            "method": {"type": "string", "enum": ["POST", "PUT", "PATCH"]},
+            "bodyType": {
+                "type": "string",
+                "enum": ["json", "form-data", "text"],
+            },
+            "body": {"type": "object"},
+        }
+        input_required = ["type", "method", "bodyType", "body"]
+    else:
+        input_info = {
+            "type": "http",
+            "method": method,
+            "queryParams": query_example,
+        }
+        input_properties = {
+            "type": {"type": "string", "const": "http"},
+            "method": {"type": "string", "enum": ["GET", "HEAD", "DELETE"]},
+            "queryParams": query_schema,
+        }
+        input_required = ["type", "method"]
     return {
         "info": {
-            "input": {
-                "method": request.method.upper(),
-                "queryParams": query_example,
-            },
-            "output": output_example,
+            "input": input_info,
+            "output": {"type": "json", "example": output_example},
         },
         "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": {
                 "input": {
                     "type": "object",
-                    "properties": {"queryParams": query_schema},
+                    "properties": input_properties,
+                    "required": input_required,
+                    "additionalProperties": False,
                 },
                 "output": {
                     "type": "object",
-                    "properties": {"example": output_example},
+                    "properties": {
+                        "type": {"type": "string"},
+                        "example": {"type": "object"},
+                    },
+                    "required": ["type"],
                 },
             },
+            "required": ["input"],
         },
     }
 
@@ -1727,8 +2812,6 @@ def _x402_v2_accepts(
             "maxTimeoutSeconds": int(requirement.get("maxTimeoutSeconds") or 60),
             "extra": accept_extra,
         }
-        if resource_url:
-            accept["resource"] = resource_url
         accepts.append(accept)
     return accepts
 
@@ -1920,11 +3003,30 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
         return None
 
     client_ip = _client_ip(request)
-    allowed, retry_after, limit_window = _DISCOVERY_RATE_LIMITER.check(
-        f"discovery:{client_ip}",
-        per_minute=settings.server.discovery_rate_limit_per_minute,
-        per_day=settings.server.discovery_rate_limit_per_day,
-    )
+    manager = getattr(request.app.state, "credits", None)
+    try:
+        if isinstance(manager, CreditManager):
+            allowed, retry_after, limit_window = manager.check_rate_limit(
+                scope="discovery",
+                key=client_ip,
+                per_minute=settings.server.discovery_rate_limit_per_minute,
+                per_day=settings.server.discovery_rate_limit_per_day,
+            )
+        else:
+            allowed, retry_after, limit_window = _DISCOVERY_RATE_LIMITER.check(
+                f"discovery:{client_ip}",
+                per_minute=settings.server.discovery_rate_limit_per_minute,
+                per_day=settings.server.discovery_rate_limit_per_day,
+            )
+    except sqlite3.Error:
+        logger.exception("Persistent discovery rate limiter is unavailable")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Service Unavailable",
+                "message": "Discovery rate-limit state is temporarily unavailable.",
+            },
+        )
     if allowed:
         return None
 
@@ -2099,6 +3201,11 @@ def _credit_cost_for_request(request: Request) -> float | None:
 
 def _starter_credit_subject(request: Request) -> tuple[str, str, bool] | None:
     """Resolve the best starter-credit subject from wallet/user/agent hints."""
+    if (
+        is_production_environment()
+        or not settings.server.unverified_http_credits_enabled
+    ):
+        return None
     wallet = request.headers.get("X-AGENT-WALLET")
     if wallet:
         clean_wallet = wallet.strip()
@@ -2132,7 +3239,7 @@ def _credit_meta_for_request(request: Request) -> dict[str, Any] | None:
         "credit_cost": context["credits_spent"],
         "credits_remaining": context["credits_remaining"],
         "starter_allowance_credits": STARTER_CREDIT_ALLOWANCE,
-        "upgrade_path": "Use x402 payment or prepaid credit top-ups after starter credits are exhausted.",
+        "upgrade_path": "After authenticated connector credits are exhausted, use signed x402 or contact sales for an account plan.",
     }
 
 
@@ -2143,7 +3250,7 @@ def _apply_credit_response_headers(response: Response, request: Request) -> Resp
         response.headers["X-Blocksize-Credits-Spent"] = str(context["credits_spent"])
         response.headers["X-Blocksize-Credits-Remaining"] = str(context["credits_remaining"])
         response.headers["X-Blocksize-Starter-Allowance"] = str(STARTER_CREDIT_ALLOWANCE)
-        response.headers["X-Blocksize-Upgrade-Path"] = "x402-or-prepaid-credits"
+        response.headers["X-Blocksize-Upgrade-Path"] = "x402-or-authenticated-account-plan"
         if context.get("credits_refunded"):
             response.headers["X-Blocksize-Credits-Refunded"] = str(context["credits_refunded"])
             response.headers["X-Blocksize-Delivery-Status"] = "failed-refunded"
@@ -2242,14 +3349,57 @@ def _json_hash(payload: Any) -> str:
 
 
 def _rwa_observation_store(request: Request) -> RWAObservationStore:
-    store = getattr(request.app.state, "rwa_store", None)
-    if isinstance(store, RWAObservationStore):
-        return store
-    store = RWAObservationStore(
-        os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
+    db_path = configured_rwa_observation_db_path()
+    credit_manager = getattr(request.app.state, "credits", None)
+    runtime_paths = (
+        {"credits_runtime": str(credit_manager.db_path)}
+        if isinstance(credit_manager, CreditManager)
+        else None
     )
+    if rwa_database_collisions(
+        db_path,
+        settings.server.observability_db_path,
+        runtime_paths,
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "RWA_DATABASE_NOT_ISOLATED",
+                "message": "RWA evidence storage is unavailable until its database is isolated.",
+            },
+        )
+    store = getattr(request.app.state, "rwa_store", None)
+    if isinstance(store, RWAObservationStore) and database_paths_collide(
+        store.db_path,
+        db_path,
+    ):
+        return store
+    store = RWAObservationStore(db_path)
     request.app.state.rwa_store = store
     return store
+
+
+async def _store_rwa_observation_without_blocking(
+    store: RWAObservationStore,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a bounded SQLite writer off-loop and never abandon an in-flight transaction."""
+    task = asyncio.create_task(
+        asyncio.to_thread(
+            store.store_observation,
+            payload,
+            lock_timeout_seconds=rwa_store_lock_timeout_seconds(),
+            ingestion_source="operator_api",
+        )
+    )
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(task)
+        except Exception:
+            pass
+        raise
 
 
 def _response_receipt(
@@ -2845,9 +3995,6 @@ def _build_token_quality_indicator(
     }
 
 
-_SEEN_TX_HASHES: set[str] = set()
-
-
 def _decode_payment_payload(payment_payload: str) -> dict[str, Any]:
     """Decode and lightly validate the x402 proof header payload."""
     if len(payment_payload) > 4096:
@@ -2863,23 +4010,20 @@ def _decode_payment_payload(payment_payload: str) -> dict[str, Any]:
 
 
 def _network_kind(network: str) -> str | None:
-    network_lower = network.lower()
-    if "solana" in network_lower:
+    network_lower = network.strip().lower()
+    if network_lower.startswith("solana:"):
         return "solana"
-    if "eip155" in network_lower or "base" in network_lower:
+    if network_lower.startswith("eip155:"):
         return "evm"
     return None
 
 
 def _select_requirement(network: str, payment_requirements: list[dict]) -> dict[str, Any] | None:
     """Find the payment requirement matching the proof network."""
-    kind = _network_kind(network)
+    clean_network = network.strip()
     for requirement in payment_requirements:
-        req_network = str(requirement.get("network", ""))
-        req_kind = _network_kind(req_network)
-        if kind and req_kind == kind:
-            return requirement
-        if network and network == req_network:
+        req_network = str(requirement.get("network", "")).strip()
+        if clean_network and clean_network == req_network:
             return requirement
     return None
 
@@ -2888,7 +4032,7 @@ def _requirement_amount_atomic(requirement: dict[str, Any]) -> int:
     """Read the required amount as USDC atomic units."""
     raw = requirement.get("maxAmountRequired")
     if raw is None and "amount" in requirement:
-        return int(Decimal(str(requirement["amount"])) * Decimal("1000000"))
+        return int(str(requirement["amount"]))
     return int(Decimal(str(raw or "0")))
 
 
@@ -2940,6 +4084,8 @@ def _solana_transfer_satisfies_requirement(
             continue
         if post.get("owner") != expected_recipient:
             continue
+        if int(post.get("uiTokenAmount", {}).get("decimals", -1)) != 6:
+            continue
         key = (post.get("accountIndex"), post.get("mint"))
         delta = _token_amount_atomic(post) - pre_balances.get(key, 0)
         if delta >= required_amount:
@@ -2962,6 +4108,10 @@ def _evm_transfer_satisfies_requirement(
 
     if not expected_recipient.startswith("0x") or len(expected_recipient) != 42:
         return False, "EVM payment recipient is not configured"
+    if not re.fullmatch(r"0x[0-9a-f]{40}", expected_recipient):
+        return False, "EVM payment recipient is invalid"
+    if not re.fullmatch(r"0x[0-9a-f]{40}", expected_token):
+        return False, "EVM payment asset is invalid"
     if required_amount <= 0:
         return False, "EVM payment amount is not configured"
 
@@ -2986,35 +4136,208 @@ def _evm_transfer_satisfies_requirement(
 
 def _transaction_is_recent(block_time: int | None) -> bool:
     max_age = settings.server.x402_payment_max_age_seconds
-    if max_age <= 0 or not block_time:
-        return True
-    return time.time() - block_time <= max_age
+    future_skew = settings.server.x402_payment_future_skew_seconds
+    if max_age <= 0 or future_skew < 0 or block_time is None:
+        return False
+    try:
+        timestamp = int(block_time)
+    except (TypeError, ValueError):
+        return False
+    now = time.time()
+    return now - max_age <= timestamp <= now + future_skew
 
 
-def _record_payment_use(
+async def _rpc_result(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    method: str,
+    params: list[Any],
+) -> Any:
+    """Call one JSON-RPC method and fail closed on protocol-level errors."""
+    response = await client.post(
+        rpc_url,
+        json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("error") is not None:
+        raise ValueError(f"RPC method {method} failed")
+    if "result" not in payload:
+        raise ValueError(f"RPC method {method} returned no result")
+    return payload["result"]
+
+
+def _hex_quantity(value: Any, field: str) -> int:
+    if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]+", value):
+        raise ValueError(f"Invalid EVM {field}")
+    return int(value, 16)
+
+
+async def _verify_legacy_solana_payment(
     tx_hash: str,
+    network: str,
+    requirement: dict[str, Any],
+) -> tuple[bool, str]:
+    """Verify a legacy Solana transaction against exact mainnet chain state."""
+    if not SOLANA_SIGNATURE_RE.fullmatch(tx_hash):
+        return False, "Malformed Solana transaction signature"
+    expected_genesis = network.partition(":")[2]
+    if not expected_genesis:
+        return False, "Malformed Solana network identifier"
+    rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        genesis_hash = await _rpc_result(client, rpc_url, "getGenesisHash", [])
+        if genesis_hash != expected_genesis:
+            return False, "Solana RPC genesis does not match requested network"
+        result = await _rpc_result(
+            client,
+            rpc_url,
+            "getTransaction",
+            [
+                tx_hash,
+                {
+                    "encoding": "jsonParsed",
+                    "maxSupportedTransactionVersion": 0,
+                    "commitment": "finalized",
+                },
+            ],
+        )
+    if not isinstance(result, dict):
+        return False, "Transaction not found on chain or not finalized"
+    signatures = (result.get("transaction") or {}).get("signatures") or []
+    if tx_hash not in signatures:
+        return False, "Solana RPC transaction signature mismatch"
+    meta = result.get("meta")
+    if not isinstance(meta, dict) or meta.get("err") is not None:
+        return False, "Solana transaction failed on chain"
+    if not _transaction_is_recent(result.get("blockTime")):
+        return False, "Solana transaction timestamp is missing, stale, or in the future"
+    return _solana_transfer_satisfies_requirement(result, requirement)
+
+
+async def _verify_legacy_evm_payment(
+    tx_hash: str,
+    network: str,
+    requirement: dict[str, Any],
+) -> tuple[bool, str]:
+    """Verify a legacy EVM transfer with chain identity, time, and finality checks."""
+    if not EVM_TX_HASH_RE.fullmatch(tx_hash):
+        return False, "Malformed EVM transaction hash"
+    try:
+        expected_chain_id = int(network.partition(":")[2])
+    except ValueError:
+        return False, "Malformed EVM network identifier"
+    rpc_url = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
+    token = _requirement_asset(requirement, settings.x402.base_usdc_address)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        chain_id = _hex_quantity(
+            await _rpc_result(client, rpc_url, "eth_chainId", []),
+            "chain id",
+        )
+        if chain_id != expected_chain_id:
+            return False, "EVM RPC chain does not match requested network"
+        receipt = await _rpc_result(
+            client,
+            rpc_url,
+            "eth_getTransactionReceipt",
+            [tx_hash],
+        )
+        if not isinstance(receipt, dict):
+            return False, "EVM transaction not found or not finalized"
+        returned_hash = str(receipt.get("transactionHash") or "")
+        if returned_hash.lower() != tx_hash.lower():
+            return False, "EVM RPC transaction hash mismatch"
+        if receipt.get("status") not in ("0x1", 1):
+            return False, "EVM transaction reverted on chain"
+        block_hash = str(receipt.get("blockHash") or "")
+        if not EVM_TX_HASH_RE.fullmatch(block_hash):
+            return False, "EVM receipt is missing a canonical block hash"
+        receipt_block_number = _hex_quantity(receipt.get("blockNumber"), "block number")
+        latest_block_number = _hex_quantity(
+            await _rpc_result(client, rpc_url, "eth_blockNumber", []),
+            "latest block number",
+        )
+        confirmations = latest_block_number - receipt_block_number + 1
+        if confirmations < settings.server.x402_payment_min_confirmations:
+            return False, "EVM transaction has insufficient confirmations"
+        block = await _rpc_result(
+            client,
+            rpc_url,
+            "eth_getBlockByHash",
+            [block_hash, False],
+        )
+        if not isinstance(block, dict):
+            return False, "EVM canonical block is unavailable"
+        if str(block.get("hash") or "").lower() != block_hash.lower():
+            return False, "EVM canonical block hash mismatch"
+        if _hex_quantity(block.get("number"), "canonical block number") != receipt_block_number:
+            return False, "EVM canonical block number mismatch"
+        block_time = _hex_quantity(block.get("timestamp"), "block timestamp")
+        if not _transaction_is_recent(block_time):
+            return False, "EVM transaction timestamp is missing, stale, or in the future"
+        decimals_value = await _rpc_result(
+            client,
+            rpc_url,
+            "eth_call",
+            [{"to": token, "data": "0x313ce567"}, "latest"],
+        )
+        if _hex_quantity(decimals_value, "USDC decimals") != 6:
+            return False, "EVM payment asset does not use six decimals"
+    return _evm_transfer_satisfies_requirement(receipt, requirement)
+
+
+def _reserve_payment_use(
+    payment_id: str,
     network: str,
     requirement: dict[str, Any],
     credit_manager: CreditManager | None,
     purpose: str,
-) -> tuple[bool, str]:
-    """Persist proof usage so a transaction cannot be replayed."""
-    if tx_hash in _SEEN_TX_HASHES:
-        return False, "Transaction hash has already been used"
-
+    request_binding: str,
+    attempt_id: str,
+    *,
+    existing_only: bool = False,
+) -> dict[str, Any]:
+    """Acquire a durable proof lease before invoking a paid handler."""
+    if credit_manager is None:
+        return {"valid": False, "reason": "Payment ledger is unavailable"}
     amount_atomic = _requirement_amount_atomic(requirement)
     recipient = _requirement_recipient(requirement)
-    if credit_manager and not credit_manager.record_payment_proof(
-        tx_hash=tx_hash,
+    reservation = credit_manager.reserve_payment_proof(
+        payment_id=payment_id,
         network=network,
         amount_atomic=amount_atomic,
         recipient=recipient,
         purpose=purpose,
-    ):
-        return False, "Transaction hash has already been used"
-
-    _SEEN_TX_HASHES.add(tx_hash)
-    return True, "ok"
+        request_binding=request_binding,
+        attempt_id=attempt_id,
+        lease_seconds=settings.server.x402_payment_verification_lease_seconds,
+        existing_only=existing_only,
+    )
+    if not reservation.acquired:
+        if reservation.reason == "payment_already_finalized":
+            replay = credit_manager.finalized_payment_response(
+                payment_id=reservation.payment_id,
+                request_binding=request_binding,
+                max_age_seconds=settings.server.x402_payment_replay_ttl_seconds,
+            )
+            if replay is not None:
+                return {
+                    "valid": True,
+                    "replay": True,
+                    "payment_id": reservation.payment_id,
+                    "reservation_id": None,
+                    "request_binding": request_binding,
+                    "attempt_id": attempt_id,
+                    "cached_response": replay,
+                }
+        return {"valid": False, "reason": reservation.reason}
+    return {
+        "valid": True,
+        "payment_id": reservation.payment_id,
+        "reservation_id": reservation.reservation_id,
+        "request_binding": request_binding,
+        "attempt_id": attempt_id,
+    }
 
 
 async def _verify_payment(
@@ -3022,122 +4345,307 @@ async def _verify_payment(
     payment_requirements: list[dict],
     credit_manager: CreditManager | None = None,
     purpose: str = "data",
+    request_method: str = "GET",
+    resource_url: str | None = None,
+    request_body: bytes = b"",
+    attempt_id: str | None = None,
 ) -> dict:
-    """Verify an x402 payment against chain data, amount, token, and recipient."""
+    """Verify an official x402 v2 signature and reserve it for delivery.
+
+    Legacy public-transaction proofs are available only behind the explicit
+    local/test migration flag and still receive strict native chain checks.
+    """
+    effective_attempt_id = attempt_id or secrets.token_hex(16)
+    official_error = "Payment payload is not a valid bound x402 v2 signature"
+    if resource_url:
+        accepts = _x402_v2_accepts(payment_requirements, resource_url)
+        for requirement in accepts:
+            try:
+                parsed = parse_payment_signature(
+                    payment_payload,
+                    accepted_requirement=requirement,
+                    method=request_method,
+                    resource_url=resource_url,
+                    body=request_body,
+                )
+            except PaymentSecurityError:
+                continue
+            if credit_manager is not None:
+                replay = credit_manager.finalized_payment_response(
+                    payment_id=parsed.payment_id,
+                    request_binding=parsed.request_binding,
+                    max_age_seconds=settings.server.x402_payment_replay_ttl_seconds,
+                )
+                if replay is not None:
+                    return {
+                        "valid": True,
+                        "replay": True,
+                        "mode": "replay",
+                        "network": str(requirement["network"]),
+                        "payment_id": parsed.payment_id,
+                        "reservation_id": None,
+                        "request_binding": parsed.request_binding,
+                        "attempt_id": effective_attempt_id,
+                        "cached_response": replay,
+                    }
+            try:
+                facilitator = FacilitatorAdapter(
+                    settings.x402.facilitator_url,
+                    bearer_token=settings.x402.facilitator_bearer_token or None,
+                    cdp_api_key_id=settings.x402.cdp_api_key_id or None,
+                    cdp_api_key_secret=settings.x402.cdp_api_key_secret or None,
+                    production=security_configuration_status()["production"],
+                )
+            except PaymentSecurityError:
+                return {"valid": False, "reason": "Payment facilitator is not configured safely"}
+            existing = _reserve_payment_use(
+                parsed.payment_id,
+                str(requirement["network"]),
+                requirement,
+                credit_manager,
+                purpose,
+                parsed.request_binding,
+                effective_attempt_id,
+                existing_only=True,
+            )
+            if existing.get("valid") is True:
+                return {
+                    **existing,
+                    "valid": True,
+                    "mode": "facilitator",
+                    "network": str(requirement["network"]),
+                    "_parsed_payment": parsed,
+                    "_requirement": requirement,
+                    "_facilitator": facilitator,
+                    "verification_reused": True,
+                }
+            if existing.get("reason") != "payment_reservation_missing":
+                return existing
+            verification = await facilitator.verify(parsed, requirement)
+            if verification.get("isValid") is not True:
+                reason = str(verification.get("invalidReason") or "payment_invalid")
+                return {"valid": False, "reason": reason}
+            network = str(requirement["network"])
+            reserved = _reserve_payment_use(
+                parsed.payment_id,
+                network,
+                requirement,
+                credit_manager,
+                purpose,
+                parsed.request_binding,
+                effective_attempt_id,
+            )
+            if not reserved["valid"]:
+                return reserved
+            return {
+                **reserved,
+                "valid": True,
+                "mode": "facilitator",
+                "network": network,
+                "payer": verification.get("payer"),
+                "_parsed_payment": parsed,
+                "_requirement": requirement,
+                "_facilitator": facilitator,
+            }
+
+    allow_mock = settings.server.x402_allow_mock_payments
+    allow_legacy = settings.server.x402_allow_legacy_payments
+    if not allow_legacy and not allow_mock:
+        return {"valid": False, "reason": official_error}
+
     try:
         payload = _decode_payment_payload(payment_payload)
         tx_hash = str(payload.get("proof") or payload.get("tx_hash") or "").strip()
-        network = str(payload.get("network") or "solana").strip()
-        
+        network = str(payload.get("network") or "").strip()
         if not tx_hash:
             return {"valid": False, "reason": "Missing tx_hash/proof in payload"}
+        if not network:
+            return {"valid": False, "reason": "Missing exact CAIP-2 network in payload"}
 
         requirement = _select_requirement(network, payment_requirements)
         if requirement is None:
             return {"valid": False, "reason": f"No payment requirement configured for {network}"}
 
-        allow_mock = os.getenv("X402_ALLOW_MOCK_PAYMENTS", "").lower() in {"1", "true", "yes"}
-        if allow_mock and str(tx_hash).startswith(("mock_", "test_")):
-            if requirement is None:
-                return {"valid": False, "reason": "Mock payment has no matching requirement"}
-            recorded, reason = _record_payment_use(
+        request_binding = hashlib.sha256(
+            (resource_url or purpose).encode("utf-8") + b"\0" + request_body
+        ).hexdigest()
+        if allow_mock and tx_hash.startswith(("mock_", "test_")):
+            reserved = _reserve_payment_use(
                 tx_hash,
                 network,
                 requirement,
                 credit_manager,
                 purpose,
+                request_binding,
+                effective_attempt_id,
             )
-            if not recorded:
-                return {"valid": False, "reason": reason}
+            if not reserved["valid"]:
+                return reserved
             logger.warning("Accepted mock x402 proof for local/demo mode only: %s", tx_hash)
-            return {"valid": True, "mock": True, "network": network}
-            
-        if "solana" in network:
-            rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
-            logger.info(f"Verifying Solana payment via RPC: {rpc_url.split('?')[0]}")
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(
-                    rpc_url,
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "getTransaction",
-                        "params": [
-                            tx_hash,
-                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}
-                        ]
-                    }
-                )
-                res.raise_for_status()
-                data = res.json()
-                
-            result = data.get("result")
-            if not result:
-                return {"valid": False, "reason": "Transaction not found on chain or not yet finalized"}
-                
-            meta = result.get("meta")
-            if meta and meta.get("err") is not None:
-                return {"valid": False, "reason": f"Transaction reverted on chain: {meta['err']}"}
+            return {
+                **reserved,
+                "valid": True,
+                "mode": "mock",
+                "mock": True,
+                "network": network,
+                "transaction": reserved["payment_id"],
+                "_requirement": requirement,
+            }
 
-            if not _transaction_is_recent(result.get("blockTime")):
-                return {"valid": False, "reason": "Transaction is older than allowed payment window"}
-
-            matched, reason = _solana_transfer_satisfies_requirement(result, requirement)
-            if not matched:
-                return {"valid": False, "reason": reason}
-
-        elif "eip155" in network or "base" in network:
-            rpc_url = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(
-                    rpc_url,
-                    json={
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "eth_getTransactionReceipt",
-                        "params": [tx_hash]
-                    }
-                )
-                res.raise_for_status()
-                data = res.json()
-            
-            result = data.get("result")
-            if not result:
-                return {"valid": False, "reason": "EVM Transaction not found or not yet finalized"}
-                
-            status = result.get("status")
-            if status not in ("0x1", 1):
-                return {"valid": False, "reason": f"EVM Transaction reverted on chain: status={status}"}
-
-            matched, reason = _evm_transfer_satisfies_requirement(result, requirement)
-            if not matched:
-                return {"valid": False, "reason": reason}
-        
+        if not allow_legacy:
+            return {"valid": False, "reason": "Legacy transaction proofs are disabled"}
+        kind = _network_kind(network)
+        if kind == "solana":
+            matched, reason = await _verify_legacy_solana_payment(
+                tx_hash,
+                network,
+                requirement,
+            )
+        elif kind == "evm":
+            matched, reason = await _verify_legacy_evm_payment(
+                tx_hash,
+                network,
+                requirement,
+            )
         else:
             return {"valid": False, "reason": f"Unsupported network: {network}"}
-
-        recorded, reason = _record_payment_use(
+        if not matched:
+            return {"valid": False, "reason": reason}
+        reserved = _reserve_payment_use(
             tx_hash,
             network,
             requirement,
             credit_manager,
             purpose,
+            request_binding,
+            effective_attempt_id,
         )
-        if not recorded:
-            return {"valid": False, "reason": reason}
-
-        logger.info("NATIVELY VERIFIED %s: %s", network, tx_hash)
-        return {"valid": True, "network": network}
-        
+        if not reserved["valid"]:
+            return reserved
+        logger.info("Natively verified legacy payment on %s", network)
+        return {
+            **reserved,
+            "valid": True,
+            "mode": "legacy",
+            "network": network,
+            "transaction": reserved["payment_id"],
+            "_requirement": requirement,
+        }
     except ValueError as e:
         return {"valid": False, "reason": str(e)}
-    except Exception as e:
-        logger.error("Native RPC verification failed: %s", e)
-        return {"valid": False, "reason": f"Native RPC failure: {str(e)}"}
+    except Exception:
+        logger.error("Native RPC verification failed")
+        return {"valid": False, "reason": "Native RPC verification unavailable"}
 
-async def _settle_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
-    """Payment has inherently settled on chain during Native RPC Verification."""
-    return {"success": True}
+
+async def _settle_payment(
+    payment_payload: str,
+    payment_requirements: list[dict],
+    verification: dict[str, Any] | None = None,
+) -> dict:
+    """Settle an official authorization or attest an already-final native proof."""
+    context = verification or {}
+    if context.get("mode") == "facilitator":
+        facilitator = context.get("_facilitator")
+        parsed = context.get("_parsed_payment")
+        requirement = context.get("_requirement")
+        if (
+            not isinstance(facilitator, FacilitatorAdapter)
+            or not isinstance(parsed, ParsedPayment)
+            or not isinstance(requirement, dict)
+        ):
+            return {"success": False, "errorReason": "missing_settlement_context"}
+        return await facilitator.settle(parsed, requirement)
+    if context.get("mode") in {"legacy", "mock"}:
+        requirement = context.get("_requirement")
+        if not isinstance(requirement, dict):
+            requirement = _select_requirement(
+                str(context.get("network") or ""),
+                payment_requirements,
+            )
+        if not isinstance(requirement, dict):
+            return {"success": False, "errorReason": "missing_settlement_context"}
+        return {
+            "success": True,
+            "transaction": str(context.get("transaction") or context.get("payment_id") or ""),
+            "network": str(context.get("network") or ""),
+            "amount": str(_requirement_amount_atomic(requirement)),
+        }
+    return {"success": False, "errorReason": "missing_settlement_context"}
+
+
+async def _buffer_payment_response(response: Response) -> tuple[Response, bytes] | None:
+    """Materialize a successful paid response for bounded durable replay."""
+    body = bytearray()
+    body_iterator = getattr(response, "body_iterator", None)
+    if body_iterator is not None:
+        async for chunk in body_iterator:
+            encoded = chunk.encode() if isinstance(chunk, str) else bytes(chunk)
+            body.extend(encoded)
+            if len(body) > MAX_CACHED_PAYMENT_RESPONSE_BYTES:
+                return None
+    else:
+        raw_body = getattr(response, "body", b"")
+        body.extend(raw_body.encode() if isinstance(raw_body, str) else bytes(raw_body))
+        if len(body) > MAX_CACHED_PAYMENT_RESPONSE_BYTES:
+            return None
+
+    buffered = Response(
+        content=bytes(body),
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        background=response.background,
+    )
+    return buffered, bytes(body)
+
+
+def _cached_payment_response(cached: dict[str, Any]) -> Response:
+    """Reconstruct a previously finalized response without recharging or settling."""
+    response = Response(
+        content=bytes(cached["body"]),
+        status_code=int(cached["status_code"]),
+        headers={str(key): str(value) for key, value in cached.get("headers", {}).items()},
+    )
+    settlement = cached.get("settlement")
+    if isinstance(settlement, dict) and settlement:
+        settlement_b64 = base64.b64encode(
+            json.dumps(settlement, sort_keys=True).encode()
+        ).decode()
+        response.headers["PAYMENT-RESPONSE"] = settlement_b64
+        response.headers["X-PAYMENT-RESPONSE"] = settlement_b64
+    response.headers["X-Payment-Replayed"] = "true"
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+async def _paid_request_preflight_response(request: Request) -> Response | None:
+    """Reject known-invalid paid mutations before credits or payment handling."""
+    if (
+        request.method.upper() != "POST"
+        or request.url.path != "/v1/rwa/benchmark/blocksize"
+    ):
+        return None
+    body = await request.body()
+    if len(body) > 1_048_576:
+        return JSONResponse(
+            status_code=413,
+            content={"error": "Payload Too Large", "message": "Paid request body exceeds 1 MiB."},
+        )
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and payload.get("persist"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": {
+                    "error_code": "RWA_PUBLIC_PERSISTENCE_FORBIDDEN",
+                    "message": "The public benchmark endpoint is stateless.",
+                }
+            },
+        )
+    return None
 
 
 @app.middleware("http")
@@ -3158,6 +4666,10 @@ async def x402_payment_middleware(request: Request, call_next):
     discovery_limit = _discovery_rate_limit_response(request)
     if discovery_limit is not None:
         return discovery_limit
+
+    preflight_response = await _paid_request_preflight_response(request)
+    if preflight_response is not None:
+        return _apply_x402_cors_headers(request, preflight_response)
 
     path = request.url.path
     try:
@@ -3238,7 +4750,13 @@ async def x402_payment_middleware(request: Request, call_next):
             require_wallet_history=require_wallet_history,
         )
 
-        if mgr.spend_credits(subject, credit_cost):
+        charge_id = secrets.token_hex(16)
+        if starter.eligible and mgr.spend_credits(
+            subject,
+            credit_cost,
+            charge_id=charge_id,
+            purpose=f"{request.method} {path}",
+        ):
             credits_remaining = mgr.get_balance(subject)
             subject_wallet_hash = _wallet_hash(subject)
             request.state.starter_credit_context = {
@@ -3246,6 +4764,7 @@ async def x402_payment_middleware(request: Request, call_next):
                 "credits_spent": credit_cost,
                 "credits_remaining": credits_remaining,
                 "starter_granted": starter.granted_credits,
+                "charge_id": charge_id,
             }
             logger.info(
                 "CREDIT DRAWDOWN: Spent %.1f from %s:%s for %s",
@@ -3264,12 +4783,58 @@ async def x402_payment_middleware(request: Request, call_next):
                     "credits_remaining": credits_remaining,
                     "starter_subject_type": subject_type,
                     "starter_granted": starter.granted_credits,
+                    "charge_id": charge_id,
                 },
             )
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except asyncio.CancelledError:
+                mgr.refund_credits(
+                    subject,
+                    credit_cost,
+                    charge_id=charge_id,
+                )
+                _record_product_event(
+                    "charged_delivery_failed",
+                    request,
+                    price_usdc=price,
+                    reason="request_cancelled",
+                    wallet_hash=subject_wallet_hash,
+                    metadata={
+                        "attempt_id": charge_id,
+                        "charge_id": charge_id,
+                        "payment_mode": "starter_credit",
+                        "refund_status": "refunded",
+                    },
+                )
+                raise
+            except Exception:
+                mgr.refund_credits(
+                    subject,
+                    credit_cost,
+                    charge_id=charge_id,
+                )
+                _record_product_event(
+                    "charged_delivery_failed",
+                    request,
+                    price_usdc=price,
+                    reason="handler_exception",
+                    wallet_hash=subject_wallet_hash,
+                    metadata={
+                        "attempt_id": charge_id,
+                        "charge_id": charge_id,
+                        "payment_mode": "starter_credit",
+                        "refund_status": "refunded",
+                    },
+                )
+                raise
             refund_metadata: dict[str, Any] = {}
             if response.status_code >= 400:
-                refunded = mgr.refund_credits(subject, credit_cost)
+                refunded = mgr.refund_credits(
+                    subject,
+                    credit_cost,
+                    charge_id=charge_id,
+                )
                 refund_metadata = {
                     "credits_refunded": credit_cost if refunded else 0.0,
                     "refund_status": "refunded" if refunded else "refund_failed",
@@ -3292,6 +4857,7 @@ async def x402_payment_middleware(request: Request, call_next):
                     "credits_spent": credit_cost,
                     "credits_remaining": credits_remaining,
                     "starter_subject_type": subject_type,
+                    "charge_id": charge_id,
                     **refund_metadata,
                 },
             )
@@ -3316,18 +4882,57 @@ async def x402_payment_middleware(request: Request, call_next):
             # Proceed to normal 402 challenge below
 
     # Build multi-network payment requirements
-    payment_reqs = settings.payment_requirements(price)
+    payment_reqs = _facilitator_supported_requirements(
+        settings.payment_requirements(price),
+        getattr(request.app.state, "facilitator_support", None),
+    )
 
-    # Check for x402 payment proof. X-PAYMENT is the standard retry header;
-    # PAYMENT-SIGNATURE is retained for existing Blocksize demo clients.
+    # Never advertise an empty or structurally unusable payment challenge.
+    if not payment_reqs:
+        _record_product_event(
+            "payment_configuration_unavailable",
+            request,
+            price_usdc=price,
+            reason="no_operational_payment_rail",
+        )
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Payment Configuration Unavailable",
+                    "message": "No operational payment rail is currently configured.",
+                },
+            ),
+        )
+
+    # PAYMENT-SIGNATURE is the x402 v2 header. X-PAYMENT remains a temporary
+    # transport alias, but its contents must pass the same signed-v2 parser.
     payment_header = (
-        request.headers.get("X-PAYMENT")
-        or request.headers.get("PAYMENT-SIGNATURE")
+        request.headers.get("PAYMENT-SIGNATURE")
+        or request.headers.get("X-PAYMENT")
     )
 
     if not payment_header:
         payment_required = _x402_payment_required(request, payment_reqs)
         requirements_b64 = _encode_payment_required(payment_required)
+        network_labels = {
+            "solana": "Solana",
+            "evm": "Base L2",
+        }
+        accepted_networks = [
+            {
+                "name": network_labels.get(
+                    _network_kind(str(requirement.get("network") or "")),
+                    str(requirement.get("network") or "Unknown"),
+                ),
+                "caip2": str(requirement.get("network") or ""),
+            }
+            for requirement in payment_reqs
+        ]
+        accepted_network_names = ", ".join(
+            str(item["name"]) for item in accepted_networks
+        )
         _record_product_event(
             "payment_required",
             request,
@@ -3350,28 +4955,35 @@ async def x402_payment_middleware(request: Request, call_next):
                     "error": "Payment Required",
                     "message": (
                         f"This endpoint requires a payment of ${price} USDC. "
-                        f"Send a signed x402 payment in the X-PAYMENT header. "
-                        f"Accepted networks: Solana (preferred), Base L2."
+                        f"Send a signed x402 v2 payment in the PAYMENT-SIGNATURE header. "
+                        f"Accepted networks: {accepted_network_names}."
                     ),
                     "price_usdc": str(price),
                     "starter_credits": {
-                        "positioning": "Start with 50 live data credits",
+                        "positioning": "Up to 50 live data credits are for authenticated connectors only.",
+                        "eligibility": "authenticated_connector_only",
+                        "available_on_this_surface": False,
                         "allowance_credits": STARTER_CREDIT_ALLOWANCE,
                         "credit_cost": _credit_cost_for_request(request),
-                        "identity_headers": [
-                            "X-AGENT-WALLET",
-                            "X-AUTHENTICATED-USER",
-                            "X-USER-ID",
-                            "X-AGENT-ID",
-                            "X-DEVICE-ID",
-                            "X-SESSION-ID",
-                        ],
-                        "upgrade_path": "After starter credits are exhausted, use x402 payment or prepaid credit top-ups.",
+                        "unverified_http_identity_enabled": (
+                            settings.server.unverified_http_credits_enabled
+                        ),
+                        "identity_headers": (
+                            [
+                                "X-AGENT-WALLET",
+                                "X-AUTHENTICATED-USER",
+                                "X-USER-ID",
+                                "X-AGENT-ID",
+                                "X-DEVICE-ID",
+                                "X-SESSION-ID",
+                            ]
+                            if settings.server.unverified_http_credits_enabled
+                            else []
+                        ),
+                        "direct_public_http": "This request requires the signed x402 payment shown above.",
+                        "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
                     },
-                    "networks": [
-                        {"name": "Solana", "caip2": settings.x402.solana_network},
-                        {"name": "Base", "caip2": settings.x402.base_network},
-                    ],
+                    "networks": accepted_networks,
                     "legacy_requirements": payment_reqs,
                 },
                 headers={
@@ -3380,12 +4992,24 @@ async def x402_payment_middleware(request: Request, call_next):
             ),
         )
 
-    # Verify the payment
+    request_body = await request.body()
+    if len(request_body) > 1_048_576:
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=413,
+                content={"error": "Payload Too Large", "message": "Paid request body exceeds 1 MiB."},
+            ),
+        )
+    attempt_id = secrets.token_hex(16)
+    resource_url = _public_request_url(request)
+
+    # Verify and reserve the payment before invoking the paid handler.
     _record_product_event(
         "payment_proof_submitted",
         request,
         price_usdc=price,
-        metadata={"proof_hash": fingerprint(payment_header)},
+        metadata={"proof_hash": fingerprint(payment_header), "attempt_id": attempt_id},
     )
     try:
         verification = await _verify_payment(
@@ -3393,22 +5017,42 @@ async def x402_payment_middleware(request: Request, call_next):
             payment_reqs,
             request.app.state.credits,
             purpose=f"{request.method} {path}",
+            request_method=request.method,
+            resource_url=resource_url,
+            request_body=request_body,
+            attempt_id=attempt_id,
         )
         if not verification.get("valid", False):
+            reason = str(verification.get("reason", "unknown"))
             _record_product_event(
                 "payment_failed",
                 request,
                 price_usdc=price,
-                reason=str(verification.get("reason", "unknown")),
+                reason=reason,
+                metadata={"attempt_id": attempt_id},
             )
+            unavailable = reason in {
+                "facilitator_unavailable",
+                "x402_sdk_unavailable",
+                "Payment facilitator is not configured safely",
+                "Payment ledger is unavailable",
+            }
             return _apply_x402_cors_headers(
                 request,
                 JSONResponse(
-                    status_code=402,
+                    status_code=502 if unavailable else 402,
                     content={
-                        "error": "Payment Invalid",
-                        "message": "Payment verification failed.",
-                        "details": verification.get("reason", "Unknown"),
+                        "error": (
+                            "Payment Verification Unavailable"
+                            if unavailable
+                            else "Payment Invalid"
+                        ),
+                        "message": (
+                            "Payment verification is temporarily unavailable."
+                            if unavailable
+                            else "Payment verification failed."
+                        ),
+                        "details": reason,
                     },
                 ),
             )
@@ -3433,35 +5077,382 @@ async def x402_payment_middleware(request: Request, call_next):
 
     # Payment verified — serve the request
     network = str(verification.get("network") or "")
+    payment_id = str(verification.get("payment_id") or "")
+    reservation_id = str(verification.get("reservation_id") or "")
+    payer = verification.get("payer")
+    if isinstance(payer, str) and payer:
+        request.state.trusted_wallet_hash = _wallet_hash(payer)
+        request.state.trusted_identity_hash = fingerprint(f"x402:{network}:{payer}")
+        request.state.trusted_identity_type = "wallet"
+        request.state.trusted_identity_trust = "verified_x402"
+    if verification.get("replay") is True:
+        cached = verification.get("cached_response")
+        if not isinstance(cached, dict):
+            return _apply_x402_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": "Payment Replay Unavailable",
+                        "message": "The finalized response could not be restored.",
+                    },
+                ),
+            )
+        _record_product_event(
+            "payment_response_replayed",
+            request,
+            price_usdc=price,
+            network=network,
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+            },
+        )
+        return _apply_x402_cors_headers(request, _cached_payment_response(cached))
+
     _record_product_event(
-        "payment_verified",
+        "payment_authorization_verified",
         request,
         price_usdc=price,
         network=network,
-        metadata={"mock": bool(verification.get("mock"))},
+        metadata={
+            "mock": bool(verification.get("mock")),
+            "attempt_id": attempt_id,
+            "payment_id": payment_id or None,
+        },
     )
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except asyncio.CancelledError:
+        if payment_id and reservation_id:
+            request.app.state.credits.release_payment_proof(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+            )
+        _record_product_event(
+            "payment_failed",
+            request,
+            price_usdc=price,
+            network=network,
+            reason="request_cancelled_before_settlement",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "released",
+            },
+        )
+        raise
+    except Exception:
+        if payment_id and reservation_id:
+            request.app.state.credits.release_payment_proof(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+            )
+        raise
+
+    if response.status_code >= 400:
+        if payment_id and reservation_id:
+            request.app.state.credits.release_payment_proof(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+            )
+        _record_charged_delivery_outcome(
+            request,
+            response,
+            price_usdc=price,
+            payment_mode="x402",
+            network=network,
+            metadata={
+                "mock": bool(verification.get("mock")),
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "released",
+            },
+        )
+        return response
+
+    try:
+        buffered_response = await _buffer_payment_response(response)
+    except asyncio.CancelledError:
+        if payment_id and reservation_id:
+            request.app.state.credits.release_payment_proof(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+            )
+        _record_product_event(
+            "payment_failed",
+            request,
+            price_usdc=price,
+            network=network,
+            reason="request_cancelled_before_settlement",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "released",
+            },
+        )
+        raise
+    if buffered_response is None:
+        if payment_id and reservation_id:
+            request.app.state.credits.release_payment_proof(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+            )
+        _record_product_event(
+            "payment_failed",
+            request,
+            price_usdc=price,
+            network=network,
+            reason="response_replay_cache_limit_exceeded",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "released",
+            },
+        )
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=502,
+                content={
+                    "error": "Paid Response Unavailable",
+                    "message": "The response exceeded the protected delivery limit; no data was delivered.",
+                },
+            ),
+        )
+    response, response_body = buffered_response
+
+    try:
+        settlement = await _settle_payment(payment_header, payment_reqs, verification)
+    except asyncio.CancelledError:
+        try:
+            quarantined = bool(
+                payment_id
+                and reservation_id
+                and request.app.state.credits.mark_payment_settlement_unknown(
+                    payment_id=payment_id,
+                    reservation_id=reservation_id,
+                )
+            )
+        except Exception:
+            quarantined = False
+        _record_product_event(
+            "payment_settlement_unreconciled",
+            request,
+            price_usdc=price,
+            network=network,
+            reason="settlement_cancelled_with_unknown_remote_outcome",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": (
+                    "settlement_unknown"
+                    if quarantined
+                    else "settlement_unknown_unpersisted"
+                ),
+            },
+        )
+        raise
+    except Exception:
+        logger.error("Payment settlement call failed")
+        settlement = {
+            "success": False,
+            "errorReason": "facilitator_unavailable",
+            "outcomeUnknown": True,
+        }
+    if settlement.get("success") is not True:
+        reason = str(settlement.get("errorReason") or "settlement_failed")
+        if settlement.get("outcomeUnknown") is True:
+            try:
+                quarantined = bool(
+                    payment_id
+                    and reservation_id
+                    and request.app.state.credits.mark_payment_settlement_unknown(
+                        payment_id=payment_id,
+                        reservation_id=reservation_id,
+                    )
+                )
+            except Exception:
+                quarantined = False
+            _record_product_event(
+                "payment_settlement_unreconciled",
+                request,
+                price_usdc=price,
+                network=network,
+                reason=reason,
+                metadata={
+                    "attempt_id": attempt_id,
+                    "payment_id": payment_id or None,
+                    "payment_state": (
+                        "settlement_unknown"
+                        if quarantined
+                        else "settlement_unknown_unpersisted"
+                    ),
+                },
+            )
+            return _apply_x402_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": "Payment Settlement Outcome Unknown",
+                        "message": "The remote settlement outcome is unknown; this proof is quarantined from automatic retry pending reconciliation.",
+                    },
+                ),
+            )
+        _record_product_event(
+            "payment_failed",
+            request,
+            price_usdc=price,
+            network=network,
+            reason=reason,
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "pending",
+            },
+        )
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=502,
+                content={
+                    "error": "Payment Settlement Unavailable",
+                    "message": "The payment could not be finalized; no data was delivered.",
+                    "details": reason,
+                },
+            ),
+        )
+
+    settlement_tx_hash = fingerprint(str(settlement.get("transaction") or ""))
+    try:
+        checkpointed = bool(
+            payment_id
+            and reservation_id
+            and request.app.state.credits.checkpoint_settled_payment(
+                payment_id=payment_id,
+                reservation_id=reservation_id,
+                settlement=settlement,
+                response_status=response.status_code,
+                response_headers=dict(response.headers),
+                response_body=response_body,
+                replay_ttl_seconds=settings.server.x402_payment_replay_ttl_seconds,
+                replay_max_entries=settings.server.x402_payment_replay_max_entries,
+            )
+        )
+    except Exception:
+        checkpointed = False
+    if not checkpointed:
+        logger.error("Remote settlement succeeded but its local checkpoint failed")
+        _record_product_event(
+            "payment_settlement_unreconciled",
+            request,
+            price_usdc=price,
+            network=network,
+            reason="settlement_checkpoint_failed_after_remote_settlement",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id or None,
+                "payment_state": "settlement_unreconciled",
+                "transaction_hash": settlement_tx_hash,
+            },
+        )
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Payment Reconciliation Required",
+                    "message": "The payment settled remotely, but its recovery checkpoint could not be stored; no data was delivered.",
+                },
+            ),
+        )
+
+    _record_product_event(
+        "payment_settled",
+        request,
+        price_usdc=price,
+        network=network,
+        metadata={
+            "attempt_id": attempt_id,
+            "payment_id": payment_id,
+            "payment_state": "settled",
+            "transaction_hash": settlement_tx_hash,
+        },
+    )
+
+    try:
+        finalized = request.app.state.credits.finalize_payment_proof(
+            payment_id=payment_id,
+            reservation_id=reservation_id,
+            settlement=settlement,
+            response_status=response.status_code,
+            response_headers=dict(response.headers),
+            response_body=response_body,
+            replay_ttl_seconds=settings.server.x402_payment_replay_ttl_seconds,
+            replay_max_entries=settings.server.x402_payment_replay_max_entries,
+        )
+    except Exception:
+        finalized = False
+    if not finalized:
+        try:
+            recovered = request.app.state.credits.finalized_payment_response(
+                payment_id=payment_id,
+                request_binding=str(verification.get("request_binding") or ""),
+                max_age_seconds=settings.server.x402_payment_replay_ttl_seconds,
+            )
+            finalized = recovered is not None
+        except Exception:
+            finalized = False
+    if not finalized:
+        logger.error("Settlement checkpointed but local delivery finalization is deferred")
+        _record_product_event(
+            "charged_delivery_failed",
+            request,
+            status_code=503,
+            price_usdc=price,
+            network=network,
+            reason="local_finalization_deferred_after_settlement",
+            metadata={
+                "attempt_id": attempt_id,
+                "payment_id": payment_id,
+                "payment_mode": "x402",
+                "payment_state": "settled",
+                "transaction_hash": settlement_tx_hash,
+            },
+        )
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Payment Delivery Deferred",
+                    "message": "The payment is safely checkpointed; retry the exact request to recover the response without paying again.",
+                },
+            ),
+        )
+
     first_activation = _record_charged_delivery_outcome(
         request,
         response,
         price_usdc=price,
         payment_mode="x402",
         network=network,
-        metadata={"mock": bool(verification.get("mock"))},
+        metadata={
+            "mock": bool(verification.get("mock")),
+            "attempt_id": attempt_id,
+            "payment_id": payment_id or None,
+            "payment_state": "finalized",
+        },
     )
     if first_activation:
         response.headers["X-Blocksize-Activation"] = "first-live-price"
-
-    # Settle payment (best-effort)
-    try:
-        settlement = await _settle_payment(payment_header, payment_reqs)
-        if settlement.get("success"):
-            settlement_b64 = base64.b64encode(json.dumps(settlement).encode()).decode()
-            response.headers["PAYMENT-RESPONSE"] = settlement_b64
-            response.headers["X-PAYMENT-RESPONSE"] = settlement_b64
-            logger.info("Payment settled: %s USDC for %s", price, path)
-    except httpx.HTTPError as e:
-        logger.error("Payment settlement failed: %s", e)
+    settlement_b64 = base64.b64encode(
+        json.dumps(settlement, sort_keys=True).encode()
+    ).decode()
+    response.headers["PAYMENT-RESPONSE"] = settlement_b64
+    response.headers["X-PAYMENT-RESPONSE"] = settlement_b64
+    logger.info("Payment settled and finalized: %s USDC for %s", price, path)
 
     return response
 
@@ -4929,7 +6920,21 @@ async def search_pairs(
 
 
 @app.get("/v1/instruments/{service}")
-async def list_instruments(service: str, request: Request) -> dict[str, Any]:
+async def list_instruments(
+    service: str,
+    request: Request,
+    limit: int = Query(
+        DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+        ge=1,
+        le=DISCOVERY_INSTRUMENT_MAX_LIMIT,
+        description="Maximum instruments to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based offset into the sorted instrument catalog",
+    ),
+) -> dict[str, Any]:
     """List instruments for a service. FREE."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
@@ -4943,8 +6948,29 @@ async def list_instruments(service: str, request: Request) -> dict[str, Any]:
             instruments = await client.list_metal_instruments()
         else:
             raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
+        instruments = sorted(str(instrument) for instrument in instruments)
+        total = len(instruments)
+        page = instruments[offset : offset + limit]
+        next_offset = offset + len(page)
+        has_more = next_offset < total
         return InstrumentListResponse(
-            service=service, total_instruments=len(instruments), instruments=instruments,
+            service=service,
+            total_instruments=total,
+            returned_instruments=len(page),
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            next_offset=next_offset if has_more else None,
+            instruments=page,
+            meta={
+                **build_catalog_snapshot_metadata(
+                    source=f"Blocksize {service} instrument catalog",
+                    records=instruments,
+                    grain="instrument",
+                    snapshot_scope="full_upstream_catalog",
+                ),
+                "ordering": "lexicographic_ascending",
+            },
         ).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
@@ -4967,7 +6993,7 @@ async def get_rwa_build_plan() -> dict[str, Any]:
 async def get_rwa_coverage(
     asset_class: str = Query(
         "all",
-        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        max_length=64,
         description="RWA asset-class filter",
     ),
     venue: str = Query(
@@ -4976,6 +7002,17 @@ async def get_rwa_coverage(
         description="Venue filter, e.g. kraken_xstocks, ostium, gains, jupiter_xstocks",
     ),
     include_symbols: bool = Query(True, description="Include per-symbol coverage rows"),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum symbol rows to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based symbol-row offset",
+    ),
 ) -> dict[str, Any]:
     """Return filterable RWA symbol and venue coverage. FREE."""
     try:
@@ -4987,11 +7024,15 @@ async def get_rwa_coverage(
                 "asset_class": asset_class,
                 "venue": venue,
                 "include_symbols": include_symbols,
+                "limit": limit,
+                "offset": offset,
             },
             **build_rwa_coverage_overview(
                 asset_class=asset_class,
                 venue=venue,
                 include_symbols=include_symbols,
+                limit=limit,
+                offset=offset,
             ),
         }
     except ValueError as exc:
@@ -5002,13 +7043,24 @@ async def get_rwa_coverage(
 async def get_rwa_assets(
     asset_class: str = Query(
         "all",
-        pattern="^(all|equity|etf|index|fx|commodity|metal|treasury|treasury_fund|tokenized_fund)$",
+        max_length=64,
         description="RWA asset-class filter",
     ),
     venue: str = Query(
         "all",
         max_length=64,
         description="Venue filter, e.g. kraken_xstocks, ostium, gains, ondo_stocks",
+    ),
+    limit: int = Query(
+        RWA_ASSET_MATRIX_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum canonical asset rows to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based canonical-asset offset",
     ),
 ) -> dict[str, Any]:
     """Return sourceable assets grouped across all RWA venues. FREE."""
@@ -5017,21 +7069,79 @@ async def get_rwa_assets(
             "status": "ok",
             "product": "rwa_asset_sourcing_matrix",
             "as_of": _utc_now_iso(),
-            "filters": {"asset_class": asset_class, "venue": venue},
-            **build_rwa_asset_matrix(asset_class=asset_class, venue=venue),
+            "filters": {
+                "asset_class": asset_class,
+                "venue": venue,
+                "limit": limit,
+                "offset": offset,
+            },
+            **build_rwa_asset_matrix(
+                asset_class=asset_class,
+                venue=venue,
+                limit=limit,
+                offset=offset,
+            ),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/v1/rwa/identity-audit")
-async def get_rwa_identity_audit() -> dict[str, Any]:
+async def get_rwa_identity_audit(
+    asset_id: str = Query(
+        "all",
+        max_length=512,
+        description="Optional comma-separated exact canonical asset ids",
+    ),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum identity rows to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based identity-row offset",
+    ),
+) -> dict[str, Any]:
     """Return verified ticker identities and taxonomy corrections. FREE."""
+    audit = build_rwa_ticker_identity_audit()
+    requested_asset_ids = {
+        item.strip().upper()
+        for item in asset_id.split(",")
+        if item.strip()
+    }
+    matching_rows = [
+        row
+        for row in audit["rows"]
+        if (
+            asset_id.strip().lower() == "all"
+            or str(row.get("asset_id", "")).upper() in requested_asset_ids
+        )
+    ]
+    rows, pagination = paginate_rows(
+        matching_rows,
+        limit=limit,
+        offset=offset,
+    )
     return {
         "status": "ok",
         "product": "rwa_ticker_identity_audit",
         "as_of": _utc_now_iso(),
-        **build_rwa_ticker_identity_audit(),
+        "filters": {
+            "asset_id": asset_id,
+            "limit": limit,
+            "offset": offset,
+        },
+        **audit,
+        "summary": {
+            **audit["summary"],
+            "matching_asset_count": len(matching_rows),
+            "returned_asset_count": len(rows),
+        },
+        "rows": rows,
+        "pagination": pagination,
     }
 
 
@@ -5078,18 +7188,65 @@ async def get_rwa_derivative_venues(
         False,
         description="Include inactive/settled and raw market rows from the generated report",
     ),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum rows per derivative collection to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based derivative-row offset",
+    ),
 ) -> dict[str, Any]:
     """Return derivative/perp/futures/yield venue discovery and fair-value methodology. FREE."""
+    report = build_derivative_venue_report(
+        venue=venue,
+        asset_class=asset_class,
+        status=status,
+        include_market_rows=include_market_rows,
+    )
+    coverage_rows, coverage_pagination = paginate_rows(
+        report["coverage_rows"],
+        limit=limit,
+        offset=offset,
+    )
+    matching_coverage_rows = len(report["coverage_rows"])
+    pagination: dict[str, Any] = {"coverage_rows": coverage_pagination}
+    response = {
+        **report,
+        "filters": {
+            **report["filters"],
+            "limit": limit,
+            "offset": offset,
+        },
+        "summary": {
+            **report["summary"],
+            "matching_coverage_row_count": matching_coverage_rows,
+            "returned_coverage_rows": len(coverage_rows),
+        },
+        "coverage_rows": coverage_rows,
+        "pagination": pagination,
+    }
+    if include_market_rows:
+        market_rows, market_pagination = paginate_rows(
+            report.get("market_rows", []),
+            limit=limit,
+            offset=offset,
+        )
+        response["market_rows"] = market_rows
+        response["summary"] = {
+            **response["summary"],
+            "matching_market_row_count": len(report.get("market_rows", [])),
+            "returned_market_rows": len(market_rows),
+        }
+        pagination["market_rows"] = market_pagination
     return {
         "status": "ok",
         "product": "rwa_derivative_venue_discovery",
         "as_of": _utc_now_iso(),
-        **build_derivative_venue_report(
-            venue=venue,
-            asset_class=asset_class,
-            status=status,
-            include_market_rows=include_market_rows,
-        ),
+        **response,
     }
 
 
@@ -5198,18 +7355,64 @@ async def get_rwa_non_crypto_feeds(
         max_length=96,
         description="Optional venue id filter",
     ),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum rows per non-crypto feed collection to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based non-crypto feed-row offset",
+    ),
 ) -> dict[str, Any]:
     """Return generated non-crypto VWAP and bid/ask feed definitions. FREE."""
     try:
+        catalog = build_non_crypto_feed_catalog(
+            exclude_tokenized_stocks=exclude_tokenized_stocks,
+            asset_class=None if asset_class == "all" else asset_class,
+            venue=None if venue == "all" else venue,
+        )
+        vwap_feeds, vwap_pagination = paginate_rows(
+            catalog["vwap_feeds"],
+            limit=limit,
+            offset=offset,
+        )
+        bidask_feeds, bidask_pagination = paginate_rows(
+            catalog["bidask_feeds"],
+            limit=limit,
+            offset=offset,
+        )
+        excluded_rows, excluded_pagination = paginate_rows(
+            catalog["excluded_rows"],
+            limit=limit,
+            offset=offset,
+        )
         return {
             "status": "ok",
             "product": "rwa_non_crypto_feed_catalog",
             "as_of": _utc_now_iso(),
-            **build_non_crypto_feed_catalog(
-                exclude_tokenized_stocks=exclude_tokenized_stocks,
-                asset_class=None if asset_class == "all" else asset_class,
-                venue=None if venue == "all" else venue,
-            ),
+            **catalog,
+            "filters": {
+                **catalog["filters"],
+                "limit": limit,
+                "offset": offset,
+            },
+            "summary": {
+                **catalog["summary"],
+                "returned_vwap_feed_count": len(vwap_feeds),
+                "returned_bidask_feed_count": len(bidask_feeds),
+                "returned_excluded_row_count": len(excluded_rows),
+            },
+            "vwap_feeds": vwap_feeds,
+            "bidask_feeds": bidask_feeds,
+            "excluded_rows": excluded_rows,
+            "pagination": {
+                "vwap_feeds": vwap_pagination,
+                "bidask_feeds": bidask_pagination,
+                "excluded_rows": excluded_pagination,
+            },
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -5240,20 +7443,52 @@ async def get_rwa_discovery(
         True,
         description="Include per-feed gate details",
     ),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum feed-detail rows to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based feed-detail offset",
+    ),
 ) -> dict[str, Any]:
     """Return discovery evidence and promotion blockers for every sourced RWA feed. FREE."""
     try:
+        audit = build_feed_discovery_audit(
+            exclude_tokenized_stocks=exclude_tokenized_stocks,
+            asset_class=asset_class,
+            venue=venue,
+            status=status,
+            include_feed_details=include_feed_details,
+        )
+        if include_feed_details:
+            feeds, pagination = paginate_rows(
+                audit["feeds"],
+                limit=limit,
+                offset=offset,
+            )
+            audit = {
+                **audit,
+                "summary": {
+                    **audit["summary"],
+                    "returned_feed_count": len(feeds),
+                },
+                "feeds": feeds,
+                "pagination": pagination,
+            }
+        audit["filters"] = {
+            **audit["filters"],
+            "limit": limit,
+            "offset": offset,
+        }
         return {
             "status": "ok",
             "product": "rwa_feed_discovery_promotion_audit",
             "as_of": _utc_now_iso(),
-            **build_feed_discovery_audit(
-                exclude_tokenized_stocks=exclude_tokenized_stocks,
-                asset_class=asset_class,
-                venue=venue,
-                status=status,
-                include_feed_details=include_feed_details,
-            ),
+            **audit,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -5530,6 +7765,17 @@ async def get_rwa_registry(
     symbol: str | None = Query(None, max_length=96, description="Optional symbol or alias, e.g. AAPL, AAPLx/USD, EURUSD"),
     venue: str | None = Query(None, max_length=96, description="Optional venue alias, e.g. Meteora DLMM, uniswap, jupiter"),
     include_aliases: bool = Query(False, description="Include generated symbol and venue aliases"),
+    limit: int = Query(
+        RWA_ASSET_MATRIX_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum canonical assets to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Canonical asset offset in deterministic registry order",
+    ),
 ) -> dict[str, Any]:
     """Return canonical RWA assets and venue coverage with alias handling. FREE."""
     try:
@@ -5537,11 +7783,20 @@ async def get_rwa_registry(
             "status": "ok",
             "product": "rwa_canonical_registry",
             "as_of": _utc_now_iso(),
-            "filters": {"symbol": symbol, "venue": venue, "include_aliases": include_aliases},
+            "filters": {
+                "symbol": symbol,
+                "venue": venue,
+                "include_aliases": include_aliases,
+                "limit": limit,
+                "offset": offset,
+            },
             **build_rwa_registry_overview(
                 symbol=symbol,
                 venue=venue,
                 include_aliases=include_aliases,
+                limit=limit,
+                offset=offset,
+                include_venue_instruments=False,
             ),
         }
     except ValueError as exc:
@@ -5568,30 +7823,37 @@ async def resolve_rwa_symbol_endpoint(
 @app.get("/v1/rwa/registry/venues")
 async def get_rwa_registry_venues(
     venue: str | None = Query(None, max_length=96, description="Optional venue alias"),
+    asset_id: str | None = Query(
+        None,
+        max_length=256,
+        description="Optional canonical asset_id returned by the RWA registry",
+    ),
     include_aliases: bool = Query(False, description="Include generated venue aliases"),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum venue-instrument rows to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Venue-instrument offset in deterministic registry order",
+    ),
 ) -> dict[str, Any]:
     """Return what each venue covers and how it should be interpreted. FREE."""
     try:
-        registry = build_rwa_venue_registry()
-        venues = registry["venues"]
-        if venue:
-            resolved = registry["venue_alias_index"].get(normalize_venue_alias(venue))
-            if resolved is None:
-                raise ValueError(f"Unsupported venue: {venue}")
-            venues = [row for row in venues if row["venue_id"] == resolved]
-        if not include_aliases:
-            for row in venues:
-                row.pop("aliases", None)
         return {
             "status": "ok",
             "product": "rwa_venue_coverage_registry",
             "as_of": _utc_now_iso(),
-            "filters": {"venue": venue, "include_aliases": include_aliases},
-            "summary": {
-                **registry["summary"],
-                "returned_venues": len(venues),
-            },
-            "venues": venues,
+            **build_rwa_venue_registry_page(
+                venue=venue,
+                asset_id=asset_id,
+                include_aliases=include_aliases,
+                limit=limit,
+                offset=offset,
+            ),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -5603,37 +7865,133 @@ async def get_rwa_sourcing_jobs(
         False,
         description="Include jobs for targets already marked covered",
     ),
+    venue: str = Query(
+        "all",
+        max_length=96,
+        description="Optional exact venue id filter",
+    ),
+    status: str = Query(
+        "all",
+        max_length=96,
+        description="Optional exact sourcing status filter",
+    ),
+    category: str = Query(
+        "all",
+        max_length=128,
+        description="Optional exact sourcing category filter",
+    ),
+    limit: int = Query(
+        RWA_COLLECTION_DEFAULT_LIMIT,
+        ge=1,
+        le=RWA_COLLECTION_MAX_LIMIT,
+        description="Maximum sourcing jobs to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based sourcing-job offset",
+    ),
 ) -> dict[str, Any]:
     """Return per-symbol sourcing jobs needed for oracle-parity coverage. FREE."""
+    sourcing = build_sourcing_jobs(
+        include_completed_targets=include_completed_targets,
+    )
+    venue_filter = venue.strip().lower()
+    status_filter = status.strip().lower()
+    category_filter = category.strip().lower()
+    matching_jobs = [
+        job
+        for job in sourcing["jobs"]
+        if (
+            venue_filter == "all"
+            or str(job.get("venue", "")).lower() == venue_filter
+        )
+        and (
+            status_filter == "all"
+            or str(job.get("status", "")).lower() == status_filter
+        )
+        and (
+            category_filter == "all"
+            or str(job.get("category", "")).lower() == category_filter
+        )
+    ]
+    jobs, pagination = paginate_rows(
+        matching_jobs,
+        limit=limit,
+        offset=offset,
+    )
     return {
         "status": "ok",
         "product": "rwa_sourcing_jobs",
         "as_of": _utc_now_iso(),
-        "filters": {"include_completed_targets": include_completed_targets},
-        **build_sourcing_jobs(include_completed_targets=include_completed_targets),
+        "filters": {
+            "include_completed_targets": include_completed_targets,
+            "venue": venue,
+            "status": status,
+            "category": category,
+            "limit": limit,
+            "offset": offset,
+        },
+        **sourcing,
+        "summary": {
+            **sourcing["summary"],
+            "matching_job_count": len(matching_jobs),
+            "returned_job_count": len(jobs),
+        },
+        "jobs": jobs,
+        "pagination": pagination,
     }
 
 
 @app.post("/v1/rwa/sourcing/probe")
-async def probe_rwa_sourcing_jobs(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Execute bounded ready-to-probe RWA sourcing jobs. FREE."""
+async def probe_rwa_sourcing_jobs(request: Request) -> dict[str, Any]:
+    """Execute bounded ready-to-probe RWA sourcing jobs for an authenticated operator."""
+    require_rwa_operator(request, require_mutations=True)
+    try:
+        payload = RWAProbeRequest.model_validate(await request.json()).as_probe_payload()
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "RWA_PROBE_REQUEST_INVALID",
+                "message": "The RWA probe request did not satisfy the bounded schema.",
+            },
+        ) from None
     registry = getattr(request.app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
     store = _rwa_observation_store(request) if payload.get("persist") else None
+    try:
+        result = await probe_sourcing_jobs(payload, registry=registry, store=store)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error_code": "RWA_PROBE_TIMEOUT",
+                "message": "The bounded RWA probe exceeded its time limit.",
+            },
+        ) from None
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "RWA_PROBE_RESULT_INVALID",
+                "message": "The probe result did not satisfy the evidence contract.",
+            },
+        ) from None
     return {
         "status": "ok",
         "product": "rwa_sourcing_probe",
         "as_of": _utc_now_iso(),
         "methodology": {
-            "type": "rwa_sourcing_probe_v1",
+            "type": "rwa_sourcing_probe_v2",
             "steps": [
+                "Authenticate an operator and enforce request, concurrency, and time ceilings.",
                 "Select ready_to_probe jobs from the oracle-parity sourcing queue.",
-                "Fetch normalized bid/ask and optional L2 depth through the registered adapter.",
-                "Calculate block-size VWAP when depth is available.",
+                "Fetch normalized bid/ask and optional bounded L2 depth.",
                 "Run the real-time quality gate over fetched observations.",
-                "Persist observations only when persist is explicitly true.",
+                "Commit persisted observations atomically when persist is explicitly true.",
             ],
         },
-        **await probe_sourcing_jobs(payload, registry=registry, store=store),
+        **result,
     }
 
 
@@ -5797,18 +8155,39 @@ async def check_rwa_realtime_quality(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/v1/rwa/observations/store")
-async def store_rwa_observation(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Store one replayable RWA observation and its quality artifacts. FREE."""
+async def store_rwa_observation(request: Request) -> dict[str, Any]:
+    """Store one bounded observation for an authenticated RWA operator."""
+    require_rwa_operator(request, require_mutations=True)
     try:
-        record = _rwa_observation_store(request).store_observation(payload)
+        payload = RWAObservationEnvelope.model_validate(
+            await request.json()
+        ).as_store_payload()
+        record = await _store_rwa_observation_without_blocking(
+            _rwa_observation_store(request),
+            payload,
+        )
         return {
             "status": "ok",
             "product": "rwa_observation_store",
             "as_of": _utc_now_iso(),
             "record": record,
         }
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "RWA_OBSERVATION_INVALID",
+                "message": "The observation did not satisfy the bounded evidence schema.",
+            },
+        ) from None
+    except sqlite3.Error:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "RWA_OBSERVATION_STORE_BUSY",
+                "message": "The RWA evidence store is temporarily unavailable.",
+            },
+        ) from None
 
 
 @app.get("/v1/rwa/observations")
@@ -5818,7 +8197,8 @@ async def list_rwa_observations(
     venue: str | None = Query(None, max_length=64, description="Optional venue filter"),
     limit: int = Query(50, ge=1, le=200, description="Maximum observations to return"),
 ) -> dict[str, Any]:
-    """List replayable RWA observation records. FREE."""
+    """List bounded RWA evidence summaries for an authenticated operator."""
+    require_rwa_operator(request, require_mutations=False)
     return {
         "status": "ok",
         "product": "rwa_observation_ledger",
@@ -5848,9 +8228,17 @@ async def benchmark_rwa_against_blocksize(
     request: Request,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Benchmark sourced RWA observations against live Blocksize market data."""
+    """Benchmark sourced RWA observations without mutating operator evidence."""
     import asyncio
 
+    if payload.get("persist"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "RWA_PUBLIC_PERSISTENCE_FORBIDDEN",
+                "message": "The public benchmark endpoint is stateless.",
+            },
+        )
     observations = payload.get("observations")
     if not isinstance(observations, list) or not observations:
         raise HTTPException(status_code=400, detail="observations must include at least one row")
@@ -5935,41 +8323,6 @@ async def benchmark_rwa_against_blocksize(
         for item in ok_results
         if isinstance(item.get("benchmark"), dict) and item["benchmark"].get("endpoint")
     ]
-    if payload.get("persist"):
-        store = _rwa_observation_store(request)
-        stored_observations: list[dict[str, Any]] = []
-        for raw, benchmark_result in zip(observations, results):
-            if not isinstance(raw, dict):
-                continue
-            try:
-                stored_observations.append(
-                    store.store_observation(
-                        {
-                            "raw_payload": raw,
-                            "normalized_observation": raw,
-                            "blocksize_benchmark": benchmark_result
-                            if isinstance(benchmark_result, dict)
-                            else {},
-                            "metadata": {
-                                "product": "rwa_blocksize_benchmark",
-                                "benchmark_status": (
-                                    benchmark_result.get("status")
-                                    if isinstance(benchmark_result, dict)
-                                    else "unknown"
-                                ),
-                            },
-                        }
-                    )
-                )
-            except ValueError as exc:
-                stored_observations.append(
-                    {
-                        "status": "error",
-                        "error_code": "RWA_OBSERVATION_STORE_ERROR",
-                        "message": str(exc),
-                    }
-                )
-        response_core["stored_observations"] = stored_observations
     receipt = _response_receipt(
         request,
         product="rwa_blocksize_benchmark",
@@ -6031,9 +8384,18 @@ async def get_cache_status(request: Request) -> dict[str, Any]:
 # Credit Management
 # ---------------------------------------------------------------------------
 
-@app.get("/v1/credits/balance/{wallet}")
+def _require_unverified_http_credits_enabled() -> None:
+    """Expose legacy wallet-credit QA routes only outside production."""
+    if (
+        security_configuration_status()["production"]
+        or not settings.server.unverified_http_credits_enabled
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+
+@app.get("/v1/credits/balance/{wallet}", include_in_schema=False)
 async def get_credit_balance(request: Request, wallet: str):
-    """View current drawdown credit balance for a specific wallet."""
+    """Local-QA-only view of a legacy unverified wallet credit balance."""
+    _require_unverified_http_credits_enabled()
     mgr: CreditManager = request.app.state.credits
     balance = mgr.get_balance(wallet)
     return {
@@ -6041,27 +8403,34 @@ async def get_credit_balance(request: Request, wallet: str):
         "balance_credits": balance,
         "credit_unit": "Blocksize service credit",
         "starter_allowance": {
-            "positioning": "Start with 50 live data credits",
+            "positioning": "Legacy local-QA wallets may receive up to 50 test credits.",
+            "eligibility": "local_qa_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "not_free_forever": True,
         },
-        "upgrade_path": "Use x402 payment or prepaid credit top-ups when credits are exhausted.",
+        "upgrade_path": "Production direct HTTP uses signed x402; contact sales for an authenticated account plan.",
     }
 
-@app.post("/v1/credits/purchase")
+@app.post("/v1/credits/purchase", include_in_schema=False)
 async def purchase_credits_challenge(
     request: Request,
     tier: str = Query(..., pattern="^(starter|pro|institutional)$"),
 ):
     """
-    Triggers an x402 challenge for bulk credits.
+    Local-QA-only legacy challenge for unverified wallet credits.
     Tiers: starter ($0.90), pro ($8.00), institutional ($60.00)
     """
+    _require_unverified_http_credits_enabled()
     tier_data = BULK_TIERS.get(tier)
     price = Decimal(str(tier_data["price"]))
 
     # Return 402 challenge
-    requirements = settings.payment_requirements(price)
+    requirements = _facilitator_supported_requirements(
+        settings.payment_requirements(price),
+        getattr(request.app.state, "facilitator_support", None),
+    )
+    if not requirements:
+        raise HTTPException(status_code=503, detail="No operational payment rail")
     payment_required = _x402_payment_required(request, requirements)
     payload = _encode_payment_required(payment_required)
     _record_product_event(
@@ -6084,9 +8453,10 @@ async def purchase_credits_challenge(
         }
     )
 
-@app.post("/v1/credits/claim")
+@app.post("/v1/credits/claim", include_in_schema=False)
 async def claim_credits(request: Request, payload: dict):
-    """Verify a bulk payment and credit the agent's drawdown balance."""
+    """Local-QA-only legacy proof claim for an unverified wallet balance."""
+    _require_unverified_http_credits_enabled()
     mgr: CreditManager = request.app.state.credits
     tx_hash = payload.get("proof")
     network = payload.get("network", "solana")
@@ -6108,10 +8478,17 @@ async def claim_credits(request: Request, payload: dict):
 
     # Native RPC verification of the bulk payment
     payment_reqs = settings.payment_requirements(Decimal(str(tier_data["price"])))
-    verification = await _verify_payment(base64.b64encode(json.dumps({
+    payment_header = base64.b64encode(json.dumps({
         "proof": tx_hash,
         "network": network
-    }).encode()).decode(), payment_reqs, mgr, purpose=f"credits:{tier}")
+    }).encode()).decode()
+    verification = await _verify_payment(
+        payment_header,
+        payment_reqs,
+        mgr,
+        purpose=f"credits:{tier}",
+        attempt_id=secrets.token_hex(16),
+    )
 
     if not verification.get("valid"):
         _record_product_event(
@@ -6124,13 +8501,20 @@ async def claim_credits(request: Request, payload: dict):
         )
         raise HTTPException(status_code=402, detail=f"Bulk payment verification failed: {verification.get('reason')}")
     
-    # Credit the wallet
-    mgr.add_credits(
-        address=wallet, 
-        credits=tier_data["credits"], 
-        tx_hash=tx_hash, 
-        amount_usdc=tier_data["price"]
-    )
+    settlement = await _settle_payment(payment_header, payment_reqs, verification)
+    if settlement.get("success") is not True:
+        raise HTTPException(status_code=502, detail="Bulk payment settlement failed")
+    payment_id = str(verification.get("payment_id") or "")
+    reservation_id = str(verification.get("reservation_id") or "")
+    if not mgr.finalize_payment_and_add_credits(
+        payment_id=payment_id,
+        reservation_id=reservation_id,
+        address=wallet,
+        credits=tier_data["credits"],
+        amount_usdc=tier_data["price"],
+        settlement=settlement,
+    ):
+        raise HTTPException(status_code=409, detail="Bulk payment was already claimed")
     _record_product_event(
         "bulk_credit_claimed",
         request,
@@ -6140,7 +8524,7 @@ async def claim_credits(request: Request, payload: dict):
         metadata={
             "tier": tier,
             "credits_added": tier_data["credits"],
-            "proof_hash": fingerprint(str(tx_hash)),
+            "proof_hash": fingerprint(payment_id),
         },
     )
     
@@ -6155,12 +8539,35 @@ async def claim_credits(request: Request, payload: dict):
 # Discovery & MCP
 # ---------------------------------------------------------------------------
 
+@app.head("/mcp/manifest.json", include_in_schema=False)
 @app.get("/mcp/manifest.json")
 async def mcp_manifest():
     """
     Model Context Protocol (MCP) Manifest.
     Provides listing metadata for the public remote discovery server.
     """
+    manifest_tools: list[dict[str, object]] = []
+    for tool in await public_mcp.list_tools():
+        annotations = (
+            tool.annotations.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+            )
+            if tool.annotations is not None
+            else {}
+        )
+        manifest_tool: dict[str, object] = {
+            "name": tool.name,
+            "description": tool.description or "",
+            "parameters": tool.parameters,
+            "payment": {"required": False},
+            "annotations": annotations,
+        }
+        if tool.title:
+            manifest_tool["title"] = tool.title
+        manifest_tools.append(manifest_tool)
+
     manifest: dict[str, object] = {
         "mcp_version": "1.0",
         "name": PUBLIC_DISPLAY_NAME,
@@ -6172,14 +8579,16 @@ async def mcp_manifest():
         },
         "capabilities": {
             "discovery_modes": ["instrument-search", "equity-search", "pricing-inspection", "document-search"],
-            "paid_api_modes": ["real-time-x402", "credit-drawdown"],
-            "bulk_discounts": "up to 40% via /v1/credits/purchase",
+            "paid_api_modes": [
+                "real-time-x402",
+                "authenticated-connector-credit-drawdown",
+            ],
             "public_remote_server": "read-only and listing-safe",
             "ai_reader_brief": LLMS_TXT_URL,
             "sitemap": SITEMAP_URL,
             "data_package_catalog": DATA_PACKAGES_JSON_URL,
             "category_hubs": CATEGORY_HUBS_JSON_URL,
-            "starter_allowance": "Start with 50 live data credits across raw data and premium workflow products.",
+            "starter_allowance": "Authenticated connectors receive up to 50 live data credits; direct public HTTP uses signed x402.",
             "equities": "Supported stock tickers are discoverable with asset_class=equity and fetched through /v1/bidask/{ticker}.",
         },
         "links": {
@@ -6203,108 +8612,14 @@ async def mcp_manifest():
             "glama_claim": GLAMA_WELL_KNOWN_URL,
             "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
         },
-        "tools": [
-            {
-                "name": "search_pairs",
-                "description": (
-                    "Search supported crypto, equity/stock ticker, FX, and metal symbols. "
-                    "Returns catalog metadata only; free, read-only, and no live prices."
-                ),
-                "parameters": {
-                    "query": {"type": "string", "example": "AAPL"},
-                    "asset_class": {"type": "string", "example": "equity"},
-                },
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "list_instruments",
-                "description": (
-                    "List supported instruments for one service such as vwap, bidask, fx, "
-                    "or metal. Use bidask for supported equities. Free read-only catalog metadata."
-                ),
-                "parameters": {"service": {"type": "string", "example": "bidask"}},
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "get_pricing_info",
-                "description": (
-                    "Inspect current per-call pricing, bulk credit tiers, and supported "
-                    "USDC settlement networks. Free and read-only; no payment is started."
-                ),
-                "parameters": {},
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "get_market_data_endpoint",
-                "description": (
-                    "Build the exact x402-protected HTTP URL for one live market-data "
-                    "request, including supported equity ticker bid/ask URLs. Free and "
-                    "read-only; does not fetch prices or charge a wallet."
-                ),
-                "parameters": {
-                    "service": {"type": "string", "example": "bidask"},
-                    "symbol": {"type": "string", "example": "AAPL"},
-                },
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "get_product_catalog",
-                "description": (
-                    "Inspect raw data and premium agent-native workflow products, "
-                    "including starter-credit positioning, credit costs, suggested "
-                    "paid prices, endpoint templates, and upgrade path."
-                ),
-                "parameters": {},
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "get_workflow_endpoint",
-                "description": (
-                    "Build the exact paid HTTP endpoint, method, starter-credit "
-                    "cost, and example body for a premium Blocksize workflow. "
-                    "Free and read-only; does not fetch data or charge credits."
-                ),
-                "parameters": {
-                    "product": {
-                        "type": "string",
-                        "example": "agent_market_brief",
-                    },
-                },
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "search",
-                "description": (
-                    "Search Blocksize docs and instrument metadata. Returns ids for fetch; "
-                    "free, read-only, and no live prices."
-                ),
-                "parameters": {"query": {"type": "string", "example": "pricing"}},
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-            {
-                "name": "fetch",
-                "description": (
-                    "Fetch one document or instrument guide by id. Free, read-only, and "
-                    "no account, credential, payment, or live-price side effects."
-                ),
-                "parameters": {"id": {"type": "string", "example": "doc:quickstart"}},
-                "payment": {"required": False},
-                "annotations": {"readOnlyHint": True, "idempotentHint": True},
-            },
-        ],
+        "tools": manifest_tools,
         "paid_api": {
             "openapi_url": OPENAPI_URL,
             "swagger_url": SWAGGER_URL,
-            "payment_model": "x402 or wallet credits",
+            "payment_model": "direct x402 or authenticated connector starter credits",
             "starter_allowance": {
-                "positioning": "Start with 50 live data credits",
+                "positioning": "Authenticated connectors receive up to 50 live data credits.",
+                "eligibility": "authenticated_connector_only",
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
                 "applies_to": [
                     "raw_vwap",
@@ -6323,7 +8638,8 @@ async def mcp_manifest():
                     "trader_alpha_packs",
                     "provenance",
                 ],
-                "upgrade_path": "x402 payment or prepaid credit top-ups",
+                "direct_public_http": "Signed x402 payment is required per live-data request.",
+                "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
             },
         },
     }
@@ -6338,24 +8654,35 @@ async def mcp_manifest():
 
 
 def _observability_authorized(request: Request) -> bool:
-    expected = settings.server.observability_dashboard_token
+    expected = dashboard_token()
     if not expected:
-        return True
+        return False
     header_token = request.headers.get("x-observability-token", "")
     cookie_token = request.cookies.get("observability_token", "")
     auth_header = request.headers.get("authorization", "")
     bearer_token = ""
     if auth_header.lower().startswith("bearer "):
         bearer_token = auth_header.split(" ", 1)[1].strip()
-    query_token = request.query_params.get("token", "")
     return any(
         secrets.compare_digest(expected, token)
-        for token in (header_token, bearer_token, query_token, cookie_token)
+        for token in (header_token, bearer_token, cookie_token)
         if token
     )
 
 
 def _observability_unauthorized() -> JSONResponse:
+    if not dashboard_token():
+        return JSONResponse(
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+            content={
+                "error": "Observability authentication unavailable",
+                "message": (
+                    "Configure a strong OBSERVABILITY_DASHBOARD_TOKEN before "
+                    "using internal observability endpoints."
+                ),
+            },
+        )
     return JSONResponse(
         status_code=401,
         headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
@@ -6509,9 +8836,9 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     failed_after_credit = int(popularity.get("total_failed_after_credit") or 0)
     prompts = int(event_counts.get("payment_required") or 0)
     proof_submissions = int(event_counts.get("payment_proof_submitted") or 0)
-    verified_payments = int(event_counts.get("payment_verified") or 0)
-    credit_successes = int(event_counts.get("credit_drawdown_success") or 0) + int(
-        event_counts.get("mcp_credit_drawdown_success") or 0
+    settled_payments = int(event_counts.get("payment_settled") or 0)
+    unreconciled_settlements = int(
+        event_counts.get("payment_settlement_unreconciled") or 0
     )
     paid_calls = int(overview.get("paid_calls") or 0)
     registry_requests = int(overview.get("registry_requests") or 0)
@@ -6533,6 +8860,19 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     evidence_events = int(source_evidence.get("events_reviewed") or 0)
     synthetic_evidence_events = int(source_evidence.get("synthetic_events") or 0)
     proof_hash_events = int(source_evidence.get("transaction_or_proof_hash_events") or 0)
+    telemetry_scope = (
+        summary.get("telemetry_scope")
+        if isinstance(summary.get("telemetry_scope"), dict)
+        else {}
+    )
+    excluded_synthetic_events = int(
+        telemetry_scope.get("excluded_synthetic_events") or 0
+    )
+    evidence_scope_note = (
+        f"{synthetic_evidence_events} synthetic/test events included"
+        if telemetry_scope.get("include_synthetic")
+        else f"{excluded_synthetic_events} tagged synthetic/test events excluded"
+    )
     unconfigured_platforms = [
         str(platform.get("name") or platform.get("id") or "Unknown platform")
         for platform in platforms
@@ -6543,7 +8883,10 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     top_blocked = _top_popularity_row(rows, "blocked")
     top_delivered = _top_popularity_row(rows, "delivered")
 
-    if requested and delivered == 0 and (blocked or prompts):
+    if unreconciled_settlements:
+        status = "needs_attention"
+        status_label = "Needs attention"
+    elif requested and delivered == 0 and (blocked or prompts):
         status = "needs_attention"
         status_label = "Needs attention"
     elif requested and (delivery_rate is not None and delivery_rate < 0.5):
@@ -6578,13 +8921,17 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         f"The payment funnel shows {prompts} x402 prompts, {proof_submissions} proof submissions, "
         f"{paid_calls} paid/credit-backed calls, ${revenue_usdc:.4f} recognized revenue, and ${inflow_usdc:.4f} wallet inflows."
     )
+    if unreconciled_settlements:
+        executive_summary.append(
+            f"P0: {unreconciled_settlements} remote settlement outcome(s) lack a conclusive local recovery checkpoint."
+        )
     executive_summary.append(
         f"Acquisition telemetry recorded {registry_requests} registry requests across {active_registry_sources} attributed registry sources. "
         f"{len(unconfigured_platforms)} onboarded platform metric feed(s) are still not ingested."
     )
     executive_summary.append(
         f"Raw evidence review found {evidence_events} evidence-bearing events, "
-        f"{synthetic_evidence_events} synthetic/test events, and {proof_hash_events} transaction/proof-hash event(s)."
+        f"{evidence_scope_note}, and {proof_hash_events} transaction/proof-hash event(s)."
     )
 
     what_works: list[dict[str, str]] = []
@@ -6593,12 +8940,20 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         if top_delivered:
             detail += f"; strongest delivered item is {top_delivered.get('service')} / {top_delivered.get('subject')}"
         what_works.append({"title": "Data delivery is producing usable output", "detail": detail, "tone": "good"})
-    if proof_submissions or verified_payments or credit_successes:
+    if settled_payments:
         what_works.append(
             {
-                "title": "Paid usage path has activity",
-                "detail": f"{proof_submissions} proof submissions, {verified_payments} verified direct payments, and {credit_successes} credit-backed successes.",
+                "title": "Settled paid usage path has activity",
+                "detail": f"{proof_submissions} proof submissions, {settled_payments} finalized direct payments, and {paid_calls} successful paid/credit-backed deliveries.",
                 "tone": "good",
+            }
+        )
+    elif paid_calls:
+        what_works.append(
+            {
+                "title": "Credit-backed delivery path has activity",
+                "detail": f"{paid_calls} successful credit-backed deliveries are visible, but no direct x402 payment is settled and finalized.",
+                "tone": "watch",
             }
         )
     if registry_requests or active_registry_sources:
@@ -6627,11 +8982,27 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         )
 
     what_does_not: list[dict[str, str]] = []
+    if unreconciled_settlements:
+        what_does_not.append(
+            {
+                "title": "Payment settlement outcomes require immediate reconciliation",
+                "detail": f"{unreconciled_settlements} remote settlement outcome(s) are unresolved; use available payment evidence to reconcile delivery or refund before retrying.",
+                "tone": "bad",
+            }
+        )
     if prompts and proof_submissions == 0:
         what_does_not.append(
             {
                 "title": "Payment prompts are not converting",
                 "detail": "Clients are seeing x402 challenges, but no payment proof is being submitted afterward.",
+                "tone": "bad",
+            }
+        )
+    if proof_submissions and settled_payments == 0:
+        what_does_not.append(
+            {
+                "title": "Submitted payment proofs are not settling",
+                "detail": f"{proof_submissions} proof submission(s) are recorded, but none reached durable payment_settled finalization.",
                 "tone": "bad",
             }
         )
@@ -6701,13 +9072,22 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         )
 
     improvement_steps: list[dict[str, str]] = []
+    if unreconciled_settlements:
+        improvement_steps.append(
+            {
+                "priority": "P0",
+                "action": "Reconcile every remotely settled payment that lacks a local checkpoint before changing payment infrastructure.",
+                "why": "The payer may have transferred irreversible funds without receiving the protected response.",
+                "check": "Expect payment_settlement_unreconciled to return to 0 after each transaction is delivered or refunded.",
+            }
+        )
     if prompts and proof_submissions == 0:
         improvement_steps.append(
             {
                 "priority": "P0",
                 "action": "Run an end-to-end x402 payment smoke test from the same client surfaces that are prompting.",
                 "why": "The current funnel stops at 402 challenge, so users may be unable or unwilling to complete payment.",
-                "check": "Expect payment_proof_submitted > 0, payment_verified > 0, and wallet inflows with transaction hashes.",
+                "check": "Expect payment_proof_submitted > 0, payment_settled > 0, and wallet inflows with transaction hashes.",
             }
         )
     if requested and delivered == 0:
@@ -6757,6 +9137,12 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
 
     checks = [
         {
+            "name": "Settlement reconciliation",
+            "status": "fail" if unreconciled_settlements else "pass",
+            "value": f"{unreconciled_settlements} unreconciled",
+            "detail": "Remote settlements without a durable local recovery checkpoint are P0 operator alerts.",
+        },
+        {
             "name": "Data delivery",
             "status": "pass" if delivered else "fail" if requested else "watch",
             "value": f"{delivered}/{requested}",
@@ -6764,15 +9150,15 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "Payment proof submission",
-            "status": "pass" if proof_submissions else "fail" if prompts else "watch",
-            "value": f"{proof_submissions}/{prompts}",
-            "detail": "Proof submissions after x402 prompts; this is the first conversion checkpoint.",
+            "status": "pass" if settled_payments else "fail" if proof_submissions or prompts else "watch",
+            "value": f"{settled_payments} settled / {proof_submissions} submitted / {prompts} prompted",
+            "detail": "A proof submission is only successful when settlement and durable finalization complete.",
         },
         {
             "name": "Wallet inflows",
-            "status": "pass" if inflow_count else "fail" if prompts or verified_payments else "watch",
+            "status": "pass" if inflow_count else "fail" if prompts or settled_payments else "watch",
             "value": f"{inflow_count} inflow(s), ${inflow_usdc:.4f}",
-            "detail": "Verified direct x402 payments and credit top-ups with transaction hashes.",
+            "detail": "Verified direct x402 payments and legacy local-QA top-ups with transaction hashes.",
         },
         {
             "name": "Registry attribution",
@@ -6797,9 +9183,9 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "Raw evidence",
-            "status": "pass" if proof_hash_events or not (prompts or delivered) else "watch",
+            "status": "pass" if settled_payments or not (prompts or delivered) else "watch",
             "value": f"{proof_hash_events} proof/tx event(s), {synthetic_evidence_events} synthetic",
-            "detail": "Source, user agent, endpoint, and transaction/proof-hash support for growth claims.",
+            "detail": "Submitted proof hashes support debugging; settled and durably finalized payments are required for monetization claims.",
         },
     ]
 
@@ -6872,6 +9258,7 @@ async def ingest_marketplace_metrics(request: Request) -> JSONResponse:
 async def observability_stats(
     request: Request,
     days: int = Query(30, ge=1, le=180),
+    include_synthetic: bool = Query(True),
 ) -> JSONResponse:
     """Return dashboard-ready usage, registry, MCP, and monetization rollups."""
     if not _observability_authorized(request):
@@ -6882,7 +9269,12 @@ async def observability_stats(
             headers={"Cache-Control": "no-store"},
             content={"error": "Observability disabled"},
         )
-    content = _with_external_observability_context(OBSERVABILITY.summarize(days=days))
+    content = _with_external_observability_context(
+        OBSERVABILITY.summarize(
+            days=days,
+            include_synthetic=include_synthetic,
+        )
+    )
     credits = getattr(request.app.state, "credits", None)
     if credits is not None and hasattr(credits, "wallet_inflow_summary"):
         content["wallet_inflows"] = credits.wallet_inflow_summary(days=days)
@@ -6897,7 +9289,7 @@ async def observability_stats(
             "rows": [],
         }
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
-    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status()
+    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
@@ -6910,10 +9302,20 @@ async def observability_dashboard(request: Request) -> Any:
     return await observability_command_center(request)
 
 
-def _observability_login_page(request: Request) -> HTMLResponse:
-    target = request.url.path
+def _observability_login_page(
+    request: Request,
+    *,
+    status_code: int = 401,
+    login_failed: bool = False,
+) -> HTMLResponse:
+    del request
+    error_message = (
+        '<p role="alert">The supplied password was not accepted.</p>'
+        if login_failed
+        else ""
+    )
     return HTMLResponse(
-        status_code=401,
+        status_code=status_code,
         headers={"Cache-Control": "no-store", "WWW-Authenticate": "Bearer"},
         content=f"""<!doctype html>
 <html lang="en">
@@ -6979,9 +9381,10 @@ def _observability_login_page(request: Request) -> HTMLResponse:
   <main>
     <h1>Internal Observability</h1>
     <p>This console is private. Enter the observability password configured for this environment.</p>
-    <form method="get" action="{target}">
+    {error_message}
+    <form method="post" action="/internal/observability/login">
       <label>Password
-        <input name="token" type="password" autocomplete="current-password" autofocus />
+        <input name="password" type="password" autocomplete="current-password" autofocus required />
       </label>
       <button type="submit">Open Dashboard</button>
     </form>
@@ -6991,7 +9394,7 @@ def _observability_login_page(request: Request) -> HTMLResponse:
     )
 
 
-def _observability_command_center_html(*, stats_path: str, token_required: bool) -> str:
+def _observability_command_center_html(*, stats_path: str) -> str:
     html = """<!doctype html>
 <html lang="en">
 <head>
@@ -7132,12 +9535,32 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       background: var(--green);
     }
     .unprotected::before { background: var(--amber); }
+    .confidence-banner {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      background: var(--amber-soft);
+      color: var(--ink);
+    }
+    .confidence-banner.ready {
+      border-left-color: var(--green);
+      background: var(--green-soft);
+    }
+    .confidence-banner strong { font-size: 13px; white-space: nowrap; }
+    .confidence-banner span { color: var(--muted); font-size: 13px; line-height: 1.4; }
     .grid { display: grid; gap: 14px; }
     .hero {
-      grid-template-columns: minmax(360px, 1.35fr) minmax(280px, .65fr);
+      grid-template-columns: 1fr;
+      align-items: start;
       margin-bottom: 14px;
     }
-    .kpis { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+    .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .two { grid-template-columns: minmax(0, 1fr) minmax(320px, .78fr); }
     .three { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
     .card {
@@ -7297,10 +9720,17 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     .bars { display: grid; gap: 9px; }
     .bar-row {
       display: grid;
-      grid-template-columns: minmax(100px, 180px) minmax(90px, 1fr) 54px;
+      grid-template-columns: minmax(0, 140px) minmax(48px, 1fr) minmax(32px, auto);
       gap: 10px;
       align-items: center;
       font-size: 13px;
+    }
+    .bar-row code {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .track { height: 10px; background: #eef1ee; border-radius: 999px; overflow: hidden; }
     .fill { height: 100%; background: var(--green); }
@@ -7429,7 +9859,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       .layout { grid-template-columns: 1fr; }
       aside { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
       nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .hero, .two, .three, .kpis { grid-template-columns: 1fr 1fr; }
+      .hero { grid-template-columns: 1fr; }
+      .two, .three, .kpis { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 760px) {
       main { padding: 18px; }
@@ -7437,7 +9868,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       .hero, .two, .three, .kpis, .brief-grid, .check-grid { grid-template-columns: 1fr; }
       .brief-header { grid-template-columns: 1fr; }
       nav { grid-template-columns: 1fr 1fr; }
-      .bar-row { grid-template-columns: minmax(95px, 1fr) 1fr 44px; }
+      .bar-row { grid-template-columns: minmax(0, 1fr) minmax(48px, 1fr) 44px; }
     }
   </style>
 </head>
@@ -7480,8 +9911,19 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
               <option value="180">180 days</option>
             </select>
           </label>
+          <label class="sub">Telemetry
+            <select id="telemetry-scope">
+              <option value="false" selected>Exclude tagged tests</option>
+              <option value="true">Include tests</option>
+            </select>
+          </label>
         </div>
       </header>
+
+      <section id="decision-confidence" class="confidence-banner" role="status" aria-live="polite">
+        <strong id="confidence-label">Checking evidence</strong>
+        <span id="confidence-summary">Evaluating whether this snapshot is suitable for operational, growth, and revenue decisions.</span>
+      </section>
 
       <section class="grid hero">
         <div class="card headline">
@@ -7600,7 +10042,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         <div class="headline">
           <div>
             <h2>Wallet Inflows</h2>
-            <div class="sub">Verified x402 payments and credit top-ups with transaction hashes for payment follow-up.</div>
+            <div class="sub">Verified direct x402 payments and legacy local-QA top-ups with transaction hashes for payment follow-up.</div>
           </div>
           <div class="summary-strip" id="wallet-inflow-kpis"></div>
         </div>
@@ -7669,7 +10111,6 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
   </div>
   <script>
     const statsPath = __STATS_PATH__;
-    const tokenRequired = __TOKEN_REQUIRED__;
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
     const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
     const pct = value => value == null ? "n/a" : `${Math.round(value * 1000) / 10}%`;
@@ -7678,12 +10119,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     let refreshTimer = null;
     let currentData = null;
 
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("token")) {
-      history.replaceState(null, "", url.pathname + (url.searchParams.get("days") ? `?days=${url.searchParams.get("days")}` : "") + url.hash);
-    }
-    document.getElementById("security").textContent = tokenRequired ? "Password protected" : "Token not configured";
-    if (!tokenRequired) document.getElementById("security").classList.add("unprotected");
+    document.getElementById("security").textContent = "Password protected";
 
     function metric(label, value, note = "") {
       return `<div class="card metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></div>`;
@@ -7788,13 +10224,18 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
 
     function renderRwaPilot(data) {
       const pilot = data.rwa_growth_pilot || {};
-      const capture = pilot.current_capture || {};
       const depth = pilot.depth_and_manipulation_evidence?.summary || {};
       const packet = pilot.promotion_packet || {};
       const packetByPilot = Object.fromEntries((packet.feeds || []).map(row => [row.pilot_id, row]));
+      const freshness = pilot.freshness || {};
+      const freshnessFeeds = freshness.feeds || [];
+      const healthyFeeds = freshnessFeeds.filter(row => row.healthy).length;
+      const latestCapture = pilot.current_capture || {};
       document.getElementById("rwa-pilot-kpis").innerHTML = [
         summaryItem("Status", text(pilot.status)),
-        summaryItem("Latest capture", `${fmt.format(capture.succeeded || 0)}/${fmt.format(capture.attempted || 0)}`),
+        summaryItem("Ledger freshness", text(freshness.status || "not_started")),
+        summaryItem("Latest outcomes", `${fmt.format(latestCapture.succeeded || 0)}/${fmt.format(latestCapture.attempted || 0)}`),
+        summaryItem("Healthy feeds", `${fmt.format(healthyFeeds)}/${fmt.format(freshnessFeeds.length)}`),
         summaryItem("Monitoring ready", pilot.source_monitoring_ready ? "Yes" : "No"),
         summaryItem("Volume windows", fmt.format(depth.point_in_time_volume_window_observed || 0)),
         summaryItem("Tick replays", fmt.format(depth.point_in_time_tick_replay_observed || 0)),
@@ -7802,7 +10243,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       ].join("");
       const rows = pilot.feeds || [];
       document.getElementById("rwa-pilot-table").innerHTML =
-        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Monitoring</th><th>Gate progress</th><th>Decision</th></tr></thead><tbody>` +
+        `<thead><tr><th>Feed</th><th>Source</th><th>Samples</th><th>Window</th><th>Success</th><th>Freshness</th><th>Latest</th><th>Monitoring</th><th>Gate progress</th><th>Decision</th></tr></thead><tbody>` +
         (rows.length ? rows.map(row => {
           const readiness = packetByPilot[row.pilot_id] || {};
           return `<tr>
@@ -7812,11 +10253,12 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
           <td>${fmt.format(row.window_days || 0)} days</td>
           <td>${pct(row.success_rate)}</td>
           <td>${pct(row.freshness_rate)}</td>
+          <td>${rowBadge(row.stale ? "stale" : "fresh")}</td>
           <td>${rowBadge(row.source_monitoring_ready ? "pass" : "collecting")}</td>
           <td>${fmt.format(readiness.passed_gate_count || 0)}/${fmt.format(readiness.required_gate_count || 0)}</td>
-          <td title="${escapeAttr((readiness.blocking_gates || []).join(", "))}">${rowBadge("hold")}</td>
+          <td title="${escapeAttr((readiness.blocking_gates || []).join(", "))}">${rowBadge(readiness.decision || "hold")}</td>
         </tr>`;
-        }).join("") : `<tr><td colspan="9" class="empty">Pilot monitoring has not produced a persisted capture yet.</td></tr>`) +
+        }).join("") : `<tr><td colspan="10" class="empty">The authoritative RWA ledger has no pilot outcomes yet.</td></tr>`) +
         `</tbody>`;
     }
 
@@ -7904,18 +10346,21 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     function renderPlatformCoverage(data) {
       const platforms = data.external_sources?.platforms || [];
       const table = document.getElementById("platform-coverage");
-      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
+      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Release Truth</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
         (platforms.length ? platforms.map(platform => {
           const status = platform.external_metrics_configured ? "Configured" : "Not ingested";
           const badgeClass = platform.external_metrics_configured ? "neutral" : "warn";
+          const releaseStatus = text(platform.release_status || "not audited").replaceAll("_", " ");
+          const releaseClass = platform.release_status === "verified_live_baseline" ? "neutral" : "warn";
           return `<tr>
             <td><strong>${escapeAttr(platform.name)}</strong></td>
             <td>${fmt.format(platform.local_recorded_calls || 0)}</td>
             <td><span class="badge ${badgeClass}">${status}</span></td>
-            <td><a href="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">${escapeAttr(platform.listing_url || "n/a")}</a></td>
+            <td><span class="badge ${releaseClass}">${escapeAttr(releaseStatus)}</span><div class="metric-note">${escapeAttr(platform.observed_version || "Version not exposed")} · audited ${escapeAttr(platform.audited_at || "unknown")}</div></td>
+            <td><a href="${escapeAttr(platform.listing_url || "")}" title="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">Open listing ↗</a></td>
             <td>${escapeAttr(platform.note || "")}</td>
           </tr>`;
-        }).join("") : `<tr><td colspan="5" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
+        }).join("") : `<tr><td colspan="6" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
     }
 
     function summaryItem(label, value) {
@@ -7932,7 +10377,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     }
 
     function inflowKindLabel(kind) {
-      if (kind === "credit_topup") return "Credit top-up";
+      if (kind === "credit_topup") return "Legacy local-QA top-up";
       if (kind === "direct_x402") return "Direct x402";
       return text(kind);
     }
@@ -7943,7 +10388,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       document.getElementById("wallet-inflow-kpis").innerHTML = [
         summaryItem("Total", money.format(inflows.total_usdc || 0)),
         summaryItem("Inflows", fmt.format(inflows.total_inflows || 0)),
-        summaryItem("Top-ups", fmt.format(inflows.credit_topup_count || 0)),
+        summaryItem("Legacy QA top-ups", fmt.format(inflows.credit_topup_count || 0)),
         summaryItem("Direct x402", fmt.format(inflows.direct_x402_count || 0)),
       ].join("");
       const table = document.getElementById("wallet-inflow-table");
@@ -8091,9 +10536,9 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     function renderAttention(data) {
       const o = data.overview || {};
       const prompts = Number(data.event_counts?.payment_required || 0);
-      const verified = Number(data.event_counts?.payment_verified || 0) + Number(data.event_counts?.credit_drawdown_success || 0);
-      const abandoned = Math.max(0, prompts - verified);
-      const errorRate = o.http_error_rate == null ? 0 : Number(o.http_error_rate);
+      const settled = Number(data.event_counts?.payment_settled || 0);
+      const abandoned = Math.max(0, prompts - settled);
+      const errorRate = o.server_error_rate == null ? 0 : Number(o.server_error_rate);
       const registrySources = Object.keys(data.registry_source_mix || {}).length;
       const items = [
         {
@@ -8103,8 +10548,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         },
         {
           tone: errorRate > 0 ? "bad" : "",
-          title: `${pct(errorRate)} HTTP error rate`,
-          note: errorRate > 0 ? "Review rejected, failed, or upstream events in the trace." : "No HTTP errors observed in this window."
+          title: `${pct(errorRate)} server error rate`,
+          note: errorRate > 0 ? "Review HTTP 5xx and upstream failures in the trace." : "No HTTP 5xx responses observed in this window."
         },
         {
           tone: registrySources ? "" : "warn",
@@ -8157,8 +10602,10 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
 
     async function load() {
       const days = document.getElementById("window").value;
+      const includeSynthetic = document.getElementById("telemetry-scope").value;
       const statsUrl = new URL(statsPath, window.location.origin);
       statsUrl.searchParams.set("days", days);
+      statsUrl.searchParams.set("include_synthetic", includeSynthetic);
       const res = await fetch(statsUrl.toString(), { cache: "no-store", credentials: "same-origin" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Unable to load stats");
@@ -8168,16 +10615,25 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       const prompts = Number(data.event_counts?.payment_required || 0);
       const paid = Number(o.paid_calls || 0);
       const conversion = prompts ? paid / prompts : null;
-      document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}. ${live ? "Live refresh is on." : "Live refresh is paused."}`;
+      const scope = data.telemetry_scope || {};
+      const scopeNote = scope.include_synthetic
+        ? ` Includes ${fmt.format(scope.detected_synthetic_events || 0)} test/synthetic events.`
+        : ` Excludes ${fmt.format(scope.excluded_synthetic_events || 0)} test/synthetic events.`;
+      document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}.${scopeNote} ${live ? "Live refresh is on." : "Live refresh is paused."}`;
+      const confidence = data.decision_confidence || {};
+      const confidenceBanner = document.getElementById("decision-confidence");
+      confidenceBanner.classList.toggle("ready", confidence.level === "decision_ready");
+      document.getElementById("confidence-label").textContent = confidence.label || "Evidence status unavailable";
+      document.getElementById("confidence-summary").textContent = confidence.summary || "Review the raw event trace before using this snapshot for decisions.";
       document.getElementById("headline-value").textContent = g.activated_identities ? `${fmt.format(g.activated_identities)} activated` : "No activation yet";
       document.getElementById("headline-note").textContent = g.activated_identities ? "Explicit identities that received their first live price in the selected window." : "No identity-attributed first live price has been recorded in this window.";
       document.getElementById("kpis").innerHTML = [
         metric("Activation", pct(g.activation_rate), "First live price / eligible explicit identities"),
         metric("Time to Value", g.median_time_to_first_live_price_seconds == null ? "n/a" : `${fmt.format(g.median_time_to_first_live_price_seconds)}s`, "Median discovery-to-first-live-price time"),
         metric("7-Day Repeat", pct(g.repeat_7d_rate), "Mature activated identities with repeat delivery"),
-        metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to verified revenue"),
-        metric("Paid Calls", fmt.format(paid), "Verified x402, credits, and MCP paid usage"),
-        metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Direct x402 + bulk credit claims"),
+        metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to finalized settlement"),
+        metric("Successful Deliveries", fmt.format(paid), "Completed x402, credit-backed HTTP, and authenticated MCP data returns"),
+        metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Deduplicated finalized x402 settlements"),
         metric("Server Errors", pct(data.reliability?.server_error_rate), "HTTP 5xx responses / all HTTP requests"),
         metric("Unsupported Demand", fmt.format(o.unsupported_symbol_requests || 0), "Bounded zero-result symbol searches"),
       ].join("");
@@ -8189,9 +10645,10 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       bars("funnel", {
         "payment prompts": prompts,
         "proof submissions": data.event_counts?.payment_proof_submitted || 0,
-        "verified payments": data.event_counts?.payment_verified || 0,
+        "authorization verified": data.event_counts?.payment_authorization_verified || 0,
+        "settled payments": data.event_counts?.payment_settled || 0,
         "credit drawdowns": data.event_counts?.credit_drawdown_success || 0,
-        "bulk claims": data.event_counts?.bulk_credit_claimed || 0,
+        "successful deliveries": paid,
       }, "amber");
       renderPopularity(data);
       renderWalletInflows(data);
@@ -8224,6 +10681,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     }
 
     document.getElementById("window").addEventListener("change", load);
+    document.getElementById("telemetry-scope").addEventListener("change", load);
     document.getElementById("refresh").addEventListener("click", load);
     document.getElementById("data-search").addEventListener("input", rerenderTables);
     document.getElementById("outcome-filter").addEventListener("change", rerenderTables);
@@ -8234,22 +10692,119 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       load();
     });
     scheduleLive();
+    function syncActiveNav() {
+      const activeHash = window.location.hash || "#overview";
+      document.querySelectorAll("nav a").forEach(link => {
+        link.classList.toggle("active", link.getAttribute("href") === activeHash);
+      });
+    }
+    window.addEventListener("hashchange", syncActiveNav);
+    syncActiveNav();
     load().catch(err => {
       document.getElementById("freshness").textContent = err.message;
     });
   </script>
 </body>
 </html>"""
-    return html.replace("__STATS_PATH__", json.dumps(stats_path)).replace(
-        "__TOKEN_REQUIRED__",
-        "true" if token_required else "false",
+    return html.replace("__STATS_PATH__", json.dumps(stats_path))
+
+
+_OBSERVABILITY_COOKIE_NAME = "observability_token"
+_OBSERVABILITY_COOKIE_PATH = "/internal/observability"
+_OBSERVABILITY_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12
+_OBSERVABILITY_LOGIN_BODY_LIMIT = 4096
+
+
+async def _read_observability_login_body(request: Request) -> bytes:
+    """Read the login form with a hard ceiling for fixed or streamed bodies."""
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length:
+        try:
+            content_length = int(raw_content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+        if content_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if content_length > _OBSERVABILITY_LOGIN_BODY_LIMIT:
+            raise HTTPException(status_code=413, detail="Login form is too large")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _OBSERVABILITY_LOGIN_BODY_LIMIT:
+            raise HTTPException(status_code=413, detail="Login form is too large")
+    return bytes(body)
+
+
+@app.post("/internal/observability/login", include_in_schema=False, response_model=None)
+async def observability_login(request: Request) -> Any:
+    """Exchange a form password for a secure, narrowly scoped dashboard cookie."""
+    expected = dashboard_token()
+    if not expected:
+        return _observability_unauthorized()
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return JSONResponse(
+            status_code=415,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Expected application/x-www-form-urlencoded"},
+        )
+    try:
+        encoded_body = await _read_observability_login_body(request)
+        decoded_body = encoded_body.decode("utf-8", errors="strict")
+        fields = parse_qs(
+            decoded_body,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=8,
+        )
+    except UnicodeDecodeError:
+        return JSONResponse(
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Login form must be UTF-8"},
+        )
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Malformed login form"},
+        )
+
+    password_values = fields.get("password", [])
+    if set(fields) != {"password"} or len(password_values) != 1:
+        return JSONResponse(
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Login form must contain one password field"},
+        )
+    supplied = password_values[0]
+    if not supplied or not secrets.compare_digest(expected, supplied):
+        return _observability_login_page(request, login_failed=True)
+
+    response = RedirectResponse(
+        "/internal/observability/command-center",
+        status_code=303,
+        headers={"Cache-Control": "no-store"},
     )
+    response.set_cookie(
+        _OBSERVABILITY_COOKIE_NAME,
+        expected,
+        max_age=_OBSERVABILITY_COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path=_OBSERVABILITY_COOKIE_PATH,
+    )
+    return response
 
 
 @app.get("/internal/observability/command-center", include_in_schema=False, response_model=None)
 async def observability_command_center(request: Request) -> Any:
     """Serve the protected internal product usage command center."""
     if not _observability_authorized(request):
+        if not dashboard_token():
+            return _observability_unauthorized()
         return _observability_login_page(request)
     if OBSERVABILITY is None:
         return JSONResponse(
@@ -8258,30 +10813,25 @@ async def observability_command_center(request: Request) -> Any:
             content={"error": "Observability disabled"},
         )
 
-    token = request.query_params.get("token")
-    response = HTMLResponse(
+    return HTMLResponse(
         headers={"Cache-Control": "no-store"},
         content=_observability_command_center_html(
             stats_path="/internal/observability/stats",
-            token_required=bool(settings.server.observability_dashboard_token),
         ),
     )
-    if token:
-        response.set_cookie(
-            "observability_token",
-            token,
-            max_age=60 * 60 * 12,
-            httponly=True,
-            samesite="strict",
-        )
-    return response
 
 
 @app.get("/internal/observability/logout", include_in_schema=False, response_model=None)
 async def observability_logout() -> RedirectResponse:
     """Clear local observability access and return to the login screen."""
     response = RedirectResponse("/internal/observability/command-center", status_code=303)
-    response.delete_cookie("observability_token")
+    response.delete_cookie(
+        _OBSERVABILITY_COOKIE_NAME,
+        path=_OBSERVABILITY_COOKIE_PATH,
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
     return response
 
 
@@ -8289,11 +10839,10 @@ async def observability_logout() -> RedirectResponse:
 async def observability_legacy_dashboard(request: Request) -> Any:
     """Serve the original lightweight internal product observability dashboard."""
     if not _observability_authorized(request):
+        if not dashboard_token():
+            return _observability_unauthorized()
         return _observability_login_page(request)
-    token = request.query_params.get("token")
     stats_path = "/internal/observability/stats"
-    if token:
-        stats_path = f"{stats_path}?token={token}"
     return HTMLResponse(
         headers={"Cache-Control": "no-store"},
         content=f"""<!doctype html>
@@ -8519,25 +11068,27 @@ async def observability_legacy_dashboard(request: Request) -> Any:
       document.getElementById("freshness").textContent = `Generated ${{new Date(data.generated_at).toLocaleString()}} over the last ${{data.window_days}} days. ${{live ? "Live refresh is on." : "Live refresh is paused."}}`;
       document.getElementById("kpis").innerHTML = [
         metric("Paid Calls", fmt.format(o.paid_calls), "x402 + credit + MCP credit usage"),
-        metric("Revenue", money.format(o.estimated_revenue_usdc), "direct x402 + bulk credit claims"),
+        metric("Revenue", money.format(o.estimated_revenue_usdc), "deduplicated finalized x402 settlements"),
         metric("MCP Tools", fmt.format(o.mcp_tool_calls), "tool-level activity"),
         metric("Registry Hits", fmt.format(o.registry_requests), "directory and metadata discovery"),
         metric("Top Service", text(o.most_used_service), "highest-volume called service"),
         metric("Unique Clients", fmt.format(o.unique_client_fingerprints), "hashed IP fingerprints"),
-        metric("Payment Success", pct(o.payment_success_rate), "verified / submitted proofs"),
+        metric("Payment Success", pct(o.payment_success_rate), "settled / correlated submitted proofs"),
       ].join("");
       timeline(data.timeline || []);
       bars("funnel", {{
         "free discovery": o.free_discovery_calls,
         "402 challenges": data.event_counts.payment_required || 0,
         "proof submissions": data.event_counts.payment_proof_submitted || 0,
-        "verified payments": data.event_counts.payment_verified || 0,
+        "authorization verified": data.event_counts.payment_authorization_verified || 0,
+        "settled payments": data.event_counts.payment_settled || 0,
         "credit drawdowns": data.event_counts.credit_drawdown_success || 0,
-        "bulk claims": data.event_counts.bulk_credit_claimed || 0,
       }}, "amber");
       bars("services", data.service_mix);
       bars("origins", data.origin_mix, "blue");
       bars("registry-sources", data.registry_source_mix, "amber");
+      bars("campaigns", data.campaign_mix, "blue");
+      bars("outbound-destinations", data.outbound_destination_mix, "amber");
       bars("registries", data.registry_mix, "amber");
       bars("mcp", data.mcp_tool_mix, "blue");
       bars("paid", data.paid_endpoint_mix);
@@ -8570,61 +11121,1043 @@ async def observability_legacy_dashboard(request: Request) -> Any:
     )
 
 
+def _database_path_is_writable(raw_path: str) -> bool:
+    """Check a database target without creating or modifying it."""
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if path.exists():
+        return path.is_file() and os.access(path, os.W_OK)
+    parent = path.parent
+    return parent.is_dir() and os.access(parent, os.W_OK)
+
+
+_CREDIT_DB_SCHEMA = {
+    "wallets": {"address", "balance_credits", "last_updated"},
+    "credit_purchases": {"tx_hash", "address", "amount_usdc", "credits_added"},
+    "trial_history": {"ip_hash", "subject_hash", "subject_type"},
+    "payment_proofs": {
+        "tx_hash",
+        "state",
+        "request_binding",
+        "reservation_id",
+        "settled_at",
+        "finalized_at",
+        "response_body",
+    },
+    "credit_charges": {"charge_id", "address", "credits", "state"},
+    "rate_limit_events": {"scope", "key_hash", "occurred_at"},
+    "price_receipts": {"receipt_id", "payload_json", "created_at"},
+}
+_OBSERVABILITY_DB_SCHEMA = {
+    "usage_events": {"id", "timestamp", "event", "metadata_json"},
+    "marketplace_metric_snapshots": {"id", "timestamp", "platform_id", "metrics_json"},
+    "event_milestones": {"event", "identity_hash", "timestamp"},
+}
+
+
+def _resolved_runtime_path(raw_path: str | os.PathLike[str]) -> Path:
+    path = Path(raw_path).expanduser()
+    return (path if path.is_absolute() else Path.cwd() / path).resolve(strict=False)
+
+
+def _path_on_railway_volume(path: Path) -> bool:
+    try:
+        path.relative_to(Path("/data"))
+    except ValueError:
+        return False
+    return True
+
+
+def _sqlite_database_readiness(
+    raw_path: str | os.PathLike[str],
+    *,
+    expected_schema: dict[str, set[str]],
+    hosted: bool,
+    required: bool = True,
+    configured_path: str | os.PathLike[str] | None = None,
+    deadline_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Validate the exact runtime SQLite file, integrity, and critical schema."""
+    path = _resolved_runtime_path(raw_path)
+    blockers: list[str] = []
+    if configured_path is not None and path != _resolved_runtime_path(configured_path):
+        blockers.append("runtime_path_mismatch")
+    if hosted and not _path_on_railway_volume(path):
+        blockers.append("not_on_railway_volume")
+    if not path.is_file():
+        blockers.append("database_missing")
+    elif not os.access(path, os.R_OK | os.W_OK):
+        blockers.append("database_not_read_write")
+
+    integrity = "unavailable"
+    missing_tables: list[str] = []
+    missing_columns: dict[str, list[str]] = {}
+    if deadline_seconds is None:
+        try:
+            deadline_seconds = float(
+                os.environ.get("STORE_READINESS_PROBE_DEADLINE_SECONDS", "2")
+            )
+        except ValueError:
+            deadline_seconds = 2.0
+    deadline_seconds = max(0.1, min(float(deadline_seconds), 10.0))
+    deadline = time.monotonic() + deadline_seconds
+    if not blockers or all(item == "not_on_railway_volume" for item in blockers):
+        try:
+            connection = sqlite3.connect(
+                f"{path.as_uri()}?mode=ro",
+                uri=True,
+                timeout=min(1.0, deadline_seconds),
+            )
+            connection.set_progress_handler(
+                lambda: 1 if time.monotonic() >= deadline else 0,
+                1_000,
+            )
+            try:
+                # Readiness validates the small schema b-tree, not every page in
+                # a potentially multi-gigabyte event ledger. Full-database
+                # integrity belongs in an offline maintenance job; running it
+                # on a health poll can make the health check the outage source.
+                integrity_rows = connection.execute(
+                    "PRAGMA quick_check('sqlite_schema')"
+                ).fetchall()
+                integrity = (
+                    "ok"
+                    if integrity_rows and all(str(row[0]).lower() == "ok" for row in integrity_rows)
+                    else "failed"
+                )
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                }
+                missing_tables = sorted(set(expected_schema) - tables)
+                for table, required_columns in expected_schema.items():
+                    if table not in tables:
+                        continue
+                    columns = {
+                        str(row[1])
+                        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+                    }
+                    missing = sorted(required_columns - columns)
+                    if missing:
+                        missing_columns[table] = missing
+            finally:
+                connection.set_progress_handler(None, 0)
+                connection.close()
+        except (OSError, sqlite3.Error, ValueError):
+            if time.monotonic() >= deadline:
+                integrity = "timeout"
+                blockers.append("integrity_check_timeout")
+            else:
+                integrity = "unavailable"
+                blockers.append("database_unreadable")
+    if integrity != "ok":
+        blockers.append("integrity_check_failed")
+    if missing_tables:
+        blockers.append("schema_tables_missing")
+    if missing_columns:
+        blockers.append("schema_columns_missing")
+    blockers = sorted(set(blockers))
+    return {
+        "ready": not blockers if required else True,
+        "required": required,
+        "path": str(path),
+        "absolute": Path(raw_path).expanduser().is_absolute(),
+        "on_railway_volume": _path_on_railway_volume(path),
+        "integrity": integrity,
+        "integrity_scope": "sqlite_schema",
+        "missing_tables": missing_tables,
+        "missing_columns": missing_columns,
+        "blockers": blockers,
+    }
+
+
+def _store_readiness_max_age_seconds() -> float:
+    try:
+        configured = float(
+            os.environ.get("STORE_READINESS_PROBE_MAX_AGE_SECONDS", "180")
+        )
+    except ValueError:
+        configured = 180.0
+    return min(900.0, max(30.0, configured))
+
+
+def _sqlite_readiness_configuration_fingerprint(
+    raw_path: str | os.PathLike[str],
+    *,
+    expected_schema: dict[str, set[str]],
+    hosted: bool,
+    required: bool = True,
+    configured_path: str | os.PathLike[str] | None = None,
+) -> str:
+    material = {
+        "runtime_path": str(_resolved_runtime_path(raw_path)),
+        "configured_path": (
+            str(_resolved_runtime_path(configured_path))
+            if configured_path is not None
+            else None
+        ),
+        "hosted": hosted,
+        "required": required,
+        "schema": {
+            table: sorted(columns)
+            for table, columns in sorted(expected_schema.items())
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _rwa_readiness_configuration_fingerprint(
+    store: RWAObservationStore | None,
+    *,
+    configured_path: str | os.PathLike[str],
+    hosted: bool,
+) -> str:
+    material = {
+        "runtime_path": (
+            str(_resolved_runtime_path(store.db_path))
+            if isinstance(store, RWAObservationStore)
+            else None
+        ),
+        "configured_path": str(_resolved_runtime_path(configured_path)),
+        "hosted": hosted,
+        "schema_version": RWA_STORE_SCHEMA_VERSION,
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _cached_store_readiness(
+    name: str,
+    *,
+    configuration_fingerprint: str,
+    required: bool = True,
+) -> dict[str, Any]:
+    snapshots = getattr(app.state, "store_readiness_snapshots", {})
+    snapshot = snapshots.get(name) if isinstance(snapshots, dict) else None
+    max_age = _store_readiness_max_age_seconds()
+    if not isinstance(snapshot, dict):
+        return {
+            "ready": not required,
+            "required": required,
+            "checked": False,
+            "age_seconds": None,
+            "max_age_seconds": max_age,
+            "reason": "not_checked",
+            "blockers": [] if not required else ["readiness_probe_not_checked"],
+        }
+
+    checked_at = snapshot.get("checked_at")
+    try:
+        age_seconds = max(0.0, time.time() - float(checked_at))
+    except (TypeError, ValueError):
+        age_seconds = None
+    result = dict(snapshot.get("result") or {})
+    blockers = set(result.get("blockers") or [])
+    reason = result.get("reason")
+    if snapshot.get("configuration_fingerprint") != configuration_fingerprint:
+        reason = "configuration_changed_since_probe"
+        blockers.add("configuration_changed_since_probe")
+    elif age_seconds is None or age_seconds > max_age:
+        reason = "probe_stale"
+        blockers.add("readiness_probe_stale")
+    ready = bool(result.get("ready")) and not blockers and reason is None
+    return {
+        **result,
+        "ready": ready if required else True,
+        "required": required,
+        "checked": True,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "max_age_seconds": max_age,
+        "reason": reason,
+        "blockers": sorted(blockers),
+    }
+
+
+async def _refresh_store_readiness_snapshots(target_app: FastAPI) -> None:
+    """Refresh bounded store probes once; callers serialize refresh cycles."""
+    hosted = _hosted_environment()
+    credit_manager = getattr(target_app.state, "credits", None)
+    rwa_store = getattr(target_app.state, "rwa_store", None)
+    rwa_db_path = configured_rwa_observation_db_path()
+    observability_runtime_path = (
+        str(OBSERVABILITY.db_path)
+        if OBSERVABILITY is not None
+        else settings.server.observability_db_path
+    )
+
+    probes: list[tuple[str, str, Any]] = []
+    if isinstance(credit_manager, CreditManager):
+        credit_kwargs = {
+            "expected_schema": _CREDIT_DB_SCHEMA,
+            "hosted": hosted,
+            "configured_path": os.environ.get("CREDIT_DB_PATH", "credits.db"),
+        }
+        probes.append(
+            (
+                "credit_ledger",
+                _sqlite_readiness_configuration_fingerprint(
+                    credit_manager.db_path,
+                    **credit_kwargs,
+                ),
+                asyncio.to_thread(
+                    _sqlite_database_readiness,
+                    credit_manager.db_path,
+                    **credit_kwargs,
+                ),
+            )
+        )
+    if settings.server.observability_enabled:
+        observability_kwargs = {
+            "expected_schema": _OBSERVABILITY_DB_SCHEMA,
+            "hosted": hosted,
+            "configured_path": settings.server.observability_db_path,
+        }
+        probes.append(
+            (
+                "observability_store",
+                _sqlite_readiness_configuration_fingerprint(
+                    observability_runtime_path,
+                    **observability_kwargs,
+                ),
+                asyncio.to_thread(
+                    _sqlite_database_readiness,
+                    observability_runtime_path,
+                    **observability_kwargs,
+                ),
+            )
+        )
+    if isinstance(rwa_store, RWAObservationStore):
+        probes.append(
+            (
+                "rwa_operator_store",
+                _rwa_readiness_configuration_fingerprint(
+                    rwa_store,
+                    configured_path=rwa_db_path,
+                    hosted=hosted,
+                ),
+                asyncio.to_thread(rwa_store.schema_status, force=True),
+            )
+        )
+
+    results = await asyncio.gather(
+        *(probe[2] for probe in probes),
+        return_exceptions=True,
+    )
+    checked_at = time.time()
+    snapshots: dict[str, dict[str, Any]] = {}
+    for (name, configuration_fingerprint, _), result in zip(probes, results):
+        if isinstance(result, Exception):
+            result = {
+                "ready": False,
+                "integrity": "unavailable",
+                "reason": "readiness_probe_failed",
+                "blockers": ["readiness_probe_failed"],
+            }
+        snapshots[name] = {
+            "checked_at": checked_at,
+            "configuration_fingerprint": configuration_fingerprint,
+            "result": result,
+        }
+    target_app.state.store_readiness_snapshots = snapshots
+
+
+async def _run_store_readiness_probe_loop(target_app: FastAPI) -> None:
+    """Refresh store snapshots without overlapping large SQLite work."""
+    interval = max(15.0, _store_readiness_max_age_seconds() / 3)
+    while True:
+        await asyncio.sleep(interval)
+        await _refresh_store_readiness_snapshots(target_app)
+
+
+def _oauth_storage_readiness(prefix: str, *, hosted: bool, production: bool) -> dict[str, Any]:
+    """Require durable encrypted proxy-OAuth state for production connectors."""
+    provider = os.environ.get(f"{prefix}_AUTH_PROVIDER", "none").strip().lower()
+    provider_requires_auth = provider not in {"", "none", "dev", "beta-token"}
+    required = (production or hosted) and provider_requires_auth
+    raw_path = os.environ.get(f"{prefix}_OAUTH_STORAGE_DIR", "").strip()
+    path = _resolved_runtime_path(raw_path) if raw_path else None
+    jwt_ready = is_strong_secret(os.environ.get(f"{prefix}_OAUTH_JWT_SIGNING_KEY"))
+    encryption_ready = is_strong_secret(
+        os.environ.get(f"{prefix}_OAUTH_STORAGE_ENCRYPTION_KEY")
+    )
+    blockers: list[str] = []
+    # Supabase validates bearer JWTs directly and does not construct the local
+    # authorize/token/register/callback route surface advertised by this host.
+    local_route_provider = provider in {"clerk", "auth0"}
+    if required and not local_route_provider:
+        blockers.append("provider_missing_local_oauth_routes")
+    if required and not jwt_ready:
+        blockers.append("jwt_signing_key_missing_or_weak")
+    if required and not encryption_ready:
+        blockers.append("storage_encryption_key_missing_or_weak")
+    if required and path is None:
+        blockers.append("storage_directory_missing")
+    if required and path is not None:
+        if not Path(raw_path).expanduser().is_absolute():
+            blockers.append("storage_directory_not_absolute")
+        if hosted and not _path_on_railway_volume(path):
+            blockers.append("storage_directory_not_on_railway_volume")
+        if not path.is_dir() or not os.access(path, os.R_OK | os.W_OK | os.X_OK):
+            blockers.append("storage_directory_unavailable")
+    return {
+        "ready": not blockers,
+        "required": required,
+        "backend": "encrypted_filetree" if raw_path else "none",
+        "path": str(path) if path is not None else None,
+        "absolute": bool(raw_path and Path(raw_path).expanduser().is_absolute()),
+        "on_railway_volume": bool(path and _path_on_railway_volume(path)),
+        "jwt_signing_key_strong": jwt_ready,
+        "storage_encryption_key_strong": encryption_ready,
+        "local_oauth_route_provider": local_route_provider,
+        "blockers": sorted(set(blockers)),
+    }
+
+
+def _stream_cache_readiness(stream_cache: BlocksizeStreamCache | None) -> dict[str, Any]:
+    required = _blocksize_dependency_required() and not _anthropic_only_mode()
+    status = stream_cache.status() if isinstance(stream_cache, BlocksizeStreamCache) else {}
+    blockers: list[str] = []
+    if required and not status.get("enabled"):
+        blockers.append("stream_cache_disabled")
+    if required and not status.get("ready"):
+        blockers.append("stream_not_connected")
+    if required and int(status.get("fixed_vwap_tickers") or 0) < 1:
+        blockers.append("no_fixed_vwap_subscriptions")
+    configured_tickers = int(status.get("fixed_vwap_tickers") or 0)
+    fresh_tickers = int(status.get("fresh_configured_24h_vwap") or 0)
+    if required and fresh_tickers < configured_tickers:
+        blockers.append("configured_fixed_vwap_cache_not_fully_seeded")
+    return {
+        "ready": not blockers,
+        "required": required,
+        "enabled": bool(status.get("enabled")),
+        "connected": bool(status.get("ready")),
+        "fixed_vwap_tickers": configured_tickers,
+        "cached_24h_vwap": int(status.get("cached_24h_vwap") or 0),
+        "fresh_configured_24h_vwap": fresh_tickers,
+        "blockers": blockers,
+    }
+
+
+def _state_store_isolation(paths: dict[str, str | os.PathLike[str] | None]) -> dict[str, Any]:
+    resolved_paths: list[tuple[str, Path]] = []
+    for label, raw_path in paths.items():
+        if raw_path:
+            resolved_paths.append((label, _resolved_runtime_path(raw_path)))
+    collision_pairs: set[tuple[str, str]] = set()
+    for index, (left_label, left_path) in enumerate(resolved_paths):
+        for right_label, right_path in resolved_paths[index + 1 :]:
+            overlaps = (
+                left_path == right_path
+                or left_path in right_path.parents
+                or right_path in left_path.parents
+            )
+            if overlaps:
+                collision_pairs.add(tuple(sorted((left_label, right_label))))
+    collisions = [list(labels) for labels in sorted(collision_pairs)]
+    return {
+        "ready": not collisions,
+        "collisions": collisions,
+    }
+
+
+def _release_manifest_check() -> dict[str, Any]:
+    """Validate the packaged/tracked MCP manifest against the running version."""
+    manifest_path = next((path for path in SERVER_JSON_PATHS if path.is_file()), None)
+    if manifest_path is None:
+        return {"ready": False, "reason": "server.json is not packaged"}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"ready": False, "reason": "server.json is unreadable or invalid"}
+    description = str(manifest.get("description", ""))
+    version_matches = manifest.get("version") == APP_VERSION
+    description_valid = 1 <= len(description) <= 100
+    return {
+        "ready": version_matches and description_valid,
+        "version_matches": version_matches,
+        "description_length": len(description),
+        "description_valid": description_valid,
+    }
+
+
+def _connector_entitlement_readiness(
+    prefix: str,
+    *,
+    hosted: bool,
+    production: bool,
+    initialize: bool,
+) -> dict[str, Any]:
+    raw_path = connector_entitlement_db_path(prefix)
+    path = Path(raw_path).expanduser()
+    blockers: list[str] = []
+    if production and not path.is_absolute():
+        blockers.append("entitlement_db_not_durable")
+    resolved = path.resolve(strict=False)
+    try:
+        resolved.relative_to(Path("/data"))
+        on_railway_volume = True
+    except ValueError:
+        on_railway_volume = False
+    if hosted and not on_railway_volume:
+        blockers.append("entitlement_db_not_on_railway_volume")
+    if (production or hosted) and not _database_path_is_writable(str(path)):
+        blockers.append("entitlement_db_not_writable")
+
+    schema: dict[str, object] = {
+        "ready": not (production or hosted),
+        "integrity": "not_required",
+        "missing_tables": [],
+    }
+    if initialize and not blockers:
+        try:
+            manager = connector_entitlement_manager(prefix)
+            schema = manager.schema_status()
+        except (OSError, sqlite3.Error, ValueError):
+            schema = {
+                "ready": False,
+                "integrity": "unavailable",
+                "missing_tables": [],
+            }
+    elif production or hosted:
+        cached = getattr(app.state, "connector_entitlement_statuses", {}).get(prefix)
+        if isinstance(cached, dict) and cached.get("path") == str(resolved):
+            cached_schema = cached.get("schema")
+            if isinstance(cached_schema, dict):
+                schema = cached_schema
+        # A path/configuration mismatch must fail closed. Never instantiate or
+        # scan an entitlement database from the readiness request path: hosted
+        # health polling must remain constant-time even when state is large or
+        # damaged. The next controlled process start refreshes this snapshot.
+    if (production or hosted) and not schema.get("ready"):
+        blockers.append("entitlement_schema_unavailable")
+    return {
+        "ready": not blockers,
+        "required": production or hosted,
+        "path": str(resolved),
+        "absolute": path.is_absolute(),
+        "on_railway_volume": on_railway_volume,
+        "schema": schema,
+        "blockers": sorted(set(blockers)),
+    }
+
+
+def _connector_readiness(
+    prefix: str,
+    connector: Any,
+    entitlement: dict[str, Any],
+) -> dict[str, Any]:
+    provider = os.environ.get(f"{prefix}_AUTH_PROVIDER", "none").strip().lower()
+    provider_requires_auth = provider not in {"", "none", "dev", "beta-token"}
+    auth_constructed = getattr(connector, "auth", None) is not None
+    production = is_production_environment()
+    hosted = _hosted_environment()
+    strict_auth = production or hosted
+    beta_enabled = _env_enabled(f"{prefix}_ENABLE_BETA_TOKENS")
+    connector_slug = prefix.lower()
+    connector_url = os.environ.get(
+        f"{prefix}_MCP_PUBLIC_URL",
+        f"{PUBLIC_BASE_URL.rstrip('/')}/{connector_slug}/mcp",
+    ).rstrip("/")
+    connector_parsed = urlsplit(connector_url)
+    base_parsed = urlsplit(PUBLIC_BASE_URL)
+    connector_url_ready = (
+        connector_parsed.scheme in {"http", "https"}
+        and bool(connector_parsed.netloc)
+        and (connector_parsed.scheme, connector_parsed.netloc)
+        == (base_parsed.scheme, base_parsed.netloc)
+        and connector_parsed.path.rstrip("/") == f"/{connector_slug}/mcp"
+        and not connector_parsed.query
+        and not connector_parsed.fragment
+    )
+    oauth_storage = _oauth_storage_readiness(
+        prefix,
+        hosted=hosted,
+        production=production,
+    )
+    auth_ready = (
+        auth_constructed and provider_requires_auth and not beta_enabled
+        if strict_auth
+        else not provider_requires_auth or auth_constructed
+    )
+    return {
+        "ready": (
+            auth_ready
+            and bool(entitlement.get("ready"))
+            and bool(oauth_storage.get("ready"))
+            and (connector_url_ready or not strict_auth)
+        ),
+        "provider": provider or "none",
+        "auth_constructed": auth_constructed,
+        "beta_tokens_enabled": beta_enabled,
+        "production_auth_required": strict_auth,
+        "public_url": {
+            "ready": connector_url_ready or not strict_auth,
+            "url": connector_url,
+            "expected_origin": f"{base_parsed.scheme}://{base_parsed.netloc}",
+            "expected_path": f"/{connector_slug}/mcp",
+            "reason": (
+                None
+                if connector_url_ready or not strict_auth
+                else "connector_public_url_must_match_PUBLIC_BASE_URL"
+            ),
+        },
+        "oauth_storage": oauth_storage,
+        "entitlement_ledger": entitlement,
+    }
+
+
+def _mark_connector_entitlement_collisions(
+    entitlement_statuses: dict[str, dict[str, Any]],
+    protected_paths: dict[str, str],
+) -> None:
+    """Fail readiness when a connector ledger shares any other state store."""
+    connector_paths = [str(status.get("path") or "") for status in entitlement_statuses.values()]
+    connector_paths = [path for path in connector_paths if path]
+    connectors_share_path = len(connector_paths) != len(set(connector_paths))
+    for status in entitlement_statuses.values():
+        path = str(status.get("path") or "")
+        blockers = set(status.get("blockers") or [])
+        collisions: list[str] = []
+        if connectors_share_path and connector_paths.count(path) > 1:
+            blockers.add("entitlement_db_shared_between_connectors")
+            collisions.append("connector_entitlements")
+        for label, protected_path in protected_paths.items():
+            if path and protected_path and database_paths_collide(path, protected_path):
+                blockers.add(f"entitlement_db_shared_with_{label}")
+                collisions.append(label)
+        if collisions:
+            status["ready"] = False
+        status["blockers"] = sorted(blockers)
+        status["database_collisions"] = sorted(set(collisions))
+
+
+def _readiness_report() -> dict[str, Any]:
+    missing_docs = [
+        relative_path
+        for relative_path in READINESS_REQUIRED_DOC_PATHS
+        if not (DOCS_DIR / relative_path).is_file()
+    ]
+    runtime_ready = all(
+        getattr(app.state, name, None) is not None
+        for name in ("blocksize", "stream_cache", "credits", "rwa_store")
+    )
+    hosted = _hosted_environment()
+    require_payment_wallet = _env_enabled(
+        "READINESS_REQUIRE_PAYMENT_WALLET",
+        "true" if hosted and not _anthropic_only_mode() else "false",
+    )
+    payment_rails = settings.x402.payment_rail_status()
+    facilitator_support = getattr(app.state, "facilitator_support", None)
+    facilitator_readiness = _facilitator_support_readiness(facilitator_support)
+    operational_payment_requirements = _facilitator_supported_requirements(
+        settings.payment_requirements(Decimal("0.000001")),
+        facilitator_support,
+    )
+    payment_wallet_ready = bool(operational_payment_requirements) or not require_payment_wallet
+    rwa_db_path = configured_rwa_observation_db_path()
+    credit_manager = getattr(app.state, "credits", None)
+    credit_store = (
+        _cached_store_readiness(
+            "credit_ledger",
+            configuration_fingerprint=_sqlite_readiness_configuration_fingerprint(
+                credit_manager.db_path,
+                expected_schema=_CREDIT_DB_SCHEMA,
+                hosted=hosted,
+                configured_path=os.environ.get("CREDIT_DB_PATH", "credits.db"),
+            ),
+        )
+        if isinstance(credit_manager, CreditManager)
+        else {
+            "ready": False,
+            "required": True,
+            "integrity": "unavailable",
+            "blockers": ["runtime_store_missing"],
+        }
+    )
+    observability_runtime_path = (
+        str(OBSERVABILITY.db_path)
+        if OBSERVABILITY is not None
+        else settings.server.observability_db_path
+    )
+    observability_store = (
+        _cached_store_readiness(
+            "observability_store",
+            configuration_fingerprint=_sqlite_readiness_configuration_fingerprint(
+                observability_runtime_path,
+                expected_schema=_OBSERVABILITY_DB_SCHEMA,
+                hosted=hosted,
+                configured_path=settings.server.observability_db_path,
+            ),
+        )
+        if settings.server.observability_enabled
+        else {
+            "ready": True,
+            "required": False,
+            "enabled": False,
+            "integrity": "not_required",
+            "blockers": [],
+        }
+    )
+    observability_store["enabled"] = settings.server.observability_enabled
+    runtime_state_paths = (
+        {"credits_runtime": str(credit_manager.db_path)}
+        if isinstance(credit_manager, CreditManager)
+        else None
+    )
+    rwa_boundary = rwa_security_status(
+        settings.server.observability_db_path,
+        runtime_state_paths,
+    )
+    rwa_store = getattr(app.state, "rwa_store", None)
+    rwa_schema = (
+        _cached_store_readiness(
+            "rwa_operator_store",
+            configuration_fingerprint=_rwa_readiness_configuration_fingerprint(
+                rwa_store,
+                configured_path=rwa_db_path,
+                hosted=hosted,
+            ),
+        )
+        if isinstance(rwa_store, RWAObservationStore)
+        else {
+            "ready": False,
+            "schema_version": 0,
+            "integrity": "unavailable",
+            "blockers": ["runtime_store_missing"],
+        }
+    )
+    rwa_runtime_path = (
+        _resolved_runtime_path(rwa_store.db_path)
+        if isinstance(rwa_store, RWAObservationStore)
+        else _resolved_runtime_path(rwa_db_path)
+    )
+    rwa_blockers: list[str] = []
+    if rwa_runtime_path != _resolved_runtime_path(rwa_db_path):
+        rwa_blockers.append("runtime_path_mismatch")
+    if hosted and not _path_on_railway_volume(rwa_runtime_path):
+        rwa_blockers.append("not_on_railway_volume")
+    if not _database_path_is_writable(str(rwa_runtime_path)):
+        rwa_blockers.append("database_not_writable")
+    if not rwa_schema.get("ready"):
+        rwa_blockers.append("schema_or_integrity_check_failed")
+    rwa_blockers.extend(rwa_schema.get("blockers") or [])
+    if not rwa_boundary.get("ready"):
+        rwa_blockers.append("operator_boundary_not_ready")
+
+    entitlement_statuses = {
+        prefix: _connector_entitlement_readiness(
+            prefix,
+            hosted=hosted,
+            production=is_production_environment(),
+            initialize=False,
+        )
+        for prefix in (
+            ["ANTHROPIC"]
+            if _anthropic_only_mode()
+            else ["ANTHROPIC", "CURSOR", "OPENAI"]
+        )
+    }
+    _mark_connector_entitlement_collisions(
+        entitlement_statuses,
+        {
+            "credit_ledger": (
+                str(credit_manager.db_path)
+                if isinstance(credit_manager, CreditManager)
+                else os.environ.get("CREDIT_DB_PATH", "credits.db")
+            ),
+            "observability_store": settings.server.observability_db_path,
+            "rwa_store": rwa_db_path,
+        },
+    )
+    connectors = {
+        "anthropic": _connector_readiness(
+            "ANTHROPIC",
+            anthropic_mcp,
+            entitlement_statuses["ANTHROPIC"],
+        ),
+    }
+    if not _anthropic_only_mode():
+        connectors.update(
+            {
+                "cursor": _connector_readiness(
+                    "CURSOR", cursor_mcp, entitlement_statuses["CURSOR"]
+                ),
+                "openai": _connector_readiness(
+                    "OPENAI", openai_mcp, entitlement_statuses["OPENAI"]
+                ),
+            }
+        )
+
+    state_paths: dict[str, str | os.PathLike[str] | None] = {
+        "credit_ledger": (
+            credit_manager.db_path if isinstance(credit_manager, CreditManager) else None
+        ),
+        "observability_store": (
+            observability_runtime_path if settings.server.observability_enabled else None
+        ),
+        "rwa_store": (
+            rwa_store.db_path if isinstance(rwa_store, RWAObservationStore) else rwa_db_path
+        ),
+    }
+    for prefix, entitlement in entitlement_statuses.items():
+        state_paths[f"{prefix.lower()}_entitlements"] = str(entitlement.get("path") or "")
+    for name, connector_status in connectors.items():
+        oauth_path = connector_status.get("oauth_storage", {}).get("path")
+        state_paths[f"{name}_oauth_storage"] = str(oauth_path or "")
+    state_store_isolation = _state_store_isolation(state_paths)
+
+    checks: dict[str, Any] = {
+        "static_product": {
+            "ready": not missing_docs,
+            "missing": missing_docs,
+        },
+        "release_manifest": _release_manifest_check(),
+        "release_provenance": {
+            "ready": bool(RELEASE_BUILD.get("commit_sha")) or not hosted,
+            "required": hosted,
+            "commit_sha": RELEASE_BUILD.get("commit_sha"),
+            "source_branch": RELEASE_BUILD.get("source_branch"),
+        },
+        "deployment_security_policy": {
+            "ready": not hosted or is_production_environment(),
+            "required": hosted,
+            "strict_environment": is_production_environment(),
+            "reason": (
+                None
+                if not hosted or is_production_environment()
+                else "hosted_runtime_requires_APP_ENV_production"
+            ),
+        },
+        "runtime": {"ready": runtime_ready},
+        "blocksize_upstream": _blocksize_dependency_readiness(
+            getattr(app.state, "blocksize", None)
+        ),
+        "stream_cache": _stream_cache_readiness(
+            getattr(app.state, "stream_cache", None)
+        ),
+        "credit_ledger": credit_store,
+        "payment_wallet": {
+            "ready": payment_wallet_ready,
+            "required": require_payment_wallet,
+            "configured_rails": sum(
+                bool(status["configured"])
+                for status in payment_rails.values()
+            ),
+            "operational_rails": len(operational_payment_requirements),
+            "rails": payment_rails,
+        },
+        "observability_store": observability_store,
+        "state_store_isolation": state_store_isolation,
+        "privacy_security": security_configuration_status(),
+        "trusted_identity": trusted_identity_configuration_status(),
+        "payment_security": payment_security_status(
+            production=security_configuration_status()["production"],
+            railway_hosted=hosted,
+            facilitator_url=settings.x402.facilitator_url,
+            facilitator_bearer_configured=bool(
+                settings.x402.facilitator_bearer_token
+            ),
+            cdp_api_key_id_configured=bool(settings.x402.cdp_api_key_id),
+            cdp_api_key_secret_configured=bool(settings.x402.cdp_api_key_secret),
+            mock_enabled=settings.server.x402_allow_mock_payments,
+            legacy_enabled=settings.server.x402_allow_legacy_payments,
+            networks=[
+                str(requirement["network"])
+                for requirement in operational_payment_requirements
+            ],
+            trusted_proxies=settings.server.forwarded_allow_ips,
+            freshness_seconds=settings.server.x402_payment_max_age_seconds,
+            finality_confirmations=settings.server.x402_payment_min_confirmations,
+            verification_lease_seconds=(
+                settings.server.x402_payment_verification_lease_seconds
+            ),
+            replay_ttl_seconds=settings.server.x402_payment_replay_ttl_seconds,
+            replay_max_entries=settings.server.x402_payment_replay_max_entries,
+            credit_db_path=(credit_manager.db_path if isinstance(credit_manager, CreditManager) else None),
+        ),
+        "facilitator_support": {
+            "ready": (
+                facilitator_readiness["ready"]
+                and (
+                    not facilitator_readiness["required"]
+                    or bool(operational_payment_requirements)
+                )
+            ),
+            "required": facilitator_readiness["required"],
+            "checked": facilitator_readiness["checked"],
+            "available": facilitator_readiness["available"],
+            "age_seconds": facilitator_readiness.get("age_seconds"),
+            "max_age_seconds": facilitator_readiness.get("max_age_seconds"),
+            "supported_networks": sorted(
+                {
+                    str(kind.get("network"))
+                    for kind in (facilitator_support or {}).get("kinds", [])
+                    if isinstance(kind, dict) and kind.get("network")
+                }
+            ),
+            "advertised_networks": [
+                str(requirement["network"])
+                for requirement in operational_payment_requirements
+            ],
+            "reason": (
+                facilitator_readiness.get("reason")
+                or (
+                    "no_supported_configured_rail"
+                    if facilitator_readiness["required"]
+                    and not operational_payment_requirements
+                    else None
+                )
+            ),
+        },
+        "rwa_operator_store": {
+            **rwa_boundary,
+            "ready": not rwa_blockers,
+            "path": str(rwa_runtime_path),
+            "on_railway_volume": _path_on_railway_volume(rwa_runtime_path),
+            "blockers": sorted(set(rwa_blockers)),
+            "schema_version": rwa_schema.get("schema_version", 0),
+            "integrity": rwa_schema.get("integrity", "unavailable"),
+            "integrity_scope": rwa_schema.get("integrity_scope", "rwa_store_metadata"),
+            "checked": rwa_schema.get("checked", False),
+            "age_seconds": rwa_schema.get("age_seconds"),
+            "max_age_seconds": rwa_schema.get("max_age_seconds"),
+            "reason": rwa_schema.get("reason"),
+        },
+        "connectors": {
+            "ready": all(item["ready"] for item in connectors.values()),
+            "providers": connectors,
+        },
+    }
+    ready = all(bool(check.get("ready")) for check in checks.values())
+    return {
+        "status": "ready" if ready else "not_ready",
+        "ready": ready,
+        "service": "blocksize-mcp-x402",
+        "version": APP_VERSION,
+        "commit_sha": RELEASE_BUILD.get("commit_sha"),
+        "checks": checks,
+    }
+
+
+@app.get("/readyz", include_in_schema=False)
+async def readiness_check() -> JSONResponse:
+    """Return dependency-aware release readiness for deployment promotion."""
+    report = _readiness_report()
+    return JSONResponse(status_code=200 if report["ready"] else 503, content=report)
+
+
 @app.get("/health")
 async def health_check() -> dict[str, Any]:
     """Health check — free."""
     if _anthropic_only_mode():
+        anthropic_oauth_available = _connector_local_oauth_available(
+            "ANTHROPIC", anthropic_mcp
+        )
         return {
             "status": "healthy",
             "service": "blocksize-anthropic-mcp-beta",
             "version": APP_VERSION,
+            "commit_sha": RELEASE_BUILD.get("commit_sha"),
             "mcp_url": _anthropic_mcp_url(),
             "transport": "streamable-http",
             "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
-            "oauth_callback_url": anthropic_auth.oauth_callback_url(),
-            "oauth_protected_resource_metadata": (
-                f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
-                "oauth-protected-resource/anthropic/mcp/"
+            "oauth_available": anthropic_oauth_available,
+            **(
+                {"oauth_callback_url": anthropic_auth.oauth_callback_url()}
+                if anthropic_oauth_available
+                else {}
             ),
-            "oauth_authorization_server_metadata": (
-                f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
-                "oauth-authorization-server/anthropic/mcp"
+            **(
+                {
+                    "oauth_protected_resource_metadata": (
+                        f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
+                        "oauth-protected-resource/anthropic/mcp/"
+                    ),
+                    "oauth_authorization_server_metadata": (
+                        f"{PUBLIC_BASE_URL.rstrip()}/.well-known/"
+                        "oauth-authorization-server/anthropic/mcp"
+                    ),
+                }
+                if anthropic_oauth_available
+                else {}
             ),
             "documentation": CLAUDE_CONNECTOR_URL,
             "privacy_policy": PRIVACY_POLICY_URL,
             "support": SUPPORT_URL,
+            "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
             "starter_allowance": {
-                "positioning": "Start with 50 live data credits",
+                "positioning": "Authenticated connectors receive up to 50 live data credits.",
+                "eligibility": "authenticated_connector_only",
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             },
             "tool_surface": "read-only",
             "tool_costs": ANTHROPIC_TOOL_COSTS,
         }
 
+    facilitator_support = getattr(app.state, "facilitator_support", None)
+    health_payment_requirements = _facilitator_supported_requirements(
+        settings.payment_requirements(Decimal("0.000001")),
+        facilitator_support,
+    )
+    operational_networks = {
+        str(requirement["network"]) for requirement in health_payment_requirements
+    }
+    rail_status = settings.x402.payment_rail_status()
+    anthropic_oauth_available = _connector_local_oauth_available(
+        "ANTHROPIC", anthropic_mcp
+    )
+    cursor_oauth_available = _connector_local_oauth_available("CURSOR", cursor_mcp)
+    openai_oauth_available = _connector_local_oauth_available("OPENAI", openai_mcp)
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",
         "version": APP_VERSION,
+        "commit_sha": RELEASE_BUILD.get("commit_sha"),
         "engine": "Shielded x402 Gateway (Iron Dome Active)",
+        "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
         "networks": {
             "primary": {
                 "name": "Solana",
-                "configured": bool(settings.x402.solana_wallet_address),
+                "configured": bool(rail_status["solana"]["configured"]),
+                "operational": settings.x402.solana_network in operational_networks,
             },
             "fallback": {
                 "name": "Base",
-                "configured": bool(settings.x402.evm_wallet_address),
+                "configured": bool(rail_status["base"]["configured"]),
+                "operational": settings.x402.base_network in operational_networks,
             },
         },
+        "payments": {
+            "operational": bool(health_payment_requirements),
+            "advertised_networks": sorted(operational_networks),
+            "facilitator_capabilities_checked": _facilitator_support_readiness(
+                facilitator_support
+            )["ready"],
+            "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
+        },
         "pricing": settings.pricing_summary,
-        "bulk_pricing": BULK_TIERS,
+        **(
+            {"legacy_local_qa_bulk_pricing": BULK_TIERS}
+            if settings.server.unverified_http_credits_enabled
+            and not security_configuration_status()["production"]
+            else {}
+        ),
         "starter_allowance": {
-            "positioning": "Start with 50 live data credits",
+            "positioning": "Authenticated connectors receive up to 50 live data credits.",
+            "eligibility": "authenticated_connector_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
-            "upgrade_path": "x402 payment or prepaid credit top-ups",
+            "direct_public_http": "Signed x402 payment is required per live-data request.",
+            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
         },
         "equities": {
             "positioning": "Supported equity tickers are first-class Blocksize symbols.",
@@ -8658,15 +12191,34 @@ async def health_check() -> dict[str, Any]:
             "glama_claim": GLAMA_WELL_KNOWN_URL,
             "mcp_registry_auth": MCP_REGISTRY_AUTH_URL,
             "anthropic_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/anthropic/mcp/",
-            "anthropic_oauth_callback": anthropic_auth.oauth_callback_url(),
+            **(
+                {"anthropic_oauth_callback": anthropic_auth.oauth_callback_url()}
+                if anthropic_oauth_available
+                else {}
+            ),
             "claude_connector": CLAUDE_CONNECTOR_URL,
             "cursor_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp/",
-            "cursor_oauth_callback": cursor_auth.oauth_callback_url(),
+            **(
+                {"cursor_oauth_callback": cursor_auth.oauth_callback_url()}
+                if cursor_oauth_available
+                else {}
+            ),
+            "openai_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/openai/mcp/",
+            **(
+                {"openai_oauth_callback": openai_auth.oauth_callback_url()}
+                if openai_oauth_available
+                else {}
+            ),
         },
         "anthropic_connector": {
             "mcp_url": _anthropic_mcp_url(),
             "auth_provider": os.environ.get("ANTHROPIC_AUTH_PROVIDER", "none"),
-            "oauth_callback_url": anthropic_auth.oauth_callback_url(),
+            "oauth_available": anthropic_oauth_available,
+            **(
+                {"oauth_callback_url": anthropic_auth.oauth_callback_url()}
+                if anthropic_oauth_available
+                else {}
+            ),
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": ANTHROPIC_TOOL_COSTS,
@@ -8676,10 +12228,30 @@ async def health_check() -> dict[str, Any]:
         "cursor_connector": {
             "mcp_url": _cursor_mcp_url(),
             "auth_provider": os.environ.get("CURSOR_AUTH_PROVIDER", "none"),
-            "oauth_callback_url": cursor_auth.oauth_callback_url(),
+            "oauth_available": cursor_oauth_available,
+            **(
+                {"oauth_callback_url": cursor_auth.oauth_callback_url()}
+                if cursor_oauth_available
+                else {}
+            ),
             "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": CURSOR_TOOL_COSTS,
+            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
+        },
+        "openai_connector": {
+            "mcp_url": _openai_mcp_url(),
+            "auth_provider": os.environ.get("OPENAI_AUTH_PROVIDER", "none"),
+            "oauth_available": openai_oauth_available,
+            **(
+                {"oauth_callback_url": openai_auth.oauth_callback_url()}
+                if openai_oauth_available
+                else {}
+            ),
+            "oauth_scopes": openai_auth.oauth_scopes(),
+            "beta_tokens_enabled": openai_auth.beta_tokens_enabled(),
+            "tool_surface": "read-only-live-data",
+            "tool_costs": OPENAI_TOOL_COSTS,
             "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
         },
     }
@@ -8689,7 +12261,7 @@ def run_resource_server() -> None:
     """Start the resource server with uvicorn."""
     import uvicorn
     port = int(os.environ.get("PORT", settings.server.resource_server_port))
-    uvicorn.run(
+    config = uvicorn.Config(
         "src.resource_server:app",
         host="0.0.0.0",
         port=port,
@@ -8698,6 +12270,8 @@ def run_resource_server() -> None:
         forwarded_allow_ips=settings.server.forwarded_allow_ips,
         reload=False,
     )
+    install_sensitive_query_log_filter()
+    uvicorn.Server(config).run()
 
 
 if __name__ == "__main__":

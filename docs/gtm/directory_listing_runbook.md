@@ -38,7 +38,7 @@ What exists:
 
 - `server.json`
 - public Streamable HTTP endpoint
-- public repository metadata omitted by default
+- approved canonical GitHub repository metadata included by default
 
 What still requires approval:
 

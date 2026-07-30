@@ -1,7 +1,7 @@
 [project]
 name = "blocksize-mcp-x402"
-version = "0.6.4"
-description = "Blocksize live multi-asset market data for AI agents with provenance, starter credits, and x402 payments"
+version = "0.6.5"
+description = "Blocksize live multi-asset market data for AI agents: signed x402 for direct public HTTP, authenticated-connector-only starter credits, and a contact-sales authenticated account plan"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -21,9 +21,24 @@ dependencies = [
     "websockets>=12.0",
     # Data validation
     "pydantic>=2.10.0",
-    "pydantic-settings>=2.7.0",
+    "pydantic-settings>=2.14.2",
     # FastMCP's in-memory store expects TLRUCache, absent from cachetools 4.x.
     "cachetools>=5.3.0",
+    # Used directly for encrypted OAuth storage and signed venue adapters.
+    "cryptography>=48.0.1",
+    # Official x402 v2 schema validation for production payment signatures.
+    "x402>=2.8.0",
+    # Official request-bound JWT generation for the CDP production facilitator.
+    "cdp-sdk>=1.47.1",
+    # Explicit security floors keep non-uv installers from resolving known-
+    # vulnerable transitive runtime versions.
+    "idna>=3.15",
+    "joserfc>=1.6.8",
+    "mcp>=1.28.1",
+    "pyjwt>=2.13.0",
+    "python-multipart>=0.0.31",
+    "starlette>=1.3.1",
+    "urllib3>=2.7.0",
     # Environment management
     "python-dotenv>=1.0.0",
 ]
@@ -33,11 +48,16 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24.0",
     "respx>=0.22.0",
+    # Starlette 1.x uses HTTPX2 for TestClient; plain httpx support is deprecated.
+    "httpx2>=2.7.0",
     "ruff>=0.8.0",
+    "build>=1.2.0",
+    # Exercise official EVM/SVM client compatibility in the payment gate tests.
+    "x402[mechanisms]>=2.8.0",
 ]
 x402 = [
-    # x402 payment protocol — install when CDP is configured
-    "x402[fastapi]",
+    # Optional framework helpers; core schema validation is always installed.
+    "x402[fastapi]>=2.8.0",
 ]
 
 [build-system]
@@ -46,6 +66,23 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"server.json" = "share/blocksize-mcp/server.json"
+"docs/developer_portal.html" = "share/blocksize-mcp/docs/developer_portal.html"
+"docs/remote_mcp_quickstart.html" = "share/blocksize-mcp/docs/remote_mcp_quickstart.html"
+"docs/first_price_quickstart.html" = "share/blocksize-mcp/docs/first_price_quickstart.html"
+"docs/prompt_examples.html" = "share/blocksize-mcp/docs/prompt_examples.html"
+"docs/privacy_policy.html" = "share/blocksize-mcp/docs/privacy_policy.html"
+"docs/support.html" = "share/blocksize-mcp/docs/support.html"
+"docs/claude_connector.html" = "share/blocksize-mcp/docs/claude_connector.html"
+"docs/assets" = "share/blocksize-mcp/docs/assets"
+"docs/pdf" = "share/blocksize-mcp/docs/pdf"
+"docs/evidence" = "share/blocksize-mcp/docs/evidence"
+
+[tool.hatch.build.targets.wheel.force-include]
+"scripts/__init__.py" = "scripts/__init__.py"
+"scripts/run_rwa_growth_pilot.py" = "scripts/run_rwa_growth_pilot.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -73,8 +73,7 @@
             "x402"
           ],
           "pricingMode": "dynamic",
-          "price": "$0.002-$0.004",
-          "starterCredits": 1
+          "price": "$0.002-$0.004"
         }
       }
     },
@@ -96,8 +95,7 @@
             "x402"
           ],
           "pricingMode": "dynamic",
-          "price": "$0.002-$0.004",
-          "starterCredits": 1
+          "price": "$0.002-$0.004"
         }
       }
     },
@@ -119,8 +117,7 @@
             "x402"
           ],
           "pricingMode": "dynamic",
-          "price": "$0.002-$0.004",
-          "starterCredits": 1
+          "price": "$0.002-$0.004"
         }
       }
     },
@@ -186,8 +183,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.25",
-                    "starterCredits": 10
+                    "price": "$0.25"
                 }
             }
         },
@@ -226,8 +222,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.10",
-                    "starterCredits": 5
+                    "price": "$0.10"
                 }
             }
         },
@@ -265,8 +260,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.25",
-                    "starterCredits": 10
+                    "price": "$0.25"
                 }
             }
         },
@@ -288,8 +282,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$1.00",
-                    "starterCredits": 25
+                    "price": "$1.00"
                 }
             }
         },
@@ -311,8 +304,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.25",
-                    "starterCredits": 10
+                    "price": "$0.25"
                 }
             }
         },
@@ -349,8 +341,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.50",
-                    "starterCredits": 15
+                    "price": "$0.50"
                 }
             }
         },
@@ -387,8 +378,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$0.50",
-                    "starterCredits": 15
+                    "price": "$0.50"
                 }
             }
         },
@@ -410,8 +400,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$1.00",
-                    "starterCredits": 25
+                    "price": "$1.00"
                 }
             }
         },
@@ -433,8 +422,7 @@
                         "x402"
                     ],
                     "pricingMode": "fixed",
-                    "price": "$2.50",
-                    "starterCredits": 50
+                    "price": "$2.50"
                 }
             }
         }

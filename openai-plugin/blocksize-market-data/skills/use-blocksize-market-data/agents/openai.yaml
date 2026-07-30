@@ -1,0 +1,13 @@
+interface:
+  display_name: "Use Blocksize Market Data"
+  short_description: "Discover and retrieve Blocksize market data"
+  default_prompt: "Use $use-blocksize-market-data to resolve an instrument and retrieve a timestamped Blocksize market-data snapshot."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "blocksize-market-data-public"
+      description: "Public read-only Blocksize catalog discovery and paid endpoint construction"
+      transport: "streamable_http"
+      url: "https://mcp.blocksize.info/mcp/server/"
+policy:
+  allow_implicit_invocation: true

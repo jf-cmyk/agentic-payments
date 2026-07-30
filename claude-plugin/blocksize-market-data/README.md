@@ -18,9 +18,22 @@ x402 payment proofs.
 ## What It Adds
 
 - A remote HTTP MCP server reference for Blocksize Market Data.
-- A market-data workflow skill for safe symbol lookup, credit checks, and
-  bounded snapshot requests.
+- The `/blocksize-market-data:use-blocksize-market-data` skill for safe symbol
+  lookup, credit checks, and bounded snapshot requests.
 - Setup and review instructions for Claude Code and Cowork users.
+
+## Use The Skill
+
+After installing the plugin, invoke:
+
+```text
+/blocksize-market-data:use-blocksize-market-data
+```
+
+You can also ask Claude for a Blocksize VWAP, bid/ask, FX, metal,
+instrument-search, or credit-status workflow. The skill will prefer live tools
+when the authenticated connector exposes them and will clearly label
+discovery-only or route-only results.
 
 ## Available Tools
 
@@ -84,12 +97,14 @@ Get the latest XAUUSD metal price.
 This plugin and the Claude MCP connector are separate from Blocksize's x402 paid
 HTTP API. The Claude surface does not expose payment proof submission, wallet
 operations, credit purchases, order placement, or account mutation tools.
-Eligible users start with 50 live data credits; production usage upgrades
-through Blocksize x402 payment or prepaid credits outside Claude.
+Eligible users receive the starter allowance reported by the server; production
+usage can continue through direct Blocksize x402 outside Claude or an
+authenticated account plan arranged with Blocksize.
 
 ## Links
 
 - Connector docs: https://mcp.blocksize.info/claude-connector
 - Privacy policy: https://mcp.blocksize.info/privacy
+- Data terms: https://mcp.blocksize.info/terms
 - Support: https://mcp.blocksize.info/support
 - Production health: https://mcp.blocksize.info/health

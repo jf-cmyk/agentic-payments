@@ -2,7 +2,10 @@
 
 Welcome to the Blocksize Agentic Data node. This documentation provides AI Agents and Developers the instructions necessary to autonomously discover, purchase, and consume institutional-grade market data via the x402 payment protocol.
 
-To authorize requests, you must include either an x402 payment proof or an `X-AGENT-WALLET` header for credit drawdown.
+To authorize requests, use either an official signed x402 v2
+`PAYMENT-SIGNATURE` or an authenticated Claude, Cursor, or OpenAI connector
+principal with available credits. Raw wallet or caller-selected identity
+headers do not authorize production credit drawdown.
 
 ## System Architecture
 
@@ -10,7 +13,7 @@ To authorize requests, you must include either an x402 payment proof or an `X-AG
 
 ## Operational Swimlane
 
-![Institutional Swimlane](assets/swimlane_diagram.png)
+![Institutional Swimlane](assets/swimlane_diagram.jpg)
 
 ### End-to-End Sequence Flow
 
@@ -18,28 +21,30 @@ To authorize requests, you must include either an x402 payment proof or an `X-AG
 sequenceDiagram
     participant Agent as AI Agent
     participant Gateway as Blocksize Gateway
-    participant CM as Credit Manager
-    participant Chain as Blockchain (SOL/Base)
+    participant Auth as OAuth Connector
+    participant CM as Credit Ledger
+    participant Facilitator as x402 Facilitator
     participant Feed as Institutional Feed
 
-    Agent->>Gateway: GET /v1/vwap/BTC-USD (X-AGENT-WALLET)
-    Gateway->>CM: verify_eligibility(wallet, IP)
-    CM->>Chain: getBalance + signatures
-    Chain-->>CM: 0.15 SOL, 50 txs, 48h old
-    alt New Qualified Wallet
-        CM->>CM: Grant 50 Welcome Credits
-    end
-    CM->>CM: draw_credits(2.0)
-    alt Success
+    Agent->>Auth: Complete connector OAuth
+    Auth-->>Gateway: Verified namespaced principal
+    Gateway->>CM: Atomic credit drawdown
+    alt Authenticated credits available
         Gateway->>Feed: fetch_data(BTC-USD)
         Feed-->>Gateway: Institutional Data
         Gateway-->>Agent: 200 OK + Data
-    else Insufficient Credits
-        Gateway-->>Agent: 402 Payment Required
-        Agent->>Chain: settle_transaction(USDC)
-        Chain-->>Agent: TX Hash
-        Agent->>Gateway: GET /v1/vwap/... (X-PAYMENT-PROOF)
-        Gateway-->>Agent: 200 OK + Data
+    else Direct HTTP or insufficient credits
+        Gateway-->>Agent: 402 + PAYMENT-REQUIRED
+        Agent->>Agent: Select requirement and sign authorization
+        Agent->>Gateway: Retry with PAYMENT-SIGNATURE
+        Gateway->>Facilitator: verify
+        Facilitator-->>Gateway: valid
+        Gateway->>Feed: fetch_data(BTC-USD)
+        Feed-->>Gateway: Institutional Data
+        Gateway->>Facilitator: settle
+        Facilitator-->>Gateway: settlement receipt
+        Gateway->>CM: Finalize payment + cache response atomically
+        Gateway-->>Agent: 200 + data + PAYMENT-RESPONSE
     end
 ```
 
@@ -72,11 +77,14 @@ Contained within the response body (and the `PAYMENT-REQUIRED` header) is a mach
 ```
 
 ### Step 2: The Agentic Settlement
-Your Agent parses the JSON invoice. Utilizing an embedded funding mechanism (such as a Coinbase Developer Platform AgentKit wallet, or an abstracted LangChain tool), the Agent automatically executes a blockchain transaction transferring the required USDC amount to the designated `payTo` address on the chosen blockchain (Solana or Base L2).
+Your agent passes the challenge to an official x402 v2 client. The client
+selects one of the advertised facilitator-supported requirements and signs the
+scheme-specific payment authorization for the exact amount, recipient,
+network, and resource.
 
 ### Step 3: Cryptographic Fulfillment
-Once the transaction settles on the blockchain, the Agent extracts the Transaction Hash. The Agent then constructs a base64-encoded x402 valid payload dictating the network, signature format, and proof (transaction hash). 
-Finally, the Agent resubmits the exact same `GET` request, this time appending the signature in the headers:
+The agent resubmits the exact same request with the base64-encoded official
+x402 v2 payload:
 
 ```http
 GET /v1/vwap/BTC-USD HTTP/1.1
@@ -84,7 +92,10 @@ Host: mcp.blocksize.info
 PAYMENT-SIGNATURE: eyJhbGciOiJFZERTQ...<agent_cryptographic_signature>
 ```
 
-Our server natively decodes the payload and instantly validates the transaction completely on-chain via a secure Solana RPC node, preventing playback attacks. Upon verification, it seamlessly fulfills the market data payload as standard JSON.
+The server binds the signed requirement to the exact method, URL, and body,
+asks the configured facilitator to verify it, reserves the proof durably, and
+only releases data after settlement and local finalization succeed. Exact
+retries return the cached finalized response without charging again.
 
 ---
 

@@ -8,11 +8,18 @@ Dual-network payment: Solana (priority) + Base (fallback).
 
 from __future__ import annotations
 
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
+import re
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.payment_limits import MAX_PAYMENT_REPLAY_ENTRIES, MAX_PAYMENT_REPLAY_TTL_SECONDS
+
+
+_EVM_ADDRESS_RE = re.compile(r"^0x[0-9A-Fa-f]{40}$")
+_SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def _csv_list(value: str) -> list[str]:
@@ -130,14 +137,29 @@ class X402Settings(BaseSettings):
     solana_wallet_address: str = Field(
         "", alias="X402_SOLANA_WALLET_ADDRESS",
     )
+    solana_fee_payer: str = Field(
+        "", alias="X402_SOLANA_FEE_PAYER",
+    )
     evm_wallet_address: str = Field(
         "", alias="X402_EVM_WALLET_ADDRESS",
     )
 
     # Facilitator
     facilitator_url: str = Field(
-        "https://x402.org/facilitator",
+        "",
         alias="X402_FACILITATOR_URL",
+    )
+    facilitator_bearer_token: str = Field(
+        "",
+        alias="X402_FACILITATOR_BEARER_TOKEN",
+    )
+    cdp_api_key_id: str = Field(
+        "",
+        alias="CDP_API_KEY_ID",
+    )
+    cdp_api_key_secret: str = Field(
+        "",
+        alias="CDP_API_KEY_SECRET",
     )
 
     # Solana config (primary)
@@ -159,16 +181,68 @@ class X402Settings(BaseSettings):
         "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         alias="X402_BASE_USDC_ADDRESS",
     )
+    base_usdc_name: str = Field(
+        "USD Coin",
+        alias="X402_BASE_USDC_NAME",
+    )
+    base_usdc_version: str = Field(
+        "2",
+        alias="X402_BASE_USDC_VERSION",
+    )
+
+    def payment_rail_status(self) -> dict[str, dict[str, object]]:
+        """Return non-secret configuration status for each advertised rail."""
+        solana_blockers: list[str] = []
+        if not self.solana_wallet_address:
+            solana_blockers.append("recipient_missing")
+        elif not _SOLANA_ADDRESS_RE.fullmatch(self.solana_wallet_address):
+            solana_blockers.append("recipient_malformed")
+        if not self.solana_fee_payer:
+            solana_blockers.append("fee_payer_missing")
+        elif not _SOLANA_ADDRESS_RE.fullmatch(self.solana_fee_payer):
+            solana_blockers.append("fee_payer_malformed")
+        if not _SOLANA_ADDRESS_RE.fullmatch(self.solana_usdc_address):
+            solana_blockers.append("asset_malformed")
+
+        base_blockers: list[str] = []
+        if not self.evm_wallet_address:
+            base_blockers.append("recipient_missing")
+        elif not _EVM_ADDRESS_RE.fullmatch(self.evm_wallet_address):
+            base_blockers.append("recipient_malformed")
+        if not _EVM_ADDRESS_RE.fullmatch(self.base_usdc_address):
+            base_blockers.append("asset_malformed")
+        if not self.base_usdc_name.strip():
+            base_blockers.append("asset_name_missing")
+        if not self.base_usdc_version.strip():
+            base_blockers.append("asset_version_missing")
+
+        return {
+            "solana": {
+                "configured": bool(self.solana_wallet_address),
+                "ready": not solana_blockers,
+                "blockers": solana_blockers,
+            },
+            "base": {
+                "configured": bool(self.evm_wallet_address),
+                "ready": not base_blockers,
+                "blockers": base_blockers,
+            },
+        }
 
     @property
     def primary_wallet(self) -> str:
-        """Return the primary wallet (Solana if set, else Base)."""
-        return self.solana_wallet_address or self.evm_wallet_address
+        """Return the first recipient on an operational payment rail."""
+        rail_status = self.payment_rail_status()
+        if rail_status["solana"]["ready"]:
+            return self.solana_wallet_address
+        if rail_status["base"]["ready"]:
+            return self.evm_wallet_address
+        return ""
 
     @property
     def primary_network(self) -> str:
-        """Return the primary network."""
-        if self.solana_wallet_address:
+        """Return the first operational payment network."""
+        if self.payment_rail_status()["solana"]["ready"]:
             return self.solana_network
         return self.base_network
 
@@ -215,6 +289,32 @@ class ServerSettings(BaseSettings):
         alias="CORS_ALLOW_ORIGINS",
     )
     x402_payment_max_age_seconds: int = Field(900, alias="X402_PAYMENT_MAX_AGE_SECONDS")
+    x402_payment_future_skew_seconds: int = Field(
+        30,
+        alias="X402_PAYMENT_FUTURE_SKEW_SECONDS",
+    )
+    x402_payment_min_confirmations: int = Field(
+        2,
+        alias="X402_PAYMENT_MIN_CONFIRMATIONS",
+    )
+    x402_payment_verification_lease_seconds: int = Field(
+        120,
+        alias="X402_PAYMENT_VERIFICATION_LEASE_SECONDS",
+    )
+    x402_payment_replay_ttl_seconds: int = Field(
+        MAX_PAYMENT_REPLAY_TTL_SECONDS,
+        alias="X402_PAYMENT_REPLAY_TTL_SECONDS",
+    )
+    x402_payment_replay_max_entries: int = Field(
+        MAX_PAYMENT_REPLAY_ENTRIES,
+        alias="X402_PAYMENT_REPLAY_MAX_ENTRIES",
+    )
+    x402_allow_mock_payments: bool = Field(False, alias="X402_ALLOW_MOCK_PAYMENTS")
+    x402_allow_legacy_payments: bool = Field(False, alias="X402_ALLOW_LEGACY_PAYMENTS")
+    unverified_http_credits_enabled: bool = Field(
+        False,
+        alias="UNVERIFIED_HTTP_CREDITS_ENABLED",
+    )
     max_batch_size: int = Field(20, alias="MAX_BATCH_SIZE")
     discovery_rate_limit_enabled: bool = Field(True, alias="DISCOVERY_RATE_LIMIT_ENABLED")
     discovery_rate_limit_per_minute: int = Field(60, alias="DISCOVERY_RATE_LIMIT_PER_MINUTE")
@@ -222,6 +322,17 @@ class ServerSettings(BaseSettings):
     observability_enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
     observability_db_path: str = Field("usage_events.db", alias="OBSERVABILITY_DB_PATH")
     observability_dashboard_token: str = Field("", alias="OBSERVABILITY_DASHBOARD_TOKEN")
+    observability_hash_salt: str = Field("", alias="OBSERVABILITY_HASH_SALT")
+    trial_ip_hash_salt: str = Field("", alias="TRIAL_IP_HASH_SALT")
+    receipt_hash_salt: str = Field("", alias="RECEIPT_HASH_SALT")
+    receipt_id_salt: str = Field("", alias="RECEIPT_ID_SALT")
+    rwa_observation_db_path: str = Field("", alias="RWA_OBSERVATION_DB_PATH")
+    rwa_mutations_enabled: bool = Field(False, alias="RWA_MUTATIONS_ENABLED")
+    rwa_operator_token: str = Field("", alias="RWA_OPERATOR_TOKEN")
+    rwa_store_lock_timeout_seconds: float = Field(1.0, alias="RWA_STORE_LOCK_TIMEOUT_SECONDS")
+    rwa_probe_call_timeout_seconds: float = Field(10.0, alias="RWA_PROBE_CALL_TIMEOUT_SECONDS")
+    rwa_probe_total_timeout_seconds: float = Field(30.0, alias="RWA_PROBE_TOTAL_TIMEOUT_SECONDS")
+    rwa_probe_max_concurrency: int = Field(2, alias="RWA_PROBE_MAX_CONCURRENCY")
 
     @property
     def cors_origins(self) -> list[str]:
@@ -255,8 +366,10 @@ class Settings:
 
         requirements = []
 
-        # Solana (primary) — if wallet is configured
-        if self.x402.solana_wallet_address:
+        rail_status = self.x402.payment_rail_status()
+
+        # Solana requires the facilitator fee payer advertised by `/supported`.
+        if rail_status["solana"]["ready"]:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.solana_network,
@@ -267,11 +380,11 @@ class Settings:
                 "payTo": self.x402.solana_wallet_address,
                 "maxTimeoutSeconds": 30,
                 "asset": f"{self.x402.solana_network}/{self.x402.solana_usdc_address}",
-                "extra": {},
+                "extra": {"feePayer": self.x402.solana_fee_payer},
             })
 
-        # Base (fallback) — if wallet is configured
-        if self.x402.evm_wallet_address:
+        # Base EIP-3009 clients need the token's EIP-712 domain metadata.
+        if rail_status["base"]["ready"]:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.base_network,
@@ -282,7 +395,10 @@ class Settings:
                 "payTo": self.x402.evm_wallet_address,
                 "maxTimeoutSeconds": 60,
                 "asset": f"{self.x402.base_network}/{self.x402.base_usdc_address}",
-                "extra": {},
+                "extra": {
+                    "name": self.x402.base_usdc_name,
+                    "version": self.x402.base_usdc_version,
+                },
             })
 
         return requirements

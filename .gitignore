@@ -17,6 +17,7 @@ cursor_entitlements.db
 .tmp_stork_coverage/
 tmp/
 outputs/
+backups/
 .DS_Store
 mcp-registry-key.pem
 tools/mcp-publisher

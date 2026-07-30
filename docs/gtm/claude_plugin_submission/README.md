@@ -1,6 +1,6 @@
 # Claude Plugin Submission Packet
 
-Prepared: 2026-05-13
+Prepared: 2026-07-29
 
 This packet is for the optional Claude plugin directory track. The primary
 Claude marketplace path remains the remote MCP connector submission at:
@@ -40,13 +40,18 @@ claude-plugin/blocksize-market-data
 Public source URL:
 
 ```text
-https://gitlab.com/jfocke/agentic-payments/-/tree/main/claude-plugin/blocksize-market-data
+https://github.com/jf-cmyk/agentic-payments/tree/main/claude-plugin/blocksize-market-data
 ```
+
+Release gate: the canonical GitHub path currently contains an older public
+package. Do not submit it as the `0.3.0` source until the accepted release
+commit, repository marketplace manifest, tag, checksum, and clean-install smoke
+evidence are public and mutually consistent.
 
 Prepared upload archive:
 
 ```text
-deliverables/blocksize-market-data-claude-plugin-0.1.0.zip
+deliverables/blocksize-market-data-claude-plugin-0.3.0.zip
 ```
 
 Remote MCP endpoint:
@@ -66,7 +71,8 @@ https://platform.claude.com/plugins/submit
 
 - `.claude-plugin/plugin.json` with plugin metadata.
 - `.mcp.json` pointing to the production Claude MCP endpoint.
-- `skills/market-data-workflow/SKILL.md` with safe market-data workflow guidance.
+- `skills/use-blocksize-market-data/SKILL.md` with safe market-data workflow
+  guidance shared across Claude, OpenAI, and Cursor.
 - `SETUP.md` with installation and OAuth troubleshooting instructions.
 - `README.md` and `LICENSE`.
 
@@ -75,16 +81,19 @@ https://platform.claude.com/plugins/submit
 - Use this plugin for Claude Code and Cowork discovery.
 - Use the Connectors Directory form for Claude.ai/Desktop/mobile-wide remote MCP
   discovery.
-- If Anthropic requires a GitHub URL, sync this plugin path to the public GitHub
-  remote before using the GitHub option.
-- Until GitHub is synced, upload
-  `deliverables/blocksize-market-data-claude-plugin-0.1.0.zip`.
+- If Anthropic requires a GitHub URL, sync and verify the canonical repository
+  release gate above before using the GitHub option.
+- Until GitHub is synced, use
+  `deliverables/blocksize-market-data-claude-plugin-0.3.0.zip` only for a
+  controlled local validation or an explicit archive-upload workflow. Its
+  checksum is recorded in `deliverables/agent-skill-release-0.4.0.json`, whose
+  current signature status is `unsigned-local-build`.
 - Run `claude plugin validate claude-plugin/blocksize-market-data` before plugin
   submission where the Claude CLI is available.
 
 ## Validation Status
 
-Verified on 2026-05-13:
+Verified on 2026-07-29:
 
 ```bash
 python3 -m json.tool claude-plugin/blocksize-market-data/.claude-plugin/plugin.json

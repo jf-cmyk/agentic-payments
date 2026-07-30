@@ -13,7 +13,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from src.rwa_coverage import build_rwa_asset_matrix
+from src.rwa_coverage import (
+    build_rwa_asset_matrix,
+    iter_asset_venue_instruments,
+)
 
 
 IdentityOverride = dict[str, str]
@@ -200,20 +203,59 @@ def build_rwa_ticker_identity_audit() -> dict[str, Any]:
         asset_classes = [str(item) for item in asset.get("asset_classes", [])]
         identity = IDENTITY_OVERRIDES.get(asset_id) or _fallback_identity(asset_id, asset_classes)
         primary_type = identity["primary_type"]
+        venue_instruments: dict[str, list[dict[str, Any]]] = {}
+        for venue_id, instrument in iter_asset_venue_instruments(asset):
+            venue_instruments.setdefault(venue_id, []).append(
+                {
+                    "instrument_id": instrument.get("instrument_id"),
+                    "symbol": instrument["symbol"],
+                    "asset_class": instrument.get("asset_class"),
+                    "raw_source_asset_class": instrument.get(
+                        "raw_source_asset_class"
+                    ),
+                    "underlying_asset_class": instrument.get(
+                        "underlying_asset_class"
+                    ),
+                    "contract_type": instrument.get("contract_type"),
+                    "identity_status": instrument.get("identity_status"),
+                    "decision_grade": instrument.get("decision_grade"),
+                    "source_type": instrument["source_type"],
+                }
+            )
+        matrix_identity_status = str(
+            asset.get("identity_status") or "manual_verification_required"
+        )
         rows.append(
             {
                 "asset_id": asset_id,
                 "name": identity["name"],
                 "registry_asset_classes": asset_classes,
+                "canonical_underlying_asset_class": asset.get(
+                    "canonical_underlying_asset_class"
+                ),
+                "raw_source_asset_ids": asset.get("raw_source_asset_ids", []),
+                "raw_source_asset_classes": asset.get(
+                    "raw_source_asset_classes", []
+                ),
                 "verified_primary_type": primary_type,
                 "underlying_exposure": identity["exposure"],
                 "canonical_symbols": asset["symbols"],
                 "venues": sorted(asset["venues"]),
                 "venue_symbols": {
-                    venue_id: venue_data["symbol"]
-                    for venue_id, venue_data in sorted(asset["venues"].items())
+                    venue_id: instruments[0]["symbol"]
+                    for venue_id, instruments in sorted(
+                        venue_instruments.items()
+                    )
                 },
-                "verification_status": _verification_status(asset_id, asset_classes, primary_type),
+                "venue_instruments": venue_instruments,
+                "verification_status": matrix_identity_status,
+                "security_master_review_status": _verification_status(
+                    asset_id, asset_classes, primary_type
+                ),
+                "decision_grade": bool(asset.get("decision_grade")),
+                "manual_verification_required": bool(
+                    asset.get("manual_verification_required")
+                ),
                 "classification_action": _classification_action(asset_classes, primary_type),
                 "note": SOURCE_NOTES.get(asset_id, ""),
             }
@@ -222,9 +264,29 @@ def build_rwa_ticker_identity_audit() -> dict[str, Any]:
     by_status = Counter(row["verification_status"] for row in rows)
     by_primary_type = Counter(row["verified_primary_type"] for row in rows)
     actions = Counter(row["classification_action"] for row in rows)
+    matrix_quality = matrix["summary"]["identity_quality"]
     return {
         "summary": {
             "asset_count": len(rows),
+            "decision_grade_canonical_asset_count": matrix_quality[
+                "decision_grade_canonical_asset_count"
+            ],
+            "manual_verification_asset_count": matrix_quality[
+                "manual_verification_asset_count"
+            ],
+            "ambiguous_source_scoped_asset_count": matrix_quality[
+                "ambiguous_source_scoped_asset_count"
+            ],
+            "raw_mixed_class_asset_id_count": matrix_quality[
+                "raw_mixed_class_asset_id_count"
+            ],
+            "canonical_mixed_class_asset_id_count": matrix_quality[
+                "canonical_mixed_class_asset_id_count"
+            ],
+            "decision_grade_mixed_class_asset_id_count": matrix_quality[
+                "decision_grade_mixed_class_asset_id_count"
+            ],
+            "identity_acceptance": matrix_quality["acceptance"],
             "by_verification_status": dict(sorted(by_status.items())),
             "by_primary_type": dict(sorted(by_primary_type.items())),
             "by_classification_action": dict(sorted(actions.items())),
@@ -250,12 +312,19 @@ def write_rwa_ticker_identity_audit(
         "asset_id",
         "name",
         "registry_asset_classes",
+        "canonical_underlying_asset_class",
+        "raw_source_asset_ids",
+        "raw_source_asset_classes",
         "verified_primary_type",
         "underlying_exposure",
         "canonical_symbols",
         "venues",
         "venue_symbols",
+        "venue_instruments",
         "verification_status",
+        "security_master_review_status",
+        "decision_grade",
+        "manual_verification_required",
         "classification_action",
         "note",
     ]

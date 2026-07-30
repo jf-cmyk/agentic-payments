@@ -48,6 +48,8 @@ async def test_cursor_credit_balance_returns_daily_status(monkeypatch):
     assert parsed["status"] == "ok"
     assert parsed["credits"]["daily_limit"] == 2
     assert parsed["credits"]["credits_remaining"] == 2
+    assert "user_id" not in parsed["credits"]
+    assert "email" not in parsed["credits"]
 
 
 @pytest.mark.asyncio
@@ -70,6 +72,7 @@ async def test_cursor_vwap_spends_one_credit(monkeypatch):
     assert "Credits remaining today: 1/2" in result
     mock_client.get_vwap_latest.assert_awaited_once_with("BTCUSD")
     assert server._entitlements.status("cursor-user-1").credits_remaining == 1
+    assert server._entitlements.schema_status()["charge_states"] == {"delivered": 1}
 
 
 @pytest.mark.asyncio

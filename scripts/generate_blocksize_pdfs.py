@@ -30,12 +30,12 @@ class BlocksizePDF(FPDF):
         self.multi_cell(0, 5, text)
         self.ln()
 
-    def pricing_table(self, rows):
+    def pricing_table(self, rows, headers=("Access path", "Availability", "Terms")):
         self.set_font("helvetica", "B", 9)
         self.set_fill_color(220, 220, 220)
-        self.cell(60, 8, "Tier", 1, 0, 'C', True)
-        self.cell(50, 8, "Credits", 1, 0, 'C', True)
-        self.cell(70, 8, "Price (USDC)", 1, 1, 'C', True)
+        self.cell(60, 8, headers[0], 1, 0, 'C', True)
+        self.cell(50, 8, headers[1], 1, 0, 'C', True)
+        self.cell(70, 8, headers[2], 1, 1, 'C', True)
         
         self.set_font("helvetica", "", 9)
         for row in rows:
@@ -61,8 +61,13 @@ def generate_docs():
     pdf.body_text("Each request follows a strict verification and settlement flow via the Iron Dome security layer.")
     pdf.body_text("Each request follows a strict verification and settlement flow via the Iron Dome security layer. Refer to the internal documentation for the full operational sequence.")
 
-    pdf.section_title("3. Authentication Mode")
-    pdf.body_text("- x402 Header: Include Payment-Proof signature (TX Hash).\n- Credit Header: Include X-AGENT-WALLET for drawdown.")
+    pdf.section_title("3. Authentication Modes")
+    pdf.body_text(
+        "- Direct HTTP: use an official signed x402 v2 PAYMENT-SIGNATURE.\n"
+        "- Connectors: sign in through the supported OAuth flow to use an eligible "
+        "starter-credit allowance. Caller-selected identity headers do not grant "
+        "production credits."
+    )
 
     pdf.output("docs/pdf/Blocksize_API_Documentation.pdf")
     print("Generated: Blocksize_API_Documentation.pdf")
@@ -95,10 +100,20 @@ def generate_flow():
     pdf.chapter_title("Autonomous User Flow")
     
     pdf.section_title("1. The 402 Challenge Loop")
-    pdf.body_text("1. Agent performs GET to /v1/vwap/BTC-USD.\n2. Server returns 402 Payment Required.\n3. Server provides 'Payment-Required' header with cost and destination wallet.\n4. Agent settles USDC via Solana/Base.\n5. Agent resubmits with 'Payment-Signature' containing TX Hash.")
+    pdf.body_text(
+        "1. Agent requests /v1/vwap/BTC-USD.\n"
+        "2. Server returns 402 Payment Required.\n"
+        "3. PAYMENT-REQUIRED lists the exact amount, asset, network, and resource.\n"
+        "4. An official x402 v2 client signs the selected authorization.\n"
+        "5. Agent retries the exact request with PAYMENT-SIGNATURE."
+    )
     
     pdf.section_title("2. Deterministic Unlock")
-    pdf.body_text("Upon verification, the gateway serves the paid JSON payload for that request and records the payment proof to prevent replay. Wallet credits can be used for lower-latency drawdown.")
+    pdf.body_text(
+        "After facilitator verification, successful settlement, and durable local "
+        "finalization, the gateway returns the paid JSON payload and prevents proof "
+        "replay. Authenticated connectors can separately use an eligible starter allowance."
+    )
     
     pdf.output("docs/pdf/Blocksize_User_Flow.pdf")
     print("Generated: Blocksize_User_Flow.pdf")
@@ -109,19 +124,28 @@ def generate_pricing():
     pdf.add_page()
     pdf.chapter_title("Institutional Pricing Guide")
     
-    pdf.section_title("1. Unit Economics")
-    pdf.body_text("1 Credit = $0.001 Market Value. Credits allow for zero-latency drawdown without waiting for block confirmations.")
+    pdf.section_title("1. Direct x402 Unit Pricing")
+    pdf.body_text(
+        "Public paid HTTP routes use direct x402 per request. Raw-data defaults range "
+        "from 0.002 USDC for core crypto to 0.008 USDC for supported equity bid/ask; "
+        "packaged workflow prices can differ. Always use the live 402 challenge as "
+        "the authoritative price and network list."
+    )
 
-    pdf.section_title("2. Bulk Purchase Tiers")
-    tiers = [
-        ("Starter Pouch", "1,000 Credits", "0.90 USDC (10% OFF)"),
-        ("Growth Pack", "10,000 Credits", "8.00 USDC (20% OFF)"),
-        ("Institutional Vault", "100,000 Credits", "60.00 USDC (40% OFF)")
+    pdf.section_title("2. Production Access Paths")
+    paths = [
+        ("Direct x402", "Public HTTP", "Live route price"),
+        ("Connector credits", "Eligible users", "Starter allowance"),
+        ("Account plan", "Contact sales", "Agreed terms"),
     ]
-    pdf.pricing_table(tiers)
-    
-    pdf.section_title("3. Performance Discounts")
-    pdf.body_text("Institutional clients consuming >1M calls/month receive custom rebate metadata in the X-AGENT-QUOTA response header.")
+    pdf.pricing_table(paths)
+
+    pdf.section_title("3. Account Plans")
+    pdf.body_text(
+        "Self-serve purchase routes are not exposed in production. Teams that need "
+        "sustained authenticated access should contact "
+        "Blocksize to discuss an account plan."
+    )
     
     pdf.output("docs/pdf/Blocksize_Pricing_Guide.pdf")
     print("Generated: Blocksize_Pricing_Guide.pdf")
@@ -132,14 +156,23 @@ def generate_agent_manual():
     pdf.add_page()
     pdf.chapter_title("Agent Integration Guide")
     
-    pdf.section_title("1. Iron Dome Requirements")
-    pdf.body_text("To prevent Sybil attacks and qualify for Trial Credits:\n- Minimum Stake: 0.1 SOL in Agent Wallet.\n- Wallet History: >24h Age and >5 Transactions.\n- IP Policy: Permanent 1-Trial-Per-IP lock.")
+    pdf.section_title("1. Access Requirements")
+    pdf.body_text(
+        "Direct HTTP clients use an official signed x402 v2 payment flow. Eligible "
+        "OpenAI, Claude, and Cursor connector users authenticate through OAuth to use "
+        "a starter allowance. Raw wallet and caller-selected identity headers do not "
+        "grant production credits."
+    )
     
     pdf.section_title("2. Automated Discovery")
     pdf.body_text("Fetch the MCP Discovery Manifest at /mcp/manifest.json to receive full tool definitions and JSON-schema parameters.")
     
-    pdf.section_title("3. Python Example")
-    pdf.body_text("headers = {'X-AGENT-WALLET': wallet_address}\nresponse = requests.get(url, headers=headers)")
+    pdf.section_title("3. HTTP Integration")
+    pdf.body_text(
+        "Request a paid route, parse its PAYMENT-REQUIRED challenge with an official "
+        "x402 v2 client, then retry the exact request with PAYMENT-SIGNATURE. For "
+        "sustained authenticated access, contact Blocksize about an account plan."
+    )
     
     pdf.output("docs/pdf/Blocksize_Agent_Manual.pdf")
     print("Generated: Blocksize_Agent_Manual.pdf")

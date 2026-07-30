@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +22,12 @@ class ConnectorIdentity:
     user_id: str
     email: str | None = None
     source: str = "oauth"
+    principal_id: str | None = None
+
+    @property
+    def ledger_subject(self) -> str:
+        """Return the issuer/connector-scoped identity used for entitlements."""
+        return self.principal_id or self.user_id
 
 
 AccessTokenGetter = Callable[[], AccessToken]
@@ -142,7 +149,7 @@ def resolve_connector_identity(
     """Resolve the current MCP caller from OAuth or configured beta tokens."""
     token = _safe_access_token(get_access_token_fn)
     if token is not None:
-        identity = identity_from_access_token(token)
+        identity = identity_from_access_token(token, namespace=prefix)
         if identity is not None:
             return identity
 
@@ -156,9 +163,8 @@ def resolve_connector_identity(
 
 def beta_tokens_enabled_for(prefix: str) -> bool:
     """Return whether static beta bearer tokens should be accepted."""
-    provider = _env(prefix, "AUTH_PROVIDER").strip().lower()
-    if provider in BETA_TOKEN_PROVIDERS:
-        return True
+    # Provider selection alone must never turn a static credential on. This is
+    # intentionally an independent, explicit break-glass/testing control.
     return _env_truthy(f"{prefix}_ENABLE_BETA_TOKENS")
 
 
@@ -266,7 +272,11 @@ def parse_string_list(raw: str, fallback: list[str] | None) -> list[str] | None:
     return [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
 
 
-def identity_from_access_token(token: AccessToken) -> ConnectorIdentity | None:
+def identity_from_access_token(
+    token: AccessToken,
+    *,
+    namespace: str = "connector",
+) -> ConnectorIdentity | None:
     claims = token.claims or {}
     upstream_claims = claims.get("upstream_claims")
     if isinstance(upstream_claims, dict):
@@ -283,10 +293,20 @@ def identity_from_access_token(token: AccessToken) -> ConnectorIdentity | None:
         return None
 
     email = claims.get("email") or claims.get("preferred_username")
+    issuer = str(claims.get("iss") or "unknown-issuer")
+    audience_claim = claims.get("aud") or claims.get("audience") or token.client_id or "unknown-audience"
+    if isinstance(audience_claim, list):
+        audience = ",".join(sorted(str(item) for item in audience_claim))
+    else:
+        audience = str(audience_claim)
+    scope = hashlib.sha256(
+        f"{namespace.strip().lower()}\0{issuer}\0{audience}".encode("utf-8")
+    ).hexdigest()[:24]
     return ConnectorIdentity(
         user_id=str(user_id),
         email=str(email) if email else None,
         source="oauth",
+        principal_id=f"{namespace.strip().lower()}:{scope}:{user_id}",
     )
 
 
@@ -307,7 +327,11 @@ def identity_from_beta_token(prefix: str, token: str) -> ConnectorIdentity | Non
     if raw_identity is None:
         return None
     if isinstance(raw_identity, str):
-        return ConnectorIdentity(user_id=raw_identity, source="beta-token")
+        return ConnectorIdentity(
+            user_id=raw_identity,
+            source="beta-token",
+            principal_id=f"{prefix.strip().lower()}:beta:{raw_identity}",
+        )
     if isinstance(raw_identity, dict):
         user_id = raw_identity.get("user_id") or raw_identity.get("sub")
         if not user_id:
@@ -317,6 +341,7 @@ def identity_from_beta_token(prefix: str, token: str) -> ConnectorIdentity | Non
             user_id=str(user_id),
             email=str(email) if email else None,
             source="beta-token",
+            principal_id=f"{prefix.strip().lower()}:beta:{user_id}",
         )
     return None
 

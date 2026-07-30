@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "blocksize-market-data": {
+      "url": "https://mcp.blocksize.info/cursor/mcp/"
+    }
+  }
+}

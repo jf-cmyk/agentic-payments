@@ -13,6 +13,10 @@ Blocksize Market Data gives agents accountless access to live financial market
 data through free discovery endpoints, an eligible 50-credit starter allowance,
 and x402-paid HTTP calls.
 
+The Pay.sh-facing routes use direct x402. Connector starter credits are a
+separate authenticated evaluation allowance, and self-serve purchase routes are
+not exposed in production.
+
 Use it for market-aware agent workflows that need crypto VWAP, crypto bid/ask,
 equity tickers, FX, metals, or small batches of structured financial data. Search the free
 instrument endpoints before paying for live data. Prefer a narrow lookup such as

@@ -10,6 +10,9 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from src.mcp_server import (
+    DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    InstrumentPageLimit,
+    InstrumentPageOffset,
     READ_ONLY_TOOL_ANNOTATIONS,
     fetch as fetch_catalog,
     get_pricing_info as get_local_pricing_info,
@@ -173,7 +176,11 @@ async def public_search_pairs(
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_list_instruments(service: InstrumentService = "vwap") -> str:
+async def public_list_instruments(
+    service: InstrumentService = "vwap",
+    limit: InstrumentPageLimit = DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    offset: InstrumentPageOffset = 0,
+) -> str:
     """List supported instruments on the public remote MCP surface."""
     record_usage_event(
         "mcp_tool_call",
@@ -181,16 +188,16 @@ async def public_list_instruments(service: InstrumentService = "vwap") -> str:
         tool_name="list_instruments",
         subject=service,
     )
-    return await list_local_instruments(service)
+    return await list_local_instruments(service, limit, offset)
 
 
 @public_mcp.tool(
     name="get_pricing_info",
     title="Pricing Information",
     description=(
-        "Inspect current per-call prices, bulk credit tiers, and supported Solana "
-        "and Base USDC settlement networks. This is free and read-only planning "
-        "metadata; it does not initiate payment."
+        "Inspect current direct x402 per-call prices, authenticated connector "
+        "starter-credit costs, supported USDC settlement networks, and the account-plan "
+        "contact path. This is free read-only metadata; it does not initiate payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -368,15 +375,16 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
                 "starter_credit_cost": item["credit_cost"],
                 "paid_price_usdc": item["paid_price_usdc"],
                 "starter_positioning": "Start with 50 live data credits",
-                "upgrade_path": "x402 payment or prepaid credit top-ups",
+                "upgrade_path": "x402 payment or an authenticated account plan",
             },
             "behavior": {
                 "returns_live_data": False,
                 "starts_payment": False,
                 "side_effects": "none",
                 "next_step": (
-                    "Call the returned HTTP endpoint with a starter-credit identity "
-                    "header, or without credits to receive an x402 payment challenge."
+                    "Call the returned HTTP endpoint to receive a direct x402 payment "
+                    "challenge. Starter credits are available only through an "
+                    "authenticated connector, not caller-selected HTTP identity headers."
                 ),
             },
             "links": {
@@ -525,7 +533,7 @@ async def public_info() -> str:
             "paid_data_access": {
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,
-                "starter_allowance": "Start with 50 live data credits, then upgrade through x402 payment or prepaid credit top-ups.",
+                "starter_allowance": "Start with authenticated connector credits, then upgrade through x402 payment or an authenticated account plan.",
                 "notes": (
                     "Live paid market data is exposed through the x402-protected HTTP "
                     "API and advanced local MCP setup, not this public remote server."

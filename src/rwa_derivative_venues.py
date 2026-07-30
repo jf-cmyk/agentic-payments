@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from src.rwa_asset_semantics import normalize_instrument_semantics
+
 
 DEFAULT_REPORTS_DIR = Path("reports")
 DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH = (
@@ -527,22 +529,20 @@ def _classify_asset(base: str, *, name: str = "", market_type: str = "", instrum
     lower_name = name.lower()
     lower_market = market_type.lower()
     lower_instrument = instrument_type.lower()
-    if "option" in lower_instrument:
-        return "option", "derivative", "option_contract"
     if "prediction" in lower_market or "prediction" in lower_instrument or clean.endswith("-BET"):
         return "prediction", "derivative", "prediction_market"
-    if clean in ETF_BASES:
+    if clean in ETF_BASES or " etf" in f" {lower_name}":
         return "etf", "rwa_or_traditional", "etf_or_index_derivative"
-    if clean in EQUITY_BASES or lower_market == "equity" or lower_instrument == "stock":
-        subtype = "private_market_or_equity_derivative" if clean == "SPCX" else "equity_derivative"
-        return "equity", "rwa_or_traditional", subtype
     if clean in METAL_BASES or "gold" in lower_name or "silver" in lower_name:
         return "metal", "rwa_or_traditional", "metal_or_tokenized_metal"
     if clean in COMMODITY_BASES or any(word in lower_name for word in ("crude", "natural gas", "copper", "oil")):
         return "commodity", "rwa_or_traditional", "commodity_derivative"
+    if clean in EQUITY_BASES or lower_market == "equity" or lower_instrument == "stock":
+        subtype = "private_market_or_equity_derivative" if clean == "SPCX" else "equity_derivative"
+        return "equity", "rwa_or_traditional", subtype
     if clean in TREASURY_BASES or "tbill" in clean or "treasury" in lower_name:
         return "treasury_fund", "rwa_or_traditional", "tokenized_treasury_or_fund_yield"
-    if any(hint in clean for hint in YIELD_BASE_HINTS) or lower_market == "yield":
+    if clean in YIELD_BASE_HINTS or clean.startswith(("PT-", "YT-", "SY-")) or lower_market == "yield":
         return "yield_token", "rwa_or_traditional", "yield_token_or_principal_token"
     if clean in FIAT_OR_STABLE_BASES or _fx_like(clean):
         return "fx", "rwa_or_traditional", "stablecoin_or_fx_reference"
@@ -574,10 +574,11 @@ def _market_record(
         instrument_type=instrument_type,
     )
     derivative_like = market_type not in {"spot", "yield_token_market"} or "perp" in instrument_type.lower()
+    option_contract = "option" in instrument_type.lower() or market_type == "option"
     if source_type == "onchain_yield_market":
         vwap_support = "not_vwap_suitable_until_yield_pool_state_adapter"
         bidask_support = "not_bidask_suitable_until_yield_pool_state_adapter"
-    elif asset_class == "option":
+    elif option_contract:
         vwap_support = "not_spot_vwap_suitable_option_book_only"
         bidask_support = "option_top_of_book_not_spot_bidask"
     elif source_type == "price_stream_no_book":
@@ -612,7 +613,7 @@ def _market_record(
     }
     if metadata:
         row_metadata.update(metadata)
-    return {
+    return normalize_instrument_semantics({
         "symbol": symbol,
         "asset_id": base,
         "asset_class": asset_class,
@@ -624,7 +625,7 @@ def _market_record(
         "bidask_support": bidask_support,
         "metadata": row_metadata,
         "is_active": is_active,
-    }
+    })
 
 
 def _fetch_url(url: str) -> tuple[Any, dict[str, Any]]:
@@ -1204,7 +1205,7 @@ def build_derivative_venue_discovery() -> dict[str, Any]:
     by_source_type = Counter(str(row["source_type"]) for row in coverage_rows)
     by_market_type = Counter(str(row.get("metadata", {}).get("market_type")) for row in coverage_rows)
     by_discovery_status = Counter(str(row["discovery_status"]) for row in venues)
-    return {
+    return reclassify_derivative_venue_discovery_report({
         "product": "rwa_derivative_venue_discovery",
         "generated_at": _utc_now_iso(),
         "summary": {
@@ -1244,7 +1245,7 @@ def build_derivative_venue_discovery() -> dict[str, Any]:
             ],
             key=lambda row: (str(row["venue"]), str(row["asset_id"]), str(row["symbol"])),
         ),
-    }
+    })
 
 
 def _venue_next_action(config: dict[str, Any], status: str, active_rows: list[dict[str, Any]]) -> str:
@@ -1257,6 +1258,182 @@ def _venue_next_action(config: dict[str, Any], status: str, active_rows: list[di
     if config["requires_auth"]:
         return "Provision API/RPC/indexer access and attach venue terms evidence before live sourcing."
     return "Add a confirmed catalog endpoint or protocol subgraph, then rerun discovery."
+
+
+def _derivative_identity_quality(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    raw_classes: dict[str, set[str]] = {}
+    canonical_classes: dict[str, set[str]] = {}
+    decision_flags: dict[str, list[bool]] = {}
+    statuses: dict[str, set[str]] = {}
+    for row in rows:
+        raw_id = str(row.get("raw_source_asset_id") or row.get("asset_id"))
+        canonical_id = str(row.get("asset_id") or "")
+        raw_classes.setdefault(raw_id, set()).add(
+            str(row.get("raw_source_asset_class") or "unknown")
+        )
+        canonical_classes.setdefault(canonical_id, set()).add(
+            str(row.get("underlying_asset_class") or row.get("asset_class"))
+        )
+        decision_flags.setdefault(canonical_id, []).append(
+            bool(row.get("decision_grade"))
+        )
+        statuses.setdefault(canonical_id, set()).add(
+            str(row.get("identity_status") or "unknown")
+        )
+    decision_grade_candidate_ids = {
+        asset_id
+        for asset_id, flags in decision_flags.items()
+        if flags and all(flags)
+    }
+    raw_mixed_ids = sorted(
+        asset_id
+        for asset_id, classes in raw_classes.items()
+        if len(classes) > 1
+    )
+    canonical_mixed_ids = sorted(
+        asset_id
+        for asset_id, classes in canonical_classes.items()
+        if len(classes) > 1
+    )
+    decision_grade_mixed_ids = sorted(
+        asset_id
+        for asset_id in decision_grade_candidate_ids
+        if len(canonical_classes[asset_id]) > 1
+    )
+    decision_grade_ids = decision_grade_candidate_ids - set(
+        decision_grade_mixed_ids
+    )
+    ambiguous_ids = sorted(
+        asset_id
+        for asset_id, values in statuses.items()
+        if "source_scoped_ambiguous" in values
+    )
+    return {
+        "raw_mixed_class_asset_id_count": len(raw_mixed_ids),
+        "canonical_mixed_class_asset_id_count": len(canonical_mixed_ids),
+        "decision_grade_mixed_class_asset_id_count": len(
+            decision_grade_mixed_ids
+        ),
+        "decision_grade_asset_count": len(decision_grade_ids),
+        "manual_verification_asset_count": (
+            len(canonical_classes) - len(decision_grade_ids)
+        ),
+        "ambiguous_source_scoped_asset_count": len(ambiguous_ids),
+        "raw_mixed_class_asset_ids": raw_mixed_ids,
+        "canonical_mixed_class_asset_ids": canonical_mixed_ids,
+        "decision_grade_mixed_class_asset_ids": decision_grade_mixed_ids,
+        "ambiguous_source_scoped_asset_ids": ambiguous_ids,
+        "acceptance": {
+            "status": (
+                "pass"
+                if not canonical_mixed_ids and not decision_grade_mixed_ids
+                else "blocked"
+            ),
+            "criterion": (
+                "zero unresolved mixed-class canonical ids, including zero "
+                "mixed ids in decision-grade counts"
+            ),
+        },
+    }
+
+
+def reclassify_derivative_venue_discovery_report(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    """Re-normalize a captured report without refetching or retimestamping it."""
+    updated = deepcopy(report)
+    coverage_rows = [
+        normalize_instrument_semantics(row)
+        for row in updated.get("coverage_rows", [])
+        if isinstance(row, dict)
+    ]
+    market_rows = [
+        normalize_instrument_semantics(row)
+        for row in updated.get("market_rows", [])
+        if isinstance(row, dict)
+    ]
+    coverage_rows.sort(
+        key=lambda row: (
+            str(row.get("venue")),
+            str(row.get("asset_class")),
+            str(row.get("asset_id")),
+            str(row.get("symbol")),
+            str((row.get("metadata") or {}).get("venue_market_id")),
+        )
+    )
+    market_rows.sort(
+        key=lambda row: (
+            str(row.get("venue")),
+            str(row.get("asset_id")),
+            str(row.get("symbol")),
+            str((row.get("metadata") or {}).get("venue_market_id")),
+        )
+    )
+    updated["coverage_rows"] = coverage_rows
+    updated["market_rows"] = market_rows
+
+    summary = deepcopy(updated.get("summary") or {})
+    by_venue = Counter(str(row.get("venue")) for row in coverage_rows)
+    by_asset_class = Counter(
+        str(row.get("asset_class")) for row in coverage_rows
+    )
+    by_raw_asset_class = Counter(
+        str(row.get("raw_source_asset_class")) for row in coverage_rows
+    )
+    by_family = Counter(str(row.get("asset_family")) for row in coverage_rows)
+    by_source_type = Counter(
+        str(row.get("source_type")) for row in coverage_rows
+    )
+    by_market_type = Counter(
+        str((row.get("metadata") or {}).get("market_type"))
+        for row in coverage_rows
+    )
+    by_contract_type = Counter(
+        str(row.get("contract_type")) for row in coverage_rows
+    )
+    summary.update(
+        {
+            "coverage_row_count": len(coverage_rows),
+            "market_row_count": len(market_rows),
+            "rwa_or_traditional_coverage_rows": by_family.get(
+                "rwa_or_traditional", 0
+            ),
+            "crypto_coverage_rows": by_family.get("crypto", 0),
+            # Compatibility metric based on the captured source family. New
+            # consumers should use by_contract_type.
+            "derivative_only_rows": sum(
+                1
+                for row in coverage_rows
+                if row.get("raw_source_asset_family") == "derivative"
+            ),
+            "by_venue": dict(sorted(by_venue.items())),
+            "by_asset_class": dict(sorted(by_asset_class.items())),
+            "by_raw_source_asset_class": dict(
+                sorted(by_raw_asset_class.items())
+            ),
+            "by_family": dict(sorted(by_family.items())),
+            "by_source_type": dict(sorted(by_source_type.items())),
+            "by_market_type": dict(sorted(by_market_type.items())),
+            "by_contract_type": dict(sorted(by_contract_type.items())),
+            "identity_quality": _derivative_identity_quality(coverage_rows),
+        }
+    )
+    updated["summary"] = summary
+    updated["identity_semantics"] = {
+        "version": 1,
+        "normalization_mode": "offline_deterministic_no_refetch",
+        "generated_at_preserved": True,
+        "raw_class_field": "raw_source_asset_class",
+        "underlying_class_field": "underlying_asset_class",
+        "contract_type_field": "contract_type",
+        "fail_closed_rule": (
+            "ambiguous bare tickers are source-scoped and excluded from "
+            "decision-grade counts"
+        ),
+    }
+    return updated
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -1275,7 +1452,11 @@ def load_derivative_coverage_rows(
     """Load generated derivative venue coverage rows when the report exists."""
     payload = _read_json(Path(path))
     rows = payload.get("coverage_rows") if isinstance(payload.get("coverage_rows"), list) else []
-    return [row for row in rows if isinstance(row, dict)]
+    return [
+        normalize_instrument_semantics(row)
+        for row in rows
+        if isinstance(row, dict)
+    ]
 
 
 def load_derivative_venue_rows(
@@ -1293,7 +1474,7 @@ def load_derivative_venue_discovery_report(
     """Load the generated derivative venue discovery report without network access."""
     payload = _read_json(Path(path))
     if payload:
-        return payload
+        return reclassify_derivative_venue_discovery_report(payload)
     return {
         "product": "rwa_derivative_venue_discovery",
         "generated_at": None,
@@ -1392,18 +1573,65 @@ def write_derivative_venue_discovery_reports(
 ) -> dict[str, Any]:
     """Fetch, normalize, and write derivative venue discovery reports."""
     report = build_derivative_venue_discovery()
+    _write_derivative_venue_discovery_report_files(
+        report,
+        json_path=Path(json_path),
+        csv_path=Path(csv_path),
+    )
+    return report
+
+
+def write_reclassified_derivative_venue_discovery_reports(
+    *,
+    input_json_path: str | Path = DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH,
+    json_path: str | Path = DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH,
+    csv_path: str | Path = DEFAULT_DERIVATIVE_VENUE_DISCOVERY_CSV_PATH,
+) -> dict[str, Any]:
+    """Reclassify a captured report offline and preserve its source timestamp."""
+    captured = _read_json(Path(input_json_path))
+    if not captured:
+        raise ValueError(f"Derivative discovery report is missing: {input_json_path}")
+    report = reclassify_derivative_venue_discovery_report(captured)
+    _write_derivative_venue_discovery_report_files(
+        report,
+        json_path=Path(json_path),
+        csv_path=Path(csv_path),
+    )
+    return report
+
+
+def _write_derivative_venue_discovery_report_files(
+    report: dict[str, Any],
+    *,
+    json_path: Path,
+    csv_path: Path,
+) -> None:
+    """Atomically write one already-built report and its review CSV."""
     json_out = Path(json_path)
     csv_out = Path(csv_path)
     json_out.parent.mkdir(parents=True, exist_ok=True)
     csv_out.parent.mkdir(parents=True, exist_ok=True)
-    json_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_temp = json_out.with_suffix(f"{json_out.suffix}.tmp")
+    csv_temp = csv_out.with_suffix(f"{csv_out.suffix}.tmp")
+    json_temp.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     fieldnames = [
         "venue",
         "symbol",
+        "raw_source_asset_id",
         "asset_id",
+        "raw_source_asset_class",
         "asset_class",
+        "underlying_asset_class",
         "asset_family",
+        "contract_type",
+        "identity_status",
+        "decision_grade",
+        "manual_verification_required",
+        "identity_evidence",
         "source_type",
         "coverage_status",
         "vwap_support",
@@ -1413,7 +1641,7 @@ def write_derivative_venue_discovery_reports(
         "venue_market_id",
         "pricing_methodology",
     ]
-    with csv_out.open("w", newline="", encoding="utf-8") as handle:
+    with csv_temp.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in report["coverage_rows"]:
@@ -1422,9 +1650,23 @@ def write_derivative_venue_discovery_reports(
                 {
                     "venue": row.get("venue"),
                     "symbol": row.get("symbol"),
+                    "raw_source_asset_id": row.get("raw_source_asset_id"),
                     "asset_id": row.get("asset_id"),
+                    "raw_source_asset_class": row.get(
+                        "raw_source_asset_class"
+                    ),
                     "asset_class": row.get("asset_class"),
+                    "underlying_asset_class": row.get(
+                        "underlying_asset_class"
+                    ),
                     "asset_family": row.get("asset_family"),
+                    "contract_type": row.get("contract_type"),
+                    "identity_status": row.get("identity_status"),
+                    "decision_grade": row.get("decision_grade"),
+                    "manual_verification_required": row.get(
+                        "manual_verification_required"
+                    ),
+                    "identity_evidence": row.get("identity_evidence"),
                     "source_type": row.get("source_type"),
                     "coverage_status": row.get("coverage_status"),
                     "vwap_support": row.get("vwap_support"),
@@ -1435,4 +1677,5 @@ def write_derivative_venue_discovery_reports(
                     "pricing_methodology": metadata.get("pricing_methodology"),
                 }
             )
-    return report
+    json_temp.replace(json_out)
+    csv_temp.replace(csv_out)

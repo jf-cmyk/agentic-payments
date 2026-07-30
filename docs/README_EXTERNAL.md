@@ -4,8 +4,7 @@ Blocksize Capital provides:
 
 - A public remote MCP discovery server for agent builders
 - A paid HTTP market data API for live production data
-- A 50-credit starter allowance for new eligible users, wallets, and
-  authenticated agents
+- A 50-credit starter allowance for eligible authenticated connector users
 
 ## Public discovery MCP
 
@@ -19,6 +18,8 @@ The public MCP server is read-only and exposes:
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
+- `get_product_catalog`
+- `get_workflow_endpoint`
 - `get_market_data_endpoint`
 - `search`
 - `fetch`
@@ -88,9 +89,11 @@ Free discovery endpoints:
 
 ## Pricing
 
-Start with 50 live data credits. This is a starter allowance, not a
-free-forever tier. After credits are exhausted or rate limits are hit, agents
-upgrade through x402 payment or prepaid credit top-ups.
+Eligible authenticated connector users start with 50 live data credits. This
+is a starter allowance, not a free-forever tier. Raw caller-selected identity
+headers do not grant production credits. After credits are exhausted or rate
+limits are hit, agents use signed x402 v2 payment or contact Blocksize about an
+authenticated account plan.
 
 | Service | Price |
 | --- | --- |
@@ -112,7 +115,8 @@ Credit costs:
 | Multi-asset macro snapshot | 25 |
 | Prior-call provenance lookup | 0 |
 
-Bulk credit tiers are documented in the public pricing guide:
+The public pricing guide documents direct x402 rates, authenticated connector
+starter credits, and how to discuss an authenticated account plan:
 
 - `https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf`
 

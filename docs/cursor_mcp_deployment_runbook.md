@@ -2,6 +2,10 @@
 
 Prepared: 2026-05-11
 
+> Historical deployment snapshot. Current production access is direct x402 or
+> authenticated connector starter credits; self-serve wallet-credit purchases
+> are not exposed in production.
+
 Scope: Cursor setup only. Pay.sh, `pay-skills`, Smithery, Glama, and the
 official MCP Registry are separate tracks and should not drive the Cursor
 deployment shape.
@@ -22,7 +26,7 @@ Keep these surfaces distinct:
 | Surface | Access path | Purpose | Auth/payment model |
 | --- | --- | --- | --- |
 | Public MCP registries | `/mcp/server/` | Free discovery, docs, pricing, endpoint builder | No auth, no live data |
-| x402 HTTP API | `/v1/*` paid endpoints | Live production data | x402 proof or wallet credits |
+| x402 HTTP API | `/v1/*` paid endpoints | Live production data | Signed direct x402 v2 payment |
 | Pay.sh | filtered Pay.sh OpenAPI + paid HTTP endpoints | Pay.sh catalog and PR path | Pay.sh/MPP/x402 probe path |
 | Claude | `/anthropic/mcp/` | Claude connector with daily credits | Clerk OAuth, no wallet payments inside MCP |
 | Cursor | `/cursor/mcp/` | Cursor plugin with daily credits | Clerk OAuth, no wallet payments inside MCP |

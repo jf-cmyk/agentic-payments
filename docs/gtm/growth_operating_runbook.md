@@ -17,7 +17,7 @@ The protected production command center at `/internal/observability/command-cent
 | Activation rate | Explicit identities with `first_live_price_delivered` / eligible explicit identities in the selected window | Establish baseline, then improve weekly | Fix discovery or first-price friction when this falls |
 | First price under 3 minutes | Attributed activations reached within 180 seconds of first eligible event | 50% | Simplify quickstart and identity/payment instructions |
 | Seven-day repeat | Mature activated identities with at least two successful delivery events during their first seven days / mature activated identities | 25% | Improve recurring workflows and product utility |
-| Starter-to-paid | Starter-credit activated identities later tied to verified x402 payment or prepaid credit claim / starter-credit activated identities | 5% | Improve upgrade prompts, payment support and offer packaging |
+| Starter-to-paid | Starter-credit activated verified identities later tied to finalized x402 settlement / starter-credit activated verified identities | 5% | Improve upgrade prompts, payment support and offer packaging |
 | Server error rate | HTTP `5xx` responses / HTTP requests; payment prompts, auth challenges, rate limits and client/protocol `4xx` responses are reported separately | Below 1% | Stop acquisition work and fix server reliability if breached |
 | Post-credit failure rate | Charged HTTP or MCP delivery failures / successful plus failed charged deliveries | 0% | Refund, retry and fix before scaling acquisition |
 | Unsupported demand | Bounded zero-result symbol searches, ranked by request count | No fixed target | Prioritize source expansion by demonstrated demand |
@@ -34,7 +34,7 @@ The pilot contains exactly three candidate feeds:
 | PAXG/USDC | Uniswap pool state through Ethereum RPC | Block-pinned state, initialized ticks and decoded Swap logs |
 | EURC/USDC | Aerodrome pool state through Base RPC | Block-pinned state, initialized ticks and decoded Swap logs |
 
-`scripts/run_rwa_growth_pilot.py` captures replayable raw observations and writes a bounded readiness status. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes and persists its history and latest status on the Railway volume. Each cycle also records a timestamp-aware comparison against Blocksize AAPL, XAU/USD and EUR/USD references, captures volume/depth evidence, applies robust spread/volume/liquidity drift checks after enough samples, and writes a per-feed promotion packet. These are evidence inputs only: proxy semantics, stale timestamps, lineage, independence and rights remain explicit blockers and the scheduler cannot complete a promotion gate.
+`scripts/run_rwa_growth_pilot.py` captures replayable outcomes into the same authoritative `RWAObservationStore` SQLite ledger used by the operator service. The production scheduler is enabled through `RWA_GROWTH_PILOT_ENABLED`, runs every 30 minutes, records both successes and failures, and derives dashboard status and freshness from that ledger. Source-specific volume, depth, initialized-tick and benchmark evidence is retained with each applicable observation. These are evidence inputs only: proxy semantics, stale timestamps, lineage, independence and rights remain explicit blockers, and the scheduler can never promote a feed automatically. It does not read or write a parallel JSONL/status source of truth.
 
 The runtime data boundary is explicit:
 
@@ -44,6 +44,20 @@ The runtime data boundary is explicit:
 - Tiingo is not used by any of the three runtime lanes.
 - Synthetic pool levels are excluded from executable-depth evidence.
 - A failed 24-hour log backfill does not erase successfully captured block-pinned tick replay; the missing volume window remains a separate failed gate.
+
+Before the first v3 deployment, migrate any legacy production JSONL once and
+without a live probe:
+
+```bash
+python scripts/run_rwa_growth_pilot.py \
+  --db-path /data/rwa_observations.v2.db \
+  --legacy-history /data/rwa_growth_pilot_history.jsonl \
+  --import-only
+```
+
+The migration is idempotent and reports imported, duplicate, and rejected
+rows. Preserve the legacy file as rollback evidence until the v3 ledger and
+dashboard have passed staging acceptance.
 
 Monitoring thresholds:
 
@@ -82,7 +96,7 @@ Friday:
 ## Evidence and guardrails
 
 - Identities are stored only as salted hashes; IP fingerprints are not used as funnel identities.
-- Direct x402 or prepaid credit verification is required for recognized revenue.
+- A deduplicated x402 settlement plus durable local finalization is required for recognized revenue.
 - Synthetic/test traffic must remain distinguishable from customer traffic.
 - A point-in-time RWA source success is not a production promotion.
 - Tiingo is not a runtime dependency for the three-feed RWA pilot.

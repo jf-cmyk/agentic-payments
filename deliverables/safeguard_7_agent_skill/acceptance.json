@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "safeguard": 7,
+  "status": "passed_local_external_release_blocked",
+  "date": "2026-07-30",
+  "accepted": {
+    "agent_skill_validations": 3,
+    "claude_plugin_validation": true,
+    "claude_marketplace_validation": true,
+    "cursor_official_plugin_schema": true,
+    "cursor_official_marketplace_schema": true,
+    "cross_provider_source_parity": true,
+    "deterministic_double_build": true,
+    "focused_tests_passed": 96,
+    "independent_forward_tests_passed": 3,
+    "provider_oauth_fail_closed_routes": 3,
+    "public_mcp_protocol": "2025-06-18",
+    "public_mcp_read_only_tools": 8,
+    "direct_identifiers_in_credit_response": false
+  },
+  "release_candidates": [
+    {
+      "filename": "blocksize-market-data-openai-plugin-0.4.0.zip",
+      "sha256": "c75a29242a2f1694b50a245d851c62a1b20853066bff64c42dcdd07eb5b25f55"
+    },
+    {
+      "filename": "blocksize-market-data-claude-plugin-0.3.0.zip",
+      "sha256": "68bef3bd6c0d27751ca50e25e524b026989ab39e491f0b5d0ad1025b2493b2f0"
+    },
+    {
+      "filename": "blocksize-market-data-cursor-plugin-1.3.0.zip",
+      "sha256": "3cfece3748ed100d677ad4eb0009a1e645bcc3043a460ce279edf167f89b77fc"
+    },
+    {
+      "filename": "use-blocksize-market-data-universal-skill-0.4.0.zip",
+      "sha256": "3d4b85c86a1e5beb532f98d14933004689bab000de9246e22278dd0bde103bb1"
+    }
+  ],
+  "external_release_blockers": [
+    "production_version_is_0.6.2",
+    "production_readyz_is_404",
+    "corrected_public_repositories_not_published",
+    "signed_in_openai_acceptance_missing",
+    "signed_in_claude_acceptance_missing",
+    "signed_in_cursor_acceptance_missing",
+    "release_artifacts_unsigned"
+  ]
+}

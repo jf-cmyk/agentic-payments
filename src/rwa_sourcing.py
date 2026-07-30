@@ -6,7 +6,11 @@ from collections import Counter
 from typing import Any
 
 from src.rwa_adapters import RWA_ADAPTER_REGISTRY
-from src.rwa_coverage import build_oracle_parity_matrix, build_rwa_asset_matrix
+from src.rwa_coverage import (
+    build_oracle_parity_matrix,
+    build_rwa_asset_matrix,
+    iter_asset_venue_instruments,
+)
 from src.rwa_derivative_venues import (
     DERIVATIVE_VENUE_CONFIGS,
     load_derivative_coverage_rows,
@@ -22,6 +26,11 @@ from src.rwa_hyperliquid_discovery import (
     HYPERLIQUID_PERPS_VENUE_ID,
     HYPERLIQUID_SPOT_VENUE_ID,
     load_hyperliquid_tradeable_coverage_rows,
+)
+from src.rwa_daily_feed_agent import (
+    build_rwa_xyz_token_action,
+    rwa_xyz_token_contract_key,
+    rwa_xyz_token_priority,
 )
 from src.rwa_xyz_monitor import RWA_XYZ_VENUE_ID, load_rwa_xyz_token_rows
 
@@ -235,15 +244,21 @@ def _adapter_metadata() -> dict[str, dict[str, Any]]:
     }
 
 
-def _venue_symbol_lookup() -> dict[tuple[str, str], str]:
-    matrix = build_rwa_asset_matrix()
-    lookup: dict[tuple[str, str], str] = {}
+def _venue_symbol_lookup(
+    asset_matrix: dict[str, Any] | None = None,
+) -> dict[tuple[str, ...], str]:
+    matrix = asset_matrix or build_rwa_asset_matrix()
+    lookup: dict[tuple[str, ...], str] = {}
     for asset in matrix["assets"]:
         asset_id = str(asset["asset_id"]).upper()
-        for venue_id, venue_data in (asset.get("venues") or {}).items():
+        for venue_id, venue_data in iter_asset_venue_instruments(asset):
             symbol = venue_data.get("symbol")
             if symbol:
-                lookup[(asset_id, str(venue_id))] = str(symbol)
+                normalized_symbol = str(symbol).upper()
+                lookup[(asset_id, str(venue_id), normalized_symbol)] = str(
+                    symbol
+                )
+                lookup.setdefault((asset_id, str(venue_id)), str(symbol))
     return lookup
 
 
@@ -427,17 +442,24 @@ def _rwa_xyz_monitor_sourcing_jobs(adapter_metadata: dict[str, dict[str, Any]]) 
     metadata = adapter_metadata.get(RWA_XYZ_VENUE_ID)
     hint = ENDPOINT_HINTS[RWA_XYZ_VENUE_ID]
     jobs = []
+    seen_contracts: set[str] = set()
     for row in load_rwa_xyz_token_rows():
+        contract_key = rwa_xyz_token_contract_key(row)
+        if contract_key in seen_contracts:
+            continue
+        seen_contracts.add(contract_key)
         address = str(row.get("address") or "")
         network = str(row.get("network") or "unknown")
         platform = str(row.get("platform") or "unknown")
         asset_class = str(row.get("asset_class") or "tokenized_fund")
-        priority = "P0" if asset_class in {"equity", "etf", "treasury_fund", "metal", "tokenized_fund"} else "P1"
+        action = build_rwa_xyz_token_action(row)
+        priority = rwa_xyz_token_priority(row)
         jobs.append(
             {
-                "job_id": f"rwa_xyz_token:{row.get('rwa_xyz_asset_id')}:{row.get('rwa_xyz_token_id')}:{network}:{address}",
+                "job_id": f"rwa_xyz_token:{contract_key}",
                 "priority": priority,
                 "category": "rwa_xyz_monitor_token_realtime_discovery",
+                "sourcing_lane": action["lane"],
                 "asset_class": asset_class,
                 "symbol": row.get("symbol"),
                 "asset_id": row.get("asset_id"),
@@ -450,7 +472,10 @@ def _rwa_xyz_monitor_sourcing_jobs(adapter_metadata: dict[str, dict[str, Any]]) 
                 "adapter_implementation": (metadata or {}).get("implementation") or (metadata or {}).get("adapter_lane"),
                 "target_status": "catalog_token_identity_ready_realtime_price_discovery_required",
                 "missing_source_types": [
+                    "token_identity_and_decimals",
                     "pool_or_route_liquidity",
+                    "fee_tiers_and_slot_or_block_state",
+                    "replayable_raw_payloads",
                     "issuer_nav_or_primary_market_alignment",
                     "realtime_price_observation",
                     "blocksize_benchmark_alignment",
@@ -467,12 +492,17 @@ def _rwa_xyz_monitor_sourcing_jobs(adapter_metadata: dict[str, dict[str, Any]]) 
                     "network": network,
                     "network_slug": row.get("network_slug"),
                     "address": address,
+                    "contract_identity": contract_key,
                     "standards": row.get("standards"),
                     "tokenization_type": row.get("tokenization_type"),
                     "issuance_type": row.get("issuance_type"),
                     "identity_mapping_status": row.get("identity_mapping_status"),
                     "canonical_underlying_candidate": row.get("canonical_underlying_candidate"),
-                    "production_boundary": "catalog row only until venue/pool discovery, liquidity, freshness, manipulation, issuer alignment, and data-rights gates pass",
+                    "next_action": action["next_action"],
+                    "production_eligible": False,
+                    "allowed_feed_semantics": ["supplemental_catalog_coverage"],
+                    "prohibited_feed_semantics": ["vwap", "bid_ask", "consensus"],
+                    "production_boundary": "catalog row only; do not promote to VWAP, bid/ask, or consensus until token identity, executable venue, replay, liquidity, freshness, manipulation, issuer NAV alignment, Blocksize benchmark alignment, and data-rights gates pass",
                 },
             }
         )
@@ -482,11 +512,13 @@ def _rwa_xyz_monitor_sourcing_jobs(adapter_metadata: dict[str, dict[str, Any]]) 
 def build_sourcing_jobs(
     *,
     include_completed_targets: bool = False,
+    asset_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build executable sourcing jobs from the oracle parity gaps."""
-    parity = build_oracle_parity_matrix()
+    matrix = asset_matrix or build_rwa_asset_matrix()
+    parity = build_oracle_parity_matrix(asset_matrix=matrix)
     adapter_metadata = _adapter_metadata()
-    venue_symbols = _venue_symbol_lookup()
+    venue_symbols = _venue_symbol_lookup(matrix)
     jobs: list[dict[str, Any]] = []
     for category in parity["categories"]:
         for target in category["targets"]:
@@ -516,8 +548,18 @@ def build_sourcing_jobs(
                         "category": category["category"],
                         "asset_class": category["asset_class"],
                         "symbol": venue_symbols.get(
-                            (str(target["asset_id"]).upper(), str(venue)),
-                            target["symbol"],
+                            (
+                                str(target["asset_id"]).upper(),
+                                str(venue),
+                                str(target["symbol"]).upper(),
+                            ),
+                            venue_symbols.get(
+                                (
+                                    str(target["asset_id"]).upper(),
+                                    str(venue),
+                                ),
+                                target["symbol"],
+                            ),
                         ),
                         "asset_id": target["asset_id"],
                         "venue": venue,
