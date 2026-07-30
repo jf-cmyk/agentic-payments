@@ -14,7 +14,10 @@ import zipfile
 REQUIRED_MEMBERS = (
     "src/resource_server.py",
     "scripts/__init__.py",
+    "scripts/build_rwa_pilot_promotion_packet.py",
     "scripts/run_rwa_growth_pilot.py",
+    "scripts/run_rwa_pilot_alignment_snapshot.py",
+    "scripts/run_rwa_pilot_depth_snapshot.py",
     "share/blocksize-mcp/server.json",
     "share/blocksize-mcp/docs/developer_portal.html",
     "share/blocksize-mcp/docs/remote_mcp_quickstart.html",

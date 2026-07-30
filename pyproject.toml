@@ -82,7 +82,10 @@ packages = ["src"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "scripts/__init__.py" = "scripts/__init__.py"
+"scripts/build_rwa_pilot_promotion_packet.py" = "scripts/build_rwa_pilot_promotion_packet.py"
 "scripts/run_rwa_growth_pilot.py" = "scripts/run_rwa_growth_pilot.py"
+"scripts/run_rwa_pilot_alignment_snapshot.py" = "scripts/run_rwa_pilot_alignment_snapshot.py"
+"scripts/run_rwa_pilot_depth_snapshot.py" = "scripts/run_rwa_pilot_depth_snapshot.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
