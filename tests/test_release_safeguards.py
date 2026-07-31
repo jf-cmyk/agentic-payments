@@ -1557,6 +1557,9 @@ def test_hosted_example_uses_production_policy_and_durable_distinct_state() -> N
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert "APP_ENV=production" in example
+    assert "PUBLIC_BASE_URL=https://mcp.blocksize.info" in example
+    assert "RELEASE_COMMIT_SHA=" in example
+    assert "PORT=8080" in example
     assert "BLOCKSIZE_STREAM_CACHE_ENABLED=true" in example
     assert "OBSERVABILITY_DB_PATH=/data/usage_events.db" in example
     assert "ANTHROPIC_OAUTH_STORAGE_DIR=/data/anthropic_oauth" in example
