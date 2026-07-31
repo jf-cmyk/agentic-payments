@@ -19,11 +19,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.rwa_asset_semantics import normalize_instrument_semantics
+from src.runtime_data import RWA_REPORTS_DIR, resolve_required_rwa_report_path
 
 
-DEFAULT_REPORTS_DIR = Path("reports")
+DEFAULT_REPORTS_DIR = RWA_REPORTS_DIR
 DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH = (
-    DEFAULT_REPORTS_DIR / "rwa_derivative_venue_discovery.json"
+    resolve_required_rwa_report_path("rwa_derivative_venue_discovery.json")
 )
 DEFAULT_DERIVATIVE_VENUE_DISCOVERY_CSV_PATH = (
     DEFAULT_REPORTS_DIR / "rwa_derivative_venue_discovery.csv"

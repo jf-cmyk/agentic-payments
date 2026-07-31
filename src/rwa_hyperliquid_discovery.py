@@ -16,11 +16,12 @@ from src.rwa_hyperliquid import (
     hyperliquid_is_unverified,
     hyperliquid_normalized_asset_class,
 )
+from src.runtime_data import RWA_REPORTS_DIR, resolve_required_rwa_report_path
 
 
-DEFAULT_REPORTS_DIR = Path("reports")
+DEFAULT_REPORTS_DIR = RWA_REPORTS_DIR
 DEFAULT_HYPERLIQUID_TRADEABLE_FEEDS_JSON_PATH = (
-    DEFAULT_REPORTS_DIR / "hyperliquid_tradeable_feeds.json"
+    resolve_required_rwa_report_path("hyperliquid_tradeable_feeds.json")
 )
 DEFAULT_HYPERLIQUID_TRADEABLE_FEEDS_CSV_PATH = (
     DEFAULT_REPORTS_DIR / "hyperliquid_tradeable_feeds.csv"

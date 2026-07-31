@@ -25,11 +25,19 @@ from src.rwa_xyz_monitor import (
     rwa_xyz_contract_identity_key,
     write_rwa_xyz_monitor_reports,
 )
+from src.runtime_data import (
+    RWA_REPORTS_DIR,
+    persisted_rwa_report_reference,
+    resolve_required_rwa_report_path,
+    resolve_rwa_report_reference,
+)
 
 
-DEFAULT_DAILY_AGENT_JSON_PATH = Path("reports/rwa_daily_feed_agent.json")
-DEFAULT_DAILY_AGENT_CSV_PATH = Path("reports/rwa_daily_new_tokens.csv")
-DEFAULT_DAILY_AGENT_HISTORY_DIR = Path("reports/rwa_daily_feed_agent_history")
+DEFAULT_DAILY_AGENT_JSON_PATH = resolve_required_rwa_report_path(
+    "rwa_daily_feed_agent.json"
+)
+DEFAULT_DAILY_AGENT_CSV_PATH = RWA_REPORTS_DIR / "rwa_daily_new_tokens.csv"
+DEFAULT_DAILY_AGENT_HISTORY_DIR = RWA_REPORTS_DIR / "rwa_daily_feed_agent_history"
 DAILY_AGENT_SNAPSHOT_SCHEMA = "blocksize.rwa_xyz_monitor_snapshot.v1"
 
 P0_ASSET_CLASSES = {"equity", "etf", "treasury_fund", "metal", "tokenized_fund"}
@@ -370,7 +378,7 @@ def build_daily_feed_agent_report(
         },
         "source": {
             "venue": RWA_XYZ_VENUE_ID,
-            "current_report": str(current_report_path),
+            "current_report": persisted_rwa_report_reference(current_report_path),
             "method": "daily diff of normalized RWA.xyz New Asset Monitor assets and token contracts",
         },
         "source_snapshot": current_snapshot,
@@ -685,6 +693,7 @@ def write_daily_feed_agent_report(
     return _publish_daily_feed_agent_report(
         report,
         current_report=canonical_report,
+        trusted_current_report_path=refresh_json_out,
         json_path=json_path,
         csv_path=csv_path,
         history_dir=history_dir,
@@ -710,6 +719,7 @@ def write_daily_feed_agent_baseline(
     return _publish_daily_feed_agent_report(
         report,
         current_report=current_report,
+        trusted_current_report_path=current_report_path,
         json_path=json_path,
         csv_path=csv_path,
         history_dir=history_dir,
@@ -720,6 +730,7 @@ def _publish_daily_feed_agent_report(
     report: dict[str, Any],
     *,
     current_report: dict[str, Any],
+    trusted_current_report_path: str | Path | None,
     json_path: str | Path,
     csv_path: str | Path,
     history_dir: str | Path,
@@ -729,7 +740,14 @@ def _publish_daily_feed_agent_report(
         raise ValueError("daily RWA feed report failed acceptance: " + "; ".join(errors))
 
     source = report.get("source") if isinstance(report.get("source"), dict) else {}
-    canonical_path = Path(source.get("current_report") or DEFAULT_RWA_XYZ_REPORT_JSON_PATH)
+    canonical_path = (
+        Path(trusted_current_report_path).expanduser()
+        if trusted_current_report_path is not None
+        else resolve_rwa_report_reference(
+            source.get("current_report"),
+            default_filename="rwa_xyz_new_asset_monitor.json",
+        )
+    )
     on_disk_report = load_rwa_xyz_monitor_report(canonical_path)
     if rwa_xyz_monitor_snapshot_identity(on_disk_report) != rwa_xyz_monitor_snapshot_identity(
         current_report
@@ -799,11 +817,24 @@ def load_daily_feed_agent_report(
     if not isinstance(payload, dict):
         return _fail_closed_report({}, ["daily report root is not an object"])
     source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
-    canonical_path = Path(
-        current_report_path
-        or source.get("current_report")
-        or DEFAULT_RWA_XYZ_REPORT_JSON_PATH
-    )
+    try:
+        canonical_path = (
+            Path(current_report_path).expanduser()
+            if current_report_path is not None
+            else resolve_rwa_report_reference(
+                source.get("current_report"),
+                default_filename="rwa_xyz_new_asset_monitor.json",
+            )
+        )
+    except ValueError:
+        sanitized_payload = deepcopy(payload)
+        sanitized_source = sanitized_payload.get("source")
+        if isinstance(sanitized_source, dict):
+            sanitized_source["current_report"] = None
+        return _fail_closed_report(
+            sanitized_payload,
+            ["daily persisted source reference is unsafe"],
+        )
     current_report = load_rwa_xyz_monitor_report(canonical_path)
     errors = validate_daily_feed_agent_report(payload, current_report=current_report)
     return _fail_closed_report(payload, errors) if errors else payload

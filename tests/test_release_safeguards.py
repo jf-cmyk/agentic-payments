@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ from fastapi.testclient import TestClient
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-from src import public_metadata, resource_server
+from src import public_metadata, resource_server, runtime_data
 from src.config import settings
 from src.security_config import PRIVACY_SALT_SETTINGS
 from scripts import (
@@ -71,9 +72,7 @@ def test_runtime_metadata_and_lock_enforce_dependency_security_floors() -> None:
 def test_secret_hygiene_guard_detects_keys_without_returning_secret_values() -> None:
     secret_value = "sk-proj-" + ("A" * 32)
 
-    matches = check_secret_hygiene.find_secret_patterns(
-        f"OPENAI_API_KEY={secret_value}"
-    )
+    matches = check_secret_hygiene.find_secret_patterns(f"OPENAI_API_KEY={secret_value}")
 
     assert matches == ["openai_api_key"]
     assert secret_value not in repr(matches)
@@ -86,9 +85,7 @@ def test_tracked_candidate_files_pass_secret_hygiene_gate() -> None:
 def test_release_version_and_registry_description_are_coherent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     tracked_server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
-    smithery = json.loads(
-        (ROOT / "docs" / "smithery_manifest.json").read_text(encoding="utf-8")
-    )
+    smithery = json.loads((ROOT / "docs" / "smithery_manifest.json").read_text(encoding="utf-8"))
 
     assert project["project"]["version"] == public_metadata.APP_VERSION
     assert tracked_server == public_metadata.build_server_json()
@@ -99,6 +96,7 @@ def test_release_version_and_registry_description_are_coherent() -> None:
 
 def test_resource_server_import_is_independent_of_working_directory(tmp_path: Path) -> None:
     environment = os.environ.copy()
+    environment.pop("RWA_REPORTS_DIR", None)
     environment["PYTHONPATH"] = str(ROOT)
     environment["OBSERVABILITY_ENABLED"] = "false"
     environment["BLOCKSIZE_API_KEY"] = "release-import-test"
@@ -107,9 +105,12 @@ def test_resource_server_import_is_independent_of_working_directory(tmp_path: Pa
             sys.executable,
             "-c",
             (
-                "from src.resource_server import DOCS_DIR; "
+                "from src.resource_server import DOCS_DIR, RWA_REPORTS_DIR; "
+                "from src.runtime_data import REQUIRED_RWA_REPORT_FILENAMES; "
                 "assert (DOCS_DIR / 'developer_portal.html').is_file(); "
-                "print(DOCS_DIR)"
+                "assert all((RWA_REPORTS_DIR / name).is_file() "
+                "for name in REQUIRED_RWA_REPORT_FILENAMES); "
+                "print(DOCS_DIR, RWA_REPORTS_DIR)"
             ),
         ],
         cwd=tmp_path,
@@ -122,6 +123,38 @@ def test_resource_server_import_is_independent_of_working_directory(tmp_path: Pa
 
     assert result.returncode == 0, result.stderr
     assert str(ROOT / "docs") in result.stdout
+    assert str(ROOT / "reports") in result.stdout
+
+
+def test_rwa_reports_override_is_authoritative_without_source_fallback(
+    tmp_path: Path,
+) -> None:
+    override = tmp_path / "missing-reports"
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(ROOT)
+    environment["RWA_REPORTS_DIR"] = str(override)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from src.runtime_data import RWA_REPORTS_DIR, "
+                "resolve_rwa_report_path; "
+                f"assert str(RWA_REPORTS_DIR) == {str(override)!r}; "
+                "assert resolve_rwa_report_path('rwa_xyz_new_asset_monitor.json') "
+                "== RWA_REPORTS_DIR / 'rwa_xyz_new_asset_monitor.json'; "
+                "assert not RWA_REPORTS_DIR.exists()"
+            ),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_readiness_passes_with_required_runtime_and_static_files() -> None:
@@ -162,14 +195,35 @@ def test_repeated_readiness_requests_only_use_cached_store_probes(monkeypatch) -
     assert second.status_code == 200
 
 
+def test_repeated_readiness_reuses_unchanged_rwa_integrity_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_data._cached_rwa_report_integrity.cache_clear()
+    original_validator = runtime_data.validate_rwa_report_payload
+    validations: list[str] = []
+
+    def tracking_validator(filename: str, payload: object) -> tuple[str, ...]:
+        validations.append(filename)
+        return original_validator(filename, payload)
+
+    monkeypatch.setattr(
+        runtime_data,
+        "validate_rwa_report_payload",
+        tracking_validator,
+    )
+
+    first = resource_server._rwa_runtime_reports_readiness()
+    second = resource_server._rwa_runtime_reports_readiness()
+
+    assert first["ready"] is True
+    assert second == first
+    assert validations == list(runtime_data.REQUIRED_RWA_REPORT_FILENAMES)
+
+
 def test_readiness_fails_closed_when_store_probe_is_stale() -> None:
     with TestClient(resource_server.app) as client:
-        snapshot = resource_server.app.state.store_readiness_snapshots[
-            "credit_ledger"
-        ]
-        snapshot["checked_at"] -= (
-            resource_server._store_readiness_max_age_seconds() + 1
-        )
+        snapshot = resource_server.app.state.store_readiness_snapshots["credit_ledger"]
+        snapshot["checked_at"] -= resource_server._store_readiness_max_age_seconds() + 1
 
         response = client.get("/readyz")
 
@@ -233,6 +287,427 @@ def test_readiness_fails_closed_when_static_product_is_missing(
     assert payload["status"] == "not_ready"
     assert payload["checks"]["static_product"]["ready"] is False
     assert "developer_portal.html" in payload["checks"]["static_product"]["missing"]
+
+
+def test_readiness_fails_closed_when_packaged_rwa_reports_are_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resource_server, "RWA_REPORTS_DIR", tmp_path)
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    check = response.json()["checks"]["rwa_runtime_reports"]
+    assert check == {
+        "ready": False,
+        "required_report_count": len(runtime_data.REQUIRED_RWA_REPORT_FILENAMES),
+        "checked_report_count": len(runtime_data.REQUIRED_RWA_REPORT_FILENAMES),
+        "failures": {
+            filename: ["missing"] for filename in runtime_data.REQUIRED_RWA_REPORT_FILENAMES
+        },
+    }
+
+
+def test_readiness_fails_closed_for_missing_file_specific_rwa_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_override = tmp_path / "operator-private-token" / "missing.json"
+    monkeypatch.setenv("RWA_JUPITER_ROUTE_ALLOWLIST_PATH", str(missing_override))
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    check = response.json()["checks"]["rwa_runtime_reports"]
+    assert check["failures"] == {"rwa_jupiter_route_allowlist.json": ["missing"]}
+    assert str(missing_override) not in response.text
+
+
+def test_readiness_fails_closed_for_invalid_rwa_report_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_report = tmp_path / "invalid.json"
+    invalid_report.write_text("{not-json\n", encoding="utf-8")
+    effective_paths = runtime_data.effective_rwa_report_paths()
+    effective_paths["rwa_evm_pool_allowlist.json"] = invalid_report
+    monkeypatch.setattr(
+        resource_server,
+        "effective_rwa_report_paths",
+        lambda **_kwargs: effective_paths,
+    )
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rwa_runtime_reports"]["failures"] == {
+        "rwa_evm_pool_allowlist.json": ["invalid_json"]
+    }
+
+
+def test_readiness_fails_closed_for_structurally_empty_rwa_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collapsed_report = tmp_path / "collapsed.json"
+    collapsed_report.write_text(
+        json.dumps(
+            {
+                "product": "rwa_evm_pool_allowlist",
+                "summary": {"pool_count": 0},
+                "pools": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    effective_paths = runtime_data.effective_rwa_report_paths()
+    effective_paths["rwa_evm_pool_allowlist.json"] = collapsed_report
+    monkeypatch.setattr(
+        resource_server,
+        "effective_rwa_report_paths",
+        lambda **_kwargs: effective_paths,
+    )
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rwa_runtime_reports"]["failures"] == {
+        "rwa_evm_pool_allowlist.json": ["structurally_empty"]
+    }
+
+
+def test_readiness_fails_closed_for_wrong_rwa_report_root_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrong_root = tmp_path / "wrong-root.json"
+    wrong_root.write_text("[]\n", encoding="utf-8")
+    effective_paths = runtime_data.effective_rwa_report_paths()
+    effective_paths["rwa_solana_pool_allowlist.json"] = wrong_root
+    monkeypatch.setattr(
+        resource_server,
+        "effective_rwa_report_paths",
+        lambda **_kwargs: effective_paths,
+    )
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rwa_runtime_reports"]["failures"] == {
+        "rwa_solana_pool_allowlist.json": ["root_not_object"]
+    }
+
+
+@pytest.mark.parametrize(
+    ("filename", "rows_path"),
+    [
+        ("hyperliquid_tradeable_feeds.json", "coverage_rows"),
+        ("rwa_blocksize_state_discovery.json", "symbols"),
+        ("rwa_daily_feed_agent.json", "new_assets"),
+        ("rwa_derivative_venue_discovery.json", "market_rows"),
+        ("rwa_evm_pool_allowlist.json", "pools"),
+        ("rwa_hyperliquid_paxg_probe.json", "result.results"),
+        ("rwa_jupiter_route_allowlist.json", "routes"),
+        ("rwa_rights_clearance.json", "scope.allowed_uses"),
+        ("rwa_solana_pool_allowlist.json", "pools"),
+        ("rwa_solana_token_mints.json", "tokens"),
+        ("rwa_xyz_new_asset_monitor.json", "asset_rows"),
+    ],
+)
+def test_required_rwa_report_contract_rejects_unusable_rows(
+    filename: str,
+    rows_path: str,
+) -> None:
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    rows: object = payload
+    for part in rows_path.split("."):
+        assert isinstance(rows, dict)
+        rows = rows[part]
+    assert isinstance(rows, list)
+
+    original_rows = list(rows)
+    rows[:] = [None]
+    assert "row_invalid" in runtime_data.validate_rwa_report_payload(
+        filename,
+        payload,
+    )
+
+    rows[:] = [{}]
+    assert "row_invalid" in runtime_data.validate_rwa_report_payload(
+        filename,
+        payload,
+    )
+    rows[:] = original_rows
+
+
+@pytest.mark.parametrize(
+    ("filename", "rows_path", "field_path", "invalid_values"),
+    [
+        (
+            "rwa_evm_pool_allowlist.json",
+            "pools",
+            "pool_id",
+            (0, False, "", "   ", [], {}),
+        ),
+        (
+            "rwa_solana_token_mints.json",
+            "tokens",
+            "mint",
+            (0, False, "", "   ", [], {}),
+        ),
+        (
+            "hyperliquid_tradeable_feeds.json",
+            "coverage_rows",
+            "asset_id",
+            (0, False, "", "   ", [], {}),
+        ),
+        (
+            "rwa_hyperliquid_paxg_probe.json",
+            "result.results",
+            "job.job_id",
+            (0, False, "", "   ", [], {}),
+        ),
+        (
+            "rwa_solana_token_mints.json",
+            "tokens",
+            "decimals",
+            (False, -1, 1.5, "8", float("nan"), float("inf"), 256),
+        ),
+        (
+            "rwa_evm_pool_allowlist.json",
+            "pools",
+            "block_number",
+            (0, False, -1, 1.5, "1", float("nan"), float("inf")),
+        ),
+        (
+            "rwa_solana_pool_allowlist.json",
+            "pools",
+            "slot",
+            (0, False, -1, 1.5, "1", float("nan"), float("inf")),
+        ),
+        (
+            "rwa_hyperliquid_paxg_probe.json",
+            "result.results",
+            "block_vwap.block_size_usd",
+            (0, False, -1, "10000", float("nan"), float("inf")),
+        ),
+        (
+            "rwa_hyperliquid_paxg_probe.json",
+            "result.quality.observations",
+            "age_ms",
+            (False, -1, "0", float("nan"), float("inf")),
+        ),
+        (
+            "rwa_hyperliquid_paxg_probe.json",
+            "result.quality.observations",
+            "usable_for_realtime",
+            (0, 1, "false", None, [], {}),
+        ),
+    ],
+)
+def test_required_rwa_typed_row_contracts_reject_invalid_field_values(
+    filename: str,
+    rows_path: str,
+    field_path: str,
+    invalid_values: tuple[object, ...],
+) -> None:
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    rows: object = payload
+    for part in rows_path.split("."):
+        assert isinstance(rows, dict)
+        rows = rows[part]
+    assert isinstance(rows, list) and isinstance(rows[0], dict)
+    row = rows[0]
+    target = row
+    field_parts = field_path.split(".")
+    for part in field_parts[:-1]:
+        assert isinstance(target.get(part), dict)
+        target = target[part]
+    field_name = field_parts[-1]
+    original_value = target[field_name]
+
+    for invalid_value in invalid_values:
+        target[field_name] = invalid_value
+        assert "row_invalid" in runtime_data.validate_rwa_report_payload(
+            filename,
+            payload,
+        )
+    target[field_name] = original_value
+
+
+@pytest.mark.parametrize(
+    ("filename", "rows_path", "field_path"),
+    [
+        ("rwa_solana_token_mints.json", "tokens", "decimals"),
+        (
+            "rwa_hyperliquid_paxg_probe.json",
+            "result.quality.observations",
+            "age_ms",
+        ),
+    ],
+)
+def test_required_rwa_numeric_row_contracts_allow_legitimate_zero(
+    filename: str,
+    rows_path: str,
+    field_path: str,
+) -> None:
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    rows: object = payload
+    for part in rows_path.split("."):
+        assert isinstance(rows, dict)
+        rows = rows[part]
+    assert isinstance(rows, list) and isinstance(rows[0], dict)
+    row = rows[0]
+    target = row
+    field_parts = field_path.split(".")
+    for part in field_parts[:-1]:
+        assert isinstance(target.get(part), dict)
+        target = target[part]
+    target[field_parts[-1]] = 0
+
+    assert "row_invalid" not in runtime_data.validate_rwa_report_payload(
+        filename,
+        payload,
+    )
+
+
+def test_required_rwa_boolean_row_contract_allows_false() -> None:
+    filename = "rwa_hyperliquid_paxg_probe.json"
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    payload["result"]["quality"]["observations"][0]["usable_for_realtime"] = False
+
+    assert "row_invalid" not in runtime_data.validate_rwa_report_payload(
+        filename,
+        payload,
+    )
+
+
+def _synchronize_solana_token_status_summary(payload: dict[str, object]) -> None:
+    tokens = payload["tokens"]
+    assert isinstance(tokens, list)
+    statuses = Counter(
+        str(row["status"]).strip().lower() for row in tokens if isinstance(row, dict)
+    )
+    summary = payload["summary"]
+    assert isinstance(summary, dict)
+    summary["by_status"] = dict(sorted(statuses.items()))
+    summary["resolved"] = statuses.get("resolved", 0)
+
+
+def test_solana_token_contract_rejects_unsupported_nonempty_status() -> None:
+    filename = "rwa_solana_token_mints.json"
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    payload["tokens"][0]["status"] = "unresolved"
+    _synchronize_solana_token_status_summary(payload)
+
+    errors = runtime_data.validate_rwa_report_payload(filename, payload)
+
+    assert "row_invalid" in errors
+    assert "count_mismatch" not in errors
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["resolved", "verified", "configured", " VERIFIED "],
+)
+def test_solana_token_contract_allows_every_loader_status(status: str) -> None:
+    filename = "rwa_solana_token_mints.json"
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    payload["tokens"][0]["status"] = status
+    _synchronize_solana_token_status_summary(payload)
+
+    assert runtime_data.validate_rwa_report_payload(filename, payload) == ()
+
+
+def test_solana_token_resolved_summary_matches_exact_status_count() -> None:
+    filename = "rwa_solana_token_mints.json"
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    payload["summary"]["resolved"] -= 1
+
+    assert runtime_data.validate_rwa_report_payload(filename, payload) == ("count_mismatch",)
+
+
+def test_solana_token_by_status_summary_matches_exact_histogram() -> None:
+    filename = "rwa_solana_token_mints.json"
+    payload = json.loads((ROOT / "reports" / filename).read_text(encoding="utf-8"))
+    payload["summary"]["by_status"] = {"resolved": 14, "verified": 1}
+
+    assert runtime_data.validate_rwa_report_payload(filename, payload) == ("count_mismatch",)
+
+
+def test_readiness_reconciles_daily_report_with_effective_xyz_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daily_path = tmp_path / "rwa_daily_feed_agent.json"
+    xyz_path = tmp_path / "rwa_xyz_new_asset_monitor.json"
+    daily_path.write_bytes((ROOT / "reports" / daily_path.name).read_bytes())
+    xyz_payload = json.loads((ROOT / "reports" / xyz_path.name).read_text(encoding="utf-8"))
+    xyz_payload["source"]["next_build_id"] = "individually-valid-different-snapshot"
+    xyz_path.write_text(json.dumps(xyz_payload), encoding="utf-8")
+
+    assert (
+        runtime_data.inspect_required_rwa_report(
+            "rwa_daily_feed_agent.json",
+            daily_path,
+        )
+        == ()
+    )
+    assert (
+        runtime_data.inspect_required_rwa_report(
+            "rwa_xyz_new_asset_monitor.json",
+            xyz_path,
+        )
+        == ()
+    )
+
+    effective_paths = runtime_data.effective_rwa_report_paths()
+    effective_paths["rwa_daily_feed_agent.json"] = daily_path
+    effective_paths["rwa_xyz_new_asset_monitor.json"] = xyz_path
+    monkeypatch.setattr(resource_server, "RWA_REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(
+        resource_server,
+        "effective_rwa_report_paths",
+        lambda **_kwargs: effective_paths,
+    )
+
+    with TestClient(resource_server.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rwa_runtime_reports"]["failures"] == {
+        "rwa_daily_feed_agent.json": ["daily_snapshot_mismatch"]
+    }
+
+
+def test_daily_report_must_target_the_effective_xyz_report(
+    tmp_path: Path,
+) -> None:
+    daily_path = tmp_path / "rwa_daily_feed_agent.json"
+    xyz_path = tmp_path / "rwa_xyz_new_asset_monitor.json"
+    daily_payload = json.loads((ROOT / "reports" / daily_path.name).read_text(encoding="utf-8"))
+    daily_payload["source"]["current_report"] = "individually-valid-other.json"
+    daily_path.write_text(json.dumps(daily_payload), encoding="utf-8")
+    xyz_path.write_bytes((ROOT / "reports" / xyz_path.name).read_bytes())
+
+    assert (
+        runtime_data.inspect_required_rwa_report(
+            "rwa_daily_feed_agent.json",
+            daily_path,
+        )
+        == ()
+    )
+    assert runtime_data.inspect_daily_xyz_reconciliation(
+        daily_path,
+        xyz_path,
+        reports_dir=tmp_path,
+    ) == ("daily_source_target_mismatch",)
 
 
 def test_missing_source_manifest_cannot_fall_back_to_unrelated_data(
@@ -299,9 +774,7 @@ def test_cached_upstream_probe_fails_closed_after_configuration_change(
         "available": True,
         "checked_at": resource_server.time.time(),
         "reason": None,
-        "configuration_fingerprint": (
-            resource_server._blocksize_configuration_fingerprint(client)
-        ),
+        "configuration_fingerprint": (resource_server._blocksize_configuration_fingerprint(client)),
     }
     client._api_key = "changed-key"
 
@@ -329,18 +802,14 @@ def test_facilitator_capability_snapshot_fails_closed_when_stale_or_reconfigured
             }
         ],
         "checked_at": resource_server.time.time(),
-        "configuration_fingerprint": (
-            resource_server._facilitator_configuration_fingerprint()
-        ),
+        "configuration_fingerprint": (resource_server._facilitator_configuration_fingerprint()),
     }
 
     current = resource_server._facilitator_support_readiness(snapshot)
     stale_snapshot = {
         **snapshot,
         "checked_at": (
-            resource_server.time.time()
-            - resource_server._facilitator_probe_max_age_seconds()
-            - 1
+            resource_server.time.time() - resource_server._facilitator_probe_max_age_seconds() - 1
         ),
     }
     stale = resource_server._facilitator_support_readiness(stale_snapshot)
@@ -443,9 +912,7 @@ def test_hosted_connector_public_url_must_match_candidate_origin(
     )
 
     assert mismatched["public_url"]["ready"] is False
-    assert mismatched["public_url"]["reason"] == (
-        "connector_public_url_must_match_PUBLIC_BASE_URL"
-    )
+    assert mismatched["public_url"]["reason"] == ("connector_public_url_must_match_PUBLIC_BASE_URL")
     assert matched["public_url"]["ready"] is True
 
 
@@ -552,9 +1019,7 @@ def test_configured_clerk_connectors_advertise_only_mounted_oauth_routes(
         environment.update(
             {
                 f"{connector}_AUTH_PROVIDER": "clerk",
-                f"{connector}_MCP_PUBLIC_URL": (
-                    f"https://mcp.blocksize.info/{slug}/mcp"
-                ),
+                f"{connector}_MCP_PUBLIC_URL": (f"https://mcp.blocksize.info/{slug}/mcp"),
                 f"{connector}_OAUTH_JWT_SIGNING_KEY": (
                     "jwt-key-0123456789abcdefghijklmnopqrstuvwxyz-ABCDEF"
                 ),
@@ -562,9 +1027,7 @@ def test_configured_clerk_connectors_advertise_only_mounted_oauth_routes(
                     "storage-key-9876543210ABCDEFGHIJKLMNOPQRSTUVWXYZ-abcdef"
                 ),
                 f"{connector}_OAUTH_STORAGE_DIR": str(state_dir / f"{slug}-oauth"),
-                f"{connector}_ENTITLEMENT_DB_PATH": str(
-                    state_dir / f"{slug}-entitlements.db"
-                ),
+                f"{connector}_ENTITLEMENT_DB_PATH": str(state_dir / f"{slug}-entitlements.db"),
             }
         )
     probe = textwrap.dedent(
@@ -630,9 +1093,7 @@ def test_railway_promotes_only_dependency_ready_releases() -> None:
 
 def test_gitlab_requires_distinct_staging_and_exact_commit_smoke_promotion() -> None:
     pipeline = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
-    staging_job = pipeline.split("deploy_staging:", 1)[1].split(
-        "deploy_production:", 1
-    )[0]
+    staging_job = pipeline.split("deploy_staging:", 1)[1].split("deploy_production:", 1)[0]
     production_job = pipeline.split("deploy_production:", 1)[1]
 
     assert "deploy_staging:" in pipeline
@@ -640,7 +1101,10 @@ def test_gitlab_requires_distinct_staging_and_exact_commit_smoke_promotion() -> 
     assert 'test "$STAGING_BASE_URL" != "$PUBLIC_BASE_URL"' in pipeline
     assert 'test "$STAGING_RAILWAY_ENVIRONMENT" != "$RAILWAY_ENVIRONMENT"' in pipeline
     assert 'test "$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_SERVICE_NAME"' in pipeline
-    assert "STAGING_RAILWAY_PROJECT_ID:$STAGING_RAILWAY_ENVIRONMENT:$STAGING_RAILWAY_SERVICE_NAME" in pipeline
+    assert (
+        "STAGING_RAILWAY_PROJECT_ID:$STAGING_RAILWAY_ENVIRONMENT:$STAGING_RAILWAY_SERVICE_NAME"
+        in pipeline
+    )
     assert 'audit_hosted_release.mjs "$STAGING_BASE_URL" "$CI_COMMIT_SHA"' in pipeline
     assert 'audit_hosted_release.mjs "$PUBLIC_BASE_URL" "$CI_COMMIT_SHA"' in pipeline
     assert 'audit_hosted_release.mjs "${PUBLIC_BASE_URL:-' not in pipeline
@@ -784,9 +1248,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
                     200,
                     {
                         "oauth_available": True,
-                        "authorization_servers": [
-                            f"{self.base_url}/{connector}/mcp"
-                        ],
+                        "authorization_servers": [f"{self.base_url}/{connector}/mcp"],
                     },
                 )
                 return
@@ -972,8 +1434,7 @@ def test_installed_release_uses_only_exact_frozen_runtime_dependencies(
 ) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text(
-        "# generated\n-e .\nfastapi==1.2.3\n"
-        "colorama==0.4.6 ; sys_platform == 'win32'\n",
+        "# generated\n-e .\nfastapi==1.2.3\ncolorama==0.4.6 ; sys_platform == 'win32'\n",
         encoding="utf-8",
     )
 
@@ -1036,11 +1497,7 @@ def test_release_artifact_rejects_any_unlisted_public_data_file(
             archive.writestr(member, payload)
         archive.writestr(
             "synthetic.dist-info/METADATA",
-            (
-                "Metadata-Version: 2.1\n"
-                "Name: synthetic\n"
-                f"Version: {public_metadata.APP_VERSION}\n"
-            ),
+            (f"Metadata-Version: 2.1\nName: synthetic\nVersion: {public_metadata.APP_VERSION}\n"),
         )
         archive.writestr(
             "share/blocksize-mcp/docs/evidence/internal-secrets.txt",
@@ -1061,6 +1518,41 @@ def test_release_artifact_rejects_any_unlisted_public_data_file(
     ]
 
 
+def test_rwa_runtime_data_manifest_and_release_guards_share_one_exact_allowlist() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    shared_data = project["tool"]["hatch"]["build"]["targets"]["wheel"]["shared-data"]
+    expected_source_files = {
+        f"reports/{filename}" for filename in runtime_data.REQUIRED_RWA_REPORT_FILENAMES
+    }
+    expected_installed_files = {
+        f"share/blocksize-mcp/reports/{filename}"
+        for filename in runtime_data.REQUIRED_RWA_REPORT_FILENAMES
+    }
+
+    assert {
+        source for source in shared_data if source.startswith("reports/")
+    } == expected_source_files
+    assert {shared_data[source] for source in expected_source_files} == (expected_installed_files)
+    assert verify_release_artifact.RWA_RUNTIME_DATA_FILES == expected_installed_files
+    assert set(resource_server.READINESS_REQUIRED_RWA_REPORT_PATHS) == set(
+        runtime_data.REQUIRED_RWA_REPORT_FILENAMES
+    )
+    assert tuple(runtime_data.RWA_REPORT_OVERRIDE_ENVS) == (
+        runtime_data.REQUIRED_RWA_REPORT_FILENAMES
+    )
+    assert {
+        filename: environment_name
+        for filename, environment_name in runtime_data.RWA_REPORT_OVERRIDE_ENVS.items()
+        if environment_name
+    } == {
+        "rwa_evm_pool_allowlist.json": "RWA_EVM_POOL_ALLOWLIST_PATH",
+        "rwa_jupiter_route_allowlist.json": "RWA_JUPITER_ROUTE_ALLOWLIST_PATH",
+        "rwa_rights_clearance.json": "RWA_RIGHTS_CLEARANCE_PATH",
+        "rwa_solana_pool_allowlist.json": "RWA_SOLANA_POOL_ALLOWLIST_PATH",
+        "rwa_solana_token_mints.json": "RWA_SOLANA_TOKEN_MINTS_PATH",
+    }
+
+
 def test_hosted_example_uses_production_policy_and_durable_distinct_state() -> None:
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
@@ -1073,14 +1565,10 @@ def test_hosted_example_uses_production_policy_and_durable_distinct_state() -> N
 
 
 def test_railway_cutover_requires_staging_and_disables_auto_deploy_first() -> None:
-    runbook = (ROOT / "docs" / "gtm" / "gitlab_railway_deploy.md").read_text(
-        encoding="utf-8"
-    )
+    runbook = (ROOT / "docs" / "gtm" / "gitlab_railway_deploy.md").read_text(encoding="utf-8")
 
     prerequisite = runbook.index("## Hard pre-deploy prerequisites")
-    disable_auto_deploy = runbook.index(
-        "Disable or pause Railway GitHub/repository auto-deploy"
-    )
+    disable_auto_deploy = runbook.index("Disable or pause Railway GitHub/repository auto-deploy")
     push_pipeline = runbook.index("Push the pipeline to GitLab")
     assert prerequisite < disable_auto_deploy < push_pipeline
     assert "GitLab must be the sole deploy" in runbook

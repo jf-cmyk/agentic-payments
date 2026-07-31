@@ -47,7 +47,7 @@ promotion remain blocked.
 | --- | --- |
 | Public resource-server suite | Pass; 253 tests |
 | Focused registry/discovery/crawler suite | Pass; 33 tests |
-| Full repository suite | Pass; 784 tests |
+| Full repository suite | Pass; 829 tests |
 | Manifest-to-runtime tool parity | Pass; exact eight-tool match |
 | Registry schema and description integrity | Pass |
 | Public links, sitemap URLs, and packaged images | Pass |

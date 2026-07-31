@@ -13,15 +13,19 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.runtime_data import resolve_required_rwa_report_path
 
-DEFAULT_RIGHTS_CLEARANCE_PATH = Path("reports") / "rwa_rights_clearance.json"
+
+DEFAULT_RIGHTS_CLEARANCE_PATH = resolve_required_rwa_report_path(
+    "rwa_rights_clearance.json"
+)
 RIGHTS_CLEARANCE_PATH_ENV = "RWA_RIGHTS_CLEARANCE_PATH"
 ACK_VALUES = {"1", "true", "yes", "y", "ack", "approved", "signed", "cleared"}
 
 
 def rights_clearance_path() -> Path:
     """Return the configured rights-clearance evidence path."""
-    return Path(os.getenv(RIGHTS_CLEARANCE_PATH_ENV, str(DEFAULT_RIGHTS_CLEARANCE_PATH))).expanduser()
+    return resolve_required_rwa_report_path("rwa_rights_clearance.json")
 
 
 def load_rights_clearance(path: str | Path | None = None) -> dict[str, Any]:

@@ -33,22 +33,17 @@ import asyncio
 import os
 import base64
 import binascii
-import csv
 import hashlib
-import io
 import json
 import logging
 import re
 import secrets
 import sqlite3
-import sysconfig
 import time
-import tomllib
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
-from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any, Deque
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
@@ -150,6 +145,18 @@ from src.public_metadata import (
     build_server_json,
     build_seo_landing_page,
     build_sitemap_xml,
+)
+from src.runtime_data import (
+    INSTALLED_DISTRIBUTION as INSTALLED_DISTRIBUTION,
+    PACKAGED_DATA_ROOT,
+    PROJECT_ROOT,
+    REQUIRED_RWA_REPORT_FILENAMES,
+    RWA_REPORTS_DIR,
+    SOURCE_CHECKOUT,
+    effective_rwa_report_paths,
+    inspect_daily_xyz_reconciliation,
+    inspect_required_rwa_report,
+    resolve_data_directory,
 )
 from src.rwa_coverage import (
     QUALITY_ALIGNMENT,
@@ -268,122 +275,7 @@ logger = logging.getLogger(__name__)
 # credential material in their path, so retain only warning/error records.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_INSTALLATION_PACKAGE_ROOTS = {
-    Path(path).resolve()
-    for path in (sysconfig.get_path("purelib"), sysconfig.get_path("platlib"))
-    if path
-}
-_MODULE_PATH = Path(__file__).resolve()
-
-
-def _record_hash_matches(path: Path, hash_spec: str, size_text: str) -> bool:
-    """Verify an installed data file against its wheel RECORD entry."""
-    if not path.is_file() or not hash_spec.startswith("sha256="):
-        return False
-    try:
-        expected_size = int(size_text)
-        payload = path.read_bytes()
-    except (OSError, ValueError):
-        return False
-    digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=")
-    return len(payload) == expected_size and digest.decode("ascii") == hash_spec[7:]
-
-
-def _installed_distribution_layout() -> tuple[bool, Path | None]:
-    """Locate this module's signed wheel data across prefix/target/user schemes."""
-    try:
-        package_distribution = distribution("blocksize-mcp-x402")
-    except PackageNotFoundError:
-        return False, None
-    recorded_module = Path(
-        package_distribution.locate_file("src/resource_server.py")
-    ).resolve(strict=False)
-    if recorded_module != _MODULE_PATH:
-        return False, None
-
-    record_text = package_distribution.read_text("RECORD") or ""
-    server_record = next(
-        (
-            row
-            for row in csv.reader(io.StringIO(record_text))
-            if len(row) >= 3
-            and row[0].replace("\\", "/").endswith(
-                "share/blocksize-mcp/server.json"
-            )
-        ),
-        None,
-    )
-    distribution_root = Path(package_distribution.locate_file("")).resolve(
-        strict=False
-    )
-    if server_record is None:
-        return True, distribution_root / ".blocksize-mcp-package-data-missing"
-
-    record_path, hash_spec, size_text = server_record[:3]
-    candidates = [
-        Path(package_distribution.locate_file(record_path)).resolve(strict=False),
-        distribution_root / "share" / "blocksize-mcp" / "server.json",
-        (
-            Path(sysconfig.get_path("data"))
-            / "share"
-            / "blocksize-mcp"
-            / "server.json"
-        ).resolve(strict=False),
-    ]
-    for candidate in dict.fromkeys(candidates):
-        if _record_hash_matches(candidate, hash_spec, size_text):
-            return True, candidate.parent
-    return True, distribution_root / ".blocksize-mcp-package-data-invalid"
-
-
-_DISTRIBUTION_INSTALLED, _DISTRIBUTION_DATA_ROOT = _installed_distribution_layout()
-
-
-def _validated_source_checkout() -> bool:
-    manifest_path = PROJECT_ROOT / "pyproject.toml"
-    if (PROJECT_ROOT / "src" / "resource_server.py").resolve() != _MODULE_PATH:
-        return False
-    try:
-        project = tomllib.loads(manifest_path.read_text(encoding="utf-8"))["project"]
-    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
-        return False
-    return (
-        project.get("name") == "blocksize-mcp-x402"
-        and project.get("version") == APP_VERSION
-    )
-
-
-SOURCE_CHECKOUT = not _DISTRIBUTION_INSTALLED and _validated_source_checkout()
-INSTALLED_DISTRIBUTION = not SOURCE_CHECKOUT
-PACKAGED_DATA_ROOT = (
-    _DISTRIBUTION_DATA_ROOT
-    if _DISTRIBUTION_DATA_ROOT is not None
-    else (
-        _MODULE_PATH.parent.parent / ".blocksize-mcp-package-data-missing"
-        if INSTALLED_DISTRIBUTION
-        else (
-        Path(sysconfig.get_path("data")) / "share" / "blocksize-mcp"
-        ).resolve(strict=False)
-    )
-)
-
-
-def _resolve_docs_dir() -> Path:
-    """Resolve static documentation independently of the process working directory."""
-    configured = os.environ.get("BLOCKSIZE_DOCS_DIR", "").strip()
-    if configured:
-        # An explicit operator path is authoritative even when it is missing;
-        # readiness must expose the error instead of silently using other data.
-        return Path(configured).expanduser().resolve()
-    if SOURCE_CHECKOUT:
-        return (PROJECT_ROOT / "docs").resolve()
-    # Installed releases must use data from their own installation prefix. An
-    # unrelated ``site-packages/docs`` directory must never mask a broken wheel.
-    return (PACKAGED_DATA_ROOT / "docs").resolve()
-
-
-DOCS_DIR = _resolve_docs_dir()
+DOCS_DIR = resolve_data_directory("docs", override_env="BLOCKSIZE_DOCS_DIR")
 SERVER_JSON_PATHS = (
     (PROJECT_ROOT / "server.json",)
     if SOURCE_CHECKOUT
@@ -393,6 +285,7 @@ READINESS_REQUIRED_DOC_PATHS = (
     "developer_portal.html",
     "remote_mcp_quickstart.html",
     "first_price_quickstart.html",
+    "agent_framework_integrations.html",
     "prompt_examples.html",
     "privacy_policy.html",
     "support.html",
@@ -404,6 +297,7 @@ READINESS_REQUIRED_DOC_PATHS = (
     "evidence/rwa-coverage-index.html",
     "evidence/oracle-lineage-index.html",
 )
+READINESS_REQUIRED_RWA_REPORT_PATHS = REQUIRED_RWA_REPORT_FILENAMES
 
 
 def _load_release_build() -> dict[str, Any]:
@@ -11738,12 +11632,37 @@ def _mark_connector_entitlement_collisions(
         status["database_collisions"] = sorted(set(collisions))
 
 
+def _rwa_runtime_reports_readiness() -> dict[str, Any]:
+    """Validate the exact override-aware reports consumed by the runtime."""
+    effective_paths = effective_rwa_report_paths(reports_dir=RWA_REPORTS_DIR)
+    failures = {
+        filename: list(errors)
+        for filename, path in effective_paths.items()
+        if (errors := inspect_required_rwa_report(filename, path))
+    }
+    if not failures:
+        cross_report_errors = inspect_daily_xyz_reconciliation(
+            effective_paths["rwa_daily_feed_agent.json"],
+            effective_paths["rwa_xyz_new_asset_monitor.json"],
+            reports_dir=RWA_REPORTS_DIR,
+        )
+        if cross_report_errors:
+            failures["rwa_daily_feed_agent.json"] = list(cross_report_errors)
+    return {
+        "ready": not failures,
+        "required_report_count": len(READINESS_REQUIRED_RWA_REPORT_PATHS),
+        "checked_report_count": len(effective_paths),
+        "failures": failures,
+    }
+
+
 def _readiness_report() -> dict[str, Any]:
     missing_docs = [
         relative_path
         for relative_path in READINESS_REQUIRED_DOC_PATHS
         if not (DOCS_DIR / relative_path).is_file()
     ]
+    rwa_runtime_reports = _rwa_runtime_reports_readiness()
     runtime_ready = all(
         getattr(app.state, name, None) is not None
         for name in ("blocksize", "stream_cache", "credits", "rwa_store")
@@ -11918,6 +11837,7 @@ def _readiness_report() -> dict[str, Any]:
             "ready": not missing_docs,
             "missing": missing_docs,
         },
+        "rwa_runtime_reports": rwa_runtime_reports,
         "release_manifest": _release_manifest_check(),
         "release_provenance": {
             "ready": bool(RELEASE_BUILD.get("commit_sha")) or not hosted,

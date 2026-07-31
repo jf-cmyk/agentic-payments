@@ -11,6 +11,19 @@ import re
 import zipfile
 
 
+RWA_RUNTIME_DATA_FILES = {
+    "share/blocksize-mcp/reports/hyperliquid_tradeable_feeds.json",
+    "share/blocksize-mcp/reports/rwa_blocksize_state_discovery.json",
+    "share/blocksize-mcp/reports/rwa_daily_feed_agent.json",
+    "share/blocksize-mcp/reports/rwa_derivative_venue_discovery.json",
+    "share/blocksize-mcp/reports/rwa_evm_pool_allowlist.json",
+    "share/blocksize-mcp/reports/rwa_hyperliquid_paxg_probe.json",
+    "share/blocksize-mcp/reports/rwa_jupiter_route_allowlist.json",
+    "share/blocksize-mcp/reports/rwa_rights_clearance.json",
+    "share/blocksize-mcp/reports/rwa_solana_pool_allowlist.json",
+    "share/blocksize-mcp/reports/rwa_solana_token_mints.json",
+    "share/blocksize-mcp/reports/rwa_xyz_new_asset_monitor.json",
+}
 REQUIRED_MEMBERS = (
     "src/resource_server.py",
     "scripts/__init__.py",
@@ -40,6 +53,7 @@ REQUIRED_MEMBERS = (
     "share/blocksize-mcp/docs/pdf/Blocksize_User_Flow.pdf",
     "share/blocksize-mcp/docs/evidence/rwa-coverage-index.html",
     "share/blocksize-mcp/docs/evidence/oracle-lineage-index.html",
+    *sorted(RWA_RUNTIME_DATA_FILES),
 )
 PUBLIC_HTML_FILES = {
     "share/blocksize-mcp/docs/agent_framework_integrations.html",
@@ -79,7 +93,7 @@ ALLOWED_PUBLIC_DOC_FILES = PUBLIC_HTML_FILES | {
     "share/blocksize-mcp/docs/pdf/Blocksize_State_Coverage.pdf",
     "share/blocksize-mcp/docs/pdf/Blocksize_User_Flow.pdf",
 }
-ALLOWED_PACKAGE_DATA_FILES = ALLOWED_PUBLIC_DOC_FILES | {
+ALLOWED_PACKAGE_DATA_FILES = ALLOWED_PUBLIC_DOC_FILES | RWA_RUNTIME_DATA_FILES | {
     "share/blocksize-mcp/server.json"
 }
 

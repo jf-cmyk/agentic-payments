@@ -42,8 +42,8 @@ readiness-gated.
 
 | Gate | Result |
 | --- | --- |
-| Full repository suite | Pass; 784 tests |
-| Release safeguard suite after final isolation changes | Pass; 32 tests |
+| Full repository suite | Pass; 829 tests |
+| Release safeguard suite after final isolation changes | Pass; 73 tests |
 | Ruff | Pass; repository-wide |
 | Python compilation | Pass; release safeguard scripts |
 | Diff whitespace check | Pass |

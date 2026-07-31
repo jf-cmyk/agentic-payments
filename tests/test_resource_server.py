@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -1815,6 +1816,75 @@ class TestPaymentGate:
         assert tbill["gates"]["liquidity_depth_volume"]["status"] == "blocked"
         assert "issuer_nav_alignment" in tbill["missing_or_blocked_gates"]
 
+    def test_public_rwa_endpoints_use_file_specific_report_overrides(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        from src import rwa_feed_discovery
+
+        route_override = tmp_path / "jupiter-override.json"
+        route_override.write_text(
+            json.dumps(
+                {
+                    "routes": [
+                        {
+                            "allowlist_id": "dex:jupiter_router:AAPLX:USD",
+                            "symbol": "AAPLx/USD",
+                            "venue": "jupiter_router",
+                            "status": "error",
+                            "error": "override-consistency-sentinel",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        evm_override = tmp_path / "evm-override.json"
+        evm_override.write_text(
+            json.dumps(
+                {
+                    "summary": {
+                        "pool_count": 73,
+                        "missing_pair_count": 72,
+                        "block_state_captured": 1,
+                    },
+                    "pools": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            "RWA_JUPITER_ROUTE_ALLOWLIST_PATH",
+            str(route_override),
+        )
+        monkeypatch.setenv("RWA_EVM_POOL_ALLOWLIST_PATH", str(evm_override))
+        monkeypatch.setattr(
+            rwa_feed_discovery,
+            "_load_replay_inventory_evidence",
+            lambda _reports_dir: {},
+        )
+
+        discovery = test_client.get(
+            "/v1/rwa/discovery?venue=jupiter_router&limit=100"
+        )
+        blocker = test_client.get("/v1/rwa/blocker-resolution")
+
+        assert discovery.status_code == 200
+        aapl = next(
+            row for row in discovery.json()["feeds"] if row["symbol"] == "AAPLx/USD"
+        )
+        route_gate = aapl["gates"]["route_or_pool_discovery"]
+        assert route_gate["status"] == "blocked"
+        assert route_gate["evidence"]["error"] == "override-consistency-sentinel"
+
+        assert blocker.status_code == 200
+        issues = {row["issue_id"]: row for row in blocker.json()["rows"]}
+        evm_evidence = issues["evm_pool_allowlist_and_rpc_state"]["evidence"]
+        assert evm_evidence["public_pair_search_pool_count"] == 73
+        assert evm_evidence["public_pair_search_missing_pair_count"] == 72
+
     def test_rwa_discovery_mitigation_plan_maps_blockers_to_solutions(self, test_client):
         response = test_client.get("/v1/rwa/discovery/mitigation-plan")
 
@@ -2182,6 +2252,66 @@ class TestPaymentGate:
         assert filtered_data["summary"]["filtered_dependency_count"] > 0
         assert all(row["category"] == "oracle_reference" for row in filtered_data["dependencies"])
         assert all(row["status"] == "blocked_by_license_or_contract" for row in filtered_data["dependencies"])
+
+    def test_rwa_source_readiness_never_exposes_effective_override_paths(
+        self,
+        test_client,
+        monkeypatch,
+        tmp_path,
+    ):
+        sentinel = "operator-secret-path-sentinel-7d33d09b"
+        override_path = tmp_path / sentinel / f"{sentinel}.json"
+        logical_path = "reports/rwa_solana_token_mints.json"
+        monkeypatch.setenv("RWA_SOLANA_TOKEN_MINTS_PATH", str(override_path))
+
+        missing_response = test_client.get("/v1/rwa/source-readiness")
+
+        assert missing_response.status_code == 200
+        missing_data = missing_response.json()
+        missing_dependency = {
+            row["dependency_id"]: row for row in missing_data["dependencies"]
+        }["solana_token_mint_registry"]
+        assert missing_dependency["status"] == "missing_identifier_mapping"
+        assert missing_dependency["configured"] is False
+        assert missing_dependency["artifact_paths"] == [logical_path]
+        assert missing_dependency["configured_artifact_paths"] == []
+        assert missing_dependency["missing_artifact_paths"] == [logical_path]
+        assert sentinel not in json.dumps(missing_data)
+        assert str(override_path) not in json.dumps(missing_data)
+
+        override_path.parent.mkdir()
+        override_path.write_text("{}\n", encoding="utf-8")
+        configured_response = test_client.get("/v1/rwa/source-readiness")
+
+        assert configured_response.status_code == 200
+        configured_data = configured_response.json()
+        configured_dependency = {
+            row["dependency_id"]: row for row in configured_data["dependencies"]
+        }["solana_token_mint_registry"]
+        assert configured_dependency["status"] == "configured"
+        assert configured_dependency["configured"] is True
+        assert configured_dependency["artifact_paths"] == [logical_path]
+        assert configured_dependency["configured_artifact_paths"] == [logical_path]
+        assert configured_dependency["missing_artifact_paths"] == []
+        assert sentinel not in json.dumps(configured_data)
+        assert str(override_path) not in json.dumps(configured_data)
+        for response_data in (missing_data, configured_data):
+            for dependency in response_data["dependencies"]:
+                for field in (
+                    "artifact_paths",
+                    "configured_artifact_paths",
+                    "missing_artifact_paths",
+                ):
+                    assert all(
+                        not Path(public_path).is_absolute()
+                        for public_path in dependency[field]
+                    )
+        legacy_dependency = {
+            row["dependency_id"]: row for row in configured_data["dependencies"]
+        }["rwa_xyz_monitor_catalog"]
+        assert legacy_dependency["artifact_paths"] == [
+            "reports/rwa_xyz_new_asset_monitor.json"
+        ]
 
     def test_rwa_solana_discovery_targets_cover_jupiter_and_pool_symbols(self):
         from src.rwa_solana_discovery import build_solana_token_targets

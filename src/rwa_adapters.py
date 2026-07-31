@@ -35,6 +35,7 @@ from src.rwa_clmm_replay import (
     simulate_exact_input,
     summarize_swap_logs,
 )
+from src.runtime_data import RWA_REPORTS_DIR, resolve_required_rwa_report_path
 
 
 JUPITER_DEFAULT_TOKEN_MINTS: dict[str, dict[str, Any]] = {
@@ -71,7 +72,7 @@ JUPITER_ASSET_CLASS_BY_BASE: dict[str, str] = {
     "OUSG": "treasury_fund",
 }
 
-DEFAULT_REPORTS_DIR = Path("reports")
+DEFAULT_REPORTS_DIR = RWA_REPORTS_DIR
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -158,7 +159,9 @@ def _iter_dicts(value: Any) -> Any:
 
 
 def _load_derivative_rows(venue_id: str) -> list[dict[str, Any]]:
-    payload = _read_json_file(DEFAULT_REPORTS_DIR / "rwa_derivative_venue_discovery.json")
+    payload = _read_json_file(
+        resolve_required_rwa_report_path("rwa_derivative_venue_discovery.json")
+    )
     rows = payload.get("coverage_rows")
     if not isinstance(rows, list):
         return []
@@ -191,7 +194,9 @@ def _derivative_aliases(venue_id: str) -> dict[str, dict[str, Any]]:
 
 def _load_jupiter_token_mints() -> dict[str, dict[str, Any]]:
     token_mints: dict[str, dict[str, Any]] = {}
-    payload = _read_json_file(DEFAULT_REPORTS_DIR / "rwa_solana_token_mints.json")
+    payload = _read_json_file(
+        resolve_required_rwa_report_path("rwa_solana_token_mints.json")
+    )
     rows = payload.get("tokens") if isinstance(payload.get("tokens"), list) else []
     for row in rows:
         if not isinstance(row, dict) or row.get("mint") in {None, ""} or row.get("decimals") is None:
@@ -231,7 +236,9 @@ def _load_jupiter_token_mints() -> dict[str, dict[str, Any]]:
 
 def _load_jupiter_blocked_tokens() -> dict[str, str]:
     """Load known non-tradable Jupiter symbols from the route allowlist evidence."""
-    payload = _read_json_file(DEFAULT_REPORTS_DIR / "rwa_jupiter_route_allowlist.json")
+    payload = _read_json_file(
+        resolve_required_rwa_report_path("rwa_jupiter_route_allowlist.json")
+    )
     routes = payload.get("routes") if isinstance(payload.get("routes"), list) else []
     blocked: dict[str, str] = {}
     for row in routes:
@@ -2774,10 +2781,10 @@ class EVMPoolStateAdapter:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.venue_id = venue_id
-        self.pool_path = Path(
-            pool_path
-            or os.getenv("RWA_EVM_POOL_ALLOWLIST_PATH", "")
-            or DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.json"
+        self.pool_path = (
+            Path(pool_path).expanduser()
+            if pool_path
+            else resolve_required_rwa_report_path("rwa_evm_pool_allowlist.json")
         )
         self._client = client
         self.swap_cache_dir = Path(
@@ -3655,10 +3662,10 @@ class EVMPairMetadataAdapter:
     ) -> None:
         self.venue_id = venue_id
         self.source_type = source_type
-        self.pool_path = Path(
-            pool_path
-            or os.getenv("RWA_EVM_POOL_ALLOWLIST_PATH", "")
-            or DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.json"
+        self.pool_path = (
+            Path(pool_path).expanduser()
+            if pool_path
+            else resolve_required_rwa_report_path("rwa_evm_pool_allowlist.json")
         )
         self._client = client
         self._aliases = self._load_aliases()

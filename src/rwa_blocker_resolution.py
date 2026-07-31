@@ -11,6 +11,7 @@ from src.rwa_feed_discovery import DEFAULT_REPORTS_DIR, build_feed_discovery_aud
 from src.rwa_replay_inventory import build_route_pool_replay_inventory
 from src.rwa_source_readiness import build_source_readiness
 from src.rwa_source_rights import build_source_rights_registry
+from src.runtime_data import resolve_required_rwa_report_path
 
 
 DEFAULT_BLOCKER_RESOLUTION_JSON_PATH = DEFAULT_REPORTS_DIR / "rwa_blocker_resolution.json"
@@ -63,7 +64,9 @@ def build_blocker_resolution_ledger() -> dict[str, Any]:
         if isinstance(row, dict) and row.get("dependency_id")
     }
     source_rows = {row["venue"]: row for row in rights.get("rows", [])}
-    evm_allowlist = _read_json(DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.json")
+    evm_allowlist = _read_json(
+        resolve_required_rwa_report_path("rwa_evm_pool_allowlist.json")
+    )
     evm_allowlist_summary = evm_allowlist.get("summary") if isinstance(evm_allowlist.get("summary"), dict) else {}
     evm_replay_rows = [
         row

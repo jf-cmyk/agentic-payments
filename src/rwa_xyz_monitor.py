@@ -16,11 +16,16 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_REPORTS_DIR = Path("reports")
+from src.runtime_data import RWA_REPORTS_DIR, resolve_required_rwa_report_path
+
+
+DEFAULT_REPORTS_DIR = RWA_REPORTS_DIR
 RWA_XYZ_VENUE_ID = "rwa_xyz_new_asset_monitor"
 DEFAULT_RWA_XYZ_MONITOR_URL = "https://app.rwa.xyz/new-asset-monitor"
 DEFAULT_RWA_XYZ_DOCS_URL = "https://docs.rwa.xyz"
-DEFAULT_RWA_XYZ_REPORT_JSON_PATH = DEFAULT_REPORTS_DIR / "rwa_xyz_new_asset_monitor.json"
+DEFAULT_RWA_XYZ_REPORT_JSON_PATH = resolve_required_rwa_report_path(
+    "rwa_xyz_new_asset_monitor.json"
+)
 DEFAULT_RWA_XYZ_ASSET_CSV_PATH = DEFAULT_REPORTS_DIR / "rwa_xyz_new_asset_monitor_assets.csv"
 DEFAULT_RWA_XYZ_TOKEN_CSV_PATH = DEFAULT_REPORTS_DIR / "rwa_xyz_new_asset_monitor_tokens.csv"
 

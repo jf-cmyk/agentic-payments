@@ -80,6 +80,17 @@ packages = ["src"]
 "docs/assets" = "share/blocksize-mcp/docs/assets"
 "docs/pdf" = "share/blocksize-mcp/docs/pdf"
 "docs/evidence" = "share/blocksize-mcp/docs/evidence"
+"reports/hyperliquid_tradeable_feeds.json" = "share/blocksize-mcp/reports/hyperliquid_tradeable_feeds.json"
+"reports/rwa_blocksize_state_discovery.json" = "share/blocksize-mcp/reports/rwa_blocksize_state_discovery.json"
+"reports/rwa_daily_feed_agent.json" = "share/blocksize-mcp/reports/rwa_daily_feed_agent.json"
+"reports/rwa_derivative_venue_discovery.json" = "share/blocksize-mcp/reports/rwa_derivative_venue_discovery.json"
+"reports/rwa_evm_pool_allowlist.json" = "share/blocksize-mcp/reports/rwa_evm_pool_allowlist.json"
+"reports/rwa_hyperliquid_paxg_probe.json" = "share/blocksize-mcp/reports/rwa_hyperliquid_paxg_probe.json"
+"reports/rwa_jupiter_route_allowlist.json" = "share/blocksize-mcp/reports/rwa_jupiter_route_allowlist.json"
+"reports/rwa_rights_clearance.json" = "share/blocksize-mcp/reports/rwa_rights_clearance.json"
+"reports/rwa_solana_pool_allowlist.json" = "share/blocksize-mcp/reports/rwa_solana_pool_allowlist.json"
+"reports/rwa_solana_token_mints.json" = "share/blocksize-mcp/reports/rwa_solana_token_mints.json"
+"reports/rwa_xyz_new_asset_monitor.json" = "share/blocksize-mcp/reports/rwa_xyz_new_asset_monitor.json"
 
 [tool.hatch.build.targets.wheel.force-include]
 "scripts/__init__.py" = "scripts/__init__.py"

@@ -203,6 +203,49 @@ def test_mismatched_or_legacy_daily_evidence_fails_closed(tmp_path):
     assert legacy_rejected["summary"]["reported_alert_level"] == "no_new_feeds"
 
 
+@pytest.mark.parametrize(
+    "unsafe_reference",
+    ["../outside-secret.json", "/tmp/private-secret.json"],
+)
+def test_persisted_daily_source_reference_cannot_escape_reports_directory(
+    tmp_path,
+    unsafe_reference,
+):
+    current = _monitor(
+        generated_at="2026-07-30T12:00:00+00:00",
+        assets=[_asset("1")],
+        tokens=[_token("1", "0x01")],
+        build_id="current",
+    )
+    canonical_path = tmp_path / "monitor.json"
+    daily_path = tmp_path / "daily.json"
+    _write_json(canonical_path, current)
+    report = build_daily_feed_agent_report(
+        previous_report={},
+        current_report=current,
+        generated_at="2026-07-30T12:01:00+00:00",
+        current_report_path=canonical_path,
+    )
+    report["source"]["current_report"] = unsafe_reference
+    _write_json(daily_path, report)
+
+    rejected = load_daily_feed_agent_report(daily_path)
+
+    assert rejected["status"]["acceptance"] == "failed_closed"
+    assert rejected["status"]["decision_usable"] is False
+    assert rejected["status"]["errors"] == [
+        "daily persisted source reference is unsafe"
+    ]
+    assert rejected["source"]["current_report"] is None
+    assert unsafe_reference not in json.dumps(rejected)
+
+    trusted = load_daily_feed_agent_report(
+        daily_path,
+        current_report_path=canonical_path,
+    )
+    assert trusted["status"]["acceptance"] == "passed"
+
+
 def test_invalid_counts_and_stale_generation_are_rejected():
     current = _monitor(
         generated_at="2026-07-30T12:00:00+00:00",
