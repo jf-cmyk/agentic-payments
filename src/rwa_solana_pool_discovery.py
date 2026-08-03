@@ -15,11 +15,16 @@ from pathlib import Path
 from typing import Any
 
 from src.rwa_feed_discovery import DEFAULT_REPORTS_DIR
+from src.runtime_data import resolve_required_rwa_report_path
 
 
-DEFAULT_SOLANA_POOL_ALLOWLIST_JSON_PATH = DEFAULT_REPORTS_DIR / "rwa_solana_pool_allowlist.json"
+DEFAULT_SOLANA_POOL_ALLOWLIST_JSON_PATH = resolve_required_rwa_report_path(
+    "rwa_solana_pool_allowlist.json"
+)
 DEFAULT_SOLANA_POOL_ALLOWLIST_CSV_PATH = DEFAULT_REPORTS_DIR / "rwa_solana_pool_allowlist.csv"
-DEFAULT_JUPITER_ROUTE_ALLOWLIST_PATH = DEFAULT_REPORTS_DIR / "rwa_jupiter_route_allowlist.json"
+DEFAULT_JUPITER_ROUTE_ALLOWLIST_PATH = resolve_required_rwa_report_path(
+    "rwa_jupiter_route_allowlist.json"
+)
 
 ROUTE_LABEL_TO_VENUE = {
     "Meteora DLMM": "meteora_dlmm",

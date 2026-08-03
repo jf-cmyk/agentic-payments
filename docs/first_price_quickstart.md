@@ -2,7 +2,11 @@
 
 Blocksize has two integration layers. The authenticated Claude and Cursor MCP connectors can return live read-only market data using included server-side credits. The public ChatGPT-compatible MCP endpoint currently provides discovery and endpoint construction only; use the HTTP call below for the live price.
 
-The hosted quickstart at `https://mcp.blocksize.info/quickstart/first-price` also includes a one-click live BTC-USD request. It keeps one browser-scoped agent identity in local storage so the starter allowance cannot be silently reset on every click.
+The hosted quickstart at `https://mcp.blocksize.info/quickstart/first-price`
+demonstrates the same fail-closed HTTP flow: an unpaid request receives an x402
+v2 challenge, and an official x402 client retries with a signed
+`PAYMENT-SIGNATURE`. Browser-selected identity headers do not grant production
+credits.
 
 ## Claude
 
@@ -32,15 +36,18 @@ Complete OAuth when Cursor prompts, then ask: `Use Blocksize get_vwap for BTC-US
 
 The public remote endpoint `https://mcp.blocksize.info/mcp/server/` supports symbol discovery, documentation, pricing inspection, and exact endpoint construction. It does not currently expose the live-price tools in ChatGPT.
 
-For a live first price now, call the HTTP API with an explicit agent identity:
+The HTTP endpoint returns a standards-based x402 v2 challenge when no payment
+is attached:
 
 ```bash
-curl -sS \
-  -H 'X-AGENT-ID: chatgpt-quickstart-0001' \
+curl -i -sS \
   'https://mcp.blocksize.info/v1/vwap/btc-usd'
 ```
 
-Eligible new identities start with 50 live-data credits. When those credits are unavailable or exhausted, the same URL returns an x402 payment challenge.
+Use an official x402 client to select one of the advertised requirements, sign
+it, and retry with the resulting `PAYMENT-SIGNATURE` header. Caller-selected
+identity headers do not grant or spend production credits. Included starter
+credits are available through authenticated connector identities.
 
 ## Verify the result
 

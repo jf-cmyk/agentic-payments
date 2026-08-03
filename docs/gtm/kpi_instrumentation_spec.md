@@ -13,27 +13,26 @@ Why: it combines activation, payment success, and repeatable product value. Reve
 | Event | Trigger | Required fields |
 | --- | --- | --- |
 | `free_discovery_call` | `/v1/search`, `/v1/instruments`, pricing info, manifest | timestamp, endpoint, query/service, IP hash, user agent, referrer |
-| `payment_required` | Paid endpoint returns 402 | timestamp, endpoint, asset, price_usdc, networks_offered, IP hash, agent wallet if present |
-| `payment_proof_submitted` | `PAYMENT-SIGNATURE` received | timestamp, endpoint, network, proof hash, wallet if known |
-| `payment_verified` | Proof accepted | timestamp, endpoint, network, price_usdc, latency_ms, wallet/payor, asset, pay_to |
+| `payment_required` | Paid endpoint returns 402 | timestamp, endpoint, asset, price_usdc, networks_offered, IP hash |
+| `payment_proof_submitted` | `PAYMENT-SIGNATURE` received | timestamp, endpoint, attempt_id, proof hash |
+| `payment_authorization_verified` | Facilitator accepts authorization, before settlement | timestamp, endpoint, attempt_id, payment_id, network, price_usdc |
+| `payment_settled` | Settlement succeeds and the replayable response is durably finalized | timestamp, endpoint, attempt_id, payment_id, network, price_usdc, verified payer hash |
 | `payment_failed` | Proof rejected or RPC unavailable | timestamp, endpoint, network, reason, latency_ms |
 | `credit_trial_granted` | Welcome credits granted | timestamp, wallet, IP hash, balance check result, history check result |
 | `credit_drawdown_success` | Credits spent | timestamp, wallet, endpoint, credits_spent, balance_after |
 | `credit_drawdown_failed` | Insufficient credits or eligibility fail | timestamp, wallet, endpoint, reason |
-| `bulk_credit_challenge` | `/v1/credits/purchase` 402 emitted | timestamp, tier, price_usdc, credits |
-| `bulk_credit_claimed` | `/v1/credits/claim` accepted | timestamp, tier, wallet, credits_added, tx_hash |
 
 ## Core dashboard
 
 | Metric | Definition | Cadence |
 | --- | --- | --- |
-| Paid calls | Count of `payment_verified` plus successful credit drawdowns | Daily/weekly |
-| Net revenue | Sum of verified paid-call prices and credit purchases | Daily/weekly |
+| Paid calls | Correlated terminal `data_delivered` and `mcp_data_delivered` events only | Daily/weekly |
+| Net revenue | Deduplicated `payment_settled` prices by payment_id | Daily/weekly |
 | Active paying wallets | Unique wallets with paid success | Weekly |
 | First paid-call conversion | Unique wallets with first paid success / unique wallets or users that saw 402 | Weekly |
 | Time to first paid call | First discovery or 402 to first success | Weekly |
 | 402 challenge volume | Count of `payment_required` | Daily |
-| Payment success rate | `payment_verified` / `payment_proof_submitted` | Daily |
+| Payment success rate | Correlated `payment_settled` attempt_ids / submitted attempt_ids | Daily |
 | Credit usage rate | Credit drawdown successes / total paid data requests | Weekly |
 | Endpoint mix | Paid calls by endpoint and asset class | Weekly |
 | Gross margin per call | Revenue less RPC/payment/data costs | Weekly |
@@ -54,4 +53,3 @@ Why: it combines activation, payment success, and repeatable product value. Reve
 - Unredacted payment signatures.
 - Secrets or upstream API keys.
 - Any compliance-sensitive user identity fields unless approved and legally reviewed.
-

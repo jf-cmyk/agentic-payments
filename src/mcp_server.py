@@ -18,11 +18,15 @@ Payment Model:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
@@ -41,6 +45,7 @@ from src.public_metadata import (
     DATA_CATALOG_URL,
     DISCOVERABLE_SYMBOL_COUNT,
     INSTRUMENT_COUNTS,
+    MAIN_WEBSITE_CONTACT_URL,
     MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
     OPENAPI_URL,
@@ -82,8 +87,10 @@ mcp = FastMCP(
         "Access real-time VWAP, bid/ask spreads, equities, FX, and metals "
         "across thousands of discoverable symbols. "
         "Outlier-filtered, decision-ready output. "
-        "Pay per call via x402 (USDC on Solana or Base L2). "
-        "No subscription required."
+        "Direct public HTTP uses signed x402 (USDC on Solana or Base L2). "
+        "Starter credits are only for eligible authenticated connector users. "
+        "For sustained or higher-volume access, contact Blocksize sales about an "
+        "authenticated account plan."
     ),
 )
 
@@ -94,6 +101,60 @@ READ_ONLY_TOOL_ANNOTATIONS = {
     "idempotentHint": True,
     "openWorldHint": True,
 }
+DISCOVERY_INSTRUMENT_DEFAULT_LIMIT = 100
+DISCOVERY_INSTRUMENT_MAX_LIMIT = 500
+InstrumentPageLimit = Annotated[
+    int,
+    Field(
+        ge=1,
+        le=DISCOVERY_INSTRUMENT_MAX_LIMIT,
+        description=(
+            "Maximum instruments to return. Use offset to traverse the stable "
+            "catalog without requesting the entire upstream array."
+        ),
+    ),
+]
+InstrumentPageOffset = Annotated[
+    int,
+    Field(
+        ge=0,
+        description="Zero-based offset into the sorted instrument catalog.",
+    ),
+]
+
+
+def build_catalog_snapshot_metadata(
+    *,
+    source: str,
+    records: list[object],
+    grain: str,
+    snapshot_scope: str,
+) -> dict[str, object]:
+    """Describe a discovery snapshot without inventing an upstream timestamp."""
+    normalized: list[object] = []
+    for record in records:
+        model_dump = getattr(record, "model_dump", None)
+        normalized.append(
+            model_dump(mode="json") if callable(model_dump) else record
+        )
+    canonical = json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    assembled_at = datetime.now(UTC).isoformat()
+    return {
+        "provider": "Blocksize Capital GmbH",
+        "source": source,
+        "metric_grain": grain,
+        "source_observed_at": None,
+        "catalog_fetched_at": assembled_at,
+        "response_assembled_at": assembled_at,
+        "freshness_status": "upstream_timestamp_unavailable",
+        "snapshot_sha256": hashlib.sha256(canonical).hexdigest(),
+        "snapshot_scope": snapshot_scope,
+    }
 
 
 async def _get_client() -> BlocksizeClient:
@@ -149,7 +210,7 @@ def _instrument_fetch_payload(pair_info) -> dict[str, object]:
     text = (
         f"{pair} is available through Blocksize Capital as a {pair_info.asset_class} "
         f"instrument. Available services: {services}. Pricing tier: {pair_info.tier}. "
-        "Live paid HTTP API access is pay-per-call through x402 or wallet credits. "
+        "Live paid direct public HTTP API access uses signed x402 per call. "
         f"Use the remote MCP discovery tools to find instruments, then call the "
         f"paid HTTP API endpoints documented in {SWAGGER_URL}. "
         f"Suggested endpoints: {'; '.join(endpoints) if endpoints else SWAGGER_URL}."
@@ -391,6 +452,18 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
             query=query,
             total_matches=len(pairs),
             pairs=pairs,
+            meta={
+                **build_catalog_snapshot_metadata(
+                    source="Blocksize instrument search result set",
+                    records=list(pairs),
+                    grain="instrument_search_match",
+                    snapshot_scope="returned_result_set_max_50",
+                ),
+                "result_limit": 50,
+                "total_coverage": (
+                    "Enabled symbols across crypto, equities, FX, and metals"
+                ),
+            },
         )
 
         if not pairs:
@@ -403,7 +476,11 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
                     asset_class=asset_class,
                     metadata={"result_count": 0},
                 )
-            return f"No instruments found matching '{query}' (class: {asset_class})."
+            details = json.dumps(response.model_dump(), default=str, indent=2)
+            return (
+                f"No instruments found matching '{query}' (class: {asset_class})."
+                f"\n\n<details>\n{details}\n</details>"
+            )
 
         pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
         summary = (
@@ -431,7 +508,11 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def list_instruments(service: str = "vwap") -> str:
+async def list_instruments(
+    service: str = "vwap",
+    limit: InstrumentPageLimit = DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    offset: InstrumentPageOffset = 0,
+) -> str:
     """
     List all available instruments for a Blocksize data service. FREE.
 
@@ -462,16 +543,36 @@ async def list_instruments(service: str = "vwap") -> str:
                 message=f"Unknown service '{service}'. Use 'vwap', 'bidask', 'fx', or 'metal'.",
             ).model_dump())
 
+        instruments = sorted(str(instrument) for instrument in instruments)
+        total = len(instruments)
+        page = instruments[offset : offset + limit]
+        next_offset = offset + len(page)
+        has_more = next_offset < total
         response = InstrumentListResponse(
             service=service,
-            total_instruments=len(instruments),
-            instruments=instruments,
+            total_instruments=total,
+            returned_instruments=len(page),
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            next_offset=next_offset if has_more else None,
+            instruments=page,
+            meta={
+                **build_catalog_snapshot_metadata(
+                    source=f"Blocksize {service} instrument catalog",
+                    records=instruments,
+                    grain="instrument",
+                    snapshot_scope="full_upstream_catalog",
+                ),
+                "ordering": "lexicographic_ascending",
+            },
         )
 
-        sample = ", ".join(instruments[:10])
+        sample = ", ".join(page[:10])
         summary = (
-            f"{len(instruments)} instruments for {service}: {sample}"
-            + (f" ... and {len(instruments) - 10} more" if len(instruments) > 10 else "")
+            f"Returned {len(page)} of {total} instruments for {service} "
+            f"at offset {offset}: {sample}"
+            + (" ... use next_offset for the next page" if has_more else "")
         )
 
         details = json.dumps(response.model_dump(), default=str, indent=2)
@@ -495,8 +596,9 @@ async def list_instruments(service: str = "vwap") -> str:
 @mcp.tool(
     title="Pricing Information",
     description=(
-        "Use this to inspect the current free and paid tiers, settlement networks, "
-        "and pricing guidance before using Blocksize data tools."
+        "Use this to inspect signed x402 prices for direct public HTTP, authenticated "
+        "connector-only starter-credit costs, settlement networks, and contact-sales "
+        "authenticated account-plan guidance."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -511,7 +613,7 @@ async def get_pricing_info() -> str:
     """
     pricing = {
         "provider": "Blocksize Capital",
-        "payment_protocol": "x402 (HTTP 402)",
+        "payment_protocol": "signed x402 for direct public HTTP (HTTP 402)",
         "settlement_networks": {
             "primary": {
                 "network": "Solana",
@@ -530,14 +632,21 @@ async def get_pricing_info() -> str:
         },
         "tiers": settings.pricing_summary,
         "starter_allowance": {
-            "positioning": "Start with 50 live data credits",
+            "positioning": (
+                "50 live data starter credits for eligible authenticated connector "
+                "users only"
+            ),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
+            "scope": "authenticated connector users only",
             "applies_to": (
                 "raw VWAP, bid/ask, FX, metals, batch calls, market briefs, "
                 "pre-trade checks, audit receipts, macro snapshots, and provenance"
             ),
             "not_free_forever": True,
-            "upgrade_path": "x402 payment or prepaid credit top-ups",
+            "upgrade_path": (
+                "signed x402 for direct public HTTP, or contact Blocksize sales for "
+                "sustained or higher-volume authenticated account-plan access"
+            ),
         },
         "credit_costs": CREDIT_COSTS,
         "premium_workflow_products": {
@@ -575,7 +684,10 @@ async def get_pricing_info() -> str:
         },
         "competitive_note": (
             "An agent making 10,000 VWAP calls/month pays ~$20 vs. Pyth Pro $2,000+/month. "
-            f"Pure pay-per-use, or explore traditional flat-rate subscriptions for high consumption agents at {MAIN_WEBSITE_PRICING_URL}."
+            "Direct public HTTP uses signed x402 pay-per-call pricing documented at "
+            f"{MAIN_WEBSITE_PRICING_URL}. For sustained or higher-volume access, contact "
+            "Blocksize sales about an authenticated account plan at "
+            f"{MAIN_WEBSITE_CONTACT_URL}."
         ),
     }
 
@@ -586,12 +698,13 @@ async def get_pricing_info() -> str:
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
         f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
-        f"  Starter Credits:  Start with {STARTER_CREDIT_ALLOWANCE:g} live data credits "
-        "(not free forever)\n"
+        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} live "
+        "data credits for eligible authenticated connector users only (not free forever)\n"
         "  Premium workflows: market brief 10 credits, pre-trade check 5, "
         "audit receipt 10, macro snapshot 25, monitor evaluate 10\n"
-        f"\nPayment: Solana (primary) or Base L2 (fallback)\n"
-        f"High Consumption Agents: Subscriptions available at {MAIN_WEBSITE_PRICING_URL}"
+        "\nDirect Public HTTP: Signed x402 on Solana (primary) or Base L2 (fallback)\n"
+        "Sustained/Higher-Volume Access: Contact Blocksize sales about an authenticated "
+        f"account plan at {MAIN_WEBSITE_CONTACT_URL}"
     )
 
     details = json.dumps(pricing, indent=2, default=str)
@@ -743,8 +856,9 @@ async def server_info() -> str:
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
             "Discovery across crypto, equities, FX, and metals plus "
-            "paid HTTP market data access via x402. "
-            "Pay per call via x402."
+            "signed x402 for direct public HTTP, authenticated-connector-only starter "
+            "credits, and contact-sales authenticated account plans for sustained or "
+            "higher-volume access."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
         "asset_classes": ["crypto", "equities", "fx", "metals"],
@@ -753,10 +867,17 @@ async def server_info() -> str:
             "search_pairs", "list_instruments", "get_pricing_info", "search", "fetch",
         ],
         "payment": {
-            "protocol": "x402",
+            "protocol": "signed x402",
+            "scope": "direct public HTTP",
             "networks": ["Solana (primary)", "Base L2 (fallback)"],
             "currency": "USDC",
-            "model": "tiered pay-per-call (no subscription)",
+            "model": "signed x402 pay-per-call for direct public HTTP",
+            "authenticated_connector_starter_credits": (
+                "eligible authenticated connector users only"
+            ),
+            "sustained_or_higher_volume": (
+                "contact Blocksize sales for an authenticated account plan"
+            ),
         },
         "coverage": {
             "discoverable_symbols": DISCOVERABLE_SYMBOL_COUNT,

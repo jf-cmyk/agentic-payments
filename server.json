@@ -2,14 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "info.blocksize.mcp/agentic-payments",
   "title": "Blocksize Agentic Market Intelligence",
-  "description": "Live multi-asset market data for AI agents with provenance, starter credits, x402, and examples.",
+  "description": "Signed x402; authenticated-connector-only starter credits; contact-sales authenticated account plan.",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",
       "type": "streamable-http"
     }
-  ]
+  ],
+  "repository": {
+    "url": "https://github.com/jf-cmyk/agentic-payments",
+    "source": "github"
+  }
 }

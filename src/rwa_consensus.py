@@ -16,7 +16,11 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from src.rwa_coverage import QUALITY_ALIGNMENT, build_rwa_asset_matrix
+from src.rwa_coverage import (
+    QUALITY_ALIGNMENT,
+    build_rwa_asset_matrix,
+    iter_asset_venue_instruments,
+)
 from src.rwa_blocksize_benchmark import build_blocksize_state_methodology
 from src.rwa_dex_allowlist import build_dex_allowlist
 from src.rwa_market_expansion import build_futures_data_plan, build_market_expansion_plan
@@ -702,15 +706,21 @@ def calculate_consensus_metric(payload: dict[str, Any]) -> dict[str, Any]:
 
 def build_consensus_source_plan(*, exclude_tokenized_stocks: bool = False) -> dict[str, Any]:
     """Return the data sourcing plan needed to power consensus metrics."""
-    feed_catalog = build_non_crypto_feed_catalog(exclude_tokenized_stocks=exclude_tokenized_stocks)
+    matrix = build_rwa_asset_matrix()
+    feed_catalog = build_non_crypto_feed_catalog(
+        exclude_tokenized_stocks=exclude_tokenized_stocks,
+        asset_matrix=matrix,
+    )
     oracle = build_oracle_stream_coverage()
     futures = build_futures_data_plan()
-    expansion = build_market_expansion_plan()
+    expansion = build_market_expansion_plan(asset_matrix=matrix)
     provider_catalog = build_provider_catalog()
     dex_allowlist = build_dex_allowlist()
     source_readiness = build_source_readiness()
-    sourcing = build_sourcing_jobs(include_completed_targets=True)
-    matrix = build_rwa_asset_matrix()
+    sourcing = build_sourcing_jobs(
+        include_completed_targets=True,
+        asset_matrix=matrix,
+    )
     blocksize_state = build_blocksize_state_methodology()
 
     feeds_by_asset: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -728,7 +738,10 @@ def build_consensus_source_plan(*, exclude_tokenized_stocks: bool = False) -> di
         asset_classes = [str(item) for item in asset.get("asset_classes") or []]
         primary_class = asset_classes[0] if asset_classes else "unknown"
         feeds = feeds_by_asset.get(asset_id, [])
-        venue_rows = list((asset.get("venues") or {}).values())
+        venue_rows = [
+            instrument
+            for _venue_id, instrument in iter_asset_venue_instruments(asset)
+        ]
         source_types = sorted({str(row["source_type"]) for row in venue_rows})
         oracle_providers = _known_oracle_providers_for_asset_class(primary_class, oracle)
         futures_candidates = futures_by_underlying.get(asset_id.upper(), [])
@@ -761,6 +774,7 @@ def build_consensus_source_plan(*, exclude_tokenized_stocks: bool = False) -> di
                 "asset_classes": asset_classes,
                 "feed_count": len(feeds),
                 "venue_count": len(asset.get("venues") or {}),
+                "instrument_count": len(venue_rows),
                 "executable_or_market_source_count": executable_count,
                 "source_types": source_types,
                 "oracle_reference_providers": oracle_providers,

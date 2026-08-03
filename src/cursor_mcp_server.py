@@ -10,7 +10,6 @@ from src.authenticated_mcp_server import (
 from src.blocksize_client import BlocksizeClient
 from src.entitlement_manager import (
     DEFAULT_DAILY_CREDITS,
-    DEFAULT_ENTITLEMENT_DB_PATH,
     EntitlementManager,
     connector_entitlement_manager,
 )
@@ -46,7 +45,6 @@ def _get_entitlements() -> EntitlementManager:
     if _entitlements is None:
         _entitlements = connector_entitlement_manager(
             "CURSOR",
-            fallback_db_path=DEFAULT_ENTITLEMENT_DB_PATH,
             fallback_daily_credits=DEFAULT_DAILY_CREDITS,
         )
     return _entitlements
@@ -62,7 +60,8 @@ _bundle = create_authenticated_market_data_mcp(
         "Read-only Blocksize Capital market data for Cursor across crypto VWAP, "
         "supported equity ticker bid/ask, FX, and metals. Sign in with Blocksize "
         "through Clerk to use the 50-credit starter live-data allowance. Production "
-        "usage can upgrade through x402 payment or prepaid credits outside Cursor. "
+        "usage can continue through direct x402 or a Blocksize authenticated account "
+        "plan outside Cursor. "
         "This connector never executes wallet transactions or submits x402 payment "
         "proofs from Cursor."
     ),

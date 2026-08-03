@@ -1,10 +1,11 @@
 # Blocksize Capital Agentic Payments
 
-Institutional-grade market data for AI agents, with two public integration layers:
+Institutional-grade market data for AI agents, with three integration surfaces:
 
 - Public remote MCP discovery server: free symbol discovery, pricing inspection, and document search
-- Paid HTTP API: live market data protected by x402 settlement or wallet-credit drawdown
-- Anthropic-safe MCP beta: authenticated read-only market data with daily user credits
+- Paid HTTP API: live market data protected by direct x402 settlement
+- Authenticated Claude, Cursor, and OpenAI MCP connectors: read-only market data
+  with eligible starter credits
 
 ## Public URLs
 
@@ -68,7 +69,11 @@ Indexing checklist:
 RWA claims boundary:
 
 - Blocksize already provides broad production coverage across its live market-data packages.
-- Separately, the RWA expansion research catalog contains 1,025 canonical economic asset IDs as of 2026-07-16.
+- Separately, the reconciled 2026-07-30 RWA research snapshot contains 1,169
+  RWA.xyz source-asset rows and 3,438 token-listing rows (3,435 unique contract
+  identities). Its lossless cross-venue matrix contains 2,139 canonical assets
+  and 5,161 venue instruments; these are catalog and identity grains, not
+  production-feed counts.
 - Candidate expansion lanes are not additional production feeds until their promotion gates pass.
 - Zero newly sourced third-party or onchain additions have completed the full RWA expansion-workflow promotion process. This figure does not describe or reduce existing Blocksize production coverage.
 - Hash-linked provenance receipts are not described as cryptographically signed unless a response includes a signature envelope with an algorithm, key identifier, digest, and signature.
@@ -84,6 +89,9 @@ It exposes only read-only discovery tools:
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
+- `get_product_catalog`
+- `get_workflow_endpoint`
+- `get_market_data_endpoint`
 - `search`
 - `fetch`
 
@@ -107,15 +115,15 @@ Free discovery endpoints:
 
 Payment modes:
 
-- x402 proof per request
-- Starter and prepaid credit drawdown via `X-AGENT-WALLET`,
-  `X-AGENT-ID`, `X-USER-ID`, `X-AUTHENTICATED-USER`, `X-DEVICE-ID`, or
-  `X-SESSION-ID`
+- signed x402 v2 payment per request via `PAYMENT-SIGNATURE`
+- starter credit drawdown through an authenticated Claude, Cursor,
+  or OpenAI connector principal
 
-New eligible users, wallets, and authenticated agents can start with 50 live
-data credits. This is positioned as `Start with 50 live data credits`, not a
-free-forever tier. When credits are exhausted or rate limits are hit, agents
-continue through x402 payment or prepaid credit top-ups.
+New eligible authenticated users can start with 50 live data credits. This is
+positioned as `Start with 50 live data credits`, not a free-forever tier. Raw
+caller-selected HTTP identity headers are disabled in production and cannot
+claim or spend credits. When authenticated credits are exhausted, agents can
+use direct x402 payment or contact Blocksize about an authenticated account plan.
 
 ### 3. Anthropic-safe MCP beta
 
@@ -134,18 +142,19 @@ Live market data tools use server-side starter credits keyed to authenticated
 user identity. The default allowance is 50 credits per user per UTC day and can
 be changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
 
-For local beta testing, set `ANTHROPIC_BETA_TOKENS` to a JSON object mapping
-random bearer tokens to user ids. For public Claude custom connectors, set
+For local beta testing, set `ANTHROPIC_ENABLE_BETA_TOKENS=true` and
+`ANTHROPIC_BETA_TOKENS` to a JSON object mapping random bearer tokens to user
+ids. For public Claude custom connectors, set
 `ANTHROPIC_AUTH_PROVIDER=clerk`, keep `ANTHROPIC_ENABLE_BETA_TOKENS=false`, and
 configure the Clerk env vars in
-[.env.example](/Users/johannfocke/Documents/Antigravity/Agentic Payments/.env.example).
+[.env.example](.env.example).
 The Claude OAuth metadata endpoints are served at
 `/.well-known/oauth-protected-resource/anthropic/mcp/` and
 `/.well-known/oauth-authorization-server/anthropic/mcp`.
 
 ### 4. Advanced local MCP
 
-For builders who want the full tool surface inside a local MCP client, this repo also contains the advanced local MCP server in [src/mcp_server.py](/Users/johannfocke/Documents/Antigravity/Agentic Payments/src/mcp_server.py).
+For builders who want the full tool surface inside a local MCP client, this repo also contains the advanced local MCP server in [src/mcp_server.py](src/mcp_server.py).
 
 That mode is intended for direct builder integrations and requires local credentials.
 
@@ -184,12 +193,12 @@ python -m src.mcp_server
 
 ## Listing Artifacts
 
-- Official registry file: [server.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/server.json)
-- Smithery metadata: [docs/smithery_manifest.json](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/smithery_manifest.json)
-- Claude submission packet: [docs/gtm/claude_connector_submission.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/claude_connector_submission.md)
-- Claude plugin package: [claude-plugin/blocksize-market-data](/Users/johannfocke/Documents/Antigravity/Agentic Payments/claude-plugin/blocksize-market-data)
-- Claude plugin submission packet: [docs/gtm/claude_plugin_submission/README.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/claude_plugin_submission/README.md)
-- Internal submission runbook: [docs/gtm/directory_listing_runbook.md](/Users/johannfocke/Documents/Antigravity/Agentic Payments/docs/gtm/directory_listing_runbook.md)
+- Official registry file: [server.json](server.json)
+- Smithery metadata: [docs/smithery_manifest.json](docs/smithery_manifest.json)
+- Claude submission packet: [docs/gtm/claude_connector_submission.md](docs/gtm/claude_connector_submission.md)
+- Claude plugin package: [claude-plugin/blocksize-market-data](claude-plugin/blocksize-market-data)
+- Claude plugin submission packet: [docs/gtm/claude_plugin_submission/README.md](docs/gtm/claude_plugin_submission/README.md)
+- Internal submission runbook: [docs/gtm/directory_listing_runbook.md](docs/gtm/directory_listing_runbook.md)
 
 ## License
 

@@ -1,5 +1,13 @@
 # ICP And Offer Memo
 
+> Superseded. Historical pricing hypothesis, not a production offer; do not use
+> it as current product or sales guidance. The package prices below were
+> planning inputs; self-serve prepaid or bulk credit tiers are not exposed in
+> production. Current access is signed x402 for direct public HTTP.
+> Starter credits only apply to eligible authenticated connector users; use a contact-sales
+> authenticated account plan. Use `docs/README_EXTERNAL.md` for current public
+> guidance.
+
 ## Recommendation
 
 Start with **crypto/onchain data and market-data vendors/builders** as the first wedge, then expand into payments/risk-ops data vendors and research/compliance intelligence.

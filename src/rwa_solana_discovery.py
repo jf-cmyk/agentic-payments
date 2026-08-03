@@ -16,12 +16,17 @@ import httpx
 
 from src.rwa_adapters import JUPITER_DEFAULT_TOKEN_MINTS, JupiterRouterAdapter
 from src.rwa_dex_allowlist import build_dex_allowlist
+from src.runtime_data import RWA_REPORTS_DIR, resolve_required_rwa_report_path
 
 
-DEFAULT_TOKEN_REGISTRY_PATH = "reports/rwa_solana_token_mints.json"
-DEFAULT_ROUTE_ALLOWLIST_PATH = "reports/rwa_jupiter_route_allowlist.json"
-DEFAULT_TOKEN_CSV_PATH = "reports/rwa_solana_token_mints.csv"
-DEFAULT_ROUTE_CSV_PATH = "reports/rwa_jupiter_route_allowlist.csv"
+DEFAULT_TOKEN_REGISTRY_PATH = resolve_required_rwa_report_path(
+    "rwa_solana_token_mints.json"
+)
+DEFAULT_ROUTE_ALLOWLIST_PATH = resolve_required_rwa_report_path(
+    "rwa_jupiter_route_allowlist.json"
+)
+DEFAULT_TOKEN_CSV_PATH = RWA_REPORTS_DIR / "rwa_solana_token_mints.csv"
+DEFAULT_ROUTE_CSV_PATH = RWA_REPORTS_DIR / "rwa_jupiter_route_allowlist.csv"
 
 
 def _utc_now_iso() -> str:

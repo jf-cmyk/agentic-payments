@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import sqlite3
+import uuid
 from dataclasses import dataclass
 from typing import Annotated, Awaitable, Callable, Literal, TypeVar
 
@@ -14,7 +17,13 @@ from pydantic import Field
 from src.blocksize_client import BlocksizeAPIError, BlocksizeClient
 from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
-from src.mcp_server import READ_ONLY_TOOL_ANNOTATIONS
+from src.mcp_server import (
+    DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    InstrumentPageLimit,
+    InstrumentPageOffset,
+    READ_ONLY_TOOL_ANNOTATIONS,
+    build_catalog_snapshot_metadata,
+)
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -42,7 +51,9 @@ InstrumentSearchQuery = Annotated[
 ]
 AssetClassFilter = Annotated[
     Literal["all", "crypto", "equity", "equities", "fx", "metal"],
-    Field(description="Optional asset class filter. Use equity/equities for supported stock tickers."),
+    Field(
+        description="Optional asset class filter. Use equity/equities for supported stock tickers."
+    ),
 ]
 InstrumentService = Annotated[
     Literal["vwap", "bidask", "fx", "metal"],
@@ -115,9 +126,8 @@ def create_authenticated_market_data_mcp(
         )
 
     def credit_payload(status: CreditStatus) -> dict[str, object]:
+        """Return account-scoped credit state without exposing direct identifiers."""
         return {
-            "user_id": status.user_id,
-            "email": status.email,
             "date": status.date,
             "daily_limit": status.daily_limit,
             "credits_spent": status.credits_spent,
@@ -133,6 +143,27 @@ def create_authenticated_market_data_mcp(
             "credits_remaining": status.credits_remaining,
             "status": status.status,
         }
+
+    def telemetry_identity_payload(
+        identity: ConnectorIdentity | None,
+    ) -> dict[str, object]:
+        """Return privacy-safe identity attribution and an explicit test marker."""
+        if identity is None:
+            return {}
+        payload: dict[str, object] = {
+            "identity_hash": fingerprint(identity.ledger_subject),
+            "identity_type": "user",
+            "identity_trust": (
+                "verified_oauth"
+                if identity.source == "oauth"
+                else "verified_beta"
+                if identity.source == "beta-token"
+                else "synthetic_test"
+            ),
+        }
+        if identity.source not in {"oauth", "beta-token"}:
+            payload["synthetic"] = True
+        return payload
 
     def normalise_symbol(value: str, field_name: str = "symbol") -> str:
         raw = value.strip()
@@ -154,14 +185,20 @@ def create_authenticated_market_data_mcp(
         call: Callable[[], Awaitable[T]],
         render: Callable[[T], str],
     ) -> str:
+        attempt_id = uuid.uuid4().hex
+        identity = resolve_identity()
+        identity_metadata = telemetry_identity_payload(identity)
         record_usage_event(
             "mcp_tool_call",
             surface=observability_surface,
             tool_name=tool_name,
             subject=subject,
-            metadata={"credit_cost": TOOL_COSTS[tool_name]},
+            metadata={
+                "attempt_id": attempt_id,
+                "credit_cost": TOOL_COSTS[tool_name],
+                **identity_metadata,
+            },
         )
-        identity = resolve_identity()
         if identity is None:
             record_usage_event(
                 "mcp_auth_failed",
@@ -169,6 +206,7 @@ def create_authenticated_market_data_mcp(
                 tool_name=tool_name,
                 subject=subject,
                 reason="missing_identity",
+                metadata={"attempt_id": attempt_id},
             )
             return error_payload(
                 "AUTH_REQUIRED",
@@ -176,30 +214,55 @@ def create_authenticated_market_data_mcp(
             )
 
         cost = TOOL_COSTS[tool_name]
+        charge_id = uuid.uuid4().hex
         entitlements = get_entitlements()
-        ok, status = entitlements.spend(
-            identity.user_id,
-            cost,
-            email=identity.email,
-            tool_name=tool_name,
-            subject=subject,
-        )
+        try:
+            ok, status = entitlements.spend(
+                identity.ledger_subject,
+                cost,
+                email=identity.email,
+                tool_name=tool_name,
+                subject=subject,
+                charge_id=charge_id,
+            )
+        except sqlite3.Error:
+            logger.error("Connector credit ledger is unavailable for %s", tool_name)
+            record_usage_event(
+                "mcp_credit_drawdown_failed",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                reason="credit_ledger_unavailable",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **identity_metadata,
+                },
+            )
+            return error_payload(
+                "CREDIT_LEDGER_UNAVAILABLE",
+                "Blocksize could not safely reserve a live-data credit. No data was returned.",
+            )
         if not ok:
             record_usage_event(
                 "mcp_credit_drawdown_failed",
                 surface=observability_surface,
                 tool_name=tool_name,
                 subject=subject,
-                wallet_hash=fingerprint(identity.user_id),
                 reason="daily_credit_limit_reached",
-                metadata=telemetry_credit_payload(status),
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **telemetry_credit_payload(status),
+                    **identity_metadata,
+                },
             )
             return error_payload(
                 "DAILY_CREDIT_LIMIT_REACHED",
                 (
                     "Blocksize starter live-data credits are exhausted for this "
                     "allowance window. Upgrade outside the connector with x402 "
-                    "payment or prepaid credits to continue production usage."
+                    "payment or an authenticated account plan to continue production usage."
                 ),
                 json.dumps(credit_payload(status)),
             )
@@ -208,27 +271,68 @@ def create_authenticated_market_data_mcp(
             surface=observability_surface,
             tool_name=tool_name,
             subject=subject,
-            wallet_hash=fingerprint(identity.user_id),
-            metadata=telemetry_credit_payload(status),
+            metadata={
+                "attempt_id": attempt_id,
+                "charge_id": charge_id,
+                "charge_state": "pending",
+                **telemetry_credit_payload(status),
+                **identity_metadata,
+            },
         )
+
+        def refund_pending_charge() -> dict[str, object]:
+            try:
+                refunded = entitlements.refund(
+                    identity.ledger_subject,
+                    cost,
+                    tool_name=tool_name,
+                    subject=subject,
+                    charge_id=charge_id,
+                )
+            except sqlite3.Error:
+                logger.error("Connector credit refund is pending recovery for %s", tool_name)
+                return {
+                    "refund_status": "pending_recovery",
+                    "credits_remaining_after_refund": status.credits_remaining,
+                }
+            return {
+                "refund_status": "refunded",
+                "credits_remaining_after_refund": refunded.credits_remaining,
+            }
 
         try:
             result = await call()
             rendered = render(result)
-        except BlocksizeAPIError as e:
-            entitlements.refund(
-                identity.user_id,
-                cost,
-                tool_name=tool_name,
-                subject=subject,
-            )
+        except asyncio.CancelledError:
+            refund_metadata = refund_pending_charge()
             record_usage_event(
                 "mcp_tool_error",
                 surface=observability_surface,
                 tool_name=tool_name,
                 subject=subject,
-                wallet_hash=fingerprint(identity.user_id),
+                reason="request_cancelled",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **refund_metadata,
+                    **identity_metadata,
+                },
+            )
+            raise
+        except BlocksizeAPIError as e:
+            refund_metadata = refund_pending_charge()
+            record_usage_event(
+                "mcp_tool_error",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
                 reason="blocksize_api_error",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **refund_metadata,
+                    **identity_metadata,
+                },
             )
             return error_payload(
                 "BLOCKSIZE_API_ERROR",
@@ -236,38 +340,82 @@ def create_authenticated_market_data_mcp(
                 str(e),
             )
         except Exception as e:
-            entitlements.refund(
-                identity.user_id,
-                cost,
-                tool_name=tool_name,
-                subject=subject,
+            refund_metadata = refund_pending_charge()
+            logger.error(
+                "Unexpected %s in %s(%s)",
+                type(e).__name__,
+                tool_name,
+                subject,
             )
-            logger.error("Unexpected error in %s(%s): %s", tool_name, subject, e, exc_info=True)
             record_usage_event(
                 "mcp_tool_error",
                 surface=observability_surface,
                 tool_name=tool_name,
                 subject=subject,
-                wallet_hash=fingerprint(identity.user_id),
                 reason="internal_error",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **refund_metadata,
+                    **identity_metadata,
+                },
             )
             return error_payload(
                 "INTERNAL_ERROR",
                 f"Error retrieving data for '{subject}'",
-                str(e),
             )
 
-        current = entitlements.status(identity.user_id, identity.email)
-        record_usage_event_once(
-            "first_live_price_delivered",
-            fingerprint(f"user:{identity.user_id}"),
+        try:
+            current = entitlements.finalize_delivery(
+                identity.ledger_subject,
+                cost,
+                charge_id=charge_id,
+            )
+        except sqlite3.Error:
+            logger.error("Connector credit delivery finalization failed for %s", tool_name)
+            current = None
+        if current is None:
+            record_usage_event(
+                "mcp_tool_error",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                reason="credit_finalization_failed",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    "charge_state": "pending_recovery",
+                    **identity_metadata,
+                },
+            )
+            return error_payload(
+                "CREDIT_FINALIZATION_FAILED",
+                "Blocksize could not safely finalize delivery. No live data was returned.",
+            )
+        record_usage_event(
+            "mcp_data_delivered",
             surface=observability_surface,
             tool_name=tool_name,
             subject=subject,
-            wallet_hash=fingerprint(identity.user_id),
             metadata={
-                "identity_hash": fingerprint(identity.user_id),
-                "identity_type": "user",
+                "attempt_id": attempt_id,
+                "charge_id": charge_id,
+                "charge_state": "delivered",
+                **telemetry_credit_payload(current),
+                **identity_metadata,
+                "payment_mode": "starter_credit",
+            },
+        )
+        record_usage_event_once(
+            "first_live_price_delivered",
+            fingerprint(f"user:{identity.ledger_subject}"),
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            metadata={
+                "attempt_id": attempt_id,
+                "charge_id": charge_id,
+                **identity_metadata,
                 "payment_mode": "starter_credit",
             },
         )
@@ -300,7 +448,23 @@ def create_authenticated_market_data_mcp(
         try:
             client = await get_client()
             pairs = await client.search_pairs(query, asset_class)
-            response = PairSearchResponse(query=query, total_matches=len(pairs), pairs=pairs)
+            response = PairSearchResponse(
+                query=query,
+                total_matches=len(pairs),
+                pairs=pairs,
+                meta={
+                    **build_catalog_snapshot_metadata(
+                        source="Blocksize instrument search result set",
+                        records=list(pairs),
+                        grain="instrument_search_match",
+                        snapshot_scope="returned_result_set_max_50",
+                    ),
+                    "result_limit": 50,
+                    "total_coverage": (
+                        "Enabled symbols across crypto, equities, FX, and metals"
+                    ),
+                },
+            )
             if not pairs:
                 if (opportunity := normalize_symbol_opportunity(query)) is not None:
                     record_usage_event(
@@ -311,11 +475,15 @@ def create_authenticated_market_data_mcp(
                         asset_class=asset_class,
                         metadata={"result_count": 0},
                     )
-                return f"No instruments found matching '{query}' (class: {asset_class})."
+                return (
+                    f"No instruments found matching '{query}' (class: {asset_class})."
+                    f"\n\n<details>\n"
+                    f"{json.dumps(response.model_dump(), default=str, indent=2)}"
+                    "\n</details>"
+                )
             pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
-            summary = (
-                f"Found {len(pairs)} instruments matching '{query}': {pair_list}"
-                + (f" ... and {len(pairs) - 10} more" if len(pairs) > 10 else "")
+            summary = f"Found {len(pairs)} instruments matching '{query}': {pair_list}" + (
+                f" ... and {len(pairs) - 10} more" if len(pairs) > 10 else ""
             )
             return (
                 f"{summary}\n\n<details>\n"
@@ -335,7 +503,11 @@ def create_authenticated_market_data_mcp(
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def list_instruments(service: InstrumentService = "vwap") -> str:
+    async def list_instruments(
+        service: InstrumentService = "vwap",
+        limit: InstrumentPageLimit = DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+        offset: InstrumentPageOffset = 0,
+    ) -> str:
         record_usage_event(
             "mcp_tool_call",
             surface=observability_surface,
@@ -353,15 +525,35 @@ def create_authenticated_market_data_mcp(
             else:
                 instruments = await client.list_metal_instruments()
 
+            instruments = sorted(str(instrument) for instrument in instruments)
+            total = len(instruments)
+            page = instruments[offset : offset + limit]
+            next_offset = offset + len(page)
+            has_more = next_offset < total
             response = InstrumentListResponse(
                 service=service,
-                total_instruments=len(instruments),
-                instruments=instruments,
+                total_instruments=total,
+                returned_instruments=len(page),
+                offset=offset,
+                limit=limit,
+                has_more=has_more,
+                next_offset=next_offset if has_more else None,
+                instruments=page,
+                meta={
+                    **build_catalog_snapshot_metadata(
+                        source=f"Blocksize {service} instrument catalog",
+                        records=instruments,
+                        grain="instrument",
+                        snapshot_scope="full_upstream_catalog",
+                    ),
+                    "ordering": "lexicographic_ascending",
+                },
             )
-            sample = ", ".join(instruments[:10])
+            sample = ", ".join(page[:10])
             summary = (
-                f"{len(instruments)} instruments for {service}: {sample}"
-                + (f" ... and {len(instruments) - 10} more" if len(instruments) > 10 else "")
+                f"Returned {len(page)} of {total} instruments for {service} "
+                f"at offset {offset}: {sample}"
+                + (" ... use next_offset for the next page" if has_more else "")
             )
             return (
                 f"{summary}\n\n<details>\n"
@@ -405,12 +597,18 @@ def create_authenticated_market_data_mcp(
                 "AUTH_REQUIRED",
                 "Connect with an authenticated Blocksize account to view starter credits.",
             )
-        status = get_entitlements().status(identity.user_id, identity.email)
+        try:
+            status = get_entitlements().status(identity.ledger_subject, identity.email)
+        except sqlite3.Error:
+            logger.error("Connector credit ledger is unavailable for get_credit_balance")
+            return error_payload(
+                "CREDIT_LEDGER_UNAVAILABLE",
+                "Blocksize could not safely read the live-data credit balance.",
+            )
         record_usage_event(
             "mcp_credit_balance_viewed",
             surface=observability_surface,
             tool_name="get_credit_balance",
-            wallet_hash=fingerprint(identity.user_id),
             metadata=telemetry_credit_payload(status),
         )
         return json.dumps({"status": "ok", "credits": credit_payload(status)}, indent=2)
@@ -544,7 +742,7 @@ def create_authenticated_market_data_mcp(
                 "tool_costs": TOOL_COSTS,
                 "subscription_note": (
                     "After starter credits are exhausted, production usage should "
-                    "move to x402 payment, prepaid credit top-ups, or Blocksize "
+                    "move to x402 payment, an authenticated account plan, or Blocksize "
                     "account entitlements outside this MCP connector."
                 ),
                 "links": {

@@ -12,9 +12,9 @@ import pytest
 from src.mcp_server import (
     get_vwap, get_bid_ask,
     get_fx_rate, get_metal_price,
-    search_pairs, get_pricing_info, search, fetch,
+    search_pairs, list_instruments, get_pricing_info, search, fetch, server_info,
 )
-from src.public_mcp_server import public_get_market_data_endpoint
+from src.public_mcp_server import public_get_market_data_endpoint, public_mcp
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
     VWAPData, BidAskData, FXData,
@@ -105,6 +105,59 @@ class TestSearchPairsTool:
             mock_client.return_value.search_pairs = AsyncMock(return_value=[])
             result = await search_pairs("zzzzz")
         assert "No instruments found" in result
+        details = json.loads(result.split("<details>\n", 1)[1].split("\n</details>", 1)[0])
+        assert details["total_matches"] == 0
+        assert details["meta"]["freshness_status"] == "upstream_timestamp_unavailable"
+        assert len(details["meta"]["snapshot_sha256"]) == 64
+
+
+class TestListInstrumentsTool:
+    @pytest.mark.asyncio
+    async def test_catalog_is_paginated_with_stable_snapshot_metadata(self):
+        instruments = [f"PAIR-{index:04d}" for index in reversed(range(605))]
+        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
+            mock_client.return_value.list_vwap_instruments = AsyncMock(
+                return_value=instruments
+            )
+            first = await list_instruments("vwap", limit=100, offset=0)
+            second = await list_instruments("vwap", limit=100, offset=100)
+
+        first_payload = json.loads(
+            first.split("<details>\n", 1)[1].split("\n</details>", 1)[0]
+        )
+        second_payload = json.loads(
+            second.split("<details>\n", 1)[1].split("\n</details>", 1)[0]
+        )
+        assert first_payload["total_instruments"] == 605
+        assert first_payload["returned_instruments"] == 100
+        assert first_payload["offset"] == 0
+        assert first_payload["limit"] == 100
+        assert first_payload["has_more"] is True
+        assert first_payload["next_offset"] == 100
+        assert first_payload["instruments"] == sorted(instruments)[:100]
+        assert second_payload["instruments"] == sorted(instruments)[100:200]
+        assert (
+            first_payload["meta"]["snapshot_sha256"]
+            == second_payload["meta"]["snapshot_sha256"]
+        )
+        assert first_payload["meta"]["source_observed_at"] is None
+        assert (
+            first_payload["meta"]["freshness_status"]
+            == "upstream_timestamp_unavailable"
+        )
+        assert first_payload["meta"]["snapshot_scope"] == "full_upstream_catalog"
+
+    @pytest.mark.asyncio
+    async def test_public_mcp_schema_exposes_page_bounds(self):
+        tools = {tool.name: tool for tool in await public_mcp.list_tools()}
+        schema = tools["list_instruments"].parameters
+
+        assert schema["additionalProperties"] is False
+        assert schema["properties"]["limit"]["default"] == 100
+        assert schema["properties"]["limit"]["minimum"] == 1
+        assert schema["properties"]["limit"]["maximum"] == 500
+        assert schema["properties"]["offset"]["default"] == 0
+        assert schema["properties"]["offset"]["minimum"] == 0
 
 
 class TestGetPricingInfoTool:
@@ -119,6 +172,24 @@ class TestGetPricingInfoTool:
         assert "Analytics" not in result
         assert "FREE" in result
         assert "Solana" in result
+        normalized = result.lower().replace("-", " ")
+        assert "signed x402" in normalized
+        assert "direct public http" in normalized
+        assert "authenticated connector users only" in normalized
+        assert "contact blocksize sales" in normalized
+        assert "authenticated account plan" in normalized
+
+    @pytest.mark.asyncio
+    async def test_server_info_exposes_the_same_access_boundaries(self):
+        payload = json.loads(await server_info())
+        serialized = json.dumps(payload).lower().replace("-", " ").replace("_", " ")
+
+        assert payload["payment"]["protocol"] == "signed x402"
+        assert payload["payment"]["scope"] == "direct public HTTP"
+        assert "authenticated connector starter credits" in serialized
+        assert "users only" in serialized
+        assert "contact blocksize sales" in serialized
+        assert "authenticated account plan" in serialized
 
 
 class TestOpenAIStyleDiscoveryTools:

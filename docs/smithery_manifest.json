@@ -1,7 +1,7 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
-  "version": "0.6.4",
-  "description": "Discover Blocksize live crypto, equity, FX, and metals data with source timestamps, provenance, starter credits, x402 HTTP access, and downloadable examples for six agent frameworks.",
+  "version": "0.6.5",
+  "description": "Read-only MCP discovery for Blocksize real-time market data. Direct public HTTP uses signed x402; starter credits are for eligible authenticated connector users only; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
   "license": "MIT",
@@ -9,7 +9,14 @@
   "mcp_manifest": "https://mcp.blocksize.info/mcp/manifest.json",
   "capabilities": {
     "remote_transport": "streamable-http",
-    "pricing_models": ["Pay-per-call HTTP API (x402)", "Credit Drawdown"],
+    "pricing_models": [
+      "Signed x402 per call for direct public HTTP",
+      "Starter credits for eligible authenticated connector users only",
+      "Contact-sales authenticated account plan for sustained or higher-volume access"
+    ],
+    "starter_credit_scope": "Eligible authenticated connector users only",
+    "direct_public_http_payment": "Signed x402 per call",
+    "sustained_or_higher_volume_access": "Contact Blocksize sales for an authenticated account plan",
     "networks": ["Solana", "Base L2"],
     "public_remote_server": "Read-only discovery and documentation tools"
   },

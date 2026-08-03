@@ -16,9 +16,12 @@ from typing import Any
 
 from src.rwa_dex_allowlist import build_dex_allowlist
 from src.rwa_feed_discovery import DEFAULT_REPORTS_DIR
+from src.runtime_data import resolve_required_rwa_report_path
 
 
-DEFAULT_EVM_POOL_ALLOWLIST_JSON_PATH = DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.json"
+DEFAULT_EVM_POOL_ALLOWLIST_JSON_PATH = resolve_required_rwa_report_path(
+    "rwa_evm_pool_allowlist.json"
+)
 DEFAULT_EVM_POOL_ALLOWLIST_CSV_PATH = DEFAULT_REPORTS_DIR / "rwa_evm_pool_allowlist.csv"
 DEFAULT_TOKEN_ADDRESS_MASTER_PATH = DEFAULT_REPORTS_DIR / "token_address_master_2026-07-15.csv"
 DEXSCREENER_SEARCH_URL = "https://api.dexscreener.com/latest/dex/search/"

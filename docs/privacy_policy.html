@@ -31,7 +31,7 @@
     <h1>Privacy Policy</h1>
     <p>
       This policy applies to the Blocksize Capital developer portal, public remote MCP discovery
-      server, and paid HTTP market data API made available at
+      server, authenticated OpenAI, Claude, and Cursor MCP connectors, and paid HTTP market data API made available at
       <a href="https://mcp.blocksize.info/">mcp.blocksize.info</a>.
     </p>
 
@@ -39,6 +39,8 @@
     <ul>
       <li>Basic request metadata such as timestamps, user agent, and network-level diagnostics needed to operate and secure the service.</li>
       <li>Free discovery queries, such as symbol searches and service listings, so we can monitor reliability and product usage.</li>
+      <li>OAuth account identifiers and scopes needed to authenticate connector users, isolate account entitlements, and prevent abuse. Direct identifiers are not returned in connector credit responses.</li>
+      <li>Read-only connector tool names, requested instruments, result status, credit accounting, and reliability diagnostics needed to deliver and audit the service.</li>
       <li>Wallet identifiers, payment headers, or credit headers when you use paid or credit-based routes.</li>
       <li>Payment proof material, transaction hashes, and related verification data when x402 settlement is used.</li>
       <li>Support communications you send to us directly.</li>
@@ -47,10 +49,18 @@
     <h2>How We Use Data</h2>
     <ul>
       <li>To deliver discovery responses, documentation access, and paid market data.</li>
+      <li>To authenticate connector users and maintain account-scoped starter-credit records.</li>
       <li>To verify payment proofs, prevent replay attacks, and reduce fraud or abuse.</li>
       <li>To troubleshoot outages, improve latency, and understand which product surfaces are being used.</li>
       <li>To respond to support requests and maintain service quality.</li>
     </ul>
+
+    <h2>AI and Model Training</h2>
+    <p>
+      Blocksize does not use MCP connector request content, plugin data, or user content to train
+      machine-learning or generative-AI models. We process this data only for the operational,
+      security, support, analytics, billing, and compliance purposes described in this policy.
+    </p>
 
     <h2>Retention</h2>
     <p>

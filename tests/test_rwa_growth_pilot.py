@@ -12,14 +12,15 @@ def test_growth_pilot_never_auto_promotes_after_source_monitoring_passes():
             timestamp = started_at + timedelta(minutes=32 * index)
             rows.append(
                 {
-                    "pilot_id": feed["pilot_id"],
+                    **feed,
                     "checked_at": timestamp.isoformat(),
                     "status": "ok",
                     "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
                 }
             )
 
-    report = evaluate_history(rows)
+    latest_timestamp = max(datetime.fromisoformat(row["checked_at"]) for row in rows)
+    report = evaluate_history(rows, now=latest_timestamp)
 
     assert report["source_monitoring_ready"] is True
     assert report["promotion_ready"] is False
@@ -33,7 +34,7 @@ def test_growth_pilot_requires_complete_success_and_freshness_history():
     report = evaluate_history(
         [
             {
-                "pilot_id": PILOT_FEEDS[0]["pilot_id"],
+                **PILOT_FEEDS[0],
                 "checked_at": checked_at.isoformat(),
                 "status": "error",
                 "checks": {"freshness_pass": False, "bidask_sanity_pass": False},
@@ -72,12 +73,14 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
             **PILOT_FEEDS[1],
             "checked_at": checked_at,
             "status": "error",
+            "error_type": "TimeoutError",
+            "message": "Upstream adapter timed out.",
             "checks": {"freshness_pass": False, "bidask_sanity_pass": False},
         },
     ]
 
     report = persist_capture(
-        tmp_path / "history.jsonl",
+        store,
         captures,
         status_output=tmp_path / "status.json",
         observation_store=store,
@@ -136,3 +139,58 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
     assert report["depth_and_manipulation_latest"]["gate_assessment"] == {
         "manipulation_and_depth_review_complete": False,
     }
+
+
+def test_growth_pilot_rejects_burst_backfill_without_slot_coverage():
+    now = datetime.now(UTC)
+    rows = []
+    for feed in PILOT_FEEDS:
+        rows.append(
+            {
+                **feed,
+                "checked_at": (now - timedelta(days=14)).isoformat(),
+                "status": "ok",
+                "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
+            }
+        )
+        for index in range(671):
+            rows.append(
+                {
+                    **feed,
+                    "checked_at": (now - timedelta(seconds=671 - index)).isoformat(),
+                    "status": "ok",
+                    "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
+                }
+            )
+
+    report = evaluate_history(rows, now=now)
+
+    assert report["source_monitoring_ready"] is False
+    assert all(
+        row["source_monitoring_gates"]["temporal_slot_coverage_pass"] is False
+        for row in report["feeds"]
+    )
+
+
+def test_growth_pilot_wrong_feed_identity_never_satisfies_gates():
+    now = datetime.now(UTC)
+    rows = []
+    for feed in PILOT_FEEDS:
+        for index in range(672):
+            rows.append(
+                {
+                    **feed,
+                    "symbol": "BTC/USD",
+                    "venue": "wrong_venue",
+                    "source_lane": "wrong_lane",
+                    "checked_at": (now - timedelta(minutes=30 * (671 - index))).isoformat(),
+                    "status": "ok",
+                    "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
+                }
+            )
+
+    report = evaluate_history(rows, now=now)
+
+    assert report["source_monitoring_ready"] is False
+    assert all(row["sample_count"] == 0 for row in report["feeds"])
+    assert all(row["identity_mismatch_count"] == 672 for row in report["feeds"])

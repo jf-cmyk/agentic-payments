@@ -1,0 +1,45 @@
+{
+  "name": "blocksize-market-data",
+  "version": "0.4.0",
+  "description": "Read-only authenticated Blocksize live market data for ChatGPT and Codex.",
+  "author": {
+    "name": "Blocksize Capital GmbH",
+    "email": "support@blocksize.info",
+    "url": "https://blocksize.info/"
+  },
+  "homepage": "https://mcp.blocksize.info/market-data-api-for-ai-agents",
+  "repository": "https://github.com/jf-cmyk/agentic-payments",
+  "license": "MIT",
+  "keywords": [
+    "market-data",
+    "crypto",
+    "equities",
+    "fx",
+    "metals",
+    "mcp",
+    "x402"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Blocksize Market Data",
+    "shortDescription": "Discover verified market data and exact API routes.",
+    "longDescription": "Find supported crypto, equity, FX, metal, state-price, and VWAP data products. The authenticated MCP connector retrieves live observations with starter credits while preserving the distinction between discovery, live retrieval, and paid x402 HTTP access.",
+    "developerName": "Blocksize Capital GmbH",
+    "category": "Data & Analytics",
+    "capabilities": [
+      "Read-only",
+      "Market data",
+      "MCP"
+    ],
+    "websiteURL": "https://mcp.blocksize.info/",
+    "privacyPolicyURL": "https://mcp.blocksize.info/privacy",
+    "termsOfServiceURL": "https://mcp.blocksize.info/terms",
+    "defaultPrompt": [
+      "Retrieve Blocksize BTC VWAP with its timestamp.",
+      "Get the live Blocksize AAPL bid/ask snapshot.",
+      "Show Blocksize pricing for an FX snapshot."
+    ],
+    "brandColor": "#4F4BFF"
+  },
+  "mcpServers": "./.mcp.json"
+}

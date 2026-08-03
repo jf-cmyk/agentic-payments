@@ -60,7 +60,7 @@
             "https://glama.ai/mcp/connectors/info.blocksize.mcp/agentic-payments",
             "https://smithery.ai/servers/blocksize/agentic-payments?capability=tools",
             "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize",
-            "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp",
+            "https://github.com/jf-cmyk/agentic-payments",
             "https://gitlab.com/jfocke/agentic-payments",
             "https://pay.sh/services/blocksize/market-data",
             "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66"
@@ -74,7 +74,7 @@
           "url": "https://mcp.blocksize.info/",
           "description": "Remote MCP discovery and x402-paid live crypto, supported equity ticker, FX, metals, state price, VWAP-window, receipt, market brief, macro snapshot, and trader indicator endpoints for AI agents.",
           "softwareHelp": "https://mcp.blocksize.info/quickstart/remote-mcp",
-          "codeRepository": "https://gitlab.com/jfocke/agentic-payments"
+          "codeRepository": "https://github.com/jf-cmyk/agentic-payments"
         },
         {
           "@type": "WebSite",
@@ -175,7 +175,7 @@
               "name": "How do agents access live production data?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Live production data is available through x402-paid HTTP endpoints or wallet-credit drawdown documented in the OpenAPI schema. New eligible users, wallets, and authenticated agents can start with 50 live data credits."
+                "text": "Live production data is available through signed x402 v2 HTTP payments or authenticated connector credit drawdown documented in the OpenAPI schema. New eligible authenticated users can start with 50 live data credits."
               }
             }
           ]
@@ -189,56 +189,15 @@
             {"@type": "ListItem", "position": 3, "name": "Smithery Blocksize agentic-payments server", "url": "https://smithery.ai/servers/blocksize/agentic-payments?capability=tools"},
             {"@type": "ListItem", "position": 4, "name": "Pay.sh Blocksize market-data service listing", "url": "https://pay.sh/services/blocksize/market-data"},
             {"@type": "ListItem", "position": 5, "name": "x402scan Blocksize server listing", "url": "https://www.x402scan.com/server/3d0ad7cd-9e98-473a-8409-25813530df66"},
-            {"@type": "ListItem", "position": 6, "name": "Blocksize Agentic Payments MCP GitHub repository", "url": "https://github.com/jf-cmyk/blocksize-agentic-payments-mcp"},
-            {"@type": "ListItem", "position": 7, "name": "Blocksize Agentic Payments GitLab repository", "url": "https://gitlab.com/jfocke/agentic-payments"},
-            {"@type": "ListItem", "position": 8, "name": "Awesome MCP Servers Blocksize submission", "url": "https://github.com/punkpeye/awesome-mcp-servers/pull/7790"}
+            {"@type": "ListItem", "position": 6, "name": "Canonical Blocksize Agentic Payments GitHub repository", "url": "https://github.com/jf-cmyk/agentic-payments"},
+            {"@type": "ListItem", "position": 7, "name": "Historical Blocksize GitLab mirror (not an install source)", "url": "https://gitlab.com/jfocke/agentic-payments"},
+            {"@type": "ListItem", "position": 8, "name": "Merged Awesome MCP Servers Blocksize listing", "url": "https://github.com/punkpeye/awesome-mcp-servers/pull/7790"}
           ]
         }
       ]
     }
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <style>
-    @font-face {
-      font-display: swap;
-      font-family: 'Almarena Neue';
-      font-style: normal;
-      font-weight: 400;
-      src: url('/fonts/AlmarenaNeue-DisplayRegular.woff2') format('woff2');
-    }
-
-    @font-face {
-      font-display: swap;
-      font-family: 'Hind';
-      font-style: normal;
-      font-weight: 400;
-      src: url('/fonts/hind-v17-latin-regular.woff2') format('woff2');
-    }
-
-    @font-face {
-      font-display: swap;
-      font-family: 'Hind';
-      font-style: normal;
-      font-weight: 500;
-      src: url('/fonts/hind-v17-latin-500.woff2') format('woff2');
-    }
-
-    @font-face {
-      font-display: swap;
-      font-family: 'Hind';
-      font-style: normal;
-      font-weight: 600;
-      src: url('/fonts/hind-v17-latin-600.woff2') format('woff2');
-    }
-
-    @font-face {
-      font-display: swap;
-      font-family: 'Roboto';
-      font-style: normal;
-      font-weight: 400;
-      src: url('/fonts/roboto-mono-v23-latin-500.woff2') format('woff2');
-    }
-
     :root {
       --off-white: #FAFAFA;
       --heading: #000;
@@ -262,7 +221,7 @@
     body {
       background: var(--off-white);
       color: var(--paragraph);
-      font-family: "Hind", Arial, Helvetica, sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       line-height: 1.6;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
@@ -270,7 +229,7 @@
 
     .container { max-width: 84.25rem; width: 92%; margin: 0 auto; }
     section { padding: 5.25rem 0; }
-    h1, h2, h3, h4, h5 { font-family: "Almarena Neue", sans-serif; font-weight: 400; letter-spacing: -0.03em; color: var(--heading); margin-bottom: 1.35rem; line-height: 1.125em; }
+    h1, h2, h3, h4, h5 { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-weight: 400; letter-spacing: -0.03em; color: var(--heading); margin-bottom: 1.35rem; line-height: 1.125em; }
     h1 { font-size: clamp(2.65rem, 4vw, 4rem); }
     h2 { font-size: clamp(2.25rem, 3.2vw, 3.3rem); margin-bottom: 1.4rem; }
     h3 { font-size: clamp(1.55rem, 2.4vw, 2.15rem); margin-bottom: 0.85rem; }
@@ -452,7 +411,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .dropdown-kicker {
-      font-family: "Roboto", monospace;
+      font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -500,7 +459,7 @@
       color: rgba(255, 255, 255, 0.84);
     }
     .dropdown-right .promo-kicker {
-      font-family: "Almarena Neue", sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       font-size: 0.8rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -508,7 +467,7 @@
       margin-bottom: 0.85rem;
     }
     .dropdown-right .promo-title {
-      font-family: "Almarena Neue", sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       font-size: 1.5rem;
       line-height: 1.1;
       margin-bottom: 1rem;
@@ -591,7 +550,7 @@
     }
     .hero-label {
       color: var(--light-paragraph);
-      font-family: "Roboto", monospace;
+      font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.85rem;
       font-weight: 400;
       letter-spacing: 0.08em;
@@ -630,7 +589,7 @@
     }
     .stat-label {
       display: block;
-      font-family: "Roboto", monospace;
+      font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -709,7 +668,7 @@
       background: #fff;
     }
     .welcome-count {
-      font-family: "Almarena Neue", sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       font-size: clamp(2.4rem, 4vw, 4.2rem);
       line-height: 0.9;
       color: var(--purple);
@@ -718,7 +677,7 @@
     .welcome-count span {
       display: block;
       margin-top: 0.35rem;
-      font-family: "Roboto", monospace;
+      font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.72rem;
       line-height: 1.3;
       letter-spacing: 0.08em;
@@ -772,7 +731,7 @@
     .listing-kicker {
       display: block;
       margin-bottom: 0.5rem;
-      font-family: "Roboto", monospace;
+      font-family: "SFMono-Regular", Consolas, monospace;
       font-size: 0.72rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -1100,7 +1059,7 @@
         gap: 1.1rem;
       }
       .mobile-dropdown-kicker {
-        font-family: "Roboto", monospace;
+        font-family: "SFMono-Regular", Consolas, monospace;
         font-size: 0.72rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
@@ -1134,7 +1093,7 @@
       .mobile-dropdown-promo .promo-kicker {
         margin: 0 0 0.6rem;
         color: rgba(255, 255, 255, 0.75);
-        font-family: "Almarena Neue", sans-serif;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
         font-size: 0.8rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
@@ -1142,7 +1101,7 @@
       .mobile-dropdown-promo .promo-title {
         margin: 0 0 1rem;
         color: #fff;
-        font-family: "Almarena Neue", sans-serif;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
         font-size: 1.35rem;
         line-height: 1.15;
       }
@@ -1496,11 +1455,11 @@
         <div class="welcome-copy">
           <h2>Start with 50 live data credits.</h2>
           <p>
-            Eligible users, wallets, and authenticated agents can try live data,
+            Eligible authenticated connector users can try live data,
             market briefs, macro snapshots, pre-trade checks, receipts, and trader
-            indicators before upgrading to x402 settlement or prepaid drawdown credits.
+            indicators before using direct x402 settlement or contacting Blocksize about an authenticated account plan.
           </p>
-          <code class="welcome-code">Headers: X-AGENT-ID, X-AGENT-WALLET, X-USER-ID</code>
+          <code class="welcome-code">Authenticated Claude, Cursor, or OpenAI connector identity</code>
           <p class="welcome-note">Eligibility checks protect the trial from abuse; free discovery remains available through the public remote MCP server.</p>
         </div>
       </div>
@@ -1538,17 +1497,17 @@
               <img class="listing-logo" src="assets/listings/x402scan.png" alt="x402scan logo" loading="eager" />
               <span><span class="listing-name">x402scan</span><span class="listing-detail">x402 server listing</span></span>
             </a>
-            <a class="listing-link" href="https://github.com/jf-cmyk/blocksize-agentic-payments-mcp" target="_blank" rel="noreferrer" aria-label="Blocksize Agentic Payments MCP GitHub repository">
+            <a class="listing-link" href="https://github.com/jf-cmyk/agentic-payments" target="_blank" rel="noreferrer" aria-label="Canonical Blocksize Agentic Payments GitHub repository">
               <img class="listing-logo" src="assets/listings/github.png" alt="GitHub logo" loading="eager" />
-              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">MCP package for community lists</span></span>
+              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">Canonical source and future signed releases</span></span>
             </a>
             <a class="listing-link" href="https://gitlab.com/jfocke/agentic-payments" target="_blank" rel="noreferrer" aria-label="Blocksize Agentic Payments GitLab repository">
               <img class="listing-logo" src="assets/listings/gitlab.png" alt="GitLab logo" loading="eager" />
-              <span><span class="listing-name">GitLab Repo</span><span class="listing-detail">Primary source repository</span></span>
+              <span><span class="listing-name">GitLab Mirror</span><span class="listing-detail">Historical mirror; not an install source</span></span>
             </a>
             <a class="listing-link" href="https://github.com/punkpeye/awesome-mcp-servers/pull/7790" target="_blank" rel="noreferrer" aria-label="Awesome MCP Servers Blocksize submission pull request">
               <img class="listing-logo" src="assets/listings/awesome-mcp.svg" alt="Awesome MCP Servers logo" loading="eager" />
-              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community submission PR</span></span>
+              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community listing (merged)</span></span>
             </a>
             <a class="listing-link" href="https://registry.modelcontextprotocol.io/v0/servers?search=blocksize" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
               <img class="listing-logo" src="assets/listings/mcp-registry.svg" alt="" loading="eager" />
@@ -1570,17 +1529,17 @@
               <img class="listing-logo" src="assets/listings/x402scan.png" alt="" loading="eager" />
               <span><span class="listing-name">x402scan</span><span class="listing-detail">x402 server listing</span></span>
             </a>
-            <a class="listing-link" href="https://github.com/jf-cmyk/blocksize-agentic-payments-mcp" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
+            <a class="listing-link" href="https://github.com/jf-cmyk/agentic-payments" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
               <img class="listing-logo" src="assets/listings/github.png" alt="" loading="eager" />
-              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">MCP package for community lists</span></span>
+              <span><span class="listing-name">GitHub Repo</span><span class="listing-detail">Canonical source and future signed releases</span></span>
             </a>
             <a class="listing-link" href="https://gitlab.com/jfocke/agentic-payments" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
               <img class="listing-logo" src="assets/listings/gitlab.png" alt="" loading="eager" />
-              <span><span class="listing-name">GitLab Repo</span><span class="listing-detail">Primary source repository</span></span>
+              <span><span class="listing-name">GitLab Mirror</span><span class="listing-detail">Historical mirror; not an install source</span></span>
             </a>
             <a class="listing-link" href="https://github.com/punkpeye/awesome-mcp-servers/pull/7790" target="_blank" rel="noreferrer" aria-hidden="true" tabindex="-1">
               <img class="listing-logo" src="assets/listings/awesome-mcp.svg" alt="" loading="eager" />
-              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community submission PR</span></span>
+              <span><span class="listing-name">Awesome MCP</span><span class="listing-detail">Community listing (merged)</span></span>
             </a>
           </div>
         </div>
@@ -1604,7 +1563,7 @@
           <strong>Paid HTTP API</strong>
           <h3>Live production market intelligence</h3>
           <p>
-            x402 or wallet-credit access to live data endpoints for crypto, FX, metals,
+            Direct x402 access to live data endpoints for crypto, FX, metals,
             state prices, VWAP windows, briefs, receipts, checks, and trader indicators.
           </p>
           <code>/openapi.json</code>
@@ -1726,12 +1685,12 @@
         <div class="step">
           <span class="step-num">03</span>
           <h3>Settle</h3>
-          <p>Use starter credits, wallet credits, or x402 payment proofs on Solana or Base. Eligible users, wallets, and authenticated agents can start with 50 live data credits.</p>
+          <p>Use authenticated starter credits or signed x402 v2 payments on an operational advertised network. Eligible authenticated connector users can start with 50 live data credits.</p>
         </div>
         <div class="step">
           <span class="step-num">04</span>
           <h3>Operate</h3>
-          <p>Scale with credit drawdown, bulk tiers, and instrument-aware routing once your agent is in production.</p>
+          <p>Scale with direct x402 or contact Blocksize about an authenticated account plan once your agent is in production.</p>
         </div>
       </div>
     </div>
@@ -1783,38 +1742,39 @@
       </table>
 
       <div class="callout">
-        <h3>Bulk Credit Tiers</h3>
+        <h3>Authenticated Account Plans</h3>
         <p>
-          Credit drawdown removes per-call settlement latency for repeat agents while preserving the
-          same underlying x402 economics.
+          Self-serve purchase routes are not exposed in production.
+          Teams that outgrow direct x402 or connector starter credits can discuss an
+          authenticated account plan with Blocksize.
         </p>
         <table class="pricing-table" style="margin-top: 1rem; background: transparent;">
           <thead>
             <tr>
-              <th>Tier</th>
-              <th>Credits</th>
-              <th>Price</th>
-              <th>Discount</th>
+              <th>Access path</th>
+              <th>Availability</th>
+              <th>Commercial terms</th>
+              <th>Next step</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td>Starter Pouch</td>
-              <td>1,000</td>
-              <td class="price-bold" style="color: #fff;">$0.90</td>
-              <td><span class="credit-badge">10% OFF</span></td>
+              <td>Direct x402</td>
+              <td>Public per request</td>
+              <td class="price-bold" style="color: #fff;">Published route price</td>
+              <td><span class="credit-badge">Use x402 client</span></td>
             </tr>
             <tr>
-              <td>Growth Pack</td>
-              <td>10,000</td>
-              <td class="price-bold" style="color: #fff;">$8.00</td>
-              <td><span class="credit-badge">20% OFF</span></td>
+              <td>Connector starter credits</td>
+              <td>Eligible authenticated users</td>
+              <td class="price-bold" style="color: #fff;">Included evaluation allowance</td>
+              <td><span class="credit-badge">Sign in</span></td>
             </tr>
             <tr>
-              <td>Institutional Vault</td>
-              <td>100,000</td>
-              <td class="price-bold" style="color: #fff;">$60.00</td>
-              <td><span class="credit-badge">40% OFF</span></td>
+              <td>Authenticated account plan</td>
+              <td>By agreement</td>
+              <td class="price-bold" style="color: #fff;">Custom terms</td>
+              <td><span class="credit-badge">Contact sales</span></td>
             </tr>
           </tbody>
         </table>
@@ -1822,10 +1782,10 @@
 
       <div style="margin-top: 2rem; padding: 2rem; border: 1px solid var(--border); border-radius: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
         <div>
-          <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Enterprise Subscriptions</h3>
-          <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">For high-consumption agents requiring unlimited throughput, explore our traditional flat-rate subscription models.</p>
+          <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Authenticated Account Plans</h3>
+          <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">For sustained or higher-volume access, contact Blocksize to discuss an authenticated account plan with agreed terms.</p>
         </div>
-        <a href="https://blocksize.info/crypto-market-data/pricing/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">View Subscriptions</a>
+        <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">Contact Sales</a>
       </div>
     </div>
   </section>
@@ -1907,7 +1867,7 @@
         <a href="pdf/Blocksize_Agent_Manual.pdf" class="resource-card">
           <div>
             <h4>Agent Integration Guide</h4>
-            <p>x402 flow, wallet-credit model, and system integration notes.</p>
+            <p>Direct x402 flow, authenticated connector starter credits, and system integration notes.</p>
           </div>
           <span class="arrow">→</span>
         </a>

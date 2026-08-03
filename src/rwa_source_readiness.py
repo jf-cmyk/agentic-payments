@@ -19,6 +19,7 @@ from src.rwa_dex_allowlist import build_dex_allowlist
 from src.rwa_provider_catalog import build_provider_catalog
 from src.rwa_rights_clearance import env_or_clearance_ack
 from src.rwa_xyz_monitor import RWA_XYZ_READINESS_DEPENDENCY, RWA_XYZ_VENUE_ID
+from src.runtime_data import resolve_required_rwa_report_path
 
 
 READINESS_CATEGORIES: dict[str, str] = {
@@ -67,7 +68,7 @@ SOURCE_DEPENDENCIES: list[dict[str, Any]] = [
         "name": "Verified Solana token mint registry",
         "required_env": ["RWA_SOLANA_TOKEN_MINTS_PATH"],
         "optional_env": ["JUPITER_TOKEN_SEARCH_API_KEY"],
-        "artifact_paths": ["reports/rwa_solana_token_mints.json"],
+        "artifact_report": "rwa_solana_token_mints.json",
         "missing_status": "missing_identifier_mapping",
         "required_for": ["xStock token identity", "EURC/USD", "USDY/OUSG/Treasury-fund route validation"],
         "unblocks": ["jupiter_router", "raydium_clmm", "orca_whirlpool", "meteora_dlmm"],
@@ -81,7 +82,7 @@ SOURCE_DEPENDENCIES: list[dict[str, Any]] = [
         "name": "Jupiter route allowlist evidence",
         "required_env": ["RWA_JUPITER_ROUTE_ALLOWLIST_PATH"],
         "optional_env": [],
-        "artifact_paths": ["reports/rwa_jupiter_route_allowlist.json"],
+        "artifact_report": "rwa_jupiter_route_allowlist.json",
         "missing_status": "missing_identifier_mapping",
         "required_for": ["Jupiter route promotion", "quote-sweep provenance", "route-plan review"],
         "unblocks": ["jupiter_router", "jupiter_xstocks"],
@@ -108,7 +109,7 @@ SOURCE_DEPENDENCIES: list[dict[str, Any]] = [
         "name": "Solana DEX pool allowlist",
         "required_env": ["RWA_SOLANA_POOL_ALLOWLIST_PATH"],
         "optional_env": ["METEORA_POOL_CATALOG_URL", "RAYDIUM_POOL_CATALOG_URL", "ORCA_WHIRLPOOL_CATALOG_URL"],
-        "artifact_paths": ["reports/rwa_solana_pool_allowlist.json"],
+        "artifact_report": "rwa_solana_pool_allowlist.json",
         "missing_status": "missing_identifier_mapping",
         "required_for": ["Meteora DLMM", "Raydium CLMM", "Orca Whirlpool"],
         "unblocks": ["29 Solana pool-state candidates"],
@@ -135,7 +136,7 @@ SOURCE_DEPENDENCIES: list[dict[str, Any]] = [
         "name": "EVM pool and token allowlist",
         "required_env": ["RWA_EVM_POOL_ALLOWLIST_PATH"],
         "optional_env": ["THE_GRAPH_API_KEY", "GOLDSKY_API_KEY"],
-        "artifact_paths": ["reports/rwa_evm_pool_allowlist.json"],
+        "artifact_report": "rwa_evm_pool_allowlist.json",
         "missing_status": "missing_identifier_mapping",
         "required_for": ["Uniswap V3/V4", "Curve", "Balancer", "Aerodrome"],
         "unblocks": ["10 EVM/Base DEX candidates"],
@@ -422,7 +423,7 @@ SOURCE_DEPENDENCIES: list[dict[str, Any]] = [
         "name": "On-chain derivative venue catalogs and replay access",
         "required_env": [],
         "optional_env": ["SOLANA_RPC_URL", "EVM_RPC_ETHEREUM_URL", "INJECTIVE_INDEXER_URL"],
-        "artifact_paths": ["reports/rwa_derivative_venue_discovery.json"],
+        "artifact_report": "rwa_derivative_venue_discovery.json",
         "missing_status": "missing_identifier_mapping",
         "required_for": ["Aster", "Lighter", "Drift", "dYdX", "Orderly", "Aevo", "ApeX Omni", "Pendle", "Derive"],
         "unblocks": ["public perp/futures/yield market catalogs", "venue market-id mapping", "derivative fair-value probes"],
@@ -561,19 +562,62 @@ def _artifact_exists(path: str) -> bool:
     return Path(path).expanduser().exists()
 
 
+def _logical_artifact_identifier(path: str, *, report: bool = False) -> str:
+    """Return a stable public identifier without exposing filesystem layout."""
+    normalized = path.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    filename = parts[-1] if parts else "artifact"
+    if report or "reports" in parts:
+        return f"reports/{filename}"
+    is_safe_relative = (
+        not normalized.startswith(("/", "~"))
+        and ".." not in parts
+        and (not parts or ":" not in parts[0])
+    )
+    return "/".join(parts) if is_safe_relative else filename
+
+
 def _dependency_status(row: dict[str, Any]) -> dict[str, Any]:
     required_env = [str(name) for name in row.get("required_env", [])]
     optional_env = [str(name) for name in row.get("optional_env", [])]
-    artifact_paths = [str(path) for path in row.get("artifact_paths", [])]
+    artifact_report = row.get("artifact_report")
+    if artifact_report:
+        report_name = str(artifact_report)
+        effective_artifact_paths = [str(resolve_required_rwa_report_path(report_name))]
+        artifact_paths = [
+            _logical_artifact_identifier(report_name, report=True)
+        ]
+    else:
+        effective_artifact_paths = [str(path) for path in row.get("artifact_paths", [])]
+        artifact_paths = [
+            _logical_artifact_identifier(path) for path in effective_artifact_paths
+        ]
     configured_required_env = [name for name in required_env if _env_is_set(name)]
     missing_required_env = [name for name in required_env if name not in configured_required_env]
     configured_optional_env = [name for name in optional_env if _env_is_set(name)]
     missing_optional_env = [name for name in optional_env if name not in configured_optional_env]
-    configured_artifact_paths = [path for path in artifact_paths if _artifact_exists(path)]
-    missing_artifact_paths = [path for path in artifact_paths if path not in configured_artifact_paths]
+    artifact_path_states = [
+        (logical_path, _artifact_exists(effective_path))
+        for logical_path, effective_path in zip(
+            artifact_paths,
+            effective_artifact_paths,
+            strict=True,
+        )
+    ]
+    configured_artifact_paths = [
+        logical_path for logical_path, exists in artifact_path_states if exists
+    ]
+    missing_artifact_paths = [
+        logical_path for logical_path, exists in artifact_path_states if not exists
+    ]
+    dependency_configured = (
+        bool(configured_artifact_paths)
+        if artifact_report
+        else not missing_required_env or bool(configured_artifact_paths)
+    )
     status = (
         "configured"
-        if not missing_required_env or configured_artifact_paths
+        if dependency_configured
         else str(row["missing_status"])
     )
     result = deepcopy(row)
@@ -585,6 +629,7 @@ def _dependency_status(row: dict[str, Any]) -> dict[str, Any]:
             "missing_required_env": missing_required_env,
             "configured_optional_env": configured_optional_env,
             "missing_optional_env": missing_optional_env,
+            "artifact_paths": artifact_paths,
             "configured_artifact_paths": configured_artifact_paths,
             "missing_artifact_paths": missing_artifact_paths,
             "secret_safe": True,

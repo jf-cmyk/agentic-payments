@@ -1,4 +1,6 @@
 stages:
+  - test
+  - staging
   - deploy
 
 default:
@@ -7,19 +9,100 @@ default:
 variables:
   NPM_CONFIG_UPDATE_NOTIFIER: "false"
 
-deploy_production:
-  stage: deploy
+test_python:
+  stage: test
+  image: python:3.12
+  timeout: 20m
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install uv==0.11.7
+    - uv sync --frozen --extra dev
+  script:
+    - uv run ruff check .
+    - uv run python scripts/check_secret_hygiene.py
+    - uvx --from pip-audit==2.10.1 pip-audit --path .venv/lib/python3.12/site-packages --progress-spinner off
+    - uv run pytest -q
+    - uv run python scripts/check_release_contracts.py --expected-version 0.6.5 --require-clean
+    - uv run python -m build --wheel
+    - uv run python -m build --wheel --outdir dist-repro
+    - uv run python scripts/verify_release_artifact.py dist/*.whl --reproducible-with dist-repro/*.whl
+    - uv run python scripts/verify_installed_release.py dist/*.whl --requirements requirements.txt
+
+deploy_staging:
+  stage: staging
+  timeout: 20m
+  environment:
+    name: staging
+    url: "$STAGING_BASE_URL"
+  variables:
+    RAILWAY_TOKEN: "$STAGING_RAILWAY_TOKEN"
+  needs:
+    - test_python
+  resource_group: staging
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   before_script:
-    - npm install -g @railway/cli
+    - npm install -g @railway/cli@5.30.1
   script:
+    - test -n "$RAILWAY_TOKEN"
+    - test -n "$STAGING_RAILWAY_PROJECT_ID"
+    - test -n "$STAGING_RAILWAY_ENVIRONMENT"
+    - test -n "$STAGING_RAILWAY_SERVICE_NAME"
+    - test -n "$STAGING_BASE_URL"
+    - test -n "$RAILWAY_PROJECT_ID"
+    - test -n "$RAILWAY_ENVIRONMENT"
+    - test -n "$RAILWAY_SERVICE_NAME"
+    - test -n "$PUBLIC_BASE_URL"
+    - test "$STAGING_BASE_URL" != "$PUBLIC_BASE_URL"
+    - test "$STAGING_RAILWAY_ENVIRONMENT" != "$RAILWAY_ENVIRONMENT"
+    - test "$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_SERVICE_NAME"
+    - test "$STAGING_RAILWAY_PROJECT_ID:$STAGING_RAILWAY_ENVIRONMENT:$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_PROJECT_ID:$RAILWAY_ENVIRONMENT:$RAILWAY_SERVICE_NAME"
+    - node scripts/stamp_release.mjs "$CI_COMMIT_SHA" "$CI_COMMIT_BRANCH"
+    - railway up --ci --project "$STAGING_RAILWAY_PROJECT_ID" --environment "$STAGING_RAILWAY_ENVIRONMENT" --service "$STAGING_RAILWAY_SERVICE_NAME"
+    - node scripts/audit_hosted_release.mjs "$STAGING_BASE_URL" "$CI_COMMIT_SHA"
+
+deploy_production:
+  stage: deploy
+  timeout: 20m
+  environment:
+    name: production
+    url: "$PUBLIC_BASE_URL"
+  variables:
+    RAILWAY_TOKEN: "$PRODUCTION_RAILWAY_TOKEN"
+  needs:
+    - deploy_staging
+  resource_group: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      allow_failure: false
+  before_script:
+    - npm install -g @railway/cli@5.30.1
+  script:
+    - test -n "$RAILWAY_TOKEN"
+    - test -n "$RAILWAY_PROJECT_ID"
+    - test -n "$RAILWAY_ENVIRONMENT"
+    - test -n "$RAILWAY_SERVICE_NAME"
+    - node scripts/stamp_release.mjs "$CI_COMMIT_SHA" "$CI_COMMIT_BRANCH"
     - |
+      deployed=false
       for attempt in 1 2 3; do
-        railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME" && exit 0
-        status=$?
+        if railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME"; then
+          deployed=true
+          break
+        else
+          status=$?
+        fi
         if [ "$attempt" = "3" ]; then
           exit "$status"
         fi
         sleep $((attempt * 20))
       done
+      if [ "$deployed" != "true" ]; then
+        exit 1
+      fi
+    - |
+      if ! node scripts/audit_hosted_release.mjs "$PUBLIC_BASE_URL" "$CI_COMMIT_SHA"; then
+        echo "Production hosted audit failed after activation. Stop promotion work and execute the recorded Railway rollback procedure."
+        exit 1
+      fi

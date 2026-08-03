@@ -1,0 +1,15 @@
+{
+  "name": "blocksize-plugins",
+  "owner": {
+    "name": "Blocksize Capital GmbH"
+  },
+  "metadata": {
+    "description": "Read-only Blocksize market-data plugins for AI agents."
+  },
+  "plugins": [
+    {
+      "name": "blocksize-market-data",
+      "source": "./claude-plugin/blocksize-market-data"
+    }
+  ]
+}

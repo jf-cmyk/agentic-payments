@@ -1,0 +1,11 @@
+[build]
+builder = "RAILPACK"
+# Railway passes this value through to the matching GHCR frontend tag. Release
+# images are published with the leading `v` (for example, `v0.35.0`).
+railpackVersion = "v0.35.0"
+
+[deploy]
+healthcheckPath = "/readyz"
+healthcheckTimeout = 180
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
