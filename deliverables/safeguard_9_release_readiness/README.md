@@ -1,15 +1,20 @@
 # Safeguard 9 — Dependency, artifact, CI, staging, and release readiness
 
-Date: 2026-07-30
+Date: 2026-08-03
 
 ## Decision
 
 The curated 0.6.5 release candidate passes the implemented dependency,
 secret-hygiene, version, test, packaging, and reproducibility gates in a clean
-worktree based on canonical GitHub `main`. The overall release remains a
-**no-go** because protected CI has not yet accepted the branch, there is no
-separate Railway staging environment, and the live service is not
-readiness-gated.
+worktree based on canonical GitHub `main`. The staging-diagnostic predecessor
+`8871a5f06d6b2ed162f5f74d79f00ab3af7b1f65` passed clean-checkout CI, and the
+physically separate Railway staging service built its image and completed
+application startup. The current branch also contains the proxy-identity and
+public-readiness privacy fixes found by that hosted audit. The overall release
+remains a **no-go** because `/readyz` correctly stayed non-200 with the
+configured public development facilitator, so Railway did not activate the
+candidate and the full hosted and signed-client acceptance sequence could not
+run.
 
 ## Defects remediated
 
@@ -37,13 +42,26 @@ readiness-gated.
   required environment separation and a post-deployment hosted audit.
 - Added release stamping and hosted verification so a deployment must report the
   expected commit before promotion is accepted.
+- Corrected two Railway build assumptions discovered by the isolated diagnostic:
+  the Railpack frontend tag requires the leading `v`, and the cached dependency
+  layer must install a dependency-only requirements export before source is
+  copied into the image.
+- Replaced Uvicorn's `X-Forwarded-For`-only normalization with an application
+  boundary that accepts one validated Railway `X-Real-IP` only from the narrow
+  configured raw-peer range. Hosted readiness rejects a missing, wildcard, or
+  overbroad Railway trust range.
+- Redacted internal database, entitlement, and OAuth filesystem locations from
+  the unauthenticated `/readyz` response while preserving internal validation,
+  categorical blockers, public URL diagnostics, and the 200/503 decision.
 
 ## Accepted locally
 
 | Gate | Result |
 | --- | --- |
-| Full repository suite | Pass; 829 tests |
-| Release safeguard suite after final isolation changes | Pass; 73 tests |
+| Full repository suite | Pass; 848 tests |
+| Release safeguard suite after final isolation changes | Pass; 76 tests |
+| Staging-predecessor GitHub Actions CI | Pass; run `30848975204` at `8871a5f` |
+| Networked fresh installed-release smoke in CI | Pass |
 | Ruff | Pass; repository-wide |
 | Python compilation | Pass; release safeguard scripts |
 | Diff whitespace check | Pass |
@@ -56,11 +74,16 @@ readiness-gated.
 | Wheel contents and public-data allowlist | Pass |
 | Source-free installed-target smoke | Pass |
 | Fresh-venv implementation regressions | Pass |
+| Registry, public-product, marketplace, and command-center regressions | Pass; 134 credential-free checks |
+| Proxy, payment, and public-readiness privacy regressions | Pass; 184 focused safeguard checks |
+| Isolated Railway image build and application startup | Pass; deployment `339901eb-b448-4a01-813f-ce92513b975b` |
+| Railway readiness activation | Fail closed; production-ineligible facilitator configuration |
 
-The final networked fresh-venv download could not run in this restricted
-workspace because outbound dependency installation was denied. The gate fails
-closed and is wired into both protected CI systems; its real clean-machine run
-remains mandatory evidence, not an assumed pass.
+The exact-head clean-checkout run installed the exact dependencies from the
+network, rebuilt two byte-identical wheels, verified the artifact, and completed
+the fresh installed-release smoke. The hosted staging result is diagnostic
+evidence only: successful build and startup do not constitute staging
+acceptance while readiness is red.
 
 The Safeguard 6 notebook was also linted with a minimal annotation for its
 intentional imports after repository-path setup and executed top to bottom with
@@ -72,10 +95,12 @@ all eight code cells succeeding.
    one deleted, and 413 untracked. It remains quarantined as forensic source;
    the reviewed release scope has been curated separately onto
    `codex/safeguard-release-0.6.5` from canonical GitHub `main`.
-2. GitHub `main` is unprotected and has no `.github/workflows` directory in the
-   public branch. The new local CI has therefore never protected a merge.
-3. Railway has only `production`; there is no separate staging environment or
-   service on which to prove the candidate.
+2. GitHub `main` remains unprotected. The branch workflow is now exercised and
+   green, but it is not yet a required merge check on `main`.
+3. Staging needs a dedicated production-capable facilitator and its own
+   authenticated facilitator credentials. The currently configured
+   `x402.org` facilitator is development-only and is deliberately rejected
+   under `APP_ENV=production`.
 4. Production is running version 0.6.2 and returns `404` from `/readyz`. Railway
    reports no configured healthcheck path or timeout and allows ten restart
    retries.
@@ -84,21 +109,23 @@ all eight code cells succeeding.
    bytes are the exact wheel verified in CI.
 6. Package signing, SBOM/provenance attestation, and an exercised automatic or
    one-command rollback remain future release-hardening work.
-7. Signed-in OpenAI, Claude, and Cursor client acceptance has not run against a
-   staged 0.6.5 deployment.
+7. Full hosted HTTP/MCP, live-data, x402, persistence, command-center, and
+   signed-in OpenAI, Claude, and Cursor acceptance has not run against an
+   activated staged 0.6.5 deployment.
 
 ## Required release sequence
 
-1. Publish the curated release branch as a draft pull request and require its
+1. Keep draft pull request 12 on the curated release branch and require its
    clean-checkout CI, including the `--require-clean` release contract.
 2. Protect GitHub `main`, require the new CI, and keep GitLab as a mirror unless
    it is intentionally restored as a release source.
-3. Create a physically separate Railway staging environment/service and set the
-   distinct staging variables required by the pipeline.
-4. Run protected CI, including the real networked fresh-venv smoke, dependency
-   audit, deterministic double build, and wheel verification.
-5. Deploy that reviewed artifact to staging; run hosted HTTP/MCP, data,
-   payment-boundary, command-center, and signed-client acceptance.
+3. Keep the physically separate Railway staging environment, service, volume,
+   URLs, state paths, and security material isolated from production.
+4. Provision dedicated staging upstream and production-capable facilitator
+   credentials. Do not make routine staging depend on production credentials.
+5. Redeploy the exact reviewed commit, require green `/readyz`, then run hosted
+   HTTP/MCP, data, payment-boundary, command-center, persistence, and
+   signed-client acceptance.
 6. Record the last-known-good production deployment and test the rollback
    command before promotion.
 7. Manually promote production, verify `/readyz`, version, commit SHA, manifest,
@@ -109,6 +136,8 @@ all eight code cells succeeding.
 
 The curated branch may be committed and reviewed, but it must not be merged or
 published to registries until protected CI and isolated staging acceptance pass.
-No deployment or production mutation was performed during this acceptance pass;
-the existing production service remains online on its rolled-back 0.6.2
-baseline.
+An isolated staging diagnostic was deployed on 2026-08-03; no production
+deployment or configuration was changed. Ten production-derived values were
+used only for the bounded authorized diagnostic, removed immediately afterward,
+and never printed or written to disk. Production remained healthy on its
+rolled-back 0.6.2 baseline.

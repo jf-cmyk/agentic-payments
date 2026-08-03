@@ -221,6 +221,7 @@ from src.payment_security import (
     parse_payment_signature,
     payment_security_status,
 )
+from src.proxy_headers import TrustedProxyHeadersMiddleware
 from src.rwa_models import RWAObservationEnvelope, RWAProbeRequest
 from src.rwa_security import (
     RWARequestBodyLimitMiddleware,
@@ -1372,11 +1373,11 @@ def _apply_x402_cors_headers(request: Request, response: Response) -> Response:
 
 
 def _request_client_ip(request: Request) -> str:
-    """Use only Uvicorn's proxy-normalized peer address.
+    """Use only the trusted-proxy-normalized peer address.
 
-    ProxyHeadersMiddleware rewrites request.client only when the direct peer is
-    in FORWARDED_ALLOW_IPS. Re-reading X-Forwarded-For here would bypass that
-    trust decision and let callers select their own rate-limit/trial identity.
+    TrustedProxyHeadersMiddleware rewrites request.client only when the raw
+    direct peer is in FORWARDED_ALLOW_IPS. Re-reading forwarding headers here
+    would bypass that decision and let callers select their own identity.
     """
     return request.client.host if request.client else "unknown"
 
@@ -11966,11 +11967,32 @@ def _readiness_report() -> dict[str, Any]:
     }
 
 
+_PUBLIC_READINESS_REDACTED_KEYS = frozenset({"path", "database_path"})
+
+
+def _public_readiness_report(value: Any) -> Any:
+    """Copy readiness data without exposing internal filesystem locations."""
+    if isinstance(value, dict):
+        return {
+            key: _public_readiness_report(item)
+            for key, item in value.items()
+            if key not in _PUBLIC_READINESS_REDACTED_KEYS
+        }
+    if isinstance(value, list):
+        return [_public_readiness_report(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_public_readiness_report(item) for item in value)
+    return value
+
+
 @app.get("/readyz", include_in_schema=False)
 async def readiness_check() -> JSONResponse:
     """Return dependency-aware release readiness for deployment promotion."""
     report = _readiness_report()
-    return JSONResponse(status_code=200 if report["ready"] else 503, content=report)
+    return JSONResponse(
+        status_code=200 if report["ready"] else 503,
+        content=_public_readiness_report(report),
+    )
 
 
 @app.get("/health")
@@ -12177,6 +12199,16 @@ async def health_check() -> dict[str, Any]:
     }
 
 
+# Keep this registration after every route/decorator middleware so it remains
+# the outermost application boundary and normalizes the raw peer before any
+# rate-limit, starter-credit, or observability middleware reads request.client.
+app.add_middleware(
+    TrustedProxyHeadersMiddleware,
+    trusted_proxy_ips=settings.server.forwarded_allow_ips,
+    use_x_real_ip=_hosted_environment(),
+)
+
+
 def run_resource_server() -> None:
     """Start the resource server with uvicorn."""
     import uvicorn
@@ -12186,8 +12218,9 @@ def run_resource_server() -> None:
         host="0.0.0.0",
         port=port,
         log_level=settings.server.log_level.lower(),
-        proxy_headers=True,
-        forwarded_allow_ips=settings.server.forwarded_allow_ips,
+        # The application middleware must see the raw TCP peer before deciding
+        # whether Railway's forwarding headers are trusted.
+        proxy_headers=False,
         reload=False,
     )
     install_sensitive_query_log_filter()

@@ -1074,11 +1074,25 @@ def _railway_environment() -> bool:
     )
 
 
-def _trusted_proxy_problems(value: Sequence[str] | str | None) -> list[str]:
+def _network_is_loopback(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    return network.network_address.is_loopback and network.broadcast_address.is_loopback
+
+
+def _trusted_proxy_problems(
+    value: Sequence[str] | str | None,
+    *,
+    railway_hosted: bool = False,
+) -> list[str]:
     entries = _sequence(value)
     if not entries:
-        return ["trusted_proxies_missing"]
+        problems = ["trusted_proxies_missing"]
+        if railway_hosted:
+            problems.append("railway_trusted_proxy_range_missing")
+        return problems
     problems: list[str] = []
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     for entry in entries:
         if entry == "*":
             problems.append("trusted_proxies_wildcard")
@@ -1090,6 +1104,20 @@ def _trusted_proxy_problems(value: Sequence[str] | str | None) -> list[str]:
             continue
         if network.prefixlen == 0:
             problems.append("trusted_proxies_wildcard")
+            continue
+        networks.append(network)
+    if railway_hosted:
+        hosted_ranges = [network for network in networks if not _network_is_loopback(network)]
+        if not hosted_ranges:
+            problems.append("railway_trusted_proxy_range_missing")
+        # Railway does not publish a stable source-CIDR contract. Require an
+        # explicit bounded deployment assumption instead of encoding one
+        # observed peer as a universal range.
+        if any(
+            network.prefixlen < (10 if network.version == 4 else 64)
+            for network in hosted_ranges
+        ):
+            problems.append("railway_trusted_proxy_range_overbroad")
     return problems
 
 
@@ -1257,7 +1285,7 @@ def payment_security_status(
         blockers.append("payment_networks_missing")
     elif any(network not in MAINNET_NETWORKS for network in configured_networks):
         blockers.append("unsupported_mainnet_network")
-    blockers.extend(_trusted_proxy_problems(proxy_value))
+    blockers.extend(_trusted_proxy_problems(proxy_value, railway_hosted=is_railway))
     if isinstance(freshness, bool) or not isinstance(freshness, int) or freshness <= 0:
         blockers.append("payment_freshness_nonpositive")
     if isinstance(finality, bool) or not isinstance(finality, int) or finality <= 0:

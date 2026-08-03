@@ -47,7 +47,7 @@ promotion remain blocked.
 | --- | --- |
 | Public resource-server suite | Pass; 253 tests |
 | Focused registry/discovery/crawler suite | Pass; 33 tests |
-| Full repository suite | Pass; 829 tests |
+| Full repository suite | Pass; 848 tests |
 | Manifest-to-runtime tool parity | Pass; exact eight-tool match |
 | Registry schema and description integrity | Pass |
 | Public links, sitemap URLs, and packaged images | Pass |
@@ -59,11 +59,13 @@ The full suite reports two non-failing upstream deprecation warnings: the
 
 ## Current external release truth
 
-Observed with read-only probes on 2026-07-30.
+Observed with read-only probes on 2026-07-30 and the isolated staging diagnostic
+on 2026-08-03.
 
 | Surface | Observed state | Decision |
 | --- | --- | --- |
 | Production | `/health` is `200` and version `0.6.2`; `/readyz` is `404` | Online but stale and not readiness-gated |
+| Isolated staging | Candidate `8871a5f` built and started; Railway refused activation after `/readyz` stayed non-200 with a production-ineligible facilitator | Build/start proven; registry, command-center, hosted audit, and signed-client acceptance not reached |
 | Official MCP Registry | Latest is `0.6.3`; older entries identify GitLab, latest omits repository provenance | Active but behind the candidate |
 | Canonical GitHub `main` | `server.json` is `0.6.4`; no Actions workflow; `main` is unprotected | Behind and not a protected release source |
 | GitLab mirror | `server.json` is `0.6.2`; latest mirror commit is from 2026-05-20 | Historical mirror, not an install source |
@@ -74,10 +76,11 @@ Observed with read-only probes on 2026-07-30.
 
 ## Command-center assessment
 
-The local command center can now distinguish local attributed traffic,
+The candidate command center can now distinguish local attributed traffic,
 availability of external metrics, listing state, observed version, audit date,
 and release truth. That makes it useful for operational review and release
-drift detection.
+drift detection. Its credential-free regression suite passed, but the updated
+code is not live while production remains on 0.6.2.
 
 It still cannot establish marketplace conversion or distribution performance:
 no authenticated marketplace metric feed is configured, and the updated

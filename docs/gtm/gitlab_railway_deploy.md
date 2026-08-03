@@ -66,8 +66,11 @@ Do not enable or push the GitLab production pipeline until all of these are true
   `uv export --no-emit-project`. Railpack installs that file in a cached layer
   before copying the application source, so a local editable project entry
   would make package metadata depend on source files that are not present yet.
-- Attach independent persistent `/data` volumes and configure all production
-  secrets before the first staging candidate is deployed.
+- Attach independent persistent `/data` volumes and configure dedicated,
+  environment-scoped staging credentials before routine acceptance begins.
+  Production-derived values may be used only for an explicitly authorized,
+  bounded diagnostic; never write them to logs or local disk, never retain them
+  beyond that window, and remove them immediately when the diagnostic ends.
 - Record the currently active, successful production deployment id before
   approving promotion and confirm it is still eligible for Railway rollback.
 
@@ -94,6 +97,14 @@ Set the connector URLs on staging to
 `$STAGING_BASE_URL/openai/mcp`; use the corresponding `$PUBLIC_BASE_URL` URLs
 in production. Hosted readiness rejects connector URLs on another origin.
 
+The 2026-08-03 staging logs observed direct peer `100.64.0.2`; the current
+bounded operational assumption is `FORWARDED_ALLOW_IPS=100.64.0.0/10`. Railway
+documents `X-Real-IP` but does not publish a stable proxy source-CIDR contract.
+The application trusts one validated `X-Real-IP` only in Railway mode and only
+from the configured raw peers; otherwise it fails closed to the direct address.
+Never use `*` or a broad supernet, and revalidate the configured range in
+staging before production promotion.
+
 For the stream-backed market-data products, set these variables on every
 Railway service that runs `python -m src.resource_server`:
 
@@ -105,6 +116,29 @@ BLOCKSIZE_STATE_CACHE_MAX_TICKERS=250
 BLOCKSIZE_STREAM_CACHE_TTL_SECONDS=3600
 BLOCKSIZE_STREAM_CACHE_RECONNECT_SECONDS=5
 ```
+
+## Staging diagnostic record — 2026-08-03
+
+- Exact candidate: `8871a5f06d6b2ed162f5f74d79f00ab3af7b1f65`.
+- Exact-head GitHub Actions run `30848975204` passed the clean-checkout tests,
+  dependency audit, deterministic artifact checks, and installed-release smoke.
+- Railway deployment `339901eb-b448-4a01-813f-ce92513b975b` used the tracked
+  Railpack `v0.35.0` manifest, installed the dependency-only requirements,
+  copied the full source, built the image, mounted the isolated staging volume,
+  and completed application startup on port 8080.
+- Its Railway health probes reached the container from direct peer
+  `100.64.0.2`; this is the dated evidence for the current proxy allowlist, not
+  a published Railway source-CIDR guarantee.
+- `/readyz` remained `503`, so Railway correctly refused activation. The
+  production-ineligible public development facilitator is a known hard blocker;
+  the downstream hosted audit and signed-client checks did not run.
+- The ten temporarily authorized production-derived values were removed
+  immediately after the readiness window, the staging ticker configuration was
+  restored, and production remained healthy and unchanged on 0.6.2.
+
+This record is diagnostic evidence, not staging acceptance. Routine acceptance
+requires dedicated staging credentials and a production-capable authenticated
+facilitator.
 
 ## Cutover checklist
 

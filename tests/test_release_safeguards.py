@@ -171,6 +171,84 @@ def test_readiness_passes_with_required_runtime_and_static_files() -> None:
     assert health.json()["version"] == public_metadata.APP_VERSION
 
 
+def _contains_exact_key(value: object, keys: set[str]) -> bool:
+    if isinstance(value, dict):
+        return any(
+            key in keys or _contains_exact_key(item, keys)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_exact_key(item, keys) for item in value)
+    return False
+
+
+def test_public_readiness_redacts_filesystem_paths_without_mutating_report() -> None:
+    canary = "/private/runtime/secret-state.db"
+    report = {
+        "ready": False,
+        "checks": {
+            "credit_ledger": {"path": canary, "ready": False},
+            "rwa_operator_store": {"database_path": canary, "ready": False},
+            "connectors": {
+                "providers": {
+                    "openai": {
+                        "oauth_storage": {"path": canary, "ready": False},
+                        "public_url": {
+                            "url": "https://staging.example/openai/mcp",
+                            "expected_origin": "https://staging.example",
+                            "expected_path": "/openai/mcp",
+                        },
+                    }
+                }
+            },
+            "static_product": {"missing": ["assets/favicon.ico"]},
+        },
+    }
+
+    public = resource_server._public_readiness_report(report)
+
+    assert report["checks"]["credit_ledger"]["path"] == canary
+    assert report["checks"]["rwa_operator_store"]["database_path"] == canary
+    assert not _contains_exact_key(public, {"path", "database_path"})
+    assert canary not in json.dumps(public)
+    assert public["checks"]["connectors"]["providers"]["openai"]["public_url"] == {
+        "url": "https://staging.example/openai/mcp",
+        "expected_origin": "https://staging.example",
+        "expected_path": "/openai/mcp",
+    }
+    assert public["checks"]["static_product"]["missing"] == ["assets/favicon.ico"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("ready", "expected_status"), [(True, 200), (False, 503)])
+async def test_readiness_route_uses_internal_status_while_redacting_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    ready: bool,
+    expected_status: int,
+) -> None:
+    monkeypatch.setattr(
+        resource_server,
+        "_readiness_report",
+        lambda: {
+            "status": "ready" if ready else "not_ready",
+            "ready": ready,
+            "checks": {
+                "credit_ledger": {
+                    "ready": ready,
+                    "path": "/data/private-credit-ledger.db",
+                }
+            },
+        },
+    )
+
+    response = await resource_server.readiness_check()
+    payload = json.loads(response.body)
+
+    assert response.status_code == expected_status
+    assert payload["ready"] is ready
+    assert payload["checks"]["credit_ledger"] == {"ready": ready}
+
+
 def test_repeated_readiness_requests_only_use_cached_store_probes(monkeypatch) -> None:
     def forbidden_probe(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("readiness request performed a database probe")

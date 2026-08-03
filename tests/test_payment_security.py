@@ -810,7 +810,7 @@ def _ready_status_kwargs() -> dict[str, Any]:
         "mock_enabled": False,
         "legacy_enabled": False,
         "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
-        "trusted_proxies": "10.0.0.0/8,127.0.0.1",
+        "trusted_proxies": "100.64.0.0/10",
         "freshness_seconds": 900,
         "finality_confirmations": 3,
         "verification_lease_seconds": 30,
@@ -856,7 +856,16 @@ def test_payment_security_status_accepts_complete_production_configuration():
         ({"legacy_enabled": True}, "legacy_payments_enabled"),
         ({"networks": ["eip155:1"]}, "unsupported_mainnet_network"),
         ({"trusted_proxies": "*"}, "trusted_proxies_wildcard"),
+        ({"trusted_proxies": "0.0.0.0/0"}, "trusted_proxies_wildcard"),
         ({"trusted_proxies": "proxy.internal"}, "trusted_proxies_malformed"),
+        (
+            {"trusted_proxies": "127.0.0.1"},
+            "railway_trusted_proxy_range_missing",
+        ),
+        (
+            {"trusted_proxies": "100.0.0.0/8"},
+            "railway_trusted_proxy_range_overbroad",
+        ),
         ({"freshness_seconds": 0}, "payment_freshness_nonpositive"),
         ({"finality_confirmations": 0}, "payment_finality_nonpositive"),
         ({"verification_lease_seconds": 0}, "payment_verification_lease_nonpositive"),
@@ -881,6 +890,16 @@ def test_each_production_safeguard_independently_blocks_readiness(overrides, blo
     assert status["ready"] is False
     assert status["production_ready"] is False
     assert blocker in status["blockers"]
+
+
+def test_railway_accepts_an_exact_observed_proxy_peer():
+    kwargs = _ready_status_kwargs()
+    kwargs["trusted_proxies"] = "100.64.0.2/32"
+
+    status = payment_security_status(**kwargs)
+
+    assert status["production_ready"] is True
+    assert status["blockers"] == []
 
 
 def test_local_status_stays_runnable_but_exposes_production_blockers():
