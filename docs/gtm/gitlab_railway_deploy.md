@@ -59,7 +59,9 @@ Do not enable or push the GitLab production pipeline until all of these are true
   the deployed runtime must stay on the same tested interpreter line; Python
   3.13 is not certified by this release gate. Do not set a conflicting
   `RAILPACK_PYTHON_VERSION` override. The tracked Railway configuration also
-  pins Railpack 0.35.0 and its `RAILPACK` builder.
+  pins the published Railpack `v0.35.0` frontend image and its `RAILPACK`
+  builder. Keep the leading `v`: Railway passes the configured version through
+  to the GHCR frontend tag, and the unprefixed `0.35.0` tag does not exist.
 - Attach independent persistent `/data` volumes and configure all production
   secrets before the first staging candidate is deployed.
 - Record the currently active, successful production deployment id before

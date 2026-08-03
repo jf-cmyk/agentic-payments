@@ -1084,7 +1084,7 @@ def test_railway_promotes_only_dependency_ready_releases() -> None:
 
     assert railway["build"] == {
         "builder": "RAILPACK",
-        "railpackVersion": "0.35.0",
+        "railpackVersion": "v0.35.0",
     }
     assert railway["deploy"]["healthcheckPath"] == "/readyz"
     assert railway["deploy"]["healthcheckTimeout"] >= 60
