@@ -62,6 +62,10 @@ Do not enable or push the GitLab production pipeline until all of these are true
   pins the published Railpack `v0.35.0` frontend image and its `RAILPACK`
   builder. Keep the leading `v`: Railway passes the configured version through
   to the GHCR frontend tag, and the unprefixed `0.35.0` tag does not exist.
+- Keep `requirements.txt` dependency-only and generate it with
+  `uv export --no-emit-project`. Railpack installs that file in a cached layer
+  before copying the application source, so a local editable project entry
+  would make package metadata depend on source files that are not present yet.
 - Attach independent persistent `/data` volumes and configure all production
   secrets before the first staging candidate is deployed.
 - Record the currently active, successful production deployment id before

@@ -525,19 +525,15 @@ def _run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[st
 
 
 def _frozen_runtime_requirements(source: Path) -> str:
-    """Return an exact runtime lock export without its editable local project."""
+    """Return an exact dependency-only runtime lock export."""
     source = source.resolve(strict=True)
     output: list[str] = []
     runtime_requirements = 0
-    removed_local_project = False
     for raw_line in source.read_text(encoding="utf-8").splitlines():
         stripped = raw_line.strip()
-        if stripped in {"-e .", "--editable ."}:
-            removed_local_project = True
-            continue
         if stripped.startswith(("-e ", "--editable ")):
             raise RuntimeError(
-                f"frozen runtime requirements contain an unexpected editable: {stripped}"
+                f"dependency-only runtime requirements contain an editable: {stripped}"
             )
         if stripped and not stripped.startswith("#"):
             requirement = stripped.split(";", 1)[0].strip()
@@ -548,8 +544,6 @@ def _frozen_runtime_requirements(source: Path) -> str:
             runtime_requirements += 1
         output.append(raw_line)
 
-    if not removed_local_project:
-        raise RuntimeError("frozen runtime requirements must contain the local '-e .' project")
     if not runtime_requirements:
         raise RuntimeError("frozen runtime requirements contain no pinned dependencies")
     return "\n".join(output) + "\n"

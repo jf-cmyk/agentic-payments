@@ -1081,11 +1081,15 @@ def test_configured_clerk_connectors_advertise_only_mounted_oauth_routes(
 
 def test_railway_promotes_only_dependency_ready_releases() -> None:
     railway = tomllib.loads((ROOT / "railway.toml").read_text(encoding="utf-8"))
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 
     assert railway["build"] == {
         "builder": "RAILPACK",
         "railpackVersion": "v0.35.0",
     }
+    assert "--no-emit-project" in requirements
+    assert "-e ." not in requirements
+    assert "--editable ." not in requirements
     assert railway["deploy"]["healthcheckPath"] == "/readyz"
     assert railway["deploy"]["healthcheckTimeout"] >= 60
     assert railway["deploy"]["restartPolicyType"] == "ON_FAILURE"
@@ -1434,7 +1438,7 @@ def test_installed_release_uses_only_exact_frozen_runtime_dependencies(
 ) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text(
-        "# generated\n-e .\nfastapi==1.2.3\ncolorama==0.4.6 ; sys_platform == 'win32'\n",
+        "# generated\nfastapi==1.2.3\ncolorama==0.4.6 ; sys_platform == 'win32'\n",
         encoding="utf-8",
     )
 
@@ -1445,19 +1449,19 @@ def test_installed_release_uses_only_exact_frozen_runtime_dependencies(
     assert "colorama==0.4.6 ; sys_platform == 'win32'" in frozen
 
 
-def test_installed_release_rejects_unfrozen_or_foreign_editable_dependencies(
+def test_installed_release_rejects_unfrozen_or_editable_dependencies(
     tmp_path: Path,
 ) -> None:
     requirements = tmp_path / "requirements.txt"
-    requirements.write_text("-e .\nfastapi>=1.2.3\n", encoding="utf-8")
+    requirements.write_text("fastapi>=1.2.3\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="exact version pins"):
         verify_installed_release._frozen_runtime_requirements(requirements)
 
     requirements.write_text(
-        "-e .\n-e ../another-project\nfastapi==1.2.3\n",
+        "-e .\nfastapi==1.2.3\n",
         encoding="utf-8",
     )
-    with pytest.raises(RuntimeError, match="unexpected editable"):
+    with pytest.raises(RuntimeError, match="contain an editable"):
         verify_installed_release._frozen_runtime_requirements(requirements)
 
 
