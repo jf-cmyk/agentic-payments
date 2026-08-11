@@ -32,7 +32,7 @@ from scripts import (
 ROOT = Path(__file__).resolve().parents[1]
 
 SECURITY_VERSION_FLOORS = {
-    "cryptography": Version("48.0.1"),
+    "cryptography": Version("50.0.0"),
     "idna": Version("3.15"),
     "joserfc": Version("1.6.8"),
     "mcp": Version("1.28.1"),

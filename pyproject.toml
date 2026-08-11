@@ -25,7 +25,7 @@ dependencies = [
     # FastMCP's in-memory store expects TLRUCache, absent from cachetools 4.x.
     "cachetools>=5.3.0",
     # Used directly for encrypted OAuth storage and signed venue adapters.
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.0",
     # Official x402 v2 schema validation for production payment signatures.
     "x402>=2.8.0",
     # Official request-bound JWT generation for the CDP production facilitator.
