@@ -14,6 +14,29 @@ test_python:
   image: python:3.12
   timeout: 20m
   before_script:
+    - |
+      case "$(uname -m)" in
+        x86_64)
+          NODE_ARCHIVE="node-v20.19.4-linux-x64.tar.gz"
+          NODE_SHA256="d80a33707605ced9a31b8f543cea9ab512bc3d2fef2c148f31a50e939ff07560"
+          ;;
+        aarch64|arm64)
+          NODE_ARCHIVE="node-v20.19.4-linux-arm64.tar.gz"
+          NODE_SHA256="d200798332b7a56d355888ce58e6a639fac7939a4833e5bc8780c66888e1ce4d"
+          ;;
+        *)
+          echo "Unsupported GitLab runner architecture: $(uname -m)" >&2
+          exit 1
+          ;;
+      esac
+      curl --fail --show-error --silent --location \
+        "https://nodejs.org/dist/v20.19.4/${NODE_ARCHIVE}" \
+        --output "/tmp/${NODE_ARCHIVE}"
+      echo "${NODE_SHA256}  /tmp/${NODE_ARCHIVE}" | sha256sum --check --strict -
+      tar -xzf "/tmp/${NODE_ARCHIVE}" --directory /usr/local --strip-components=1
+      rm -f "/tmp/${NODE_ARCHIVE}"
+    - test "$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.12"
+    - test "$(node --version)" = "v20.19.4"
     - python -m pip install --upgrade pip
     - python -m pip install uv==0.11.7
     - uv sync --frozen --extra dev
@@ -30,12 +53,17 @@ test_python:
 
 deploy_staging:
   stage: staging
-  timeout: 20m
+  timeout: 50m
+  interruptible: false
   environment:
     name: staging
     url: "$STAGING_BASE_URL"
   variables:
     RAILWAY_TOKEN: "$STAGING_RAILWAY_TOKEN"
+    RUNNER_SCRIPT_TIMEOUT: "25m"
+    RUNNER_AFTER_SCRIPT_TIMEOUT: "20m"
+    AFTER_SCRIPT_IGNORE_ERRORS: "false"
+    RELEASE_RECOVERY_TIMEOUT_MS: "900000"
   needs:
     - test_python
   resource_group: staging
@@ -52,23 +80,41 @@ deploy_staging:
     - test -n "$RAILWAY_PROJECT_ID"
     - test -n "$RAILWAY_ENVIRONMENT"
     - test -n "$RAILWAY_SERVICE_NAME"
+    - test -n "$RAILWAY_SERVICE_ID"
     - test -n "$PUBLIC_BASE_URL"
     - test "$STAGING_BASE_URL" != "$PUBLIC_BASE_URL"
     - test "$STAGING_RAILWAY_ENVIRONMENT" != "$RAILWAY_ENVIRONMENT"
     - test "$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_SERVICE_NAME"
     - test "$STAGING_RAILWAY_PROJECT_ID:$STAGING_RAILWAY_ENVIRONMENT:$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_PROJECT_ID:$RAILWAY_ENVIRONMENT:$RAILWAY_SERVICE_NAME"
     - node scripts/stamp_release.mjs "$CI_COMMIT_SHA" "$CI_COMMIT_BRANCH"
-    - railway up --ci --project "$STAGING_RAILWAY_PROJECT_ID" --environment "$STAGING_RAILWAY_ENVIRONMENT" --service "$STAGING_RAILWAY_SERVICE_NAME"
-    - node scripts/audit_hosted_release.mjs "$STAGING_BASE_URL" "$CI_COMMIT_SHA"
+    - |
+      STAGING_DEPLOYMENT_MESSAGE="bsmcp:staging:${CI_PIPELINE_ID}:${CI_JOB_ID}:${CI_COMMIT_SHA}"
+      STAGING_DEPLOYMENT_ID="$(node scripts/deploy_railway_exact.mjs --project "$STAGING_RAILWAY_PROJECT_ID" --environment "$STAGING_RAILWAY_ENVIRONMENT" --service "$STAGING_RAILWAY_SERVICE_NAME" --message "$STAGING_DEPLOYMENT_MESSAGE" --mode staging --base-url "$STAGING_BASE_URL" --forbidden-project "$RAILWAY_PROJECT_ID" --forbidden-environment "$RAILWAY_ENVIRONMENT" --forbidden-service "$RAILWAY_SERVICE_ID" --forbidden-base-url "$PUBLIC_BASE_URL" --state-file .railway-release-staging.json --timeout-seconds 600)"
+      test -n "$STAGING_DEPLOYMENT_ID"
+      timeout 120s railway logs "$STAGING_DEPLOYMENT_ID" --build --lines 500 --filter "railpack" --project "$STAGING_RAILWAY_PROJECT_ID" --environment "$STAGING_RAILWAY_ENVIRONMENT" --service "$STAGING_RAILWAY_SERVICE_NAME" | node scripts/audit_railpack_build_log.mjs
+      RELEASE_AUDIT_TIMEOUT_MS=300000 node scripts/audit_hosted_release.mjs "$STAGING_BASE_URL" "$CI_COMMIT_SHA"
+      timeout 120s node scripts/accept_railway_release.mjs --state-file .railway-release-staging.json --deployment-id "$STAGING_DEPLOYMENT_ID" --expected-commit "$CI_COMMIT_SHA"
+  after_script:
+    - node scripts/recover_railway_release.mjs --state-file .railway-release-staging.json
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - .railway-release-staging.json
 
 deploy_production:
   stage: deploy
-  timeout: 20m
+  timeout: 50m
+  interruptible: false
   environment:
     name: production
     url: "$PUBLIC_BASE_URL"
   variables:
     RAILWAY_TOKEN: "$PRODUCTION_RAILWAY_TOKEN"
+    RUNNER_SCRIPT_TIMEOUT: "25m"
+    RUNNER_AFTER_SCRIPT_TIMEOUT: "20m"
+    AFTER_SCRIPT_IGNORE_ERRORS: "false"
+    RELEASE_RECOVERY_TIMEOUT_MS: "900000"
   needs:
     - deploy_staging
   resource_group: production
@@ -83,26 +129,24 @@ deploy_production:
     - test -n "$RAILWAY_PROJECT_ID"
     - test -n "$RAILWAY_ENVIRONMENT"
     - test -n "$RAILWAY_SERVICE_NAME"
+    - test -n "$RAILWAY_SERVICE_ID"
+    - test -n "$PRODUCTION_VOLUME_INSTANCE_ID"
+    - test -n "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"
+    - test -n "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256"
+    - test -f "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"
+    - test -r "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"
     - node scripts/stamp_release.mjs "$CI_COMMIT_SHA" "$CI_COMMIT_BRANCH"
     - |
-      deployed=false
-      for attempt in 1 2 3; do
-        if railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME"; then
-          deployed=true
-          break
-        else
-          status=$?
-        fi
-        if [ "$attempt" = "3" ]; then
-          exit "$status"
-        fi
-        sleep $((attempt * 20))
-      done
-      if [ "$deployed" != "true" ]; then
-        exit 1
-      fi
-    - |
-      if ! node scripts/audit_hosted_release.mjs "$PUBLIC_BASE_URL" "$CI_COMMIT_SHA"; then
-        echo "Production hosted audit failed after activation. Stop promotion work and execute the recorded Railway rollback procedure."
-        exit 1
-      fi
+      PRODUCTION_DEPLOYMENT_MESSAGE="bsmcp:production:${CI_PIPELINE_ID}:${CI_JOB_ID}:${CI_COMMIT_SHA}"
+      PRODUCTION_DEPLOYMENT_ID="$(node scripts/deploy_railway_exact.mjs --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_ID" --message "$PRODUCTION_DEPLOYMENT_MESSAGE" --mode production --base-url "$PUBLIC_BASE_URL" --volume-instance "$PRODUCTION_VOLUME_INSTANCE_ID" --expected-commit "$CI_COMMIT_SHA" --drain-attestation-file "$PRODUCTION_LEGACY_DRAIN_ATTESTATION" --drain-attestation-sha256 "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256" --state-file .railway-release-production.json --timeout-seconds 600)"
+      test -n "$PRODUCTION_DEPLOYMENT_ID"
+      timeout 120s railway logs "$PRODUCTION_DEPLOYMENT_ID" --build --lines 500 --filter "railpack" --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_ID" | node scripts/audit_railpack_build_log.mjs
+      RELEASE_AUDIT_TIMEOUT_MS=300000 node scripts/audit_hosted_release.mjs "$PUBLIC_BASE_URL" "$CI_COMMIT_SHA"
+      timeout 120s node scripts/accept_railway_release.mjs --state-file .railway-release-production.json --deployment-id "$PRODUCTION_DEPLOYMENT_ID" --expected-commit "$CI_COMMIT_SHA" --drain-attestation-sha256 "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256"
+  after_script:
+    - node scripts/recover_railway_release.mjs --state-file .railway-release-production.json --expected-commit "$CI_COMMIT_SHA" --drain-attestation-sha256 "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256"
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - .railway-release-production.json

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
@@ -13,6 +14,7 @@ import textwrap
 import threading
 import tomllib
 import zipfile
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +32,118 @@ from scripts import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _canonical_json(value: object) -> str:
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            f"{json.dumps(key, separators=(',', ':'))}:{_canonical_json(value[key])}"
+            for key in sorted(value)
+        ) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical_json(item) for item in value) + "]"
+    return json.dumps(value, separators=(",", ":"))
+
+
+def _legacy_bridge_fixture(now_epoch_ms: int) -> tuple[dict[str, object], dict[str, object]]:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.fromtimestamp(now_epoch_ms / 1000, tz=UTC)
+
+    def stamp(delta: timedelta) -> str:
+        return (now + delta).isoformat().replace("+00:00", "Z")
+    payment_counts = {
+        "total": 0,
+        "pending": 0,
+        "settled": 0,
+        "settlement_unknown": 0,
+        "released": 0,
+        "finalized": 0,
+        "unknown": 0,
+        "finalized_cached_responses": 0,
+        "recent_finalized_cached_responses": 0,
+    }
+    usage = {
+        connector: {"row_count": 0, "credits_spent_total": 0}
+        for connector in ("anthropic", "cursor", "openai")
+    }
+    fingerprints = {
+        "creditDb": "1" * 64,
+        "connectors": {
+            "anthropic": "2" * 64,
+            "cursor": "3" * 64,
+            "openai": "4" * 64,
+        },
+    }
+    def sample(delta: timedelta) -> dict[str, object]:
+        return {
+            "sampledAt": stamp(delta),
+            "databaseFingerprints": fingerprints,
+            "connector_daily_usage": usage,
+            "payment_proofs": payment_counts,
+        }
+    prior_id = "33333333-3333-4333-8333-333333333333"
+    attestation = {
+        "schemaVersion": 1,
+        "kind": "blocksize_legacy_transaction_drain_v1",
+        "attestedBy": "release-operator@example.com",
+        "candidateCommit": "a" * 40,
+        "target": {
+            "project": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "environment": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "service": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "domains": {"custom": [], "service": ["production.example"]},
+        },
+        "prior": {
+            "deploymentId": prior_id,
+            "version": "0.6.2",
+            "imageDigest": "sha256:prior",
+            "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "compatibilityFixtureCommit": "1791c5c9c46163cdcc1c9b69613f2855bee4d7a1",
+            "liveSchemaBehaviorAuditSha256": "5" * 64,
+        },
+        "freeze": {
+            "ingressFrozen": True,
+            "economicWritesFrozen": True,
+            "startedAt": stamp(timedelta(minutes=-3)),
+            "drainWaitCompletedAt": stamp(timedelta(minutes=-2)),
+            "minimumDrainSeconds": 60,
+            "expiresAt": stamp(timedelta(hours=2)),
+            "enforcement": {
+                "mechanism": "all_domain_ingress_block",
+                "changeReference": "edge-change-123",
+                "zeroInFlightObservedAt": stamp(timedelta(seconds=-110)),
+            },
+            "stableLedgerSamples": [
+                sample(timedelta(seconds=-100)),
+                sample(timedelta(seconds=-90)),
+            ],
+        },
+        "directCounts": {
+            "connector_pending_charges": 0,
+            "connector_pending_charges_by_connector": {
+                "anthropic": 0,
+                "cursor": 0,
+                "openai": 0,
+            },
+            "payment_proofs": payment_counts,
+        },
+    }
+    source = (_canonical_json(attestation) + "\n").encode()
+    bridge = {
+        "required": True,
+        "phase": "legacy_lock",
+        "sourceSha256": hashlib.sha256(source).hexdigest(),
+        "attestation": attestation,
+    }
+    prior = {
+        "id": prior_id,
+        "imageDigest": "sha256:prior",
+        "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "health": {"version": "0.6.2"},
+        "readiness": {"status": 404},
+    }
+    return bridge, prior
 
 SECURITY_VERSION_FLOORS = {
     "cryptography": Version("50.0.0"),
@@ -1163,7 +1277,7 @@ def test_railway_promotes_only_dependency_ready_releases() -> None:
 
     assert railway["build"] == {
         "builder": "RAILPACK",
-        "railpackVersion": "v0.35.0",
+        "railpackVersion": "0.36.2",
     }
     assert "--no-emit-project" in requirements
     assert "-e ." not in requirements
@@ -1171,6 +1285,2240 @@ def test_railway_promotes_only_dependency_ready_releases() -> None:
     assert railway["deploy"]["healthcheckPath"] == "/readyz"
     assert railway["deploy"]["healthcheckTimeout"] >= 60
     assert railway["deploy"]["restartPolicyType"] == "ON_FAILURE"
+
+
+def test_railpack_build_log_audit_requires_the_exact_pinned_version() -> None:
+    script = ROOT / "scripts" / "audit_railpack_build_log.mjs"
+    accepted_log = "\n".join(
+        [
+            "using build driver railpack-v0.36.2",
+            "[railway] prepare railpack-v0.36.2",
+            "\x1b[95m│ Railpack 0.36.2 │\x1b[0m",
+            "resolve image config for docker-image://ghcr.io/railwayapp/railpack-frontend:v0.36.2",
+        ]
+    )
+    accepted = subprocess.run(
+        ["node", str(script)],
+        cwd=ROOT,
+        input=accepted_log,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    drifted = subprocess.run(
+        ["node", str(script)],
+        cwd=ROOT,
+        input=accepted_log.replace("0.36.2", "0.36.3"),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    assert "pinned Railpack 0.36.2" in accepted.stdout
+    assert drifted.returncode != 0
+    assert "marker observed 0.36.3" in drifted.stderr
+
+
+def test_legacy_bridge_validator_binds_digest_domains_samples_and_fresh_readiness(
+    tmp_path: Path,
+) -> None:
+    now_epoch_ms = int(__import__("time").time() * 1000)
+    bridge, prior = _legacy_bridge_fixture(now_epoch_ms)
+    target = bridge["attestation"]["target"]  # type: ignore[index]
+    readiness_counts = {
+        **bridge["attestation"]["directCounts"],  # type: ignore[index]
+        "connector_daily_usage": bridge["attestation"]["freeze"][  # type: ignore[index]
+            "stableLedgerSamples"
+        ][1]["connector_daily_usage"],
+        "database_fingerprints": bridge["attestation"]["freeze"][  # type: ignore[index]
+            "stableLedgerSamples"
+        ][1]["databaseFingerprints"],
+    }
+    readiness = {
+        "status": 200,
+        "ready": True,
+        "version": "0.6.5",
+        "commitSha": "a" * 40,
+        "legacyTransactionBridge": {
+            "ready": True,
+            "checked": True,
+            "configuration_valid": True,
+            "economic_writes_locked": True,
+            "mode": "locked",
+            "reason": None,
+            "blockers": [],
+            "direct_counts": readiness_counts,
+        },
+    }
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "bridge": bridge,
+                "prior": prior,
+                "target": {
+                    "project": target["project"],  # type: ignore[index]
+                    "environment": target["environment"],  # type: ignore[index]
+                    "service": target["service"],  # type: ignore[index]
+                },
+                "domains": target["domains"],  # type: ignore[index]
+                "readiness": readiness,
+                "now": now_epoch_ms,
+            }
+        ),
+        encoding="utf-8",
+    )
+    probe = textwrap.dedent(
+        f"""
+        import {{ readFile }} from "node:fs/promises";
+        import {{
+          expectedLegacyBridgePhase,
+          validateLegacyBridgeReadiness,
+          validateLegacyBridgeState,
+        }} from {json.dumps((ROOT / "scripts/railway_release_control.mjs").as_uri())};
+        const value = JSON.parse(await readFile({json.dumps(str(payload_path))}, "utf8"));
+        const context = {{
+          target: value.target,
+          targetDomains: value.domains,
+          prior: value.prior,
+          expectedCommit: "{'a' * 40}",
+          expectedDigest: value.bridge.sourceSha256,
+          now: value.now,
+          requireUnexpired: true,
+        }};
+        validateLegacyBridgeState(value.bridge, context);
+        validateLegacyBridgeReadiness(value.readiness, value.bridge);
+        const rejects = async (call) => {{
+          try {{ await call(); return false; }} catch {{ return true; }}
+        }};
+        const tampered = structuredClone(value.bridge);
+        tampered.attestation.directCounts.payment_proofs.released = 1;
+        const wrongDomains = structuredClone(value.domains);
+        wrongDomains.service.push("other.example");
+        const stale = structuredClone(value.readiness);
+        stale.legacyTransactionBridge.reason = "probe_stale";
+        stale.legacyTransactionBridge.blockers = ["readiness_probe_stale"];
+        const wrongCommitPrior = structuredClone(value.prior);
+        wrongCommitPrior.health = {{ version: "0.6.5", commitSha: "{'b' * 40}" }};
+        wrongCommitPrior.readiness = {{
+          ...value.readiness,
+          legacyTransactionBridge: value.readiness.legacyTransactionBridge,
+        }};
+        const unlock = structuredClone(value.bridge);
+        unlock.phase = "bridge_unlock";
+        console.log(JSON.stringify({{
+          phase: expectedLegacyBridgePhase(value.prior),
+          unlockedBypass: expectedLegacyBridgePhase({{
+            health: {{ version: "0.6.5" }},
+            readiness: {{ legacyTransactionBridge: {{
+              configuration_valid: true,
+              economic_writes_locked: false,
+            }} }},
+          }}),
+          tamperedRejected: await rejects(() => validateLegacyBridgeState(tampered, context)),
+          domainsRejected: await rejects(() => validateLegacyBridgeState(value.bridge, {{
+            ...context, targetDomains: wrongDomains,
+          }})),
+          staleRejected: await rejects(() => validateLegacyBridgeReadiness(stale, value.bridge)),
+          wrongUnlockRejected: await rejects(() => validateLegacyBridgeState(unlock, {{
+            ...context, prior: wrongCommitPrior,
+          }})),
+        }}));
+        """
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcome = json.loads(result.stdout)
+    assert outcome == {
+        "phase": "legacy_lock",
+        "unlockedBypass": None,
+        "tamperedRejected": True,
+        "domainsRejected": True,
+        "staleRejected": True,
+        "wrongUnlockRejected": True,
+    }
+
+
+def test_first_legacy_cutover_is_hard_blocked_before_deploy_mutation() -> None:
+    probe = textwrap.dedent(
+        f"""
+        import {{
+          requireExecutableLegacyBridgePhase,
+        }} from {json.dumps((ROOT / "scripts/railway_release_control.mjs").as_uri())};
+        const rejects = (phase) => {{
+          try {{
+            requireExecutableLegacyBridgePhase(phase);
+            return null;
+          }} catch (error) {{
+            return String(error.message || error);
+          }}
+        }};
+        console.log(JSON.stringify({{
+          legacy: rejects("legacy_lock"),
+          unlock: rejects("bridge_unlock"),
+          bypass: requireExecutableLegacyBridgePhase(null),
+          malformed: rejects("unexpected"),
+        }}));
+        """
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcome = json.loads(result.stdout)
+    assert "operationally blocked before mutation" in outcome["legacy"]
+    assert "operationally blocked before mutation" in outcome["unlock"]
+    assert outcome["bypass"] is None
+    assert "unsupported legacy transaction bridge phase" in outcome["malformed"]
+
+    deploy_source = (ROOT / "scripts" / "deploy_railway_exact.mjs").read_text(
+        encoding="utf-8"
+    )
+    gate_offset = deploy_source.index("requireExecutableLegacyBridgePhase(phase)")
+    mutation_offset = deploy_source.index("state.bridgeVariable.changeArmed = true")
+    upload_offset = deploy_source.index("const upload = await runRailway(")
+    assert gate_offset < mutation_offset < upload_offset
+
+
+def test_railway_bridge_variable_mutation_uses_stdin_skip_deploys_and_readback(
+    tmp_path: Path,
+) -> None:
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import json
+            import os
+            from pathlib import Path
+            import sys
+
+            args = sys.argv[1:]
+            root = Path(os.environ["FAKE_RAILWAY_STATE"])
+            root.mkdir(exist_ok=True)
+            if args[:2] == ["variable", "set"]:
+                value = sys.stdin.read()
+                (root / "value").write_text(value.strip(), encoding="utf-8")
+                (root / "set-call.json").write_text(
+                    json.dumps({{"args": args, "stdin": value}}), encoding="utf-8"
+                )
+                raise SystemExit(0)
+            if args[:2] == ["variable", "list"]:
+                value = (root / "value").read_text(encoding="utf-8")
+                print(json.dumps({{"LEGACY_TRANSACTION_BRIDGE_LOCK": value}}))
+                raise SystemExit(0)
+            raise SystemExit("unexpected Railway command")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+    state_dir = tmp_path / "state"
+    probe = textwrap.dedent(
+        f"""
+        import {{ setExactServiceVariable }} from {
+            json.dumps((ROOT / "scripts/railway_release_control.mjs").as_uri())
+        };
+        await setExactServiceVariable({{
+          project: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          environment: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          service: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        }}, "LEGACY_TRANSACTION_BRIDGE_LOCK", "true");
+        """
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+            "FAKE_RAILWAY_STATE": str(state_dir),
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    call = json.loads((state_dir / "set-call.json").read_text(encoding="utf-8"))
+    assert call["stdin"] == "true\n"
+    assert "true" not in call["args"]
+    assert call["args"][:3] == [
+        "variable",
+        "set",
+        "LEGACY_TRANSACTION_BRIDGE_LOCK",
+    ]
+    assert "--stdin" in call["args"]
+    assert "--skip-deploys" in call["args"]
+
+
+def test_transaction_bridge_projection_is_migration_invariant_and_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+
+    from src.credit_manager import CreditManager
+    from src.entitlement_manager import EntitlementManager
+    from src.transaction_bridge import transaction_bridge_readiness
+
+    credit_db = tmp_path / "credits.db"
+    connector_paths = {
+        connector: tmp_path / f"{connector}.db"
+        for connector in ("anthropic", "cursor", "openai")
+    }
+    with sqlite3.connect(credit_db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE wallets (address TEXT PRIMARY KEY, balance_credits REAL, last_updated TIMESTAMP);
+            CREATE TABLE credit_purchases (tx_hash TEXT PRIMARY KEY, address TEXT, amount_usdc REAL, credits_added REAL, timestamp TIMESTAMP);
+            CREATE TABLE trial_history (ip_hash TEXT PRIMARY KEY, address TEXT, funding_address TEXT, timestamp TIMESTAMP, subject_hash TEXT, subject_type TEXT DEFAULT 'wallet', device_hash TEXT, session_hash TEXT, user_agent_hash TEXT);
+            CREATE TABLE payment_proofs (tx_hash TEXT PRIMARY KEY, network TEXT NOT NULL, amount_atomic INTEGER DEFAULT 0, recipient TEXT DEFAULT '', purpose TEXT DEFAULT '', timestamp TIMESTAMP);
+            CREATE TABLE price_receipts (receipt_id TEXT PRIMARY KEY, product TEXT NOT NULL, subject TEXT DEFAULT '', payload_json TEXT NOT NULL, created_at TIMESTAMP);
+            """
+        )
+    legacy_fixture = ROOT / "tests" / "fixtures" / "entitlement_manager_v062.py"
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_release_bridge_v062", legacy_fixture)
+    assert spec and spec.loader
+    legacy_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = legacy_module
+    spec.loader.exec_module(legacy_module)
+    for connector, path in connector_paths.items():
+        legacy = legacy_module.EntitlementManager(path, default_daily_credits=5)
+        legacy.status(f"{connector}-user", usage_date="2026-08-13")
+
+    # Capture the reviewed v0.6.2 business projections, then run real candidate
+    # constructors that add lifecycle/identity columns and tables.
+    from src.transaction_bridge import (
+        _CONNECTOR_LEGACY_PROJECTIONS,
+        _CREDIT_LEGACY_PROJECTIONS,
+        _legacy_business_fingerprint,
+        _read_only_connection,
+    )
+
+    with _read_only_connection(credit_db) as conn:
+        legacy_credit_fingerprint = _legacy_business_fingerprint(
+            conn, _CREDIT_LEGACY_PROJECTIONS
+        )
+    legacy_connector_fingerprints = {}
+    for connector, path in connector_paths.items():
+        with _read_only_connection(path) as conn:
+            legacy_connector_fingerprints[connector] = _legacy_business_fingerprint(
+                conn, _CONNECTOR_LEGACY_PROJECTIONS
+            )
+    CreditManager(str(credit_db))
+    for path in connector_paths.values():
+        EntitlementManager(path, default_daily_credits=5)
+
+    monkeypatch.setenv("LEGACY_TRANSACTION_BRIDGE_LOCK", "true")
+    before = transaction_bridge_readiness(credit_db, connector_paths)
+    assert before["ready"] is True
+    assert before["direct_counts"]["connector_pending_charges"] == 0
+    assert before["direct_counts"]["payment_proofs"]["pending"] == 0
+    assert before["direct_counts"]["database_fingerprints"] == {
+        "creditDb": legacy_credit_fingerprint,
+        "connectors": legacy_connector_fingerprints,
+    }
+
+    with sqlite3.connect(credit_db) as conn:
+        conn.execute("ALTER TABLE wallets ADD COLUMN additive_candidate_column TEXT")
+    with sqlite3.connect(connector_paths["anthropic"]) as conn:
+        conn.execute("ALTER TABLE users ADD COLUMN additive_candidate_column TEXT")
+    after_additive_migration = transaction_bridge_readiness(credit_db, connector_paths)
+    assert (
+        after_additive_migration["direct_counts"]["database_fingerprints"]
+        == before["direct_counts"]["database_fingerprints"]
+    )
+
+    with sqlite3.connect(connector_paths["anthropic"]) as conn:
+        conn.execute(
+            "UPDATE daily_usage SET credits_spent = credits_spent + 1 "
+            "WHERE user_id = ?",
+            ("anthropic-user",),
+        )
+    changed = transaction_bridge_readiness(credit_db, connector_paths)
+    assert (
+        changed["direct_counts"]["database_fingerprints"]["connectors"]["anthropic"]
+        != before["direct_counts"]["database_fingerprints"]["connectors"]["anthropic"]
+    )
+
+    with sqlite3.connect(credit_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO payment_proofs (
+              tx_hash, network, state, request_binding, reservation_id, attempt_id
+            ) VALUES ('pending-proof', 'eip155:8453', 'pending', 'binding', 'r', 'a')
+            """
+        )
+    blocked = transaction_bridge_readiness(credit_db, connector_paths)
+    assert blocked["ready"] is False
+    assert "payment_proof_transient_states_not_drained" in blocked["blockers"]
+
+    monkeypatch.setenv("LEGACY_TRANSACTION_BRIDGE_LOCK", "malformed")
+    invalid = transaction_bridge_readiness(credit_db, connector_paths)
+    assert invalid["economic_writes_locked"] is True
+    assert invalid["configuration_valid"] is False
+    assert invalid["ready"] is False
+
+
+def test_locked_http_bridge_preserves_discovery_and_blocks_new_economic_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("LEGACY_TRANSACTION_BRIDGE_LOCK", "true")
+    monkeypatch.setenv("CREDIT_DB_PATH", str(tmp_path / "bridge-http.db"))
+    monkeypatch.setattr(resource_server, "_facilitator_support_required", lambda: False)
+    monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", True)
+    monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+    upstream = AsyncMock()
+    upstream.get_vwap_latest = AsyncMock()
+    with TestClient(resource_server.app, base_url="https://testserver") as client:
+        runtime_upstream = resource_server.app.state.blocksize
+        runtime_facilitator_support = resource_server.app.state.facilitator_support
+        resource_server.app.state.blocksize = upstream
+        resource_server.app.state.facilitator_support = {
+            "checked": True,
+            "available": True,
+            "required": False,
+            "kinds": [
+                {
+                    "x402Version": 2,
+                    "scheme": "exact",
+                    "network": requirement["network"],
+                    "extra": {},
+                }
+                for requirement in settings.payment_requirements(
+                    settings.pricing.core_crypto
+                )
+            ],
+        }
+        manager = resource_server.app.state.credits
+        try:
+            discovery = client.get("/v1/vwap/btc-usd")
+            signed = client.get(
+                "/v1/vwap/btc-usd",
+                headers={
+                    "PAYMENT-SIGNATURE": __import__("base64").b64encode(
+                        json.dumps(
+                            {"proof": "new-bridge-proof", "network": settings.x402.solana_network}
+                        ).encode()
+                    ).decode()
+                },
+            )
+            claim = client.post(
+                "/v1/credits/claim",
+                json={"proof": "proof", "tier": "starter", "wallet": "w" * 32},
+            )
+        finally:
+            resource_server.app.state.blocksize = runtime_upstream
+            resource_server.app.state.facilitator_support = runtime_facilitator_support
+
+    # Some test security profiles have no operational payment rail; unsigned
+    # discovery must remain non-economic and never reach the upstream either way.
+    assert discovery.status_code in {402, 503}
+    if discovery.status_code == 402:
+        assert signed.status_code == 503
+        assert signed.json()["error_code"] == "ECONOMIC_WRITES_LOCKED"
+        assert signed.headers["cache-control"] == "no-store"
+    else:
+        assert signed.status_code == 503
+    assert claim.status_code == 503
+    assert claim.headers["cache-control"] == "no-store"
+    assert manager.payment_proof_state("new-bridge-proof") is None
+    upstream.get_vwap_latest.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("module_name", "tool_prefix"),
+    [
+        ("src.anthropic_mcp_server", "anthropic"),
+        ("src.cursor_mcp_server", "cursor"),
+        ("src.openai_mcp_server", "openai"),
+    ],
+)
+async def test_locked_connector_tools_return_before_any_ledger_or_upstream_access(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    tool_prefix: str,
+) -> None:
+    import importlib
+
+    module = importlib.import_module(module_name)
+
+    class ForbiddenAccess:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"bridge lock touched forbidden dependency attribute {name}")
+
+    monkeypatch.setenv("LEGACY_TRANSACTION_BRIDGE_LOCK", "true")
+    monkeypatch.setattr(module, "_client", ForbiddenAccess())
+    monkeypatch.setattr(module, "_entitlements", ForbiddenAccess())
+
+    paid = await getattr(module, f"{tool_prefix}_get_vwap")("BTCUSD")
+    balance = await getattr(module, f"{tool_prefix}_get_credit_balance")()
+
+    assert json.loads(paid)["error_code"] == "ECONOMIC_WRITES_LOCKED"
+    assert json.loads(balance)["error_code"] == "ECONOMIC_WRITES_LOCKED"
+
+
+def test_transaction_bridge_direct_inspection_has_a_hard_progress_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    import time
+
+    from src.credit_manager import CreditManager
+    from src.entitlement_manager import EntitlementManager
+    from src import transaction_bridge
+
+    credit_db = tmp_path / "deadline-credits.db"
+    connector_paths = {
+        connector: tmp_path / f"deadline-{connector}.db"
+        for connector in ("anthropic", "cursor", "openai")
+    }
+    CreditManager(str(credit_db))
+    for connector, path in connector_paths.items():
+        EntitlementManager(path, default_daily_credits=5)
+        with sqlite3.connect(path) as conn:
+            conn.executemany(
+                "INSERT INTO users VALUES (?, NULL, 5, 'active', 'now', 'now')",
+                [(f"{connector}-{index}",) for index in range(2_000)],
+            )
+            conn.executemany(
+                "INSERT INTO daily_usage VALUES (?, '2026-08-13', 0, 'now')",
+                [(f"{connector}-{index}",) for index in range(2_000)],
+            )
+    monkeypatch.setenv("LEGACY_TRANSACTION_BRIDGE_LOCK", "true")
+    monkeypatch.setattr(transaction_bridge, "_INSPECTION_TIMEOUT_SECONDS", 0.000001)
+
+    started = time.monotonic()
+    result = transaction_bridge.transaction_bridge_readiness(
+        credit_db,
+        connector_paths,
+    )
+
+    assert time.monotonic() - started < 1
+    assert result["ready"] is False
+    assert result["direct_counts"] is None
+    assert result["blockers"] == ["economic_ledger_direct_inspection_failed"]
+
+
+def _run_exact_railway_helper(
+    tmp_path: Path,
+    mode: str,
+    *,
+    forbidden_environment: str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import datetime
+            import json
+            import os
+            from pathlib import Path
+            import sys
+
+            args = sys.argv[1:]
+            state_dir = Path(os.environ["FAKE_RAILWAY_STATE"])
+            state_dir.mkdir(parents=True, exist_ok=True)
+            with (state_dir / "calls.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(args) + "\\n")
+            deployment_id = "11111111-1111-4111-8111-111111111111"
+            unrelated_id = "22222222-2222-4222-8222-222222222222"
+            project_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            environment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            mode = os.environ["FAKE_RAILWAY_MODE"]
+            if args == ["--version"]:
+                print("railway 5.30.1")
+                raise SystemExit(0)
+            if args[:2] == ["status", "--json"]:
+                requested_environment = args[args.index("--environment") + 1]
+                requested_project = args[args.index("--project") + 1]
+                is_production = requested_environment == "production-environment"
+                resolved_environment_id = (
+                    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+                    if is_production
+                    else environment_id
+                )
+                resolved_service_id = (
+                    "ffffffff-ffff-4fff-8fff-ffffffffffff"
+                    if is_production
+                    else service_id
+                )
+                print(json.dumps({{
+                    "id": project_id if requested_project == "project-id" else requested_project,
+                    "environments": {{"edges": [{{"node": {{
+                        "id": resolved_environment_id,
+                        "name": requested_environment,
+                        "serviceInstances": {{"edges": [{{"node": {{
+                            "serviceId": resolved_service_id,
+                            "serviceName": "production-service" if is_production else "service-id",
+                            "environmentId": resolved_environment_id,
+                        }}}}]}},
+                    }}}}]}},
+                }}))
+                raise SystemExit(0)
+            if args[0] == "up":
+                message = args[args.index("--message") + 1]
+                (state_dir / "message").write_text(message, encoding="utf-8")
+                if mode == "fallback":
+                    print("simulated lost upload response", file=sys.stderr)
+                    raise SystemExit(1)
+                print(json.dumps({{"deploymentId": deployment_id, "logsUrl": "https://example.invalid"}}))
+                raise SystemExit(0)
+            if args[:2] == ["deployment", "list"]:
+                now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+                message_file = state_dir / "message"
+                if not message_file.exists():
+                    print(json.dumps([{{
+                        "id": unrelated_id,
+                        "status": "SUCCESS",
+                        "createdAt": now,
+                        "meta": {{"cliMessage": "old-deployment"}},
+                    }}]))
+                    raise SystemExit(0)
+                message = message_file.read_text(encoding="utf-8")
+                count_file = state_dir / "count"
+                count = int(count_file.read_text() if count_file.exists() else "0")
+                count_file.write_text(str(count + 1), encoding="utf-8")
+                if (state_dir / "stopped").exists():
+                    status = "REMOVED"
+                elif mode == "success":
+                    status = ["INITIALIZING", "BUILDING", "DEPLOYING", "SUCCESS"][min(count, 3)]
+                elif mode == "fallback":
+                    status = "SUCCESS"
+                elif mode == "mismatch":
+                    status = "BUILDING"
+                    message = "different-ci-message"
+                else:
+                    status = "UNKNOWN_NEW_STATE"
+                rows = [
+                    {{
+                        "id": unrelated_id,
+                        "status": "SUCCESS",
+                        "createdAt": now,
+                        "meta": {{"cliMessage": "unrelated-newer-deployment"}},
+                    }},
+                    {{
+                        "id": deployment_id,
+                        "status": status,
+                        "createdAt": now,
+                        "meta": {{"cliMessage": message}},
+                    }},
+                ]
+                print(json.dumps(rows))
+                raise SystemExit(0)
+            if args[0] == "api":
+                query = args[1]
+                if "ReleaseMutationContract" in query:
+                    fields = [
+                        {{
+                            "name": name,
+                            "args": [] if mode == "contract_drift" else [{{
+                                "name": "id",
+                                "type": {{
+                                    "kind": "NON_NULL",
+                                    "name": None,
+                                    "ofType": {{"kind": "SCALAR", "name": "String"}},
+                                }},
+                            }}],
+                            "type": {{
+                                "kind": "NON_NULL",
+                                "name": None,
+                                "ofType": {{"kind": "SCALAR", "name": "Boolean"}},
+                            }},
+                        }}
+                        for name in ("deploymentCancel", "deploymentStop", "deploymentRollback")
+                    ]
+                    print(json.dumps({{"data": {{"__type": {{"fields": fields}}}}}}))
+                    raise SystemExit(0)
+                if "ReleaseDeployAuthority" in query:
+                    print(json.dumps({{"data": {{"service": {{
+                        "id": service_id,
+                        "projectId": project_id,
+                        "repoTriggers": {{
+                            "edges": [],
+                            "pageInfo": {{"hasNextPage": False}},
+                        }},
+                    }}}}}}))
+                    raise SystemExit(0)
+                if "ActiveDeployments" in query:
+                    print(json.dumps({{"data": {{"serviceInstance": {{"activeDeployments": []}}}}}}))
+                    raise SystemExit(0)
+                if "TargetDomains" in query:
+                    print(json.dumps({{"data": {{"serviceInstance": {{
+                        "environmentId": environment_id,
+                        "serviceId": service_id,
+                        "domains": {{
+                            "customDomains": [],
+                            "serviceDomains": [{{
+                                "domain": "staging.example",
+                                "environmentId": environment_id,
+                                "serviceId": service_id,
+                                "syncStatus": "ACTIVE",
+                            }}],
+                        }},
+                        "tcpProxies": [],
+                    }}}}}}))
+                    raise SystemExit(0)
+                if "ExactDeployment" in query:
+                    if f"id={{deployment_id}}" not in args:
+                        raise SystemExit("exact query did not target the candidate")
+                    stopped = (state_dir / "stopped").exists()
+                    message = (state_dir / "message").read_text(encoding="utf-8")
+                    count_file = state_dir / "count"
+                    count = int(count_file.read_text() if count_file.exists() else "1") - 1
+                    if stopped:
+                        status = "REMOVED"
+                    elif mode == "success":
+                        status = ["INITIALIZING", "BUILDING", "DEPLOYING", "SUCCESS"][min(count, 3)]
+                    elif mode == "fallback":
+                        status = "SUCCESS"
+                    elif mode == "mismatch":
+                        status = "BUILDING"
+                        message = "different-ci-message"
+                    else:
+                        status = "UNKNOWN_NEW_STATE"
+                    print(json.dumps({{"data": {{"deployment": {{
+                        "id": deployment_id,
+                        "projectId": project_id,
+                        "environmentId": environment_id,
+                        "serviceId": service_id,
+                        "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        "status": status,
+                        "deploymentStopped": stopped,
+                        "canRollback": True,
+                        "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "meta": {{
+                            "cliMessage": message,
+                            "imageDigest": "sha256:candidate",
+                            "fileServiceManifest": {{"deploy": {{
+                                "healthcheckPath": "/readyz",
+                                "healthcheckTimeout": 180,
+                                "restartPolicyType": "ON_FAILURE",
+                                "restartPolicyMaxRetries": 3,
+                            }}}},
+                            "volumeMounts": ["/data"],
+                        }},
+                        "instances": [] if stopped or status != "SUCCESS" else [{{"id": "instance", "status": "RUNNING"}}],
+                    }}}}}}))
+                    raise SystemExit(0)
+                raw_id = args[args.index("--raw-var") + 1] if "--raw-var" in args else ""
+                if raw_id != f"id={{deployment_id}}":
+                    raise SystemExit("cleanup did not target the exact deployment id")
+                if "deploymentStop" in query and mode in {{"mismatch", "unknown"}}:
+                    print(json.dumps({{"data": {{"deploymentStop": False}}}}))
+                    raise SystemExit(0)
+                (state_dir / "stopped").write_text("true", encoding="utf-8")
+                mutation = "deploymentCancel" if "deploymentCancel" in query else "deploymentStop"
+                print(json.dumps({{"data": {{mutation: True}}}}))
+                raise SystemExit(0)
+            raise SystemExit("unexpected fake Railway command")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+    state_dir = tmp_path / "state"
+    environment = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "FAKE_RAILWAY_MODE": mode,
+        "FAKE_RAILWAY_STATE": str(state_dir),
+    }
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "scripts" / "deploy_railway_exact.mjs"),
+            "--project",
+            "project-id",
+            "--environment",
+            "environment-id",
+            "--service",
+            "service-id",
+            "--message",
+            "bsmcp:staging:123:456:" + ("a" * 40),
+            "--mode",
+            "staging",
+            "--base-url",
+            "https://staging.example",
+            "--forbidden-project",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "--forbidden-environment",
+            forbidden_environment,
+            "--forbidden-service",
+            "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            "--forbidden-base-url",
+            "https://production.example",
+            "--state-file",
+            str(tmp_path / "release-state.json"),
+            "--timeout-seconds",
+            "10",
+            "--poll-ms",
+            "1",
+            "--discovery-grace-seconds",
+            "2",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    calls = [
+        json.loads(line)
+        for line in (state_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    return result, calls
+
+
+@pytest.mark.parametrize("mode", ["success", "fallback"])
+def test_exact_railway_helper_selects_only_its_own_successful_deployment(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    result, calls = _run_exact_railway_helper(tmp_path, mode)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "11111111-1111-4111-8111-111111111111"
+    assert any(call[:3] == ["up", "--detach", "--json"] for call in calls)
+    assert all(call.count("--detach") == 1 for call in calls if call[0] == "up")
+    assert all("--latest" not in call for call in calls)
+    assert not any(
+        call[1].startswith("mutation")
+        for call in calls
+        if call[0] == "api"
+    )
+
+
+@pytest.mark.parametrize("mode", ["mismatch"])
+def test_exact_railway_helper_does_not_mutate_a_message_mismatch(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    result, calls = _run_exact_railway_helper(tmp_path, mode)
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert any(call[0] == "api" for call in calls)
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+    assert "different Railway CLI message" in result.stderr
+
+
+def test_exact_railway_helper_fails_closed_without_mutating_unknown_status(
+    tmp_path: Path,
+) -> None:
+    result, calls = _run_exact_railway_helper(tmp_path, "unknown")
+
+    assert result.returncode != 0
+    assert "unknown status" in result.stderr
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+
+
+def test_exact_railway_helper_rejects_a_canonical_staging_environment_alias(
+    tmp_path: Path,
+) -> None:
+    result, calls = _run_exact_railway_helper(
+        tmp_path,
+        "success",
+        forbidden_environment="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    )
+
+    assert result.returncode != 0
+    assert "distinct environment" in result.stderr
+    assert not any(call[0] == "up" for call in calls)
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+
+
+def test_exact_railway_helper_rejects_mutation_contract_drift_before_upload(
+    tmp_path: Path,
+) -> None:
+    result, calls = _run_exact_railway_helper(tmp_path, "contract_drift")
+
+    assert result.returncode != 0
+    assert "mutation contract drifted" in result.stderr
+    assert not any(call[0] == "up" for call in calls)
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "accepted", "expected_error"),
+    [
+        ("empty", True, None),
+        ("trigger", False, "repository auto-deploy trigger"),
+        ("paginated", False, "repository-trigger query was truncated"),
+        ("malformed", False, "repository-trigger query was not bound"),
+    ],
+)
+def test_repository_deploy_authority_preflight_fails_closed(
+    tmp_path: Path,
+    scenario: str,
+    accepted: bool,
+    expected_error: str | None,
+) -> None:
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import json
+            import os
+            import sys
+
+            args = sys.argv[1:]
+            scenario = os.environ["FAKE_TRIGGER_SCENARIO"]
+            project_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            environment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            if args[0] != "api" or "ReleaseDeployAuthority" not in args[1]:
+                raise SystemExit("unexpected Railway query")
+            if f"serviceId={{service_id}}" not in args:
+                raise SystemExit("query did not bind the exact service id")
+            trigger = {{
+                "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "projectId": project_id,
+                "environmentId": environment_id,
+                "serviceId": service_id,
+                "branch": "main",
+                "repository": "owner/repository",
+                "provider": "github",
+            }}
+            service = {{
+                "id": service_id,
+                "projectId": project_id,
+                "repoTriggers": {{
+                    "edges": [{{"node": trigger}}] if scenario == "trigger" else [],
+                    "pageInfo": {{"hasNextPage": scenario == "paginated"}},
+                }},
+            }}
+            if scenario == "malformed":
+                service["projectId"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+            print(json.dumps({{"data": {{"service": service}}}}))
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+    probe = textwrap.dedent(
+        f"""
+        import {{ verifyNoRepositoryDeployTriggers }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
+        await verifyNoRepositoryDeployTriggers({{
+          project: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          environment: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          service: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        }});
+        console.log("accepted");
+        """
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+            "FAKE_TRIGGER_SCENARIO": scenario,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    if accepted:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == "accepted"
+    else:
+        assert result.returncode != 0
+        assert expected_error in result.stderr
+
+
+def test_release_state_temp_files_are_excluded_from_git_and_railway_uploads() -> None:
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    railwayignore = (ROOT / ".railwayignore").read_text(encoding="utf-8")
+
+    assert ".railway-release-*.json*" in gitignore
+    assert ".railway-release-*.json*" in railwayignore
+
+
+def test_release_state_writes_are_private_and_running_is_never_stopped(
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "release.json"
+    sentinel_file = tmp_path / "sentinel.txt"
+    sentinel_file.write_text("do-not-overwrite", encoding="utf-8")
+    probe = textwrap.dedent(
+        f"""
+        import {{ readFile, stat, symlink }} from "node:fs/promises";
+        import {{
+          atomicWriteJson,
+          deploymentIsStopped,
+          deploymentOccupiesActiveSet,
+        }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
+        const path = {json.dumps(str(state_file))};
+        const sentinel = {json.dumps(str(sentinel_file))};
+        await symlink(sentinel, `${{path}}.${{process.pid}}.tmp`);
+        await atomicWriteJson(path, {{ safe: true }});
+        const mode = (await stat(path)).mode & 0o777;
+        const sentinelBody = await readFile(sentinel, "utf8");
+        const contradictory = deploymentIsStopped({{
+          status: "FAILED",
+          deploymentStopped: true,
+          instances: [{{ status: "RUNNING" }}],
+        }});
+        const terminal = deploymentIsStopped({{
+          status: "FAILED",
+          deploymentStopped: true,
+          instances: [{{ status: "EXITED" }}],
+        }});
+        const transitioningOccupies = deploymentOccupiesActiveSet({{
+          status: "DEPLOYING",
+          deploymentStopped: false,
+          instances: [],
+        }});
+        console.log(JSON.stringify({{
+          mode,
+          sentinelBody,
+          contradictory,
+          terminal,
+          transitioningOccupies,
+        }}));
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "mode": 0o600,
+        "sentinelBody": "do-not-overwrite",
+        "contradictory": False,
+        "terminal": True,
+        "transitioningOccupies": True,
+    }
+
+
+def test_restored_health_requires_consecutive_readiness_matches() -> None:
+    probe = textwrap.dedent(
+        f"""
+        import {{ verifyHealthRestored }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
+        let readinessCalls = 0;
+        globalThis.fetch = async (url) => {{
+          const isReadiness = String(url).endsWith("/readyz");
+          if (isReadiness) readinessCalls += 1;
+          const readinessReady = readinessCalls !== 2;
+          return {{
+            status: isReadiness && !readinessReady ? 503 : 200,
+            async json() {{
+              if (isReadiness) {{
+                return {{
+                  status: readinessReady ? "ready" : "not_ready",
+                  ready: readinessReady,
+                  version: "0.6.5",
+                  commit_sha: "{'a' * 40}",
+                }};
+              }}
+              return {{
+                status: "healthy",
+                service: "Blocksize Real-Time Market Data MCP",
+                version: "0.6.5",
+                commit_sha: "{'a' * 40}",
+              }};
+            }},
+          }};
+        }};
+        const state = {{
+          baseUrl: "https://production.example",
+          prior: {{
+            health: {{
+              status: 200,
+              applicationStatus: "healthy",
+              service: "Blocksize Real-Time Market Data MCP",
+              version: "0.6.5",
+              commitSha: "{'a' * 40}",
+            }},
+            readiness: {{
+              status: 200,
+              ready: true,
+              version: "0.6.5",
+              commitSha: "{'a' * 40}",
+            }},
+          }},
+        }};
+        await verifyHealthRestored(state, 1_000, 1);
+        console.log(readinessCalls);
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "5"
+
+
+def test_release_history_cap_and_daily_backup_policy_are_enforced() -> None:
+    probe = textwrap.dedent(
+        f"""
+        import {{
+          parseDeploymentList,
+          requireReleaseHistoryHeadroom,
+          validateProductionBackupEvidence,
+        }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
+        const target = {{
+          project: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          environment: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          service: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        }};
+        const rows = Array.from({{ length: 1000 }}, (_, index) => ({{
+          id: `00000000-0000-4000-8000-${{String(index).padStart(12, "0")}}`,
+          status: "SUCCESS",
+          createdAt: "2026-08-13T12:00:00Z",
+        }}));
+        let capRejected = false;
+        try {{ parseDeploymentList(JSON.stringify(rows)); }} catch {{ capRejected = true; }}
+        const headroomRows = rows.slice(0, 998);
+        let headroomRejected = false;
+        try {{ requireReleaseHistoryHeadroom(headroomRows); }} catch {{ headroomRejected = true; }}
+        const headroomAccepted = requireReleaseHistoryHeadroom(rows.slice(0, 997)).length;
+        const evidence = {{
+          volumeInstance: {{
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            environmentId: target.environment,
+            serviceId: target.service,
+            mountPath: "/data",
+            state: "READY",
+            isPendingDeletion: false,
+          }},
+          volumeInstanceBackupList: [{{
+            id: "backup-id",
+            createdAt: "2026-08-13T11:00:00Z",
+            expiresAt: null,
+          }}],
+          volumeInstanceBackupScheduleList: [{{ kind: "WEEKLY", cron: "0 0 * * 0" }}],
+        }};
+        let weeklyRejected = false;
+        try {{
+          validateProductionBackupEvidence(
+            evidence,
+            evidence.volumeInstance.id,
+            target,
+            Date.parse("2026-08-13T12:00:00Z"),
+          );
+        }} catch {{ weeklyRejected = true; }}
+        evidence.volumeInstanceBackupScheduleList.push({{ kind: "DAILY", cron: "0 0 * * *" }});
+        const accepted = validateProductionBackupEvidence(
+          evidence,
+          evidence.volumeInstance.id,
+          target,
+          Date.parse("2026-08-13T12:00:00Z"),
+        );
+        console.log(JSON.stringify({{
+          capRejected,
+          headroomRejected,
+          headroomAccepted,
+          weeklyRejected,
+          accepted,
+        }}));
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", probe],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["capRejected"] is True
+    assert payload["headroomRejected"] is True
+    assert payload["headroomAccepted"] == 997
+    assert payload["weeklyRejected"] is True
+    assert payload["accepted"]["backupId"] == "backup-id"
+    assert payload["accepted"]["scheduleKinds"] == ["DAILY", "WEEKLY"]
+
+
+@pytest.mark.parametrize("candidate_status", ["SUCCESS", "DEPLOYING", "SLEEPING"])
+def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
+    tmp_path: Path,
+    candidate_status: str,
+) -> None:
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import datetime
+            import json
+            import os
+            from pathlib import Path
+            import sys
+
+            args = sys.argv[1:]
+            state_dir = Path(os.environ["FAKE_RAILWAY_STATE"])
+            state_dir.mkdir(parents=True, exist_ok=True)
+            with (state_dir / "calls.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(args) + "\\n")
+            project_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            environment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            prior_id = "33333333-3333-4333-8333-333333333333"
+            candidate_id = "11111111-1111-4111-8111-111111111111"
+            rollback_id = "44444444-4444-4444-8444-444444444444"
+            message = "bsmcp:production:123:456:" + ("a" * 40) + ":prev:" + prior_id
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            rolled_back = (state_dir / "rolled-back").exists()
+            candidate_status = os.environ["FAKE_CANDIDATE_STATUS"]
+
+            def deployment(
+                deployment_id,
+                *,
+                status="SUCCESS",
+                digest,
+                running=True,
+                cli_message=None,
+                snapshot_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ):
+                return {{
+                    "id": deployment_id,
+                    "projectId": project_id,
+                    "environmentId": environment_id,
+                    "serviceId": service_id,
+                    "snapshotId": snapshot_id,
+                    "status": status,
+                    "deploymentStopped": False,
+                    "canRollback": True,
+                    "createdAt": now,
+                    "meta": {{"imageDigest": digest, "cliMessage": cli_message}},
+                    "instances": [{{"id": "instance", "status": "RUNNING"}}] if running else [],
+                }}
+
+            candidate = deployment(
+                candidate_id,
+                status=candidate_status,
+                digest="sha256:candidate",
+                running=candidate_status == "SUCCESS",
+                cli_message=message,
+            )
+            if rolled_back:
+                candidate["status"] = "REMOVED"
+                candidate["deploymentStopped"] = True
+                candidate["instances"] = []
+            prior = deployment(
+                prior_id,
+                digest="sha256:prior",
+                running=candidate_status != "SUCCESS",
+                cli_message="prior",
+            )
+            rollback = deployment(
+                rollback_id,
+                digest="sha256:prior",
+                cli_message="rollback",
+                snapshot_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            )
+
+            if args[:2] == ["deployment", "list"]:
+                rows = [
+                    {{"id": candidate_id, "status": "REMOVED" if rolled_back else candidate_status, "createdAt": now, "meta": {{"cliMessage": message, "imageDigest": "sha256:candidate"}}}},
+                    {{"id": prior_id, "status": "REMOVED", "createdAt": now, "meta": {{"cliMessage": "prior", "imageDigest": "sha256:prior"}}}},
+                ]
+                if rolled_back:
+                    rows.insert(0, {{"id": rollback_id, "status": "SUCCESS", "createdAt": now, "meta": {{"cliMessage": "rollback", "imageDigest": "sha256:prior"}}}})
+                print(json.dumps(rows))
+                raise SystemExit(0)
+            if args[0] != "api":
+                raise SystemExit("unexpected fake Railway command")
+            query = args[1]
+            if "ActiveDeployments" in query:
+                active = [rollback] if rolled_back else ([candidate] if candidate_status == "SUCCESS" else [prior])
+                print(json.dumps({{"data": {{"serviceInstance": {{"activeDeployments": active}}}}}}))
+                raise SystemExit(0)
+            if "TargetDomains" in query:
+                print(json.dumps({{"data": {{"serviceInstance": {{
+                    "environmentId": environment_id,
+                    "serviceId": service_id,
+                    "domains": {{
+                        "customDomains": [],
+                        "serviceDomains": [{{
+                            "domain": "production.example",
+                            "environmentId": environment_id,
+                            "serviceId": service_id,
+                            "syncStatus": "ACTIVE",
+                        }}],
+                    }},
+                    "tcpProxies": [],
+                }}}}}}))
+                raise SystemExit(0)
+            if "ExactDeployment" in query:
+                raw_id = next(value for index, value in enumerate(args) if args[index - 1] == "--raw-var")
+                deployment_id = raw_id.split("=", 1)[1]
+                if deployment_id == candidate_id:
+                    selected = candidate
+                elif deployment_id == prior_id:
+                    selected = prior
+                else:
+                    selected = rollback
+                print(json.dumps({{"data": {{"deployment": selected}}}}))
+                raise SystemExit(0)
+            if "deploymentRollback" in query:
+                raw_id = next(value for index, value in enumerate(args) if args[index - 1] == "--raw-var")
+                if raw_id != f"id={{prior_id}}":
+                    raise SystemExit("rollback did not target the recorded prior deployment")
+                (state_dir / "rolled-back").write_text("true", encoding="utf-8")
+                print(json.dumps({{"data": {{"deploymentRollback": True}}}}))
+                raise SystemExit(0)
+            raise SystemExit("unexpected fake Railway API query")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+
+    fetch_stub = tmp_path / "fetch-stub.mjs"
+    fetch_stub.write_text(
+        "globalThis.fetch = async () => ({ status: 200, async json() { "
+        "return { status: 'healthy', version: '0.6.5', "
+        "commit_sha: null, ready: true }; } });\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "railway-state"
+    state_file = tmp_path / "release-state.json"
+    prior_id = "33333333-3333-4333-8333-333333333333"
+    candidate_id = "11111111-1111-4111-8111-111111111111"
+    message = f"bsmcp:production:123:456:{'a' * 40}:prev:{prior_id}"
+    state_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "phase": "candidate_success" if candidate_status == "SUCCESS" else "candidate_bound",
+                "mode": "production",
+                "baseUrl": "https://production.example",
+                "message": message,
+                "startedAt": "2026-08-13T00:00:00Z",
+                "startedAtEpochMs": int(__import__("time").time() * 1000),
+                "target": {
+                    "project": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "environment": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "service": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                },
+                "beforeDeploymentIds": [prior_id],
+                "prior": {
+                    "id": prior_id,
+                    "projectId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "environmentId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "serviceId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "canRollback": True,
+                    "imageDigest": "sha256:prior",
+                    "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    "health": {"status": 200, "version": "0.6.5", "commitSha": None},
+                    "readiness": {
+                        "status": 200,
+                        "ready": True,
+                        "legacyTransactionBridge": {
+                            "configuration_valid": True,
+                            "economic_writes_locked": False,
+                        },
+                    },
+                },
+                "backup": {"backupId": "backup-id"},
+                "candidate": {
+                    "id": candidate_id,
+                    "status": candidate_status,
+                    "imageDigest": "sha256:candidate",
+                },
+                "accepted": False,
+                "recovery": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "FAKE_RAILWAY_STATE": str(state_dir),
+        "FAKE_CANDIDATE_STATUS": candidate_status,
+        "NODE_OPTIONS": f"--import={fetch_stub}",
+    }
+    command = [
+        "node",
+        str(ROOT / "scripts" / "recover_railway_release.mjs"),
+        "--state-file",
+        str(state_file),
+    ]
+    first = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    calls_after_first = (state_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    second = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    calls_after_second = (state_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert len(calls_after_second) == len(calls_after_first)
+    calls = [json.loads(call) for call in calls_after_first]
+    rollback_calls = [call for call in calls if call[0] == "api" and "deploymentRollback" in call[1]]
+    assert len(rollback_calls) == 1
+    assert not any(
+        call[0] == "api"
+        and call[1].startswith("mutation")
+        and ("deploymentStop" in call[1] or "deploymentCancel" in call[1])
+        for call in calls
+    )
+    recovered = json.loads(state_file.read_text(encoding="utf-8"))
+    assert recovered["phase"] == "recovered"
+    assert recovered["recovery"]["action"] == "rolled_back"
+    assert recovered["recovery"]["deploymentId"] == "44444444-4444-4444-8444-444444444444"
+
+
+def _run_recovery_adversary(
+    tmp_path: Path,
+    scenario: str,
+    *,
+    initial_recovery: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]], dict[str, object]]:
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            """\
+            #!__PYTHON__
+            import datetime
+            import json
+            import os
+            from pathlib import Path
+            import sys
+            import time
+
+            args = sys.argv[1:]
+            state_dir = Path(os.environ["FAKE_RAILWAY_STATE"])
+            state_dir.mkdir(parents=True, exist_ok=True)
+            with (state_dir / "calls.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(args) + "\\n")
+
+            scenario = os.environ["FAKE_RECOVERY_SCENARIO"]
+            project_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            environment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            prior_id = "33333333-3333-4333-8333-333333333333"
+            candidate_id = "11111111-1111-4111-8111-111111111111"
+            rollback_id = "44444444-4444-4444-8444-444444444444"
+            unrelated_id = "55555555-5555-4555-8555-555555555555"
+            lagged_id = "66666666-6666-4666-8666-666666666666"
+            message = "bsmcp:production:123:456:" + ("a" * 40) + ":prev:" + prior_id
+            now = "2026-08-13T00:00:02Z"
+            if scenario == "rollback_transient_reads":
+                created_at_file = state_dir / "created-at"
+                if created_at_file.exists():
+                    now = created_at_file.read_text(encoding="utf-8")
+                else:
+                    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    created_at_file.write_text(now, encoding="utf-8")
+            rollback_requested = (state_dir / "rollback-requested").exists()
+
+            def fail_once(site):
+                marker = state_dir / f"failed-{site}"
+                if marker.exists():
+                    return
+                marker.write_text("true", encoding="utf-8")
+                print(f"transient Railway failure at {site}", file=sys.stderr)
+                raise SystemExit(1)
+
+            def hang_once(site):
+                marker = state_dir / f"hung-{site}"
+                if marker.exists():
+                    return
+                marker.write_text("true", encoding="utf-8")
+                time.sleep(2)
+
+            def numbered_call(site):
+                counter = state_dir / f"{site}-calls"
+                count = int(counter.read_text() if counter.exists() else "0") + 1
+                counter.write_text(str(count), encoding="utf-8")
+                return count
+
+            def deployment(
+                deployment_id,
+                *,
+                status,
+                digest,
+                running,
+                cli_message,
+                stopped=False,
+                snapshot_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ):
+                return {
+                    "id": deployment_id,
+                    "projectId": project_id,
+                    "environmentId": environment_id,
+                    "serviceId": service_id,
+                    "snapshotId": snapshot_id,
+                    "status": status,
+                    "deploymentStopped": stopped,
+                    "canRollback": True,
+                    "createdAt": now,
+                    "meta": {"imageDigest": digest, "cliMessage": cli_message},
+                    "instances": [{"id": "instance", "status": "RUNNING"}] if running else [],
+                }
+
+            def candidate():
+                if scenario.startswith("rollback_"):
+                    if scenario in {"rollback_arm_before_mutation", "rollback_transient_reads"}:
+                        stopped = rollback_requested
+                    elif scenario == "rollback_prearm_lagged":
+                        stopped = False
+                    else:
+                        stopped = True
+                    return deployment(
+                        candidate_id,
+                        status="REMOVED" if stopped else "DEPLOYING",
+                        digest="sha256:candidate",
+                        running=False,
+                        cli_message=message,
+                        stopped=stopped,
+                    )
+                if not (state_dir / "cancel-requested").exists():
+                    status = "BUILDING"
+                elif scenario == "cancel_false_terminal":
+                    status = "REMOVED"
+                else:
+                    reads_file = state_dir / "post-cancel-reads"
+                    reads = int(reads_file.read_text() if reads_file.exists() else "0")
+                    reads_file.write_text(str(reads + 1), encoding="utf-8")
+                    status = "REMOVING" if reads == 0 else "REMOVED"
+                return deployment(
+                    candidate_id,
+                    status=status,
+                    digest="sha256:candidate",
+                    running=False,
+                    cli_message=message,
+                    stopped=status == "REMOVED",
+                )
+
+            prior = deployment(
+                prior_id,
+                status="SUCCESS",
+                digest="sha256:prior",
+                running=True,
+                cli_message="prior",
+            )
+            rollback_digest = (
+                "sha256:unrelated" if scenario == "rollback_wrong_digest" else "sha256:prior"
+            )
+            rollback = deployment(
+                rollback_id,
+                status="SUCCESS",
+                digest=rollback_digest,
+                running=True,
+                cli_message="rollback",
+                snapshot_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            )
+            unrelated = deployment(
+                unrelated_id,
+                status="BUILDING",
+                digest="sha256:unrelated",
+                running=False,
+                cli_message="external-deploy",
+            )
+            lagged = deployment(
+                lagged_id,
+                status="REMOVED",
+                digest="sha256:prior",
+                running=False,
+                cli_message="lagged-same-digest",
+                stopped=True,
+            )
+
+            if args[:2] == ["deployment", "list"]:
+                rows = [candidate(), prior]
+                rollback_visible = scenario in {
+                    "rollback_resume",
+                    "rollback_multiple_delta",
+                    "rollback_wrong_digest",
+                } or (
+                    scenario in {"rollback_arm_before_mutation", "rollback_transient_reads"}
+                    and rollback_requested
+                )
+                if rollback_visible:
+                    rows.insert(0, rollback)
+                if scenario == "rollback_multiple_delta":
+                    rows.insert(0, unrelated)
+                if scenario == "rollback_prearm_lagged":
+                    rows.insert(0, lagged)
+                print(json.dumps(rows))
+                raise SystemExit(0)
+            if args[0] != "api":
+                raise SystemExit("unexpected fake Railway command")
+
+            query = args[1]
+            if "TargetDomains" in query:
+                if scenario == "cancel_timeout_read":
+                    hang_once("domain")
+                if scenario in {"cancel_transient_reads", "rollback_transient_reads"}:
+                    fail_once("domain")
+                print(json.dumps({"data": {"serviceInstance": {
+                    "environmentId": environment_id,
+                    "serviceId": service_id,
+                    "domains": {
+                        "customDomains": [],
+                        "serviceDomains": [{
+                            "domain": "production.example",
+                            "environmentId": environment_id,
+                            "serviceId": service_id,
+                            "syncStatus": "ACTIVE",
+                        }],
+                    },
+                    "tcpProxies": [],
+                }}}))
+                raise SystemExit(0)
+            if "ActiveDeployments" in query:
+                active_call = numbered_call("active")
+                if scenario == "rollback_transient_reads" and active_call == 1:
+                    fail_once("initial-active")
+                if scenario == "cancel_transient_reads" and active_call == 2:
+                    fail_once("pre-cancel-active")
+                rollback_active = scenario in {
+                    "rollback_resume",
+                    "rollback_multiple_delta",
+                    "rollback_wrong_digest",
+                } or (
+                    scenario in {"rollback_arm_before_mutation", "rollback_transient_reads"}
+                    and rollback_requested
+                )
+                active = [rollback] if rollback_active else [prior]
+                print(json.dumps({"data": {"serviceInstance": {"activeDeployments": active}}}))
+                raise SystemExit(0)
+            if "ExactDeployment" in query:
+                raw_vars = [args[index + 1] for index, item in enumerate(args) if item == "--raw-var"]
+                deployment_id = next(value.split("=", 1)[1] for value in raw_vars if value.startswith("id="))
+                if deployment_id == candidate_id:
+                    candidate_call = numbered_call("candidate")
+                    if scenario == "rollback_transient_reads" and candidate_call == 1:
+                        fail_once("initial-candidate")
+                    if scenario == "cancel_transient_reads" and candidate_call == 2:
+                        fail_once("pre-cancel-candidate")
+                if deployment_id == prior_id and scenario == "rollback_transient_reads":
+                    fail_once("prior")
+                selected = (
+                    candidate()
+                    if deployment_id == candidate_id
+                    else prior
+                    if deployment_id == prior_id
+                    else rollback
+                )
+                print(json.dumps({"data": {"deployment": selected}}))
+                raise SystemExit(0)
+            if "deploymentCancel" in query:
+                (state_dir / "cancel-requested").write_text("true", encoding="utf-8")
+                if scenario == "cancel_transient_reads":
+                    fail_once("cancel-after-apply")
+                acknowledged = scenario == "cancel_ack_removing"
+                print(json.dumps({"data": {"deploymentCancel": acknowledged}}))
+                raise SystemExit(0)
+            if "deploymentRollback" in query:
+                if (
+                    scenario not in {"rollback_arm_before_mutation", "rollback_transient_reads"}
+                    or rollback_requested
+                ):
+                    raise SystemExit("unsafe duplicate rollback mutation")
+                (state_dir / "rollback-requested").write_text("true", encoding="utf-8")
+                print(json.dumps({"data": {"deploymentRollback": True}}))
+                raise SystemExit(0)
+            if "deploymentStop" in query:
+                raise SystemExit("unsafe stop mutation")
+            raise SystemExit("unexpected fake Railway API query")
+            """
+        ).replace("__PYTHON__", sys.executable),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+
+    fetch_stub = tmp_path / "fetch-stub.mjs"
+    fetch_stub.write_text(
+        textwrap.dedent(
+            """
+            const nativeSetTimeout = globalThis.setTimeout;
+            globalThis.setTimeout = (callback, delay = 0, ...args) => {
+              const numericDelay = Number(delay);
+              const preserveReadTimeout =
+                process.env.FAKE_RECOVERY_SCENARIO === "cancel_timeout_read"
+                && numericDelay === 500;
+              return nativeSetTimeout(
+                callback,
+                !preserveReadTimeout && numericDelay <= 5000 ? 0 : delay,
+                ...args,
+              );
+            };
+            globalThis.fetch = async () => ({
+              status: 200,
+              async json() { return { status: "healthy", version: "0.6.5", ready: true }; },
+            });
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    state_dir = tmp_path / "railway-state"
+    state_file = tmp_path / "release-state.json"
+    prior_id = "33333333-3333-4333-8333-333333333333"
+    candidate_id = "11111111-1111-4111-8111-111111111111"
+    started_at_ms = int(
+        __import__("datetime")
+        .datetime.fromisoformat("2026-08-13T00:00:00+00:00")
+        .timestamp()
+        * 1000
+    )
+    rollback_armed = scenario in {
+        "rollback_resume",
+        "rollback_multiple_delta",
+        "rollback_wrong_digest",
+        "rollback_arm_before_mutation",
+    }
+    recovery_action = initial_recovery or ("rollback_armed" if rollback_armed else None)
+    state_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "phase": "candidate_bound",
+                "mode": "production",
+                "baseUrl": "https://production.example",
+                "message": f"bsmcp:production:123:456:{'a' * 40}:prev:{prior_id}",
+                "startedAt": "2026-08-13T00:00:00Z",
+                "startedAtEpochMs": started_at_ms,
+                "target": {
+                    "project": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "environment": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "service": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                },
+                "beforeDeploymentIds": [prior_id],
+                "prior": {
+                    "id": prior_id,
+                    "projectId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "environmentId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "serviceId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "canRollback": True,
+                    "imageDigest": "sha256:prior",
+                    "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    "health": {"status": 200, "version": "0.6.5", "commitSha": None},
+                    "readiness": {
+                        "status": 200,
+                        "ready": True,
+                        "legacyTransactionBridge": {
+                            "configuration_valid": True,
+                            "economic_writes_locked": False,
+                        },
+                    },
+                },
+                "backup": {"backupId": "backup-id"},
+                "candidate": {
+                    "id": candidate_id,
+                    "status": "REMOVED" if rollback_armed else "BUILDING",
+                    "imageDigest": "sha256:candidate",
+                },
+                "accepted": False,
+                "recovery": (
+                    {
+                        "action": "rollback_armed",
+                        "at": "2026-08-13T00:00:01Z",
+                        "armedAtEpochMs": started_at_ms + 3_000,
+                        "candidateCreatedAtEpochMs": started_at_ms + 2_000,
+                        "priorDeploymentId": prior_id,
+                        "candidateDeploymentId": candidate_id,
+                        "beforeDeploymentIds": [prior_id, candidate_id],
+                        "mutationAttempted": scenario != "rollback_arm_before_mutation",
+                        "mutationAcknowledged": scenario != "rollback_arm_before_mutation",
+                        "rollbackDeploymentId": None,
+                    }
+                    if recovery_action == "rollback_armed"
+                    else {
+                        "action": "candidate_cancel_armed",
+                        "at": "2026-08-13T00:00:01Z",
+                        "candidateDeploymentId": candidate_id,
+                        "mutationAttempted": False,
+                        "mutationAcknowledged": False,
+                    }
+                    if recovery_action == "candidate_cancel_armed"
+                    else None
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "scripts" / "recover_railway_release.mjs"),
+            "--state-file",
+            str(state_file),
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+            "FAKE_RAILWAY_STATE": str(state_dir),
+            "FAKE_RECOVERY_SCENARIO": scenario,
+            "NODE_OPTIONS": f"--import={fetch_stub}",
+            "RELEASE_RECOVERY_TIMEOUT_MS": "60000",
+            "RELEASE_RECOVERY_READ_ATTEMPT_TIMEOUT_MS": (
+                "500" if scenario == "cancel_timeout_read" else "10000"
+            ),
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    calls = [
+        json.loads(line)
+        for line in (state_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    final_state = json.loads(state_file.read_text(encoding="utf-8"))
+    return result, calls, final_state
+
+
+@pytest.mark.parametrize("scenario", ["cancel_false_terminal", "cancel_ack_removing"])
+def test_production_cancel_terminal_transitions_never_stop_or_rollback(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, scenario)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    cancel_calls = [
+        call for call in calls if call[0] == "api" and "deploymentCancel" in call[1]
+    ]
+    assert len(cancel_calls) == 1
+    assert not any(
+        call[0] == "api"
+        and call[1].startswith("mutation")
+        and ("deploymentRollback" in call[1] or "deploymentStop" in call[1])
+        for call in calls
+    )
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "candidate_ended"
+    assert state["recovery"]["deploymentId"] == "11111111-1111-4111-8111-111111111111"
+
+
+def test_armed_rollback_with_exact_created_row_resumes_without_second_mutation(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "rollback_resume")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Resuming an already armed Railway rollback" in result.stderr
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "rolled_back"
+    assert state["recovery"]["deploymentId"] == "44444444-4444-4444-8444-444444444444"
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_error"),
+    [
+        ("rollback_multiple_delta", "multiple deployments appeared after rollback was armed"),
+        ("rollback_wrong_digest", "unexpected image digest"),
+    ],
+)
+def test_armed_rollback_rejects_unrelated_post_arm_delta_without_mutation(
+    tmp_path: Path,
+    scenario: str,
+    expected_error: str,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, scenario)
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+    assert state["recovery"]["action"] == "rollback_armed"
+
+
+def test_rollback_armed_before_mutation_refences_and_issues_exactly_once(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "rollback_arm_before_mutation")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    rollback_calls = [
+        call for call in calls if call[0] == "api" and "deploymentRollback" in call[1]
+    ]
+    assert len(rollback_calls) == 1
+    first_mutation_index = next(
+        index for index, call in enumerate(calls) if call in rollback_calls
+    )
+    assert any(call[:2] == ["deployment", "list"] for call in calls[:first_mutation_index])
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "rolled_back"
+
+
+def test_candidate_cancel_armed_before_mutation_refences_and_issues_exactly_once(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(
+        tmp_path,
+        "cancel_ack_removing",
+        initial_recovery="candidate_cancel_armed",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    cancel_calls = [
+        call for call in calls if call[0] == "api" and "deploymentCancel" in call[1]
+    ]
+    assert len(cancel_calls) == 1
+    first_mutation_index = next(index for index, call in enumerate(calls) if call in cancel_calls)
+    assert any(call[:2] == ["deployment", "list"] for call in calls[:first_mutation_index])
+    assert not any(
+        call[0] == "api"
+        and call[1].startswith("mutation")
+        and ("deploymentRollback" in call[1] or "deploymentStop" in call[1])
+        for call in calls
+    )
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "candidate_ended"
+
+
+def test_lagged_prearm_same_digest_row_is_rejected_before_rollback_mutation(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "rollback_prearm_lagged")
+
+    assert result.returncode != 0
+    assert "unrelated deployment appeared before the rollback was armed" in result.stderr
+    assert not any(
+        call[0] == "api" and call[1].startswith("mutation")
+        for call in calls
+    )
+    assert state["recovery"] is None
+
+
+def test_transient_rollback_reads_retry_before_exactly_one_mutation(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "rollback_transient_reads")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    state_dir = tmp_path / "railway-state"
+    for site in ("domain", "initial-candidate", "initial-active", "prior"):
+        assert (state_dir / f"failed-{site}").is_file()
+    rollback_calls = [
+        call for call in calls if call[0] == "api" and "deploymentRollback" in call[1]
+    ]
+    assert len(rollback_calls) == 1
+    assert not any(
+        call[0] == "api"
+        and call[1].startswith("mutation")
+        and ("deploymentCancel" in call[1] or "deploymentStop" in call[1])
+        for call in calls
+    )
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "rolled_back"
+
+
+def test_transient_precancel_reads_and_ambiguous_cancel_complete_without_reissue(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "cancel_transient_reads")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    state_dir = tmp_path / "railway-state"
+    for site in (
+        "domain",
+        "pre-cancel-candidate",
+        "pre-cancel-active",
+        "cancel-after-apply",
+    ):
+        assert (state_dir / f"failed-{site}").is_file()
+    cancel_calls = [
+        call for call in calls if call[0] == "api" and "deploymentCancel" in call[1]
+    ]
+    assert len(cancel_calls) == 1
+    assert not any(
+        call[0] == "api"
+        and call[1].startswith("mutation")
+        and ("deploymentRollback" in call[1] or "deploymentStop" in call[1])
+        for call in calls
+    )
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "candidate_ended"
+
+
+def test_timed_out_recovery_read_is_killed_and_retried_before_cancellation(
+    tmp_path: Path,
+) -> None:
+    result, calls, state = _run_recovery_adversary(tmp_path, "cancel_timeout_read")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "railway-state" / "hung-domain").is_file()
+    domain_calls = [
+        call for call in calls if call[0] == "api" and "TargetDomains" in call[1]
+    ]
+    cancel_calls = [
+        call for call in calls if call[0] == "api" and "deploymentCancel" in call[1]
+    ]
+    first_cancel_index = next(index for index, call in enumerate(calls) if call in cancel_calls)
+    domain_calls_before_cancel = [
+        call
+        for call in calls[:first_cancel_index]
+        if call[0] == "api" and "TargetDomains" in call[1]
+    ]
+    assert len(domain_calls_before_cancel) == 2
+    assert len(domain_calls) >= 2
+    assert len(cancel_calls) == 1
+    assert state["phase"] == "recovered"
+    assert state["recovery"]["action"] == "candidate_ended"
+
+
+def test_recovery_rejects_corrupt_state_without_calling_railway(tmp_path: Path) -> None:
+    state_file = tmp_path / "release-state.json"
+    state_file.write_text('{"schemaVersion":1,"mode":"production"}', encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "scripts" / "recover_railway_release.mjs"),
+            "--state-file",
+            str(state_file),
+        ],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "release state is invalid" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("served_commit_matches", "interference"),
+    [
+        (True, "none"),
+        (False, "none"),
+        (True, "history"),
+        (True, "active"),
+    ],
+)
+def test_release_acceptance_requires_the_exact_active_ready_commit(
+    tmp_path: Path,
+    served_commit_matches: bool,
+    interference: str,
+) -> None:
+    expected_commit = "a" * 40
+    served_commit = expected_commit if served_commit_matches else "b" * 40
+    deployment_id = "11111111-1111-4111-8111-111111111111"
+    project_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    environment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    prior_id = "22222222-2222-4222-8222-222222222222"
+    interfering_id = "44444444-4444-4444-8444-444444444444"
+    message = f"bsmcp:staging:123:456:{expected_commit}"
+    fake_railway = tmp_path / "railway"
+    fake_railway.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import json
+            import sys
+            args = sys.argv[1:]
+            if args[:2] == ["deployment", "list"]:
+                rows = [
+                    {{"id": "{deployment_id}", "status": "SUCCESS", "createdAt": "2026-08-13T00:01:00Z", "meta": {{"cliMessage": "{message}"}}}},
+                    {{"id": "{prior_id}", "status": "REMOVED", "createdAt": "2026-08-13T00:00:00Z", "meta": {{"cliMessage": "prior"}}}},
+                ]
+                if {interference == "history"!r}:
+                    rows.insert(0, {{"id": "{interfering_id}", "status": "BUILDING", "createdAt": "2026-08-13T00:02:00Z", "meta": {{"cliMessage": "external"}}}})
+                print(json.dumps(rows))
+                raise SystemExit(0)
+            if args[0] != "api":
+                raise SystemExit("unexpected command")
+            deployment = {{
+                "id": "{deployment_id}",
+                "projectId": "{project_id}",
+                "environmentId": "{environment_id}",
+                "serviceId": "{service_id}",
+                "snapshotId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "status": "SUCCESS",
+                "deploymentStopped": False,
+                "canRollback": True,
+                "createdAt": "2026-08-13T00:00:00Z",
+                "meta": {{"imageDigest": "sha256:candidate", "cliMessage": "{message}"}},
+                "instances": [{{"id": "instance", "status": "RUNNING"}}],
+            }}
+            if "ExactDeployment" in args[1]:
+                print(json.dumps({{"data": {{"deployment": deployment}}}}))
+            elif "ActiveDeployments" in args[1]:
+                active = [deployment]
+                if {interference == "active"!r}:
+                    active.append({{
+                        **deployment,
+                        "id": "{interfering_id}",
+                        "status": "DEPLOYING",
+                        "meta": {{"imageDigest": "sha256:external", "cliMessage": "external"}},
+                        "instances": [],
+                    }})
+                print(json.dumps({{"data": {{"serviceInstance": {{"activeDeployments": active}}}}}}))
+            elif "TargetDomains" in args[1]:
+                print(json.dumps({{"data": {{"serviceInstance": {{
+                    "environmentId": "{environment_id}",
+                    "serviceId": "{service_id}",
+                    "domains": {{"customDomains": [], "serviceDomains": [{{
+                        "domain": "staging.example",
+                        "environmentId": "{environment_id}",
+                        "serviceId": "{service_id}",
+                        "syncStatus": "ACTIVE",
+                    }}]}},
+                    "tcpProxies": [],
+                }}}}}}))
+            else:
+                raise SystemExit("unexpected API query")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_railway.chmod(0o755)
+    fetch_stub = tmp_path / "fetch-stub.mjs"
+    fetch_stub.write_text(
+        "globalThis.fetch = async () => ({ status: 200, async json() { "
+        f"return {{ status: 'ready', ready: true, version: '0.6.5', commit_sha: '{served_commit}' }}; "
+        "} });\n",
+        encoding="utf-8",
+    )
+    state_file = tmp_path / "release-state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "phase": "candidate_success",
+                "mode": "staging",
+                "baseUrl": "https://staging.example",
+                "message": message,
+                "target": {
+                    "project": project_id,
+                    "environment": environment_id,
+                    "service": service_id,
+                },
+                "beforeDeploymentIds": [prior_id],
+                "candidate": {
+                    "id": deployment_id,
+                    "status": "SUCCESS",
+                    "imageDigest": "sha256:candidate",
+                },
+                "accepted": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "node",
+            str(ROOT / "scripts" / "accept_railway_release.mjs"),
+            "--state-file",
+            str(state_file),
+            "--deployment-id",
+            deployment_id,
+            "--expected-commit",
+            expected_commit,
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+            "NODE_OPTIONS": f"--import={fetch_stub}",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    accepted_state = json.loads(state_file.read_text(encoding="utf-8"))
+    if served_commit_matches and interference == "none":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert accepted_state["accepted"] is True
+        assert accepted_state["phase"] == "accepted"
+        assert accepted_state["acceptedCommit"] == expected_commit
+    else:
+        assert result.returncode != 0
+        if not served_commit_matches:
+            assert "final hosted readiness" in result.stderr
+        elif interference == "history":
+            assert "deployment history" in result.stderr
+        else:
+            assert "sole active" in result.stderr
+        assert accepted_state["accepted"] is False
 
 
 def test_gitlab_requires_distinct_staging_and_exact_commit_smoke_promotion() -> None:
@@ -1197,10 +3545,40 @@ def test_gitlab_requires_distinct_staging_and_exact_commit_smoke_promotion() -> 
     assert "PRODUCTION_RAILWAY_TOKEN" not in staging_job
     assert "STAGING_RAILWAY_TOKEN" not in production_job
     assert pipeline.count("npm install -g @railway/cli@5.30.1") == 2
+    assert pipeline.count("audit_railpack_build_log.mjs") == 2
+    assert pipeline.count("deploy_railway_exact.mjs") == 2
+    assert "--latest" not in staging_job
+    assert "--latest" not in production_job
+    assert "for attempt in" not in production_job
+    assert 'railway logs "$STAGING_DEPLOYMENT_ID" --build' in staging_job
+    assert 'railway logs "$PRODUCTION_DEPLOYMENT_ID" --build' in production_job
+    assert '--service "$RAILWAY_SERVICE_ID"' in production_job
     assert "npm install -g @railway/cli\n" not in pipeline
     assert "when: manual" in production_job
     assert "allow_failure: false" in production_job
-    assert "execute the recorded Railway rollback procedure" in production_job
+    assert "PRODUCTION_VOLUME_INSTANCE_ID" in production_job
+    assert 'test -f "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"' in production_job
+    assert 'test -r "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"' in production_job
+    assert "recover_railway_release.mjs" in staging_job
+    assert "recover_railway_release.mjs" in production_job
+    assert "RUNNER_SCRIPT_TIMEOUT: \"25m\"" in staging_job
+    assert "RUNNER_SCRIPT_TIMEOUT: \"25m\"" in production_job
+    assert "RUNNER_AFTER_SCRIPT_TIMEOUT: \"20m\"" in staging_job
+    assert "RUNNER_AFTER_SCRIPT_TIMEOUT: \"20m\"" in production_job
+    assert 'AFTER_SCRIPT_IGNORE_ERRORS: "false"' in staging_job
+    assert 'AFTER_SCRIPT_IGNORE_ERRORS: "false"' in production_job
+    assert 'RELEASE_RECOVERY_TIMEOUT_MS: "900000"' in staging_job
+    assert 'RELEASE_RECOVERY_TIMEOUT_MS: "900000"' in production_job
+    assert staging_job.count('--expected-commit "$CI_COMMIT_SHA"') == 1
+    assert production_job.count('--expected-commit "$CI_COMMIT_SHA"') == 3
+    assert production_job.count(
+        '--drain-attestation-sha256 "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256"'
+    ) == 3
+    assert production_job.count(
+        '--drain-attestation-file "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"'
+    ) == 1
+    assert staging_job.count("timeout 120s node scripts/accept_railway_release.mjs") == 1
+    assert production_job.count("timeout 120s node scripts/accept_railway_release.mjs") == 1
 
 
 def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> None:
@@ -1215,9 +3593,26 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         "search",
         "search_pairs",
     ]
+    expected_post_bodies = {
+        "/v1/briefs/market": {"symbols": ["BTCUSD"]},
+        "/v1/checks/pre-trade": {
+            "symbol": "BTCUSD",
+            "side": "buy",
+            "notional_usd": 1,
+        },
+        "/v1/receipts/price": {"symbol": "BTCUSD"},
+        "/v1/snapshots/macro": {"universe": ["BTCUSD"]},
+        "/v1/indicators/token-quality": {"symbol": "BTCUSD"},
+        "/v1/indicators/state-divergence": {"symbol": "BTCUSD"},
+        "/v1/signals/solana-token-brief": {"symbols": ["SOLUSD"]},
+        "/v1/signals/trader-alpha-pack": {"symbols": ["BTCUSD"]},
+    }
 
     class CandidateHandler(BaseHTTPRequestHandler):
         calls: list[tuple[str, str]] = []
+        request_bodies: dict[str, object] = {}
+        user_agents: list[str] = []
+        include_unknown_x402_resource = False
         base_url = ""
 
         def log_message(self, _format: str, *_args: object) -> None:
@@ -1257,6 +3652,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
             self.calls.append(("GET", path))
+            self.user_agents.append(self.headers.get("User-Agent", ""))
             if path == "/readyz":
                 self._json(
                     200,
@@ -1348,14 +3744,20 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
                 )
                 return
             if path == "/.well-known/x402":
+                resources = [
+                    f"{self.base_url}/v1/vwap/BTC-USD",
+                    *(
+                        f"{self.base_url}{post_path}"
+                        for post_path in expected_post_bodies
+                    ),
+                ]
+                if self.include_unknown_x402_resource:
+                    resources.append(f"{self.base_url}/v1/unknown-side-effect")
                 self._json(
                     200,
                     {
                         "version": 1,
-                        "resources": [
-                            f"{self.base_url}/v1/vwap/BTC-USD",
-                            f"{self.base_url}/v1/briefs/market",
-                        ],
+                        "resources": resources,
                     },
                 )
                 return
@@ -1388,6 +3790,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         def do_POST(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
             self.calls.append(("POST", path))
+            self.user_agents.append(self.headers.get("User-Agent", ""))
             length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(length) if length else b""
             if path == "/mcp/server/":
@@ -1435,7 +3838,8 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
             if path.endswith(("/token", "/register")):
                 self._json(400, {"error": "controlled_oauth_request"})
                 return
-            if path == "/v1/briefs/market":
+            if path in expected_post_bodies:
+                self.request_bodies[path] = json.loads(raw_body or b"{}")
                 self._json(
                     402,
                     {"x402Version": 2},
@@ -1447,6 +3851,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         def do_DELETE(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
             self.calls.append(("DELETE", path))
+            self.user_agents.append(self.headers.get("User-Agent", ""))
             self._send(200 if path == "/mcp/server/" else 404)
 
     try:
@@ -1474,6 +3879,16 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
             timeout=60,
             check=False,
         )
+        CandidateHandler.include_unknown_x402_resource = True
+        CandidateHandler.calls.clear()
+        unknown_result = subprocess.run(
+            ["node", str(ROOT / "scripts" / "audit_hosted_release.mjs"), CandidateHandler.base_url],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
     finally:
         server.shutdown()
         server.server_close()
@@ -1486,7 +3901,15 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         assert ("POST", f"/{connector}/mcp/register") in CandidateHandler.calls
         assert ("GET", f"/{connector}/mcp/auth/callback") in CandidateHandler.calls
     assert ("GET", "/v1/vwap/BTC-USD") in CandidateHandler.calls
-    assert ("POST", "/v1/briefs/market") in CandidateHandler.calls
+    for path, body in expected_post_bodies.items():
+        assert ("POST", path) in CandidateHandler.calls
+        assert CandidateHandler.request_bodies[path] == body
+    assert CandidateHandler.user_agents
+    assert set(CandidateHandler.user_agents) == {"blocksize-hosted-smoke/1.0"}
+    assert unknown_result.returncode != 0
+    assert "refusing to request unknown x402 discovery resource" in unknown_result.stderr
+    assert ("GET", "/v1/unknown-side-effect") not in CandidateHandler.calls
+    assert ("POST", "/v1/unknown-side-effect") not in CandidateHandler.calls
 
 
 def test_release_ci_builds_twice_and_smokes_the_installed_wheel() -> None:
@@ -1508,7 +3931,107 @@ def test_release_ci_builds_twice_and_smokes_the_installed_wheel() -> None:
     assert "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5" in github
     assert "cancel-in-progress: true" in github
     assert "timeout-minutes: 20" in github
-    assert gitlab.count("timeout: 20m") == 3
+    assert gitlab.count("timeout: 20m") == 1
+    assert gitlab.count("timeout: 50m") == 2
+    assert gitlab.count('RUNNER_SCRIPT_TIMEOUT: "25m"') == 2
+    assert gitlab.count('RUNNER_AFTER_SCRIPT_TIMEOUT: "20m"') == 2
+    assert 25 + 20 < 50
+
+
+def test_gitlab_python_tests_install_verified_node20_and_preflight_versions(
+    tmp_path: Path,
+) -> None:
+    pipeline = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+    test_job = pipeline.split("test_python:", 1)[1].split("deploy_staging:", 1)[0]
+    node_preflight = 'test "$(node --version)" = "v20.19.4"'
+    python_preflight = (
+        'test "$(python -c \'import sys; '
+        'print(f"{sys.version_info.major}.{sys.version_info.minor}")\')" = "3.12"'
+    )
+
+    assert "image: python:3.12" in test_job
+    assert "node-v20.19.4-linux-x64.tar.gz" in test_job
+    assert "node-v20.19.4-linux-arm64.tar.gz" in test_job
+    assert (
+        "d80a33707605ced9a31b8f543cea9ab512bc3d2fef2c148f31a50e939ff07560"
+        in test_job
+    )
+    assert (
+        "d200798332b7a56d355888ce58e6a639fac7939a4833e5bc8780c66888e1ce4d"
+        in test_job
+    )
+    assert '"https://nodejs.org/dist/v20.19.4/${NODE_ARCHIVE}"' in test_job
+    assert "sha256sum --check --strict -" in test_job
+    assert 'tar -xzf "/tmp/${NODE_ARCHIVE}"' in test_job
+    assert "Unsupported GitLab runner architecture" in test_job
+    assert python_preflight in test_job
+    assert node_preflight in test_job
+    assert test_job.index("sha256sum --check --strict -") < test_job.index(
+        node_preflight
+    )
+    assert test_job.index(node_preflight) < test_job.index("uv run pytest -q")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_node = fake_bin / "node"
+    fake_node.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"${FAKE_NODE_VERSION}\"\n",
+        encoding="utf-8",
+    )
+    fake_node.chmod(0o755)
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"${FAKE_PYTHON_VERSION}\"\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        "FAKE_NODE_VERSION": "v20.19.4",
+        "FAKE_PYTHON_VERSION": "3.12",
+    }
+    accepted_node = subprocess.run(
+        ["/bin/sh", "-eu", "-c", node_preflight],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    accepted_python = subprocess.run(
+        ["/bin/sh", "-eu", "-c", python_preflight],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    environment["FAKE_NODE_VERSION"] = "v20.19.5"
+    environment["FAKE_PYTHON_VERSION"] = "3.13"
+    rejected_node = subprocess.run(
+        ["/bin/sh", "-eu", "-c", node_preflight],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    rejected_python = subprocess.run(
+        ["/bin/sh", "-eu", "-c", python_preflight],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert accepted_node.returncode == 0, accepted_node.stdout + accepted_node.stderr
+    assert accepted_python.returncode == 0, (
+        accepted_python.stdout + accepted_python.stderr
+    )
+    assert rejected_node.returncode != 0
+    assert rejected_python.returncode != 0
 
 
 def test_installed_release_uses_only_exact_frozen_runtime_dependencies(

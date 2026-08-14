@@ -7,6 +7,7 @@ from urllib.parse import quote
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
 from src.mcp_server import (
@@ -140,6 +141,19 @@ public_mcp = FastMCP(
 )
 
 
+def _record_public_mcp_usage(tool_name: str, **fields: object) -> None:
+    """Record public MCP usage with only the request user-agent for test tagging."""
+    user_agent = get_http_headers().get("user-agent", "").strip()
+    if user_agent:
+        fields["user_agent"] = user_agent
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name=tool_name,
+        **fields,
+    )
+
+
 @public_mcp.tool(
     name="search_pairs",
     title="Instrument Search",
@@ -156,10 +170,8 @@ async def public_search_pairs(
     asset_class: AssetClassFilter = "all",
 ) -> str:
     """Search supported instruments on the public remote MCP surface."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="search_pairs",
+    _record_public_mcp_usage(
+        "search_pairs",
         subject=query,
         asset_class=asset_class,
     )
@@ -182,10 +194,8 @@ async def public_list_instruments(
     offset: InstrumentPageOffset = 0,
 ) -> str:
     """List supported instruments on the public remote MCP surface."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="list_instruments",
+    _record_public_mcp_usage(
+        "list_instruments",
         subject=service,
     )
     return await list_local_instruments(service, limit, offset)
@@ -203,11 +213,7 @@ async def public_list_instruments(
 )
 async def public_get_pricing_info() -> str:
     """Return pricing guidance for public discovery clients."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_pricing_info",
-    )
+    _record_public_mcp_usage("get_pricing_info")
     return await get_local_pricing_info()
 
 
@@ -223,11 +229,7 @@ async def public_get_pricing_info() -> str:
 )
 async def public_get_product_catalog() -> str:
     """Return product catalog guidance for agents and listing surfaces."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_product_catalog",
-    )
+    _record_public_mcp_usage("get_product_catalog")
     return json.dumps(build_data_packages_json(), indent=2)
 
 
@@ -243,10 +245,8 @@ async def public_get_product_catalog() -> str:
 )
 async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
     """Return the paid HTTP endpoint and example body for a premium workflow."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_workflow_endpoint",
+    _record_public_mcp_usage(
+        "get_workflow_endpoint",
         subject=product,
     )
     catalog: dict[str, dict[str, object]] = {
@@ -412,10 +412,8 @@ async def public_get_market_data_endpoint(
     symbol: LiveMarketDataSymbol,
 ) -> str:
     """Return the paid HTTP endpoint an agent should call for live data."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_market_data_endpoint",
+    _record_public_mcp_usage(
+        "get_market_data_endpoint",
         subject=symbol.strip().upper(),
         asset_class=service,
     )
@@ -481,10 +479,8 @@ async def public_get_market_data_endpoint(
 )
 async def public_search(query: CatalogSearchQuery) -> str:
     """Search docs and catalog entries in a document-oriented shape."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="search",
+    _record_public_mcp_usage(
+        "search",
         subject=query,
     )
     return await search_catalog(query)
@@ -502,10 +498,8 @@ async def public_search(query: CatalogSearchQuery) -> str:
 )
 async def public_fetch(id: CatalogFetchId) -> str:
     """Fetch one documentation or instrument payload."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="fetch",
+    _record_public_mcp_usage(
+        "fetch",
         subject=id,
     )
     return await fetch_catalog(id)

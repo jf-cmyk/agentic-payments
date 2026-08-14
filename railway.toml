@@ -1,8 +1,8 @@
 [build]
 builder = "RAILPACK"
-# Railway passes this value through to the matching GHCR frontend tag. Release
-# images are published with the leading `v` (for example, `v0.35.0`).
-railpackVersion = "v0.35.0"
+# Railway's config-as-code field uses the bare semantic version even though the
+# corresponding GitHub release tag has a leading `v`.
+railpackVersion = "0.36.2"
 
 [deploy]
 healthcheckPath = "/readyz"

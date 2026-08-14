@@ -16,7 +16,20 @@ const expectedTools = [
   "search",
   "search_pairs",
 ];
+const expectedPostBodies = {
+  "/v1/briefs/market": { symbols: ["BTCUSD"] },
+  "/v1/checks/pre-trade": { symbol: "BTCUSD", side: "buy", notional_usd: 1 },
+  "/v1/receipts/price": { symbol: "BTCUSD" },
+  "/v1/snapshots/macro": { universe: ["BTCUSD"] },
+  "/v1/indicators/token-quality": { symbol: "BTCUSD" },
+  "/v1/indicators/state-divergence": { symbol: "BTCUSD" },
+  "/v1/signals/solana-token-brief": { symbols: ["SOLUSD"] },
+  "/v1/signals/trader-alpha-pack": { symbols: ["BTCUSD"] },
+};
 const calls = [];
+const requestBodies = new Map();
+const userAgents = [];
+let includeUnknownX402Resource = false;
 
 function response(status, payload = "", headers = {}) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
@@ -40,6 +53,7 @@ globalThis.fetch = async (input, options = {}) => {
   const path = url.pathname;
   const method = String(options.method || "GET").toUpperCase();
   calls.push([method, path]);
+  userAgents.push(new Headers(options.headers || {}).get("user-agent") || "");
 
   if (method === "GET" && path === "/readyz") {
     return response(200, {
@@ -101,12 +115,16 @@ globalThis.fetch = async (input, options = {}) => {
     });
   }
   if (method === "GET" && path === "/.well-known/x402") {
+    const resources = [
+      `${baseUrl}/v1/vwap/BTC-USD`,
+      ...Object.keys(expectedPostBodies).map((postPath) => `${baseUrl}${postPath}`),
+    ];
+    if (includeUnknownX402Resource) {
+      resources.push(`${baseUrl}/v1/unknown-side-effect`);
+    }
     return response(200, {
       version: 1,
-      resources: [
-        `${baseUrl}/v1/vwap/BTC-USD`,
-        `${baseUrl}/v1/briefs/market`,
-      ],
+      resources,
     });
   }
   if (
@@ -132,7 +150,8 @@ globalThis.fetch = async (input, options = {}) => {
       { "PAYMENT-REQUIRED": "test", "Cache-Control": "no-store" },
     );
   }
-  if (method === "POST" && path === "/v1/briefs/market") {
+  if (method === "POST" && expectedPostBodies[path]) {
+    requestBodies.set(path, JSON.parse(options.body || "{}"));
     return response(
       402,
       { x402Version: 2 },
@@ -193,5 +212,25 @@ for (const connector of ["anthropic", "cursor", "openai"]) {
   assertCalled("GET", `/${connector}/mcp/auth/callback`);
 }
 assertCalled("GET", "/v1/vwap/BTC-USD");
-assertCalled("POST", "/v1/briefs/market");
+for (const [path, expectedBody] of Object.entries(expectedPostBodies)) {
+  assertCalled("POST", path);
+  if (JSON.stringify(requestBodies.get(path)) !== JSON.stringify(expectedBody)) {
+    throw new Error(`${path} did not use its controlled no-payment request body`);
+  }
+}
+if (userAgents.length === 0 || userAgents.some((value) => value !== "blocksize-hosted-smoke/1.0")) {
+  throw new Error("hosted audit requests were not consistently tagged as synthetic");
+}
+
+includeUnknownX402Resource = true;
+calls.length = 0;
+process.exitCode = 0;
+await import(`./audit_hosted_release.mjs?unknown=${Date.now()}`);
+if (process.exitCode !== 1) {
+  throw new Error("hosted audit accepted an unknown x402 discovery resource");
+}
+process.exitCode = 0;
+if (calls.some(([, path]) => path === "/v1/unknown-side-effect")) {
+  throw new Error("hosted audit requested an unknown x402 discovery resource");
+}
 console.log(JSON.stringify({ passed: true, calls: calls.length }));

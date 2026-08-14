@@ -6,6 +6,12 @@ const baseUrl = (process.argv[2] || "https://mcp.blocksize.info").replace(/\/$/,
 const expectedCommit = (process.argv[3] || "").trim().toLowerCase();
 const expectedManifest = JSON.parse(await readFile(new URL("../server.json", import.meta.url)));
 const protocolVersion = "2025-03-26";
+const auditUserAgent = "blocksize-hosted-smoke/1.0";
+const auditTimeoutMs = Number(process.env.RELEASE_AUDIT_TIMEOUT_MS || "300000");
+if (!Number.isSafeInteger(auditTimeoutMs) || auditTimeoutMs < 30_000 || auditTimeoutMs > 600_000) {
+  throw new Error("RELEASE_AUDIT_TIMEOUT_MS must be between 30000 and 600000");
+}
+const auditDeadline = AbortSignal.timeout(auditTimeoutMs);
 const expectedTools = [
   "fetch",
   "get_market_data_endpoint",
@@ -36,7 +42,30 @@ function assert(condition, message) {
 }
 
 function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return new Promise((resolve, reject) => {
+    if (auditDeadline.aborted) {
+      reject(new Error(`hosted release audit exceeded ${auditTimeoutMs}ms`));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error(`hosted release audit exceeded ${auditTimeoutMs}ms`));
+    };
+    const timer = setTimeout(() => {
+      auditDeadline.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    auditDeadline.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function auditFetch(input, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("User-Agent", auditUserAgent);
+  const signal = options.signal
+    ? AbortSignal.any([auditDeadline, options.signal])
+    : auditDeadline;
+  return fetch(input, { ...options, headers, signal });
 }
 
 function localPath(url, label) {
@@ -79,15 +108,39 @@ function rewriteTrackedOrigin(value, trackedOrigin, candidateOrigin) {
   return value;
 }
 
+const x402PostBodies = {
+  "/v1/briefs/market": { symbols: ["BTCUSD"] },
+  "/v1/checks/pre-trade": { symbol: "BTCUSD", side: "buy", notional_usd: 1 },
+  "/v1/receipts/price": { symbol: "BTCUSD" },
+  "/v1/snapshots/macro": { universe: ["BTCUSD"] },
+  "/v1/indicators/token-quality": { symbol: "BTCUSD" },
+  "/v1/indicators/state-divergence": { symbol: "BTCUSD" },
+  "/v1/signals/solana-token-brief": { symbols: ["SOLUSD"] },
+  "/v1/signals/trader-alpha-pack": { symbols: ["BTCUSD"] },
+};
+const x402GetPaths = new Set([
+  "/v1/vwap/BTC-USD",
+  "/v1/bidask/BTC-USD",
+  "/v1/state/MSOLUSD",
+  "/v1/vwap30m/SOLUSD",
+  "/v1/vwap24h/BTCUSD",
+  "/v1/bidask/AAPL",
+  "/v1/fx/EURUSD",
+  "/v1/metal/XAUUSD",
+]);
+
 async function assertX402Challenge(resourceUrl, method) {
   const path = localPath(resourceUrl, "x402 discovery resource");
+  const pathname = new URL(resourceUrl).pathname;
   const options = {
     method,
     headers: { Origin: baseUrl },
   };
   if (method === "POST") {
+    const requestBody = x402PostBodies[pathname];
+    assert(requestBody, `${path}: missing safe POST challenge fixture`);
     options.headers["Content-Type"] = "application/json";
-    options.body = "{}";
+    options.body = JSON.stringify(requestBody);
   }
   const response = await fetchChecked(path, 402, options);
   const body = await response.json();
@@ -100,7 +153,7 @@ async function assertX402Challenge(resourceUrl, method) {
 }
 
 async function fetchOperationalOAuthEndpoint(url, method, label, options = {}) {
-  const response = await fetch(`${baseUrl}${localPath(url, label)}`, {
+  const response = await auditFetch(`${baseUrl}${localPath(url, label)}`, {
     method,
     redirect: "manual",
     signal: AbortSignal.timeout(30_000),
@@ -115,7 +168,7 @@ async function waitForCandidate() {
   let lastState = "no response";
   for (let attempt = 1; attempt <= 36; attempt += 1) {
     try {
-      const response = await fetch(`${baseUrl}/readyz`, {
+      const response = await auditFetch(`${baseUrl}/readyz`, {
         signal: AbortSignal.timeout(10_000),
       });
       const body = await response.json();
@@ -139,7 +192,7 @@ async function waitForCandidate() {
 }
 
 async function fetchChecked(path, expectedStatus = 200, options = {}) {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await auditFetch(`${baseUrl}${path}`, {
     redirect: "manual",
     signal: AbortSignal.timeout(30_000),
     ...options,
@@ -163,7 +216,7 @@ async function checkMcp() {
     Accept: "application/json, text/event-stream",
     "Content-Type": "application/json",
   };
-  const initialize = await fetch(endpoint, {
+  const initialize = await auditFetch(endpoint, {
     method: "POST",
     headers: baseHeaders,
     body: JSON.stringify({
@@ -192,7 +245,7 @@ async function checkMcp() {
   );
 
   const headers = { ...baseHeaders, "Mcp-Session-Id": sessionId };
-  const initialized = await fetch(endpoint, {
+  const initialized = await auditFetch(endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
@@ -200,7 +253,7 @@ async function checkMcp() {
   });
   assert(initialized.status === 202, `MCP initialized returned ${initialized.status}`);
 
-  const toolsResponse = await fetch(endpoint, {
+  const toolsResponse = await auditFetch(endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
@@ -217,7 +270,7 @@ async function checkMcp() {
 
   let requestId = 10;
   for (const [name, args] of Object.entries(toolCalls)) {
-    const response = await fetch(endpoint, {
+    const response = await auditFetch(endpoint, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -233,7 +286,7 @@ async function checkMcp() {
     assert(payload.result?.isError !== true, `${name}: MCP tool call returned an error`);
   }
 
-  const terminated = await fetch(endpoint, {
+  const terminated = await auditFetch(endpoint, {
     method: "DELETE",
     headers,
     signal: AbortSignal.timeout(30_000),
@@ -329,7 +382,7 @@ async function run() {
   await Promise.all(
     candidateManifestLinks.map(async (url) => {
       const path = localPath(url, "MCP manifest link");
-      const response = await fetch(`${baseUrl}${path}`, {
+      const response = await auditFetch(`${baseUrl}${path}`, {
         redirect: "manual",
         signal: AbortSignal.timeout(30_000),
       });
@@ -344,7 +397,7 @@ async function run() {
   await Promise.all(
     sitemapUrls.map(async (url) => {
       const path = localPath(url, "sitemap URL");
-      const response = await fetch(`${baseUrl}${path}`, {
+      const response = await auditFetch(`${baseUrl}${path}`, {
         redirect: "manual",
         signal: AbortSignal.timeout(30_000),
       });
@@ -427,21 +480,17 @@ async function run() {
     Array.isArray(x402Discovery.resources) && x402Discovery.resources.length > 0,
     "x402 discovery contains no resources",
   );
-  const postPaths = new Set([
-    "/v1/briefs/market",
-    "/v1/checks/pre-trade",
-    "/v1/receipts/price",
-    "/v1/snapshots/macro",
-    "/v1/indicators/token-quality",
-    "/v1/indicators/state-divergence",
-    "/v1/signals/solana-token-brief",
-    "/v1/signals/trader-alpha-pack",
-  ]);
   for (const resourceUrl of x402Discovery.resources) {
     assert(typeof resourceUrl === "string", "x402 discovery resource must be a URL");
     const resourcePath = localPath(resourceUrl, "x402 discovery resource");
     const pathname = new URL(resourceUrl).pathname;
-    await assertX402Challenge(resourceUrl, postPaths.has(pathname) ? "POST" : "GET");
+    const method = x402PostBodies[pathname]
+      ? "POST"
+      : x402GetPaths.has(pathname)
+        ? "GET"
+        : null;
+    assert(method, `refusing to request unknown x402 discovery resource ${resourcePath}`);
+    await assertX402Challenge(resourceUrl, method);
     assert(resourcePath.startsWith("/v1/"), `unexpected x402 resource path ${resourcePath}`);
   }
   results.x402Challenges = x402Discovery.resources.length;

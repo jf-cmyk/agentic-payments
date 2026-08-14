@@ -11,6 +11,8 @@ agent_wallet.json
 credits.db
 usage_events.db
 rwa_observations.db
+*.db-shm
+*.db-wal
 *entitlements.db
 anthropic_entitlements.db
 cursor_entitlements.db
@@ -21,3 +23,4 @@ backups/
 .DS_Store
 mcp-registry-key.pem
 tools/mcp-publisher
+.railway-release-*.json*

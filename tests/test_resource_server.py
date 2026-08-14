@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 import logging
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
@@ -255,6 +256,7 @@ class TestPublicListingSurfaces:
         assert support_response.status_code == 200
         assert prompt_examples_response.status_code == 200
         assert first_price_response.status_code == 200
+        assert "Get a live Blocksize price" in first_price_response.text
         assert "Get my first live price" in first_price_response.text
         assert "blocksize_first_price_agent_id" not in first_price_response.text
         assert "PAYMENT-SIGNATURE" in first_price_response.text
@@ -4606,6 +4608,89 @@ class TestObservabilityDashboard:
         assert response.headers["cache-control"] == "no-store"
         assert "authentication unavailable" in response.json()["error"].lower()
 
+    def test_legacy_observability_escapes_stored_telemetry_before_inner_html(
+        self,
+        observability_store,
+        test_client,
+    ):
+        attack = (
+            '\"><img src=x onerror="globalThis.__xss=1">'
+            '<svg onload="globalThis.__xss=2"></svg>'
+        )
+        observability_store.record(
+            "mcp_tool_call",
+            surface=attack,
+            endpoint=attack,
+            user_agent=attack,
+            referrer=attack,
+            subject=attack,
+            asset_class=attack,
+            reason=attack,
+            tool_name=attack,
+        )
+        stats_response = test_client.get("/internal/observability/stats?days=1")
+        assert stats_response.status_code == 200
+        stats = stats_response.json()
+        assert any(row.get("surface") == attack for row in stats["recent_events"])
+
+        dashboard = test_client.get("/internal/observability/legacy")
+        assert dashboard.status_code == 200
+        script = dashboard.text.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        probe = """
+globalThis.__xss = 0;
+const elements = new Map();
+const elementFor = id => {
+  if (!elements.has(id)) {
+    elements.set(id, {
+      id,
+      value: id === "window" ? "1" : "",
+      innerHTML: "",
+      textContent: "",
+      addEventListener() {},
+      setAttribute() {},
+    });
+  }
+  return elements.get(id);
+};
+globalThis.document = { getElementById: elementFor };
+globalThis.setInterval = () => 1;
+globalThis.clearInterval = () => {};
+const telemetryPayload = """ + json.dumps(stats) + ";\n" + """
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => telemetryPayload,
+});
+""" + script + """
+await new Promise(resolve => setTimeout(resolve, 25));
+const rendered = [
+  "kpis", "timeline", "services", "origins", "mcp", "subjects",
+  "clients", "agents", "data-called", "recent",
+].map(id => elementFor(id).innerHTML).join("\\n");
+process.stdout.write(JSON.stringify({
+  marker: globalThis.__xss,
+  rendered,
+  freshness: elementFor("freshness").textContent,
+}));
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "--eval", probe],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        rendered = json.loads(result.stdout)
+        assert rendered["marker"] == 0
+        assert "Unable to load stats" not in rendered["freshness"]
+        assert attack not in rendered["rendered"]
+        assert "<img" not in rendered["rendered"]
+        assert "<svg" not in rendered["rendered"]
+        assert "&lt;img" in rendered["rendered"]
+        assert "&lt;svg" in rendered["rendered"]
+        assert 'title="&quot;&gt;&lt;img' in rendered["rendered"]
+
     def test_observability_login_rejects_duplicate_and_oversize_forms(
         self,
         test_client,
@@ -4702,6 +4787,10 @@ class TestObservabilityDashboard:
         assert "timelineTip" in response.text
         assert "data-tip" in response.text
         assert "Password protected" in response.text
+        assert 'href="/internal/observability/logout"' in response.text
+        assert 'document.addEventListener("visibilitychange"' in response.text
+        assert "live && !document.hidden ? setInterval(load, 10000) : null" in response.text
+        assert '${escapeAttr(text(row.subject || row.reason))}' in response.text
         assert "Token not configured" not in response.text
 
     def test_popularity_rollup_separates_requested_delivered_and_blocked(

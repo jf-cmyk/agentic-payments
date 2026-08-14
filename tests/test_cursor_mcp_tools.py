@@ -26,7 +26,12 @@ def isolated_cursor_state(tmp_path, monkeypatch):
 
 
 def _identity():
-    return ConnectorIdentity(user_id="cursor-user-1", email="cursor@example.com", source="test")
+    return ConnectorIdentity(
+        user_id="cursor-user-1",
+        email="cursor@example.com",
+        source="test",
+        principal_id="cursor:test-scope:cursor-user-1",
+    )
 
 
 @pytest.mark.asyncio

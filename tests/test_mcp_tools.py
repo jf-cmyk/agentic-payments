@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src import public_mcp_server
 from src.mcp_server import (
     get_vwap, get_bid_ask,
     get_fx_rate, get_metal_price,
@@ -243,6 +244,28 @@ class TestOpenAIStyleDiscoveryTools:
 
 
 class TestPublicRemoteDiscoveryTools:
+    def test_usage_telemetry_carries_only_the_request_user_agent(self):
+        with (
+            patch.object(
+                public_mcp_server,
+                "get_http_headers",
+                return_value={
+                    "user-agent": "blocksize-hosted-smoke/1.0",
+                    "authorization": "Bearer must-not-be-recorded",
+                },
+            ),
+            patch.object(public_mcp_server, "record_usage_event") as record,
+        ):
+            public_mcp_server._record_public_mcp_usage("search", subject="pricing")
+
+        record.assert_called_once_with(
+            "mcp_tool_call",
+            surface="public_mcp",
+            tool_name="search",
+            subject="pricing",
+            user_agent="blocksize-hosted-smoke/1.0",
+        )
+
     @pytest.mark.asyncio
     async def test_market_data_endpoint_builder_returns_x402_url(self):
         result = await public_get_market_data_endpoint("bidask", "AAPL")

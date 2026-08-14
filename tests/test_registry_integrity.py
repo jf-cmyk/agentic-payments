@@ -89,8 +89,20 @@ def test_observability_can_exclude_synthetic_events(tmp_path: Path) -> None:
         "http_request",
         endpoint="/production",
         status_code=200,
+        ip_hash="private-client-fingerprint",
         user_agent="curl/8",
     )
+    store.record(
+        "http_request",
+        endpoint="/outside-window",
+        status_code=200,
+        user_agent="curl/8",
+    )
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE usage_events SET timestamp = ? WHERE endpoint = ?",
+            ("2000-01-01T00:00:00+00:00", "/outside-window"),
+        )
 
     all_events = store.summarize(days=1)
     production = store.summarize(days=1, include_synthetic=False)
@@ -104,3 +116,40 @@ def test_observability_can_exclude_synthetic_events(tmp_path: Path) -> None:
         "excluded_synthetic_events": 2,
         "detected_synthetic_events": 2,
     }
+    assert [event["endpoint"] for event in production["recent_events"]] == [
+        "/production"
+    ]
+    assert "ip_hash" not in production["recent_events"][0]
+
+
+def test_observability_recent_events_are_filtered_bounded_and_newest_first(
+    tmp_path: Path,
+) -> None:
+    store = UsageEventStore(tmp_path / "usage.db")
+    for index in range(55):
+        store.record(
+            "http_request",
+            endpoint=f"/production/{index:02d}",
+            status_code=200,
+            ip_hash=f"private-{index}",
+            user_agent="curl/8",
+        )
+        store.record(
+            "http_request",
+            endpoint=f"/synthetic/{index:02d}",
+            status_code=200,
+            user_agent="blocksize-hosted-smoke/1.0",
+        )
+
+    production = store.summarize(days=1, include_synthetic=False)
+    recent = production["recent_events"]
+
+    assert len(recent) == 50
+    assert [event["endpoint"] for event in recent[:3]] == [
+        "/production/54",
+        "/production/53",
+        "/production/52",
+    ]
+    assert recent[-1]["endpoint"] == "/production/05"
+    assert all(not event["endpoint"].startswith("/synthetic/") for event in recent)
+    assert all("ip_hash" not in event for event in recent)

@@ -196,13 +196,21 @@ https://mcp.blocksize.info/cursor/mcp/auth/callback
 
 Entitlement storage should be deliberate:
 
-- Shared credit pool across Claude and Cursor:
-  `/data/blocksize_connector_entitlements.db`
-- Isolated Cursor beta:
-  `/data/cursor_entitlements.db`
+- Cursor production ledger: `/data/cursor_entitlements.db`
+- Claude production ledger: `/data/anthropic_entitlements.db`
 
-Use shared storage for the public product if the same Clerk account should have
-one daily credit balance across Claude and Cursor.
+Do not point Cursor and Claude at one SQLite ledger. Connector, issuer, and
+audience are part of the authenticated principal, and the rollback-compatible
+identity bridge intentionally permits only one scoped principal per raw legacy
+`user_id`. A cross-connector shared allowance needs a separate, explicit
+account-linking migration.
+
+Keep the Cursor database path stable through deploys and rollbacks. Current
+releases add an `identity_aliases` binding but continue charging the raw
+v0.6.2-compatible user row, so an old release sees the same balance after
+rollback. Never delete or rekey that binding. Scope collisions and any
+pre-existing scoped balance fail closed for backed-up operator reconciliation
+instead of silently granting another starter allowance.
 
 ## Cursor QA Checklist
 

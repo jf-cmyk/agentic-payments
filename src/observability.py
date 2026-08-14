@@ -783,7 +783,10 @@ class UsageEventStore:
             "failure_reasons": dict(failure_reasons.most_common(10)),
             "top_subjects": dict(top_subjects.most_common(20)),
             "timeline": timeline,
-            "recent_events": self.recent_events(limit=50),
+            "recent_events": [
+                {key: value for key, value in event.items() if key != "ip_hash"}
+                for event in reversed(events[-50:])
+            ],
             "notes": [
                 "Client IPs, wallets, and payment proofs are stored only as salted hashes.",
                 "Paid calls count completed HTTP deliveries plus completed authenticated MCP deliveries; credit drawdown alone is not treated as delivery.",

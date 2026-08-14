@@ -30,6 +30,7 @@ def _identity():
         user_id="openai-user-1",
         email="openai@example.com",
         source="test",
+        principal_id="openai:test-scope:openai-user-1",
     )
 
 

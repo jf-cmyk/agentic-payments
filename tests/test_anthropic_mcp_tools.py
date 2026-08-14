@@ -29,7 +29,12 @@ def isolated_anthropic_state(tmp_path, monkeypatch):
 
 
 def _identity():
-    return AnthropicIdentity(user_id="user-1", email="user@example.com", source="test")
+    return AnthropicIdentity(
+        user_id="user-1",
+        email="user@example.com",
+        source="test",
+        principal_id="anthropic:test-scope:user-1",
+    )
 
 
 def test_anthropic_tools_use_directory_safe_annotations():

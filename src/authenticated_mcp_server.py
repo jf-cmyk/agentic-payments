@@ -38,6 +38,7 @@ from src.observability import (
     record_usage_event_once,
 )
 from src.public_metadata import APP_VERSION, MAIN_WEBSITE_PRICING_URL, PUBLIC_BASE_URL
+from src.transaction_bridge import economic_writes_locked
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,14 @@ def create_authenticated_market_data_mcp(
         call: Callable[[], Awaitable[T]],
         render: Callable[[T], str],
     ) -> str:
+        if economic_writes_locked():
+            return error_payload(
+                "ECONOMIC_WRITES_LOCKED",
+                (
+                    "Live-data credit consumption is temporarily disabled during "
+                    "a transaction-continuity maintenance release. No credit was used."
+                ),
+            )
         attempt_id = uuid.uuid4().hex
         identity = resolve_identity()
         identity_metadata = telemetry_identity_payload(identity)
@@ -217,8 +226,13 @@ def create_authenticated_market_data_mcp(
         charge_id = uuid.uuid4().hex
         entitlements = get_entitlements()
         try:
-            ok, status = entitlements.spend(
+            canonical_user_id = entitlements.bind_identity(
                 identity.ledger_subject,
+                identity.legacy_ledger_subject,
+                email=identity.email,
+            )
+            ok, status = entitlements.spend(
+                canonical_user_id,
                 cost,
                 email=identity.email,
                 tool_name=tool_name,
@@ -283,7 +297,7 @@ def create_authenticated_market_data_mcp(
         def refund_pending_charge() -> dict[str, object]:
             try:
                 refunded = entitlements.refund(
-                    identity.ledger_subject,
+                    canonical_user_id,
                     cost,
                     tool_name=tool_name,
                     subject=subject,
@@ -367,7 +381,7 @@ def create_authenticated_market_data_mcp(
 
         try:
             current = entitlements.finalize_delivery(
-                identity.ledger_subject,
+                canonical_user_id,
                 cost,
                 charge_id=charge_id,
             )
@@ -580,6 +594,14 @@ def create_authenticated_market_data_mcp(
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
     async def get_credit_balance() -> str:
+        if economic_writes_locked():
+            return error_payload(
+                "ECONOMIC_WRITES_LOCKED",
+                (
+                    "Credit-ledger access is temporarily disabled during a "
+                    "transaction-continuity maintenance release."
+                ),
+            )
         record_usage_event(
             "mcp_tool_call",
             surface=observability_surface,
@@ -598,7 +620,13 @@ def create_authenticated_market_data_mcp(
                 "Connect with an authenticated Blocksize account to view starter credits.",
             )
         try:
-            status = get_entitlements().status(identity.ledger_subject, identity.email)
+            entitlements = get_entitlements()
+            canonical_user_id = entitlements.bind_identity(
+                identity.ledger_subject,
+                identity.legacy_ledger_subject,
+                email=identity.email,
+            )
+            status = entitlements.status(canonical_user_id, identity.email)
         except sqlite3.Error:
             logger.error("Connector credit ledger is unavailable for get_credit_balance")
             return error_payload(

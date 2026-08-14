@@ -29,6 +29,11 @@ class ConnectorIdentity:
         """Return the issuer/connector-scoped identity used for entitlements."""
         return self.principal_id or self.user_id
 
+    @property
+    def legacy_ledger_subject(self) -> str:
+        """Return the raw subject used by the v0.6.2 rollback-compatible ledger."""
+        return self.user_id
+
 
 AccessTokenGetter = Callable[[], AccessToken]
 HeaderGetter = Callable[..., dict[str, str]]

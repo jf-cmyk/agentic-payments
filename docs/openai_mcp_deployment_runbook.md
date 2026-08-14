@@ -33,6 +33,19 @@ Set `ROOT_OAUTH_CONNECTOR=openai` only on a host dedicated to this connector.
 The shared production host can keep its existing root metadata setting because
 the OpenAI path also publishes path-scoped OAuth metadata.
 
+## Entitlement identity and rollback continuity
+
+Keep `OPENAI_ENTITLEMENT_DB_PATH` stable and isolated from the Claude and Cursor
+ledgers. Current releases bind the OpenAI/issuer/audience-scoped principal in
+`identity_aliases` while continuing to own balances and charges under the raw
+`user_id` read by v0.6.2. The mapping is additive and one-to-one, so an upgrade
+does not create another starter allowance and a rollback sees candidate usage.
+
+Do not delete or rewrite identity bindings. If the issuer or audience changes,
+a different scoped principal claims an existing raw ID, or an older candidate
+already created a scoped balance row, the ledger fails closed. Back up the
+database and reconcile the identity deliberately before restoring access.
+
 ## Acceptance sequence
 
 1. Confirm `/health` lists `openai_connector` and the expected MCP URL.

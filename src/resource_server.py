@@ -234,6 +234,11 @@ from src.rwa_security import (
 )
 from src.rwa_daily_feed_agent import build_daily_feed_agent_view
 from src.rwa_xyz_monitor import build_rwa_xyz_monitor_view
+from src.transaction_bridge import (
+    economic_writes_locked,
+    legacy_transaction_bridge_lock_status,
+    transaction_bridge_readiness,
+)
 from src import anthropic_auth
 from src import cursor_auth
 from src import openai_auth
@@ -4244,6 +4249,7 @@ async def _verify_payment(
     resource_url: str | None = None,
     request_body: bytes = b"",
     attempt_id: str | None = None,
+    replay_only: bool = False,
 ) -> dict:
     """Verify an official x402 v2 signature and reserve it for delivery.
 
@@ -4283,6 +4289,8 @@ async def _verify_payment(
                         "attempt_id": effective_attempt_id,
                         "cached_response": replay,
                     }
+            if replay_only:
+                return {"valid": False, "reason": "economic_writes_locked"}
             try:
                 facilitator = FacilitatorAdapter(
                     settings.x402.facilitator_url,
@@ -4342,6 +4350,9 @@ async def _verify_payment(
                 "_requirement": requirement,
                 "_facilitator": facilitator,
             }
+
+    if replay_only:
+        return {"valid": False, "reason": "economic_writes_locked"}
 
     allow_mock = settings.server.x402_allow_mock_payments
     allow_legacy = settings.server.x402_allow_legacy_payments
@@ -4567,6 +4578,23 @@ async def x402_payment_middleware(request: Request, call_next):
         return _apply_x402_cors_headers(request, preflight_response)
 
     path = request.url.path
+    bridge_locked = economic_writes_locked()
+    if bridge_locked and path == "/v1/credits/claim":
+        return _apply_x402_cors_headers(
+            request,
+            JSONResponse(
+                status_code=503,
+                headers={"Retry-After": "300", "Cache-Control": "no-store"},
+                content={
+                    "error": "Economic Writes Locked",
+                    "error_code": "ECONOMIC_WRITES_LOCKED",
+                    "message": (
+                        "Credit and payment writes are temporarily disabled during "
+                        "a transaction-continuity maintenance release."
+                    ),
+                },
+            ),
+        )
     try:
         price = _get_price_for_request(request)
     except ValueError as e:
@@ -4593,7 +4621,7 @@ async def x402_payment_middleware(request: Request, call_next):
         return _apply_x402_cors_headers(request, invalid_request)
 
     try:
-        credit_subject = _starter_credit_subject(request)
+        credit_subject = None if bridge_locked else _starter_credit_subject(request)
     except ValueError as e:
         _record_product_event(
             "credit_drawdown_failed",
@@ -4916,6 +4944,7 @@ async def x402_payment_middleware(request: Request, call_next):
             resource_url=resource_url,
             request_body=request_body,
             attempt_id=attempt_id,
+            replay_only=bridge_locked,
         )
         if not verification.get("valid", False):
             reason = str(verification.get("reason", "unknown"))
@@ -4926,6 +4955,26 @@ async def x402_payment_middleware(request: Request, call_next):
                 reason=reason,
                 metadata={"attempt_id": attempt_id},
             )
+            if reason == "economic_writes_locked":
+                return _apply_x402_cors_headers(
+                    request,
+                    JSONResponse(
+                        status_code=503,
+                        headers={
+                            "Retry-After": "300",
+                            "Cache-Control": "no-store",
+                        },
+                        content={
+                            "error": "Economic Writes Locked",
+                            "error_code": "ECONOMIC_WRITES_LOCKED",
+                            "message": (
+                                "Payment-proof consumption is temporarily disabled "
+                                "during a transaction-continuity maintenance release. "
+                                "The proof was not verified, reserved, or settled."
+                            ),
+                        },
+                    ),
+                )
             unavailable = reason in {
                 "facilitator_unavailable",
                 "x402_sdk_unavailable",
@@ -9398,7 +9447,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .sub { color: var(--muted); font-size: 13px; line-height: 1.45; }
     .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-    button, select, input {
+    button, select, input, .toolbar-link {
       border: 1px solid var(--line);
       border-radius: 6px;
       background: #fff;
@@ -9406,6 +9455,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       font: inherit;
     }
     button { padding: 8px 11px; cursor: pointer; }
+    .toolbar-link { padding: 7px 11px; text-decoration: none; }
     button[aria-pressed="true"] { border-color: var(--green); color: var(--green); font-weight: 700; }
     select { padding: 8px 10px; }
     input { padding: 9px 10px; min-width: 220px; }
@@ -9812,6 +9862,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
               <option value="true">Include tests</option>
             </select>
           </label>
+          <a class="toolbar-link" href="/internal/observability/logout">Log out</a>
         </div>
       </header>
 
@@ -10017,7 +10068,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     document.getElementById("security").textContent = "Password protected";
 
     function metric(label, value, note = "") {
-      return `<div class="card metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></div>`;
+      return `<div class="card metric"><div class="metric-label">${escapeAttr(label)}</div><div class="metric-value">${escapeAttr(value)}</div><div class="metric-note">${escapeAttr(note)}</div></div>`;
     }
 
     function rowBadge(value) {
@@ -10027,7 +10078,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       if (lower.includes("returned") || lower.includes("verified") || lower.includes("success")) cls = "";
       if (lower.includes("prompted") || lower.includes("required")) cls = "warn";
       if (lower.includes("failed") || lower.includes("error") || lower.includes("rejected")) cls = "bad";
-      return `<span class="badge ${cls}">${label}</span>`;
+      return `<span class="badge ${cls}">${escapeAttr(label)}</span>`;
     }
 
     function toneClass(tone) {
@@ -10162,7 +10213,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
       document.getElementById(target).innerHTML = entries.length ? entries.map(([k, v]) => `
         <div class="bar-row">
-          <code title="${k}">${k}</code>
+          <code title="${escapeAttr(k)}">${escapeAttr(k)}</code>
           <div class="track"><div class="fill ${color}" style="width:${Math.max(3, Number(v) / max * 100)}%"></div></div>
           <strong>${fmt.format(v)}</strong>
         </div>`).join("") : `<div class="empty">No activity in this window.</div>`;
@@ -10190,7 +10241,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const max = Math.max(1, ...entries.map(([, value]) => Number(value)));
       document.getElementById("registry-sources").innerHTML = entries.map(([label, value]) => `
         <div class="bar-row">
-          <code title="${escapeAttr(label)}">${label}</code>
+          <code title="${escapeAttr(label)}">${escapeAttr(label)}</code>
           <div class="track"><div class="fill amber" style="width:${Number(value) > 0 ? Math.max(3, Number(value) / max * 100) : 0}%"></div></div>
           <strong>${fmt.format(value)}</strong>
         </div>`).join("");
@@ -10211,9 +10262,9 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         </div>
         <div>${rowBadge(status).replace('class="badge neutral"', `class="badge ${statusClass}"`)}</div>
         <div class="source-row"><span>Listing</span><a href="${escapeAttr(smithery.performance_url || "")}" target="_blank" rel="noreferrer">Smithery performance</a></div>
-        <div class="source-row"><span>Hosted MCP</span><code title="${escapeAttr(smithery.hosted_mcp_endpoint || "")}">${text(smithery.hosted_mcp_endpoint)}</code></div>
+        <div class="source-row"><span>Hosted MCP</span><code title="${escapeAttr(smithery.hosted_mcp_endpoint || "")}">${escapeAttr(text(smithery.hosted_mcp_endpoint))}</code></div>
         <div class="source-row"><span>All MCP tools</span><strong>${fmt.format(allMcp)}</strong></div>
-        <div class="metric-note">${text(smithery.note)}</div>
+        <div class="metric-note">${escapeAttr(text(smithery.note))}</div>
       `;
     }
 
@@ -10234,7 +10285,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         <div class="source-row"><span>Listing</span><a href="${escapeAttr(pay.listing_url || "")}" target="_blank" rel="noreferrer">Pay.sh service</a></div>
         <div class="source-row"><span>x402 prompts</span><strong>${fmt.format(prompts)}</strong></div>
         <div class="source-row"><span>Paid calls</span><strong>${fmt.format(paid)}</strong></div>
-        <div class="metric-note">${text(pay.note)}</div>
+        <div class="metric-note">${escapeAttr(text(pay.note))}</div>
       `;
     }
 
@@ -10296,9 +10347,9 @@ def _observability_command_center_html(*, stats_path: str) -> str:
             ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer"><code>${escapeAttr(tx)}</code></a>`
             : `<code>${escapeAttr(tx)}</code>`;
           return `<tr>
-            <td><code>${text(row.timestamp).slice(0, 19).replace("T", " ")}</code></td>
+            <td><code>${escapeAttr(text(row.timestamp).slice(0, 19).replace("T", " "))}</code></td>
             <td>${rowBadge(inflowKindLabel(row.kind))}</td>
-            <td>${text(row.network)}</td>
+            <td>${escapeAttr(text(row.network))}</td>
             <td>${money.format(row.amount_usdc || 0)}</td>
             <td>${row.credits_added == null ? "n/a" : fmt.format(row.credits_added)}</td>
             <td><code>${escapeAttr(wallet)}</code></td>
@@ -10336,7 +10387,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const table = document.getElementById("popularity-table");
       table.innerHTML = `<thead><tr><th>Last Seen</th><th>Service</th><th>Data</th><th>Surface</th><th>Requested</th><th>Delivered</th><th>Credits</th><th>Blocked</th><th>Failed After Credit</th><th>Outcome</th></tr></thead><tbody>` +
         (rows.length ? rows.slice(0, 30).map(row => `<tr>
-          <td><code>${text(row.last_seen).slice(0, 19).replace("T", " ")}</code></td>
+          <td><code>${escapeAttr(text(row.last_seen).slice(0, 19).replace("T", " "))}</code></td>
           <td><code>${escapeAttr(row.service)}</code></td>
           <td><code>${escapeAttr(row.subject)}</code></td>
           <td>${escapeAttr(row.surface)}</td>
@@ -10424,7 +10475,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       document.getElementById("timeline-dates").innerHTML = rows.map((d, index) => {
         const farEnoughFromEnd = rows.length - 1 - index >= Math.ceil(labelEvery / 2);
         const show = index === 0 || index === rows.length - 1 || (index % labelEvery === 0 && farEnoughFromEnd);
-        return `<span class="date-tick" title="${text(d.date)}">${show ? shortDate(d.date) : ""}</span>`;
+        return `<span class="date-tick" title="${escapeAttr(text(d.date))}">${show ? escapeAttr(shortDate(d.date)) : ""}</span>`;
       }).join("");
     }
 
@@ -10453,7 +10504,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         }
       ];
       document.getElementById("attention").innerHTML = items.map(item => `
-        <div class="status-item"><span class="status-dot ${item.tone}"></span><div><strong>${item.title}</strong><span>${item.note}</span></div></div>
+        <div class="status-item"><span class="status-dot ${toneClass(item.tone)}"></span><div><strong>${escapeAttr(item.title)}</strong><span>${escapeAttr(item.note)}</span></div></div>
       `).join("");
     }
 
@@ -10463,12 +10514,12 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const table = document.getElementById("recent");
       table.innerHTML = `<thead><tr><th>Time</th><th>Event</th><th>Surface</th><th>Endpoint</th><th>Subject</th><th>Status</th><th>Price</th></tr></thead><tbody>` +
         (filtered.length ? filtered.map(row => `<tr>
-          <td><code>${text(row.timestamp).slice(0, 19).replace("T", " ")}</code></td>
+          <td><code>${escapeAttr(text(row.timestamp).slice(0, 19).replace("T", " "))}</code></td>
           <td>${rowBadge(row.event)}</td>
-          <td>${text(row.surface)}</td>
-          <td><code>${text(row.endpoint || row.tool_name)}</code></td>
-          <td><code>${text(row.subject || row.reason)}</code></td>
-          <td>${text(row.status_code)}</td>
+          <td>${escapeAttr(text(row.surface))}</td>
+          <td><code>${escapeAttr(text(row.endpoint || row.tool_name))}</code></td>
+          <td><code>${escapeAttr(text(row.subject || row.reason))}</code></td>
+          <td>${escapeAttr(text(row.status_code))}</td>
           <td>${row.price_usdc == null ? "n/a" : money.format(row.price_usdc)}</td>
         </tr>`).join("") : `<tr><td colspan="7" class="empty">No matching events in this window.</td></tr>`) + `</tbody>`;
     }
@@ -10483,11 +10534,11 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const table = document.getElementById("data-called");
       table.innerHTML = `<thead><tr><th>Last Viewed</th><th>Service</th><th>Data</th><th>Asset Class</th><th>Origin</th><th>Outcome</th><th>Prompt Price</th><th>Paid</th><th>Revenue</th></tr></thead><tbody>` +
         (filtered.length ? filtered.map(row => `<tr>
-          <td><code>${text(row.last_seen).slice(0, 19).replace("T", " ")}</code></td>
-          <td><code>${text(row.service)}</code></td>
-          <td><code>${text(row.subject)}</code></td>
-          <td>${text(row.asset_class)}</td>
-          <td>${text(row.surface)}</td>
+          <td><code>${escapeAttr(text(row.last_seen).slice(0, 19).replace("T", " "))}</code></td>
+          <td><code>${escapeAttr(text(row.service))}</code></td>
+          <td><code>${escapeAttr(text(row.subject))}</code></td>
+          <td>${escapeAttr(text(row.asset_class))}</td>
+          <td>${escapeAttr(text(row.surface))}</td>
           <td>${rowBadge(row.latest_outcome)}</td>
           <td>${row.prompt_price_usdc == null ? "n/a" : money.format(row.prompt_price_usdc)}</td>
           <td>${fmt.format(row.paid_successes || 0)}</td>
@@ -10570,7 +10621,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
 
     function scheduleLive() {
       if (refreshTimer) clearInterval(refreshTimer);
-      refreshTimer = live ? setInterval(load, 10000) : null;
+      refreshTimer = live && !document.hidden ? setInterval(load, 10000) : null;
       document.getElementById("live").setAttribute("aria-pressed", String(live));
       document.getElementById("live").textContent = live ? "Live 10s" : "Live off";
     }
@@ -10585,6 +10636,15 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       live = !live;
       scheduleLive();
       load();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = null;
+        return;
+      }
+      scheduleLive();
+      if (live) load();
     });
     scheduleLive();
     function syncActiveNav() {
@@ -10892,32 +10952,49 @@ async def observability_legacy_dashboard(request: Request) -> Any:
     const money = new Intl.NumberFormat(undefined, {{ style: "currency", currency: "USD", maximumFractionDigits: 4 }});
     const pct = value => value == null ? "n/a" : `${{Math.round(value * 1000) / 10}}%`;
     const text = value => value == null || value === "" ? "n/a" : String(value);
+    const htmlEscapes = Object.freeze({{
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }});
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => htmlEscapes[character]);
+    const escapeAttr = escapeHtml;
+    const finiteNumber = value => {{
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }};
     let live = true;
     let refreshTimer = null;
 
     function metric(label, value, note = "") {{
-      return `<div class="card"><div class="metric-label">${{label}}</div><div class="metric-value">${{value}}</div><div class="metric-note">${{note}}</div></div>`;
+      return `<div class="card"><div class="metric-label">${{escapeHtml(label)}}</div><div class="metric-value">${{escapeHtml(value)}}</div><div class="metric-note">${{escapeHtml(note)}}</div></div>`;
     }}
 
     function bars(target, data, color = "") {{
       const entries = Object.entries(data || {{}}).slice(0, 10);
-      const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
+      const max = Math.max(1, ...entries.map(([, v]) => finiteNumber(v)));
       document.getElementById(target).innerHTML = entries.length ? entries.map(([k, v]) => `
         <div class="bar-row">
-          <code title="${{k}}">${{k}}</code>
-          <div class="track"><div class="fill ${{color}}" style="width:${{Math.max(2, Number(v) / max * 100)}}%"></div></div>
-          <strong>${{fmt.format(v)}}</strong>
+          <code title="${{escapeAttr(text(k))}}">${{escapeHtml(text(k))}}</code>
+          <div class="track"><div class="fill ${{escapeAttr(color)}}" style="width:${{Math.max(2, finiteNumber(v) / max * 100)}}%"></div></div>
+          <strong>${{fmt.format(finiteNumber(v))}}</strong>
         </div>`).join("") : `<div class="empty">No activity in this window.</div>`;
     }}
 
     function timeline(rows) {{
-      const max = Math.max(1, ...rows.map(d => d.http_requests + d.mcp_tool_calls + d.registry_requests));
+      const max = Math.max(1, ...rows.map(d => finiteNumber(d.http_requests) + finiteNumber(d.mcp_tool_calls) + finiteNumber(d.registry_requests)));
       document.getElementById("timeline").innerHTML = rows.map(d => {{
-        const h = Math.max(1, (d.http_requests + d.mcp_tool_calls + d.registry_requests) / max * 100);
-        const http = Math.max(1, d.http_requests / Math.max(1, d.http_requests + d.mcp_tool_calls + d.registry_requests) * h);
-        const mcp = d.mcp_tool_calls ? Math.max(1, d.mcp_tool_calls / Math.max(1, d.http_requests + d.mcp_tool_calls + d.registry_requests) * h) : 0;
-        const reg = d.registry_requests ? Math.max(1, d.registry_requests / Math.max(1, d.http_requests + d.mcp_tool_calls + d.registry_requests) * h) : 0;
-        return `<div class="day" title="${{d.date}}: ${{d.http_requests}} HTTP, ${{d.mcp_tool_calls}} MCP, ${{d.registry_requests}} registry">
+        const httpRequests = finiteNumber(d.http_requests);
+        const mcpCalls = finiteNumber(d.mcp_tool_calls);
+        const registryRequests = finiteNumber(d.registry_requests);
+        const total = httpRequests + mcpCalls + registryRequests;
+        const h = Math.max(1, total / max * 100);
+        const http = Math.max(1, httpRequests / Math.max(1, total) * h);
+        const mcp = mcpCalls ? Math.max(1, mcpCalls / Math.max(1, total) * h) : 0;
+        const reg = registryRequests ? Math.max(1, registryRequests / Math.max(1, total) * h) : 0;
+        return `<div class="day" title="${{escapeAttr(text(d.date))}}: ${{fmt.format(httpRequests)}} HTTP, ${{fmt.format(mcpCalls)}} MCP, ${{fmt.format(registryRequests)}} registry">
           <div class="seg registry" style="height:${{reg}}%"></div>
           <div class="seg mcp" style="height:${{mcp}}%"></div>
           <div class="seg http" style="height:${{http}}%"></div>
@@ -10929,10 +11006,10 @@ async def observability_legacy_dashboard(request: Request) -> Any:
       const table = document.getElementById("recent");
       table.innerHTML = `<thead><tr><th>Time</th><th>Event</th><th>Surface</th><th>Subject</th></tr></thead><tbody>` +
         (rows || []).slice(0, 12).map(row => `<tr>
-          <td><code>${{text(row.timestamp).slice(0, 19).replace("T", " ")}}</code></td>
-          <td>${{text(row.event)}}</td>
-          <td>${{text(row.surface || row.endpoint)}}</td>
-          <td><code>${{text(row.tool_name || row.subject || row.reason)}}</code></td>
+          <td><code>${{escapeHtml(text(row.timestamp).slice(0, 19).replace("T", " "))}}</code></td>
+          <td>${{escapeHtml(text(row.event))}}</td>
+          <td>${{escapeHtml(text(row.surface || row.endpoint))}}</td>
+          <td><code>${{escapeHtml(text(row.tool_name || row.subject || row.reason))}}</code></td>
         </tr>`).join("") + `</tbody>`;
     }}
 
@@ -10941,15 +11018,15 @@ async def observability_legacy_dashboard(request: Request) -> Any:
       const items = (rows || []).slice(0, 20);
       table.innerHTML = `<thead><tr><th>Last Viewed</th><th>Service</th><th>Data</th><th>Asset Class</th><th>Origin</th><th>Outcome</th><th>Prompt Price</th><th>Paid Success</th><th>Revenue</th></tr></thead><tbody>` +
         (items.length ? items.map(row => `<tr>
-          <td><code>${{text(row.last_seen).slice(0, 19).replace("T", " ")}}</code></td>
-          <td><code>${{text(row.service)}}</code></td>
-          <td><code>${{text(row.subject)}}</code></td>
-          <td>${{text(row.asset_class)}}</td>
-          <td>${{text(row.surface)}}</td>
-          <td>${{text(row.latest_outcome)}}</td>
+          <td><code>${{escapeHtml(text(row.last_seen).slice(0, 19).replace("T", " "))}}</code></td>
+          <td><code>${{escapeHtml(text(row.service))}}</code></td>
+          <td><code>${{escapeHtml(text(row.subject))}}</code></td>
+          <td>${{escapeHtml(text(row.asset_class))}}</td>
+          <td>${{escapeHtml(text(row.surface))}}</td>
+          <td>${{escapeHtml(text(row.latest_outcome))}}</td>
           <td>${{row.prompt_price_usdc == null ? "n/a" : money.format(row.prompt_price_usdc)}}</td>
-          <td>${{fmt.format(row.paid_successes || 0)}}</td>
-          <td>${{money.format(row.revenue_usdc || 0)}}</td>
+          <td>${{fmt.format(finiteNumber(row.paid_successes))}}</td>
+          <td>${{money.format(finiteNumber(row.revenue_usdc))}}</td>
         </tr>`).join("") : `<tr><td colspan="9" class="empty">No called data in this window.</td></tr>`) + `</tbody>`;
     }}
 
@@ -11227,6 +11304,23 @@ def _rwa_readiness_configuration_fingerprint(
     ).hexdigest()
 
 
+def _transaction_bridge_configuration_fingerprint(
+    credit_db_path: str | os.PathLike[str],
+    connector_db_paths: dict[str, str | os.PathLike[str]],
+) -> str:
+    material = {
+        "credit_db_path": str(_resolved_runtime_path(credit_db_path)),
+        "connector_db_paths": {
+            name: str(_resolved_runtime_path(path))
+            for name, path in sorted(connector_db_paths.items())
+        },
+        "lock": legacy_transaction_bridge_lock_status(),
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _cached_store_readiness(
     name: str,
     *,
@@ -11304,6 +11398,28 @@ async def _refresh_store_readiness_snapshots(target_app: FastAPI) -> None:
                     _sqlite_database_readiness,
                     credit_manager.db_path,
                     **credit_kwargs,
+                ),
+            )
+        )
+        connector_db_paths = {
+            prefix.lower(): connector_entitlement_db_path(prefix)
+            for prefix in (
+                ["ANTHROPIC"]
+                if _anthropic_only_mode()
+                else ["ANTHROPIC", "CURSOR", "OPENAI"]
+            )
+        }
+        probes.append(
+            (
+                "legacy_transaction_bridge",
+                _transaction_bridge_configuration_fingerprint(
+                    credit_manager.db_path,
+                    connector_db_paths,
+                ),
+                asyncio.to_thread(
+                    transaction_bridge_readiness,
+                    credit_manager.db_path,
+                    connector_db_paths,
                 ),
             )
         )
@@ -11701,6 +11817,34 @@ def _readiness_report() -> dict[str, Any]:
             "blockers": ["runtime_store_missing"],
         }
     )
+    bridge_lock = legacy_transaction_bridge_lock_status()
+    bridge_connector_paths = {
+        prefix.lower(): connector_entitlement_db_path(prefix)
+        for prefix in (
+            ["ANTHROPIC"]
+            if _anthropic_only_mode()
+            else ["ANTHROPIC", "CURSOR", "OPENAI"]
+        )
+    }
+    legacy_transaction_bridge = (
+        _cached_store_readiness(
+            "legacy_transaction_bridge",
+            configuration_fingerprint=_transaction_bridge_configuration_fingerprint(
+                credit_manager.db_path,
+                bridge_connector_paths,
+            ),
+            required=bool(bridge_lock["economic_writes_locked"]),
+        )
+        if isinstance(credit_manager, CreditManager)
+        else {
+            **bridge_lock,
+            "ready": not bridge_lock["economic_writes_locked"],
+            "required": bool(bridge_lock["economic_writes_locked"]),
+            "checked": False,
+            "direct_counts": None,
+            "blockers": ["runtime_store_missing"],
+        }
+    )
     observability_runtime_path = (
         str(OBSERVABILITY.db_path)
         if OBSERVABILITY is not None
@@ -11864,6 +12008,7 @@ def _readiness_report() -> dict[str, Any]:
             getattr(app.state, "stream_cache", None)
         ),
         "credit_ledger": credit_store,
+        "legacy_transaction_bridge": legacy_transaction_bridge,
         "payment_wallet": {
             "ready": payment_wallet_ready,
             "required": require_payment_wallet,
