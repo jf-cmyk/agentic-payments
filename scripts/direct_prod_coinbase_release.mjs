@@ -37,8 +37,9 @@ export const TARGET = Object.freeze({
 });
 
 export const LEGACY = Object.freeze({
-  deploymentId: "a676ba77-412b-4ae4-8606-87ade7c9ff53",
+  deploymentId: "b068645d-f233-4031-b47e-efcd835c8ecb",
   imageDigest: "sha256:435dc858af3fcb3eb44b4e249e0d8e4a917f62f174881fd320f8df1d57c5d6c3",
+  snapshotId: "e37a3aeb-562f-4712-9d37-f68c59c8c648",
 });
 
 export const DOMAINS = Object.freeze([
@@ -676,7 +677,8 @@ export async function readState(path) {
   assert(value?.schemaVersion === 1, "unsupported release state schema");
   assert(JSON.stringify(value.target) === JSON.stringify(TARGET), "release state target drifted");
   assert(value?.legacy?.deploymentId === LEGACY.deploymentId
-    && canonicalDigest(value?.legacy?.imageDigest) === LEGACY.imageDigest,
+    && canonicalDigest(value?.legacy?.imageDigest) === LEGACY.imageDigest
+    && value?.legacy?.snapshotId === LEGACY.snapshotId,
   "release state legacy rollback point drifted");
   assert(SHA.test(value?.commit || "") && SHA.test(value?.artifactTree || ""),
     "release state artifact identity is invalid");
@@ -766,6 +768,10 @@ function validateRedeployIntent(state) {
     && canonicalDigest(intent.expectedImageDigest)
       === canonicalDigest(expected.expectedImageDigest),
   "release state exact-redeploy source or digest drifted");
+  if (intent.purpose === "legacy_recovery") {
+    assert(intent.sourceSnapshotId === LEGACY.snapshotId,
+      "release state legacy recovery snapshot drifted");
+  }
   if (RECOVERY_REDEPLOY_PURPOSES.has(intent.purpose)) {
     assert(state.recovery?.sourceDeploymentId === intent.sourceDeploymentId
       && canonicalDigest(state.recovery?.expectedImageDigest)
@@ -947,7 +953,7 @@ async function preflight(options, deps) {
   assert(!history.some((row) => IN_FLIGHT.has(String(row?.status || "").toUpperCase())),
     "production already has an in-flight deployment");
   const prior = await assertOneActive(deps, LEGACY.deploymentId, LEGACY.imageDigest);
-  assert(prior.canRollback === true && UUID.test(prior.snapshotId || ""),
+  assert(prior.canRollback === true && prior.snapshotId === LEGACY.snapshotId,
     "legacy deployment is not image-rollback capable");
   const exactPrior = await getExactDeployment(deps, LEGACY.deploymentId);
   assertRollbackCapableSource(
@@ -958,6 +964,8 @@ async function preflight(options, deps) {
   );
   assert(exactPrior.snapshotId === prior.snapshotId,
     "active and exact legacy deployment snapshots disagree");
+  assert(exactPrior.snapshotId === LEGACY.snapshotId,
+    "exact legacy deployment snapshot changed");
   const backup = await getBackupEvidence(deps, options.volumeInstanceId, deps.now());
   const state = {
     schemaVersion: 1,
@@ -1125,21 +1133,79 @@ async function exactRedeploy(deps, sourceDeploymentId) {
   return result.id;
 }
 
-async function exactRollback(deps, sourceDeploymentId) {
-  const data = await railwayApi(
-    deps,
-    "mutation DirectProdRollback($id:String!){deploymentRollback(id:$id){id status}}",
-    { id: sourceDeploymentId },
-  );
-  const result = data?.deploymentRollback;
-  assert(UUID.test(result?.id || "") && result.id !== sourceDeploymentId,
-    "exact deployment rollback did not return one new deployment id");
-  return result.id;
+function assertRollbackSourceBinding(source, intent, label) {
+  const status = String(source?.status || "").toUpperCase();
+  assert(source?.id === intent.sourceDeploymentId
+    && imageDigest(source) === canonicalDigest(intent.expectedImageDigest)
+    && source.snapshotId === intent.sourceSnapshotId
+    && source.canRollback === true
+    && ROLLBACK_SOURCE_STATUSES.has(status),
+  `${label} source no longer matches its rollback-capable immutable snapshot`);
+  return source;
 }
 
-async function dispatchArmedDeploymentMutation(deps, intent) {
+async function assertRollbackPostIntentBinding(deps, intent, addition, label) {
+  assert(addition?.id !== intent.sourceDeploymentId
+    && addition?.id !== intent.priorActiveDeploymentId
+    && !intent.baselineDeploymentIds.includes(addition?.id),
+  `${label} did not create one new deployment id`);
+  assertDeploymentCreatedForIntent(addition, intent.armedAt, deps.now(), label);
+  assert(addition?.meta?.reason === "rollback",
+    `${label} history row is not strictly marked as a rollback`);
+  assert(imageDigest(addition) === canonicalDigest(intent.expectedImageDigest),
+    `${label} history row does not match the intent-bound image`);
+  const source = assertRollbackSourceBinding(
+    await getExactDeployment(deps, intent.sourceDeploymentId),
+    intent,
+    label,
+  );
+  const exact = await getExactDeployment(deps, addition.id);
+  assert(exact?.id === addition.id
+    && exact.snapshotId === intent.sourceSnapshotId
+    && imageDigest(exact) === canonicalDigest(intent.expectedImageDigest)
+    && exact?.meta?.reason === "rollback",
+  `${label} exact deployment is target-, image-, snapshot-, or reason-drifted`);
+  return { source, exact };
+}
+
+async function waitForPostIntentRollback(deps, intent, options) {
+  const attempts = Math.max(1, Math.ceil(options.timeoutMs / options.pollMs));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const additions = await postIntentDeploymentDelta(
+      deps,
+      intent.baselineDeploymentIds,
+      `${intent.purpose} rollback`,
+    );
+    assert(additions.length <= 1,
+      `${intent.purpose} rollback mutation has an ambiguous deployment-history delta`);
+    if (additions.length === 1) return additions[0];
+    if (attempt + 1 < attempts) await deps.sleep(options.pollMs);
+  }
+  fail(`${intent.purpose} rollback mutation outcome is not yet observable; refusing to retry`);
+}
+
+async function exactRollback(deps, intent, options) {
+  assert(intent?.mutationKind === "rollback", "exact rollback requires an armed rollback intent");
+  const data = await railwayApi(
+    deps,
+    "mutation DirectProdRollback($id:String!){deploymentRollback(id:$id)}",
+    { id: intent.sourceDeploymentId },
+  );
+  const result = data?.deploymentRollback;
+  assert(result === true, "exact deployment rollback was not accepted");
+  const addition = await waitForPostIntentRollback(deps, intent, options);
+  await assertRollbackPostIntentBinding(
+    deps,
+    intent,
+    addition,
+    `${intent.purpose} rollback`,
+  );
+  return addition.id;
+}
+
+async function dispatchArmedDeploymentMutation(deps, intent, options) {
   if (intent.mutationKind === "rollback") {
-    return exactRollback(deps, intent.sourceDeploymentId);
+    return exactRollback(deps, intent, options);
   }
   assert(intent.mutationKind === "redeploy", "unknown armed deployment mutation kind");
   return exactRedeploy(deps, intent.sourceDeploymentId);
@@ -1166,6 +1232,10 @@ async function armExactRedeploy(
     assert(source.canRollback === true
       && ROLLBACK_SOURCE_STATUSES.has(String(source.status || "").toUpperCase()),
     "recovery source is not an exact rollback-capable historical deployment");
+    if (purpose === "legacy_recovery") {
+      assert(source.snapshotId === LEGACY.snapshotId,
+        "legacy recovery source snapshot changed");
+    }
   } else {
     assert(runningSuccess(source),
       "exact-redeploy source is not the active reviewed running-success image");
@@ -1471,13 +1541,17 @@ function assertDeploymentCreatedForIntent(row, armedAt, now, label) {
   `${label} deployment timestamp is outside the armed intent window`);
 }
 
-async function uniquePostIntentDeployment(deps, baselineIds, label) {
+async function postIntentDeploymentDelta(deps, baselineIds, label) {
   const history = await listDeployments(deps, 1);
   const currentIds = new Set(history.map((row) => row.id));
   assert(baselineIds.every((id) => currentIds.has(id)),
     `${label} deployment-history baseline is no longer complete`);
   const baseline = new Set(baselineIds);
-  const additions = history.filter((row) => !baseline.has(row.id));
+  return history.filter((row) => !baseline.has(row.id));
+}
+
+async function uniquePostIntentDeployment(deps, baselineIds, label) {
+  const additions = await postIntentDeploymentDelta(deps, baselineIds, label);
   assert(additions.length === 1,
     additions.length === 0
       ? `${label} mutation outcome is not yet observable; refusing to retry`
@@ -1680,23 +1754,32 @@ async function reconcileArmedMutation(state, active, options, deps) {
     assert(addition.id !== intent.sourceDeploymentId
       && addition.id !== intent.priorActiveDeploymentId,
     "post-intent exact redeploy did not create a new deployment id");
-    assertDeploymentCreatedForIntent(
-      addition,
-      intent.armedAt,
-      deps.now(),
-      `${intent.purpose} exact redeploy`,
-    );
-    const source = await getExactDeployment(deps, intent.sourceDeploymentId);
-    const exact = await getExactDeployment(deps, addition.id);
-    const sourceStatus = String(source?.status || "").toUpperCase();
-    assert(source
-      && imageDigest(source) === canonicalDigest(intent.expectedImageDigest)
-      && source.snapshotId === intent.sourceSnapshotId
-      && !IN_FLIGHT.has(sourceStatus)
-      && (intent.mutationKind === "rollback"
-        ? source.canRollback === true && ROLLBACK_SOURCE_STATUSES.has(sourceStatus)
-        : ["SUCCESS", "REMOVED", "CRASHED"].includes(sourceStatus)),
-    "reconciled deployment source no longer matches its immutable snapshot");
+    let source;
+    let exact;
+    if (intent.mutationKind === "rollback") {
+      ({ source, exact } = await assertRollbackPostIntentBinding(
+        deps,
+        intent,
+        addition,
+        `${intent.purpose} rollback reconciliation`,
+      ));
+    } else {
+      assertDeploymentCreatedForIntent(
+        addition,
+        intent.armedAt,
+        deps.now(),
+        `${intent.purpose} exact redeploy`,
+      );
+      source = await getExactDeployment(deps, intent.sourceDeploymentId);
+      exact = await getExactDeployment(deps, addition.id);
+      const sourceStatus = String(source?.status || "").toUpperCase();
+      assert(source
+        && imageDigest(source) === canonicalDigest(intent.expectedImageDigest)
+        && source.snapshotId === intent.sourceSnapshotId
+        && !IN_FLIGHT.has(sourceStatus)
+        && ["SUCCESS", "REMOVED", "CRASHED"].includes(sourceStatus),
+      "reconciled deployment source no longer matches its immutable snapshot");
+    }
     const providerStatus = String(exact?.status || "").toUpperCase();
     const outcome = failedDeploymentOutcome(exact);
     if (outcome) {
@@ -1746,7 +1829,10 @@ async function reconcileArmedMutation(state, active, options, deps) {
     assert(active.length === 1 && exact && exact.id === active[0].id
       && addition.id === active[0].id && runningSuccess(exact) && runningSuccess(active[0])
       && imageDigest(exact) === canonicalDigest(intent.expectedImageDigest)
-      && imageDigest(active[0]) === canonicalDigest(intent.expectedImageDigest),
+      && imageDigest(active[0]) === canonicalDigest(intent.expectedImageDigest)
+      && (intent.mutationKind !== "rollback"
+        || (active[0].snapshotId === intent.sourceSnapshotId
+          && active[0]?.meta?.reason === "rollback")),
     "reconciled exact redeploy does not match the intent-bound immutable image");
     bindAcceptedRedeploy(state, addition.id, true, deps.now());
     state.lastCrashReconciliation = {
@@ -1963,7 +2049,11 @@ async function recover(options, deps) {
     binding.sourceDeploymentId,
     binding.expectedImageDigest,
   );
-  const deploymentId = await dispatchArmedDeploymentMutation(deps, state.pendingRedeploy);
+  const deploymentId = await dispatchArmedDeploymentMutation(
+    deps,
+    state.pendingRedeploy,
+    options,
+  );
   bindAcceptedRedeploy(state, deploymentId, false, deps.now());
   state.updatedAt = new Date(deps.now()).toISOString();
   await atomicWriteState(options.stateFile, state);

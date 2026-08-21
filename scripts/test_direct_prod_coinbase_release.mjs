@@ -28,6 +28,7 @@ const SHADOW_ID = "77777777-7777-4777-8777-777777777777";
 const ENFORCE_ID = "22222222-2222-4222-8222-222222222222";
 const RECOVERY_ID = "33333333-3333-4333-8333-333333333333";
 const RETRY_ID = "88888888-8888-4888-8888-888888888888";
+const AMBIGUOUS_ID = "99999999-9999-4999-8999-999999999999";
 const VOLUME_ID = "44444444-4444-4444-8444-444444444444";
 const BACKUP_ID = "55555555-5555-4555-8555-555555555555";
 const SNAPSHOT_ID = "66666666-6666-4666-8666-666666666666";
@@ -47,7 +48,7 @@ function deployment(id, digest, status = "SUCCESS") {
     projectId: TARGET.project,
     environmentId: TARGET.environment,
     serviceId: TARGET.service,
-    snapshotId: SNAPSHOT_ID,
+    snapshotId: id === LEGACY.deploymentId ? LEGACY.snapshotId : SNAPSHOT_ID,
     status,
     deploymentStopped: false,
     canRollback: true,
@@ -87,7 +88,22 @@ function fakeRailway(overrides = {}) {
   };
   const applyDeploymentOverrides = (row) => {
     if (!row) return row;
-    return state.nonRollbackDeploymentId === row.id ? { ...row, canRollback: false } : row;
+    let resultRow = state.nonRollbackDeploymentId === row.id
+      ? { ...row, canRollback: false }
+      : row;
+    if (state.targetDriftDeploymentId === row.id) {
+      resultRow = { ...resultRow, serviceId: "wrong-service" };
+    }
+    return resultRow;
+  };
+  const revealPendingHistory = () => {
+    if (!state.pendingHistoryRows?.length) return;
+    if ((state.historyVisibilityPollsRemaining || 0) > 0) {
+      state.historyVisibilityPollsRemaining -= 1;
+      return;
+    }
+    state.history.unshift(...state.pendingHistoryRows);
+    state.pendingHistoryRows = null;
   };
   const queueKnownOverlap = (next, priorActive) => {
     if (!(state.overlapRemaining > 0)) return;
@@ -131,7 +147,10 @@ function fakeRailway(overrides = {}) {
         },
       });
     }
-    if (argv[1] === "deployment" && argv[2] === "list") return json(state.history);
+    if (argv[1] === "deployment" && argv[2] === "list") {
+      revealPendingHistory();
+      return json(state.history);
+    }
     if (argv[1] === "variable" && argv[2] === "list") return json(state.variables);
     if (argv[1] === "variable" && argv[2] === "set") {
       assert(argv.includes("--skip-deploys"), "variable mutation omitted --skip-deploys");
@@ -238,6 +257,7 @@ function fakeRailway(overrides = {}) {
           ),
           createdAt: item.createdAt,
           meta: item.meta,
+          ...(item.snapshotId ? { snapshotId: item.snapshotId } : {}),
           ...(item.unhealthySuccess ? { instances: [] } : {}),
         }))].find((item) => item.id === vars.id) || null;
         return json({ data: { deployment: applyDeploymentOverrides(row) } });
@@ -267,6 +287,9 @@ function fakeRailway(overrides = {}) {
       }
       if (query.includes("DirectProdRedeploy") || query.includes("DirectProdRollback")) {
         const mutationKind = query.includes("DirectProdRollback") ? "rollback" : "redeploy";
+        if (mutationKind === "rollback" && state.rollbackReturn === false) {
+          return json({ data: { deploymentRollback: false } });
+        }
         const source = [...state.active, ...state.history.map((item) => ({
           ...deployment(item.id, item.meta?.imageDigest || LEGACY.imageDigest),
           meta: item.meta,
@@ -286,26 +309,65 @@ function fakeRailway(overrides = {}) {
             const historical = state.history.find((item) => item.id === prior.id);
             if (historical) historical.status = "REMOVED";
           }
-          const next = deployment(id, source.meta.imageDigest, deploymentStatus);
+          const next = deployment(
+            id,
+            mutationKind === "rollback" && state.rollbackExactDigest
+              ? state.rollbackExactDigest
+              : source.meta.imageDigest,
+            deploymentStatus,
+          );
+          next.snapshotId = mutationKind === "rollback"
+            ? (state.rollbackSnapshotId || source.snapshotId)
+            : source.snapshotId;
+          if (mutationKind === "rollback") {
+            next.meta.reason = state.rollbackReason === undefined
+              ? "rollback"
+              : state.rollbackReason;
+          }
           if (unhealthySuccess) next.instances = [];
           if (deploymentStatus === "SUCCESS" && !unhealthySuccess) {
             queueKnownOverlap(next, priorActive);
           }
           state.active = [next];
         }
-        state.history.unshift({
+        const historyRow = {
           id,
           status: deploymentStatus,
           createdAt: new Date(NOW).toISOString(),
-          meta: { imageDigest: source.meta.imageDigest },
+          snapshotId: mutationKind === "rollback"
+            ? (state.rollbackSnapshotId || source.snapshotId)
+            : source.snapshotId,
+          meta: {
+            imageDigest: mutationKind === "rollback" && state.rollbackDigest
+              ? state.rollbackDigest
+              : source.meta.imageDigest,
+            ...(mutationKind === "rollback" ? {
+              reason: state.rollbackReason === undefined ? "rollback" : state.rollbackReason,
+            } : {}),
+          },
           unhealthySuccess,
-        });
+        };
+        const historyRows = [historyRow];
+        if (mutationKind === "rollback" && state.rollbackAmbiguousHistory === true) {
+          historyRows.push({
+            ...historyRow,
+            id: AMBIGUOUS_ID,
+          });
+        }
+        if (!(mutationKind === "rollback" && state.rollbackHistoryNeverVisible === true)) {
+          if (mutationKind === "rollback" && state.rollbackHistoryDelayPolls > 0) {
+            state.pendingHistoryRows = historyRows;
+            state.historyVisibilityPollsRemaining = state.rollbackHistoryDelayPolls;
+          } else {
+            state.history.unshift(...historyRows);
+          }
+        }
         if (state.crashAfterAccepted === mutationKind) {
           state.crashAfterAccepted = null;
           throw new Error(`simulated crash after accepted exact ${mutationKind}`);
         }
         return json({ data: mutationKind === "rollback"
-          ? { deploymentRollback: { id, status: deploymentStatus } }
+          ? { deploymentRollback: true }
           : { deploymentRedeploy: { id, status: deploymentStatus } } });
       }
     }
@@ -366,7 +428,8 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(TARGET.project, "9fc6c062-6d58-4cb9-af11-df68670bfca5");
   assert.equal(TARGET.environment, "9d51961d-759c-441b-be1d-186515b9ed7f");
   assert.equal(TARGET.service, "8853c53e-521e-4876-a796-f94c1adf5700");
-  assert.equal(LEGACY.deploymentId, "a676ba77-412b-4ae4-8606-87ade7c9ff53");
+  assert.equal(LEGACY.deploymentId, "b068645d-f233-4031-b47e-efcd835c8ecb");
+  assert.equal(LEGACY.snapshotId, "e37a3aeb-562f-4712-9d37-f68c59c8c648");
   assert.deepEqual(DOMAINS, [
     "mcp.blocksize.info",
     "agentic-payments-production.up.railway.app",
@@ -410,6 +473,19 @@ test("preflight refuses to overwrite an existing release state", async () => {
   try {
     await runPreflight(fakeRailway(), temporary.path);
     await assert.rejects(runPreflight(fakeRailway(), temporary.path), /state already exists/);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("release state rejects the retired legacy rollback deployment", async () => {
+  const temporary = await tempState();
+  try {
+    await runPreflight(fakeRailway(), temporary.path);
+    const state = JSON.parse(await readFile(temporary.path, "utf8"));
+    state.legacy.deploymentId = "a676ba77-412b-4ae4-8606-87ade7c9ff53";
+    await writeFile(temporary.path, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    await assert.rejects(readState(temporary.path), /legacy rollback point drifted/);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
@@ -598,13 +674,119 @@ test("recovery uses legacy only before enforce and never restores a volume", asy
     assert.equal(state.recovery.legacyIdentityAudit.railwayStatus, "SUCCESS");
     assert.equal(state.recovery.legacyIdentityAudit.rollbackRestoredSnapshotVariables, true);
     assert.equal(state.recovery.legacyIdentityAudit.legacyX402MayRemainLive, true);
+    assert.equal(state.lastAcceptedRedeploy.mutationKind, "rollback");
+    assert.equal(state.lastAcceptedRedeploy.sourceSnapshotId, LEGACY.snapshotId);
     assert.equal(Object.hasOwn(fake.state.variables, "X402_PAYMENT_MODE"), false);
+    const rollback = fake.state.commands.find(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdRollback"));
+    assert.match(rollback.argv[2], /deploymentRollback\(id:\$id\)\}/);
+    assert.doesNotMatch(rollback.argv[2], /deploymentRollback\(id:\$id\)\{/);
     const commands = fake.state.commands.map(({ argv }) => argv.join(" ")).join("\n");
     assert.equal(/volume.*restore|backup.*restore/i.test(commands), false);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
 });
+
+test("Boolean rollback waits for one delayed history row before binding", async () => {
+  const temporary = await tempState();
+  let sleeps = 0;
+  try {
+    const fake = fakeRailway({ rollbackHistoryDelayPolls: 1 });
+    await runPreflight(fake, temporary.path);
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path, "--reason", "observe delayed rollback history",
+      "--timeout-seconds", "60", "--poll-seconds", "30", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => { sleeps += 1; },
+    });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.current.deploymentId, SHADOW_ID);
+    assert.equal(sleeps, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdRollback")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("Boolean false leaves the rollback intent armed without redispatch", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({ rollbackReturn: false });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path, "--reason", "reject false rollback result", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), /was not accepted/);
+    assert.equal((await readState(temporary.path)).phase, "legacy_recovery_redeploy_armed");
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path, "--reason", "do not redispatch false result",
+      "--timeout-seconds", "60", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), /not yet observable/);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdRollback")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+for (const [label, overrides, expectedError] of [
+  ["wrong rollback reason", { rollbackReason: "redeploy" }, /not strictly marked as a rollback/],
+  ["missing rollback reason", { rollbackReason: null }, /not strictly marked as a rollback/],
+  ["wrong history digest", { rollbackDigest: `sha256:${"d".repeat(64)}` }, /history row does not match/],
+  ["wrong exact digest", { rollbackExactDigest: `sha256:${"e".repeat(64)}` }, /target-, image-, snapshot-, or reason-drifted/],
+  ["wrong snapshot", {
+    rollbackSnapshotId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  }, /target-, image-, snapshot-, or reason-drifted/],
+  ["wrong target", { targetDriftDeploymentId: SHADOW_ID }, /not bound to the fixed target/],
+]) {
+  test(`rollback binding fails closed on ${label}`, async () => {
+    const temporary = await tempState();
+    try {
+      const fake = fakeRailway(overrides);
+      await runPreflight(fake, temporary.path);
+      await assert.rejects(executeReleaseCommand([
+        "recover", "--state", temporary.path, "--reason", `reject ${label}`, "--yes",
+      ], { run: fake.run, now: () => NOW, sleep: async () => {} }), expectedError);
+      assert.equal((await readState(temporary.path)).phase, "legacy_recovery_redeploy_armed");
+      await assert.rejects(executeReleaseCommand([
+        "recover", "--state", temporary.path, "--reason", `reconcile ${label}`, "--yes",
+      ], { run: fake.run, now: () => NOW, sleep: async () => {} }), expectedError);
+      assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+        && argv[2].includes("DirectProdRollback")).length, 1);
+    } finally {
+      await rm(temporary.directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [label, overrides, expectedError] of [
+  ["zero", { rollbackHistoryNeverVisible: true }, /not yet observable/],
+  ["multiple", { rollbackAmbiguousHistory: true }, /ambiguous deployment-history delta/],
+]) {
+  test(`rollback binding retains its armed journal on ${label} history delta`, async () => {
+    const temporary = await tempState();
+    try {
+      const fake = fakeRailway(overrides);
+      await runPreflight(fake, temporary.path);
+      await assert.rejects(executeReleaseCommand([
+        "recover", "--state", temporary.path, "--reason", `reject ${label} history delta`,
+        "--timeout-seconds", "60", "--poll-seconds", "30", "--yes",
+      ], { run: fake.run, now: () => NOW, sleep: async () => {} }), expectedError);
+      assert.equal((await readState(temporary.path)).phase, "legacy_recovery_redeploy_armed");
+      await assert.rejects(executeReleaseCommand([
+        "recover", "--state", temporary.path, "--reason", `reconcile ${label} history delta`,
+        "--yes",
+      ], { run: fake.run, now: () => NOW, sleep: async () => {} }), expectedError);
+      assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+        && argv[2].includes("DirectProdRollback")).length, 1);
+    } finally {
+      await rm(temporary.directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("post-deploy checks tolerate only the known retiring deployment until singleton convergence", async () => {
   const temporary = await tempState();
