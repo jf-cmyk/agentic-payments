@@ -181,18 +181,34 @@ function fakeRailway(overrides = {}) {
       const query = argv[2];
       const vars = variablesFrom(argv);
       if (query.includes("DirectProdDomains")) {
+        assert.match(query,
+          /tcpProxies\(environmentId:\$environmentId,serviceId:\$serviceId\)/,
+          "TCP proxy inventory query is not target-bound");
         const customDomains = state.extraDomain
           ? [domainRecord(DOMAINS[0], true), domainRecord(state.extraDomain, true)]
           : [domainRecord(DOMAINS[0], true)];
-        return json({ data: { serviceInstance: {
-          environmentId: TARGET.environment,
-          serviceId: TARGET.service,
-          domains: {
-            customDomains,
-            serviceDomains: [domainRecord(DOMAINS[1], false)],
+        const tcpProxies = state.missingTcpProxyInventory
+          ? undefined
+          : (state.tcpProxy ? [{
+            id: "tcp",
+            domain: "tcp.example",
+            environmentId: state.tcpProxyEnvironmentId || TARGET.environment,
+            serviceId: state.tcpProxyServiceId || TARGET.service,
+            syncStatus: "ACTIVE",
+            proxyPort: 10000,
+            applicationPort: 8080,
+          }] : []);
+        return json({ data: {
+          serviceInstance: {
+            environmentId: TARGET.environment,
+            serviceId: TARGET.service,
+            domains: {
+              customDomains,
+              serviceDomains: [domainRecord(DOMAINS[1], false)],
+            },
           },
-          tcpProxies: state.tcpProxy ? [{ id: "tcp", domain: "tcp.example" }] : [],
-        } } });
+          ...(tcpProxies === undefined ? {} : { tcpProxies }),
+        } });
       }
       if (query.includes("DirectProdAuthority")) {
         return json({ data: { service: {
@@ -350,7 +366,14 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(TARGET.environment, "9d51961d-759c-441b-be1d-186515b9ed7f");
   assert.equal(TARGET.service, "8853c53e-521e-4876-a796-f94c1adf5700");
   assert.equal(LEGACY.deploymentId, "a676ba77-412b-4ae4-8606-87ade7c9ff53");
-  assert.equal(DOMAINS.length, 2);
+  assert.deepEqual(DOMAINS, [
+    "mcp.blocksize.info",
+    "agentic-payments-production.up.railway.app",
+  ]);
+  assert.deepEqual(AUDIT_DOMAINS, [
+    "https://mcp.blocksize.info",
+    "https://agentic-payments-production.up.railway.app",
+  ]);
   assert.throws(() => parseArguments(["funded-test"]), /deliberately absent/);
   assert.throws(() => parseArguments(["settle"]), /deliberately absent/);
   assert.throws(() => parseArguments(["payment-smoke"]), /deliberately absent/);
@@ -394,6 +417,8 @@ test("preflight refuses to overwrite an existing release state", async () => {
 for (const [label, overrides, pattern] of [
   ["extra domain", { extraDomain: "other.example" }, /domain inventory differs/],
   ["TCP proxy", { tcpProxy: true }, /TCP proxy/],
+  ["cross-target TCP proxy", { tcpProxy: true, tcpProxyServiceId: "wrong-service" }, /TCP proxy inventory is not bound/],
+  ["missing TCP proxy inventory", { missingTcpProxyInventory: true }, /incomplete TCP proxy inventory/],
   ["repository trigger", { trigger: true }, /auto-deploy trigger/],
   ["stale backup", { staleBackup: true }, /no completed, locked, named on-demand backup/],
   ["ignored SQLite ledger", { ignoredFiles: ["x402_payments.sqlite3"] }, /ignored database/],

@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 
 export const AUDIT_DOMAINS = Object.freeze([
   "https://mcp.blocksize.info",
-  "https://refreshing-art-production-86de.up.railway.app",
+  "https://agentic-payments-production.up.railway.app",
 ]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

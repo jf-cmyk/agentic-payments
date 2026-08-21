@@ -43,7 +43,7 @@ export const LEGACY = Object.freeze({
 
 export const DOMAINS = Object.freeze([
   "mcp.blocksize.info",
-  "refreshing-art-production-86de.up.railway.app",
+  "agentic-payments-production.up.railway.app",
 ]);
 
 export const SHADOW_VARIABLES = Object.freeze({
@@ -343,7 +343,7 @@ async function resolveTarget(deps) {
 async function getDomains(deps) {
   const data = await railwayApi(
     deps,
-    "query DirectProdDomains($environmentId:String!,$serviceId:String!){serviceInstance(environmentId:$environmentId,serviceId:$serviceId){environmentId serviceId domains{customDomains{domain environmentId serviceId syncStatus status{verified certificateStatus}} serviceDomains{domain environmentId serviceId syncStatus}} tcpProxies{id domain proxyPort applicationPort}}}",
+    "query DirectProdDomains($environmentId:String!,$serviceId:String!){serviceInstance(environmentId:$environmentId,serviceId:$serviceId){environmentId serviceId domains{customDomains{domain environmentId serviceId syncStatus status{verified certificateStatus}} serviceDomains{domain environmentId serviceId syncStatus}}} tcpProxies(environmentId:$environmentId,serviceId:$serviceId){id domain environmentId serviceId syncStatus proxyPort applicationPort}}",
     { environmentId: TARGET.environment, serviceId: TARGET.service },
   );
   const instance = data?.serviceInstance;
@@ -352,8 +352,11 @@ async function getDomains(deps) {
   const custom = instance?.domains?.customDomains;
   const service = instance?.domains?.serviceDomains;
   assert(Array.isArray(custom) && Array.isArray(service), "Railway returned incomplete domains");
-  assert(Array.isArray(instance.tcpProxies) && instance.tcpProxies.length === 0,
-    "production has an attached TCP proxy");
+  const tcpProxies = data?.tcpProxies;
+  assert(Array.isArray(tcpProxies), "Railway returned incomplete TCP proxy inventory");
+  assert(tcpProxies.every((entry) => entry?.environmentId === TARGET.environment
+    && entry?.serviceId === TARGET.service), "TCP proxy inventory is not bound to the fixed target");
+  assert(tcpProxies.length === 0, "production has an attached TCP proxy");
   for (const entry of custom) {
     assert(
       entry?.environmentId === TARGET.environment
