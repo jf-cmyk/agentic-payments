@@ -11,5 +11,6 @@ x402_payments*.sqlite3-shm
 .pytest_cache/
 .ruff_cache/
 deliverables/
+docs/styling_kit/
 blocksize-cursor-plugin/
 mcp-registry-key.pem

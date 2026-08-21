@@ -1027,7 +1027,7 @@ async function deployShadow(options, deps) {
   let upload;
   try {
     upload = await deps.run([
-      "railway", "up", exactArchive.sourceRoot, "--detach", "--json", "--message", message,
+      "railway", "up", exactArchive.sourceRoot, "--detach", "--yes", "--json", "--message", message,
       "--project", TARGET.project, "--environment", TARGET.environment, "--service", TARGET.service,
     ], { cwd: exactArchive.sourceRoot, timeoutMs: 180_000 });
   } finally {

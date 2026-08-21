@@ -140,6 +140,7 @@ function fakeRailway(overrides = {}) {
       return json({ ok: true });
     }
     if (argv[1] === "up") {
+      assert(argv.includes("--yes"), "shadow upload is not fully unattended");
       const message = argv[argv.indexOf("--message") + 1];
       const priorActive = [...state.active];
       const deploymentStatus = state.nextUploadStatus || "SUCCESS";
