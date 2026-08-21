@@ -57,12 +57,17 @@ def _utc_now_iso() -> str:
     return _utc_now().isoformat()
 
 
-def _token_key(row: dict[str, Any]) -> str:
+def rwa_xyz_token_contract_key(row: dict[str, Any]) -> str:
+    """Return the chain-aware identity for an RWA.xyz token deployment."""
     network = str(row.get("network_slug") or row.get("network") or "unknown").strip().lower()
     address = str(row.get("address") or "").strip().lower()
     if network and address:
         return f"{network}:{address}"
     return str(row.get("token_row_id") or row.get("rwa_xyz_token_id") or "")
+
+
+def _token_key(row: dict[str, Any]) -> str:
+    return rwa_xyz_token_contract_key(row)
 
 
 def _asset_key(row: dict[str, Any]) -> str:
@@ -78,7 +83,7 @@ def _by_key(rows: list[dict[str, Any]], key_fn) -> dict[str, dict[str, Any]]:
     return keyed
 
 
-def _priority_for_token(row: dict[str, Any]) -> str:
+def rwa_xyz_token_priority(row: dict[str, Any]) -> str:
     asset_class = str(row.get("asset_class") or "").lower()
     network = str(row.get("network_slug") or "").lower()
     if asset_class in P0_ASSET_CLASSES and network in SOLANA_NETWORKS | EVM_NETWORKS:
@@ -88,7 +93,11 @@ def _priority_for_token(row: dict[str, Any]) -> str:
     return "P2"
 
 
-def _discovery_lane(row: dict[str, Any]) -> str:
+def _priority_for_token(row: dict[str, Any]) -> str:
+    return rwa_xyz_token_priority(row)
+
+
+def rwa_xyz_token_discovery_lane(row: dict[str, Any]) -> str:
     network = str(row.get("network_slug") or "").lower()
     if network in SOLANA_NETWORKS:
         return "solana_token_route_and_pool_discovery"
@@ -101,8 +110,12 @@ def _discovery_lane(row: dict[str, Any]) -> str:
     return "manual_network_adapter_triage"
 
 
-def _token_action(row: dict[str, Any]) -> dict[str, Any]:
-    lane = _discovery_lane(row)
+def _discovery_lane(row: dict[str, Any]) -> str:
+    return rwa_xyz_token_discovery_lane(row)
+
+
+def build_rwa_xyz_token_action(row: dict[str, Any]) -> dict[str, Any]:
+    lane = rwa_xyz_token_discovery_lane(row)
     base = {
         "priority": _priority_for_token(row),
         "lane": lane,
@@ -135,6 +148,10 @@ def _token_action(row: dict[str, Any]) -> dict[str, Any]:
             "Assign a chain/platform adapter owner and require token identity, executable venue, replay, and quality evidence."
         )
     return base
+
+
+def _token_action(row: dict[str, Any]) -> dict[str, Any]:
+    return build_rwa_xyz_token_action(row)
 
 
 def _counter(rows: list[dict[str, Any]], field: str) -> dict[str, int]:

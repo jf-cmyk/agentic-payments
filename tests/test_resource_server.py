@@ -213,6 +213,7 @@ class TestPublicListingSurfaces:
             "/mcp/server",
             "/anthropic/mcp",
             "/cursor/mcp",
+            "/openai/mcp",
         ],
     )
     def test_mcp_mount_roots_do_not_redirect_without_trailing_slash(
@@ -326,6 +327,75 @@ class TestPublicListingSurfaces:
         assert response.status_code != 404
         assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
+
+    def test_openai_mcp_endpoint_exists(self, test_client):
+        response = test_client.get("/openai/mcp", follow_redirects=False)
+        assert response.status_code != 404
+        assert response.status_code not in {307, 308}
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-protected-resource/openai/mcp",
+            "/.well-known/oauth-protected-resource/openai/mcp/",
+        ],
+    )
+    def test_openai_oauth_protected_resource_metadata(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path, follow_redirects=False)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/openai/mcp/")
+        assert data["authorization_servers"][0].endswith("/openai/mcp")
+        assert data["scopes_supported"] == [
+            "openid",
+            "email",
+            "profile",
+            "offline_access",
+        ]
+        assert data["bearer_methods_supported"] == ["header"]
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-authorization-server/openai/mcp",
+            "/.well-known/openid-configuration/openai/mcp",
+            "/openai/mcp/.well-known/openid-configuration",
+        ],
+    )
+    def test_openai_oauth_authorization_server_metadata_aliases(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["issuer"].endswith("/openai/mcp")
+        assert data["registration_endpoint"].endswith("/openai/mcp/register")
+        assert "offline_access" in data["scopes_supported"]
+
+    def test_root_oauth_metadata_can_be_openai_for_openai_hosts(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ROOT_OAUTH_CONNECTOR", "openai")
+
+        auth_server = test_client.get("/.well-known/oauth-authorization-server")
+        protected = test_client.get("/.well-known/oauth-protected-resource")
+
+        assert auth_server.status_code == 200
+        assert auth_server.json()["issuer"].endswith("/openai/mcp")
+        assert "offline_access" in auth_server.json()["scopes_supported"]
+        assert protected.status_code == 200
+        assert protected.json()["resource"].endswith("/openai/mcp/")
 
     @pytest.mark.parametrize(
         "metadata_path",
@@ -501,6 +571,7 @@ class TestPublicListingSurfaces:
         assert "<loc>https://mcp.blocksize.info/data-packages.json</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/category-hubs.json</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/market-data-api-for-ai-agents</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/blocksize-market-data-agent-skill</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/crypto-vwap-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/equities-bidask-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/real-time-price-data-api</loc>" in sitemap.text
@@ -585,6 +656,28 @@ class TestPublicListingSurfaces:
         assert "Market Data API for AI Agents" in agent_page.text
         assert "/data-packages.json" in agent_page.text
         assert "application/ld+json" in agent_page.text
+        assert "/go/free-trial?utm_source=mcp.blocksize.info" in agent_page.text
+        assert "Verify the claim before production use" in agent_page.text
+
+        skill_page = test_client.get("/blocksize-market-data-agent-skill")
+        assert skill_page.status_code == 200
+        assert "Blocksize Market Data Agent Skill" in skill_page.text
+        assert "OpenAI market data skill" in skill_page.text
+        assert "/go/free-trial?utm_source=mcp.blocksize.info" in skill_page.text
+
+        comparison_page = test_client.get("/market-data-api-comparison")
+        assert comparison_page.status_code == 200
+        assert "How to evaluate this category" in comparison_page.text
+        assert "No competitor capability is asserted" in comparison_page.text
+        assert "ItemList" in comparison_page.text
+
+        alternatives_page = test_client.get("/crypto-market-data-api-alternatives")
+        assert alternatives_page.status_code == 200
+        assert "Crypto Market Data API Alternatives" in alternatives_page.text
+
+        oracle_page = test_client.get("/oracle-data-api-for-ai-agents")
+        assert oracle_page.status_code == 200
+        assert "Oracle Data API for AI Agents" in oracle_page.text
 
         vwap_page = test_client.get("/crypto-vwap-api")
         assert vwap_page.status_code == 200
@@ -2787,6 +2880,41 @@ class TestDiscoveryRateLimit:
 
 
 class TestObservabilityDashboard:
+    def test_campaign_attribution_and_outbound_clicks_are_summarized(
+        self,
+        observability_store,
+        test_client,
+    ):
+        landing = test_client.get(
+            "/market-data-api-comparison"
+            "?utm_source=google&utm_medium=organic&utm_campaign=market-data-comparison"
+        )
+        redirect = test_client.get(
+            "/go/free-trial"
+            "?utm_source=mcp.blocksize.info&utm_medium=organic_landing"
+            "&utm_campaign=market-data-api-comparison",
+            follow_redirects=False,
+        )
+
+        assert landing.status_code == 200
+        assert redirect.status_code == 307
+        assert redirect.headers["location"].startswith("https://matrix.blocksize.capital/")
+        assert "utm_campaign=market-data-api-comparison" in redirect.headers["location"]
+
+        stats = observability_store.summarize(days=1)
+        assert stats["campaign_mix"]["market-data-comparison"] == 1
+        assert stats["campaign_mix"]["market-data-api-comparison"] == 1
+        assert stats["campaign_source_mix"]["google"] == 1
+        assert stats["outbound_destination_mix"]["free-trial"] == 1
+
+        redirect_event = next(
+            event
+            for event in stats["recent_events"]
+            if event["event"] == "outbound_conversion_click"
+        )
+        assert "utm_campaign" in redirect_event["metadata"]
+        assert "token" not in redirect_event["metadata"]
+
     def test_reliability_separates_protocol_responses_from_server_failures(
         self,
         observability_store,
@@ -3288,6 +3416,8 @@ class TestObservabilityDashboard:
         assert "Pay.sh" in response.text
         assert "MCP Registry" in response.text
         assert "Smithery" in response.text
+        assert 'id="campaigns"' in response.text
+        assert 'id="outbound-destinations"' in response.text
         assert "x402scan" in response.text
         assert "Awesome MCP" in response.text
         assert "Pay.sh Marketplace" in response.text
@@ -3308,6 +3438,10 @@ class TestObservabilityDashboard:
         assert "renderSmitherySource" in response.text
         assert "renderPlatformCoverage" in response.text
         assert "registrySourceWatchlist" in response.text
+        assert 'id="telemetry-scope"' in response.text
+        assert 'id="decision-confidence"' in response.text
+        assert "Operational only" in response.text or "Checking evidence" in response.text
+        assert 'statsUrl.searchParams.set("include_synthetic", includeSynthetic)' in response.text
         assert 'id="timeline-dates"' in response.text
         assert "timelineTip" in response.text
         assert "data-tip" in response.text
@@ -3355,7 +3489,7 @@ class TestObservabilityDashboard:
 
         popularity = observability_store.summarize(days=1)["popularity"]
 
-        assert popularity["total_requested"] == 4
+        assert popularity["total_requested"] == 3
         assert popularity["total_delivered"] == 1
         assert popularity["total_blocked"] == 1
         assert popularity["total_failed_after_credit"] == 1
@@ -3368,6 +3502,17 @@ class TestObservabilityDashboard:
         assert rows[("claude_mcp", "vwap", "BTCUSD")]["delivered"] == 1
         assert rows[("claude_mcp", "vwap", "BADPAIR")]["failed_after_credit"] == 1
         assert rows[("claude_mcp", "vwap", "BADPAIR")]["delivered"] == 0
+
+        stats = observability_store.summarize(days=1)
+        assert stats["overview"]["paid_calls"] == 1
+        called_rows = {
+            (row["surface"], row["service"], row["subject"]): row
+            for row in stats["data_called"]
+        }
+        assert called_rows[("claude_mcp", "vwap", "BADPAIR")]["paid_successes"] == 0
+        assert called_rows[("claude_mcp", "vwap", "BADPAIR")]["latest_outcome"] == (
+            "Credit used then refunded after data retrieval failed"
+        )
 
     def test_internal_stats_include_daily_interpretation(
         self,
@@ -3385,7 +3530,10 @@ class TestObservabilityDashboard:
         response = test_client.get("/internal/observability/stats?days=1")
 
         assert response.status_code == 200
-        interpretation = response.json()["daily_interpretation"]
+        payload = response.json()
+        interpretation = payload["daily_interpretation"]
+        assert payload["decision_confidence"]["level"] == "limited"
+        assert "Reliability debugging" in payload["decision_confidence"]["safe_uses"]
         assert interpretation["title"] == "Daily Executive Brief"
         assert interpretation["status"] == "needs_attention"
         assert any(
@@ -3446,6 +3594,49 @@ class TestObservabilityDashboard:
             "direct-observed-tx",
             "credit-observed-tx",
         }
+
+    def test_internal_stats_do_not_treat_rejected_proof_as_paid_success(
+        self,
+        observability_store,
+        test_client,
+    ):
+        observability_store.record(
+            "payment_required",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+        )
+        observability_store.record(
+            "payment_proof_submitted",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            metadata={"proof_hash": "rejected-proof"},
+        )
+        observability_store.record(
+            "payment_failed",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            reason="invalid_payment",
+        )
+
+        response = test_client.get("/internal/observability/stats?days=1")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert any(
+            "none are verified" in reason
+            for reason in payload["decision_confidence"]["reasons"]
+        )
+        interpretation = payload["daily_interpretation"]
+        assert any(
+            item["title"] == "Submitted payment proofs are not verifying"
+            for item in interpretation["what_does_not"]
+        )
+        checks = {check["name"]: check for check in interpretation["checks"]}
+        assert checks["Payment proof submission"]["status"] == "fail"
+        assert checks["Raw evidence"]["status"] == "watch"
 
 
 class TestNativePaymentValidation:

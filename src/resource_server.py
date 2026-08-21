@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Deque
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -65,6 +66,7 @@ from src.blocksize_client import (
     BlocksizeClient,
 )
 from src.blocksize_stream_cache import BlocksizeStreamCache
+from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
 from src.config import TOP_250_CRYPTO, settings
 from src.credit_manager import (
     CREDIT_COSTS,
@@ -100,6 +102,8 @@ from src.public_metadata import (
     GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
     LLMS_TXT_URL,
+    MAIN_WEBSITE_CONTACT_URL,
+    MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
     MCP_REGISTRY_AUTH_CONTENT,
     MCP_REGISTRY_AUTH_URL,
@@ -152,7 +156,7 @@ from src.rwa_aggregator import (
     evaluate_feed_promotion,
 )
 from src.rwa_realtime_quality import build_realtime_requirements, evaluate_realtime_quality
-from src.rwa_adapters import RWA_ADAPTER_REGISTRY
+from src.rwa_adapters import KrakenSpotAdapter, KrakenXStocksAdapter, RWA_ADAPTER_REGISTRY, build_default_registry
 from src.rwa_sourcing import build_sourcing_jobs
 from src.rwa_sourcing_runner import probe_sourcing_jobs
 from src.rwa_symbol_registry import (
@@ -183,10 +187,13 @@ from src.rwa_daily_feed_agent import build_daily_feed_agent_view
 from src.rwa_xyz_monitor import build_rwa_xyz_monitor_view
 from src import anthropic_auth
 from src import cursor_auth
+from src import openai_auth
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
 from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
 from src.cursor_mcp_server import cursor_mcp
+from src.openai_mcp_server import TOOL_COSTS as OPENAI_TOOL_COSTS
+from src.openai_mcp_server import openai_mcp
 from src.public_mcp_server import public_mcp
 from scripts.run_rwa_growth_pilot import capture_pilot, persist_capture
 
@@ -195,6 +202,7 @@ DOCS_DIR = Path("docs")
 PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
+OPENAI_MCP_HTTP_APP = openai_mcp.http_app(path="/", transport="streamable-http")
 OBSERVABILITY = (
     UsageEventStore(settings.server.observability_db_path)
     if settings.server.observability_enabled
@@ -215,6 +223,19 @@ PAY_SH_SERVICE_URL = os.getenv(
     "https://pay.sh/services/blocksize/market-data",
 )
 PAY_SH_METRICS_API_URL = os.getenv("PAY_SH_METRICS_API_URL", "").strip()
+OUTBOUND_DESTINATIONS = {
+    "free-trial": "https://matrix.blocksize.capital/",
+    "pricing": MAIN_WEBSITE_PRICING_URL.split("?", 1)[0],
+    "contact": MAIN_WEBSITE_CONTACT_URL.split("?", 1)[0],
+}
+ATTRIBUTION_QUERY_KEYS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+)
+ATTRIBUTION_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:/+ -]{0,95}$")
 
 
 def _env_enabled(name: str, default: str = "false") -> bool:
@@ -411,6 +432,41 @@ async def lifespan(app: FastAPI):
     """Manage the Blocksize client and Credit manager lifecycle."""
     app.state.blocksize = BlocksizeClient()
     app.state.stream_cache = BlocksizeStreamCache(rest_client=app.state.blocksize)
+    kraken_symbols = [
+        item.strip()
+        for item in os.environ.get("KRAKEN_XSTOCKS_WS_SYMBOLS", "").split(",")
+        if item.strip()
+    ]
+    kraken_spot_symbols = [
+        item.strip()
+        for item in os.environ.get("KRAKEN_SPOT_WS_SYMBOLS", "").split(",")
+        if item.strip()
+    ]
+    app.state.cex_book_cache = CEXBookCache(
+        ttl_seconds=float(os.environ.get("CEX_STREAM_TTL_SECONDS", "10"))
+    )
+    app.state.kraken_book_stream = None
+    app.state.kraken_spot_stream = None
+    app.state.rwa_adapter_registry = build_default_registry()
+    if kraken_symbols:
+        app.state.rwa_adapter_registry.register(
+            KrakenXStocksAdapter(stream_cache=app.state.cex_book_cache)
+        )
+        app.state.kraken_book_stream = KrakenV2BookStream(
+            app.state.cex_book_cache,
+            symbols=kraken_symbols,
+            depth=int(os.environ.get("KRAKEN_XSTOCKS_WS_DEPTH", "100")),
+        )
+    if kraken_spot_symbols:
+        app.state.rwa_adapter_registry.register(
+            KrakenSpotAdapter(stream_cache=app.state.cex_book_cache)
+        )
+        app.state.kraken_spot_stream = KrakenV2BookStream(
+            app.state.cex_book_cache,
+            symbols=kraken_spot_symbols,
+            venue_id="kraken_spot",
+            depth=int(os.environ.get("KRAKEN_SPOT_WS_DEPTH", "100")),
+        )
     app.state.credits = CreditManager()
     app.state.rwa_store = RWAObservationStore(
         os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
@@ -420,18 +476,27 @@ async def lifespan(app: FastAPI):
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
+    if app.state.kraken_book_stream is not None:
+        await app.state.kraken_book_stream.start()
+    if app.state.kraken_spot_stream is not None:
+        await app.state.kraken_spot_stream.start()
     if _env_enabled("RWA_GROWTH_PILOT_ENABLED"):
         app.state.rwa_growth_pilot_task = asyncio.create_task(_run_rwa_growth_pilot_loop(app))
     try:
         async with PUBLIC_MCP_HTTP_APP.lifespan(PUBLIC_MCP_HTTP_APP):
             async with ANTHROPIC_MCP_HTTP_APP.lifespan(ANTHROPIC_MCP_HTTP_APP):
                 async with CURSOR_MCP_HTTP_APP.lifespan(CURSOR_MCP_HTTP_APP):
-                    yield
+                    async with OPENAI_MCP_HTTP_APP.lifespan(OPENAI_MCP_HTTP_APP):
+                        yield
     finally:
         if app.state.rwa_growth_pilot_task is not None:
             app.state.rwa_growth_pilot_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.rwa_growth_pilot_task
+    if app.state.kraken_book_stream is not None:
+        await app.state.kraken_book_stream.stop()
+    if app.state.kraken_spot_stream is not None:
+        await app.state.kraken_spot_stream.stop()
     await app.state.stream_cache.stop()
     await app.state.blocksize.close()
     logger.info("Blocksize MCP Resource Server shut down")
@@ -611,6 +676,16 @@ def _request_event_fields(
     }
 
 
+def _request_attribution_metadata(request: Request) -> dict[str, str]:
+    """Retain bounded campaign labels without storing arbitrary query strings."""
+    metadata: dict[str, str] = {}
+    for key in ATTRIBUTION_QUERY_KEYS:
+        value = (request.query_params.get(key) or "").strip()
+        if value and ATTRIBUTION_VALUE_RE.fullmatch(value):
+            metadata[key] = value
+    return metadata
+
+
 def _activation_identity_hash(request: Request) -> tuple[str, str] | None:
     """Resolve an explicit activation identity without retaining its raw value."""
     for header_name, identity_type in (
@@ -658,20 +733,21 @@ def _record_http_usage(request: Request, status_code: int, latency_ms: float) ->
         status_code=status_code,
         latency_ms=latency_ms,
     )
-    record_usage_event("http_request", **fields)
+    attribution = _request_attribution_metadata(request)
+    record_usage_event("http_request", **fields, metadata=attribution)
 
     registry_name = registry_name_for_path(request.url.path)
     if registry_name:
         record_usage_event(
             "registry_request",
             **fields,
-            metadata={"registry": registry_name},
+            metadata={**attribution, "registry": registry_name},
         )
     elif _is_discovery_rate_limited_path(request.url.path):
         record_usage_event(
             "free_discovery_call",
             **fields,
-            metadata=_growth_identity_metadata(request),
+            metadata={**attribution, **_growth_identity_metadata(request)},
         )
 
 
@@ -688,7 +764,11 @@ def _record_product_event(
     fields = _request_event_fields(request)
     if wallet_hash is not None:
         fields["wallet_hash"] = wallet_hash
-    event_metadata = {**_growth_identity_metadata(request), **(metadata or {})}
+    event_metadata = {
+        **_request_attribution_metadata(request),
+        **_growth_identity_metadata(request),
+        **(metadata or {}),
+    }
     record_usage_event(
         event,
         **fields,
@@ -739,6 +819,7 @@ def _record_charged_delivery_outcome(
                 price_usdc=str(price_usdc) if price_usdc is not None else None,
                 network=network,
                 metadata={
+                    **_request_attribution_metadata(request),
                     "identity_hash": identity_hash,
                     "identity_type": identity_type,
                     "payment_mode": payment_mode,
@@ -764,6 +845,8 @@ def _root_oauth_connector() -> str:
         return "anthropic"
     if value == "cursor":
         return "cursor"
+    if value in {"openai", "chatgpt"}:
+        return "openai"
     logger.warning(
         "Invalid ROOT_OAUTH_CONNECTOR=%r; defaulting root OAuth metadata to Anthropic",
         value,
@@ -801,6 +884,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
         clean_path in allowed_exact_paths
         or clean_path in seo_paths
         or clean_path.startswith("/anthropic/mcp")
+        or clean_path.startswith("/go/")
         or clean_path.startswith("/og/")
     )
 
@@ -989,6 +1073,25 @@ for _seo_slug in SEO_LANDING_PAGES:
     )
 
 
+@app.api_route("/go/{destination}", methods=["GET", "HEAD"], include_in_schema=False)
+async def tracked_outbound_redirect(destination: str, request: Request) -> RedirectResponse:
+    """Record an allowlisted conversion click and forward campaign labels safely."""
+    target = OUTBOUND_DESTINATIONS.get(destination)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Outbound destination not found")
+    attribution = _request_attribution_metadata(request)
+    _record_product_event(
+        "outbound_conversion_click",
+        request,
+        metadata={"destination": destination, **attribution},
+    )
+    parsed = urlsplit(target)
+    location = urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urlencode(attribution), parsed.fragment)
+    )
+    return RedirectResponse(location, status_code=307)
+
+
 @app.get("/.well-known/glama.json", include_in_schema=False)
 async def get_glama_well_known() -> dict[str, object]:
     """Serve the Glama connector claim file."""
@@ -1067,6 +1170,10 @@ def _cursor_mcp_url() -> str:
     return _connector_mcp_url("CURSOR_MCP_PUBLIC_URL", "/cursor/mcp")
 
 
+def _openai_mcp_url() -> str:
+    return _connector_mcp_url("OPENAI_MCP_PUBLIC_URL", "/openai/mcp")
+
+
 @app.get("/.well-known/oauth-protected-resource/anthropic/mcp", include_in_schema=False)
 @app.get("/.well-known/oauth-protected-resource/anthropic/mcp/", include_in_schema=False)
 async def get_anthropic_oauth_protected_resource_metadata() -> dict[str, object]:
@@ -1085,9 +1192,14 @@ async def get_root_oauth_protected_resource_metadata() -> dict[str, object]:
             mcp_url=_anthropic_mcp_url(),
             scopes=anthropic_auth.oauth_scopes(),
         )
+    if _root_oauth_connector() == "cursor":
+        return _oauth_protected_resource_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+        )
     return _oauth_protected_resource_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
+        mcp_url=_openai_mcp_url(),
+        scopes=openai_auth.oauth_scopes(),
     )
 
 
@@ -1098,6 +1210,16 @@ async def get_cursor_oauth_protected_resource_metadata() -> dict[str, object]:
     return _oauth_protected_resource_metadata(
         mcp_url=_cursor_mcp_url(),
         scopes=cursor_auth.oauth_scopes(),
+    )
+
+
+@app.get("/.well-known/oauth-protected-resource/openai/mcp", include_in_schema=False)
+@app.get("/.well-known/oauth-protected-resource/openai/mcp/", include_in_schema=False)
+async def get_openai_oauth_protected_resource_metadata() -> dict[str, object]:
+    """Serve OpenAI MCP OAuth protected-resource metadata."""
+    return _oauth_protected_resource_metadata(
+        mcp_url=_openai_mcp_url(),
+        scopes=openai_auth.oauth_scopes(),
     )
 
 
@@ -1120,9 +1242,14 @@ async def get_root_oauth_authorization_server_metadata() -> dict[str, object]:
             mcp_url=_anthropic_mcp_url(),
             scopes=anthropic_auth.oauth_scopes(),
         )
+    if _root_oauth_connector() == "cursor":
+        return _oauth_authorization_server_metadata(
+            mcp_url=_cursor_mcp_url(),
+            scopes=cursor_auth.oauth_scopes(),
+        )
     return _oauth_authorization_server_metadata(
-        mcp_url=_cursor_mcp_url(),
-        scopes=cursor_auth.oauth_scopes(),
+        mcp_url=_openai_mcp_url(),
+        scopes=openai_auth.oauth_scopes(),
     )
 
 
@@ -1134,6 +1261,17 @@ async def get_cursor_oauth_authorization_server_metadata() -> dict[str, object]:
     return _oauth_authorization_server_metadata(
         mcp_url=_cursor_mcp_url(),
         scopes=cursor_auth.oauth_scopes(),
+    )
+
+
+@app.get("/openai/mcp/.well-known/openid-configuration", include_in_schema=False)
+@app.get("/.well-known/openid-configuration/openai/mcp", include_in_schema=False)
+@app.get("/.well-known/oauth-authorization-server/openai/mcp", include_in_schema=False)
+async def get_openai_oauth_authorization_server_metadata() -> dict[str, object]:
+    """Serve OpenAI MCP OAuth authorization-server metadata."""
+    return _oauth_authorization_server_metadata(
+        mcp_url=_openai_mcp_url(),
+        scopes=openai_auth.oauth_scopes(),
     )
 
 
@@ -1159,6 +1297,12 @@ app.add_route(
     include_in_schema=False,
 )
 app.mount("/cursor/mcp", CURSOR_MCP_HTTP_APP, name="cursor-mcp")
+app.add_route(
+    "/openai/mcp",
+    _SlashlessMountEndpoint(OPENAI_MCP_HTTP_APP, "/openai/mcp"),
+    include_in_schema=False,
+)
+app.mount("/openai/mcp", OPENAI_MCP_HTTP_APP, name="openai-mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -6184,9 +6328,6 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     prompts = int(event_counts.get("payment_required") or 0)
     proof_submissions = int(event_counts.get("payment_proof_submitted") or 0)
     verified_payments = int(event_counts.get("payment_verified") or 0)
-    credit_successes = int(event_counts.get("credit_drawdown_success") or 0) + int(
-        event_counts.get("mcp_credit_drawdown_success") or 0
-    )
     paid_calls = int(overview.get("paid_calls") or 0)
     registry_requests = int(overview.get("registry_requests") or 0)
     revenue_usdc = float(overview.get("estimated_revenue_usdc") or 0.0)
@@ -6203,6 +6344,19 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     evidence_events = int(source_evidence.get("events_reviewed") or 0)
     synthetic_evidence_events = int(source_evidence.get("synthetic_events") or 0)
     proof_hash_events = int(source_evidence.get("transaction_or_proof_hash_events") or 0)
+    telemetry_scope = (
+        summary.get("telemetry_scope")
+        if isinstance(summary.get("telemetry_scope"), dict)
+        else {}
+    )
+    excluded_synthetic_events = int(
+        telemetry_scope.get("excluded_synthetic_events") or 0
+    )
+    evidence_scope_note = (
+        f"{synthetic_evidence_events} synthetic/test events included"
+        if telemetry_scope.get("include_synthetic")
+        else f"{excluded_synthetic_events} tagged synthetic/test events excluded"
+    )
     unconfigured_platforms = [
         str(platform.get("name") or platform.get("id") or "Unknown platform")
         for platform in platforms
@@ -6254,7 +6408,7 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     )
     executive_summary.append(
         f"Raw evidence review found {evidence_events} evidence-bearing events, "
-        f"{synthetic_evidence_events} synthetic/test events, and {proof_hash_events} transaction/proof-hash event(s)."
+        f"{evidence_scope_note}, and {proof_hash_events} transaction/proof-hash event(s)."
     )
 
     what_works: list[dict[str, str]] = []
@@ -6263,12 +6417,20 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         if top_delivered:
             detail += f"; strongest delivered item is {top_delivered.get('service')} / {top_delivered.get('subject')}"
         what_works.append({"title": "Data delivery is producing usable output", "detail": detail, "tone": "good"})
-    if proof_submissions or verified_payments or credit_successes:
+    if verified_payments:
         what_works.append(
             {
-                "title": "Paid usage path has activity",
-                "detail": f"{proof_submissions} proof submissions, {verified_payments} verified direct payments, and {credit_successes} credit-backed successes.",
+                "title": "Verified paid usage path has activity",
+                "detail": f"{proof_submissions} proof submissions, {verified_payments} verified direct payments, and {paid_calls} successful paid/credit-backed deliveries.",
                 "tone": "good",
+            }
+        )
+    elif paid_calls:
+        what_works.append(
+            {
+                "title": "Credit-backed delivery path has activity",
+                "detail": f"{paid_calls} successful paid/credit-backed deliveries are visible, but no direct x402 payment is verified.",
+                "tone": "watch",
             }
         )
     if registry_requests or active_registry_sources:
@@ -6302,6 +6464,14 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
             {
                 "title": "Payment prompts are not converting",
                 "detail": "Clients are seeing x402 challenges, but no payment proof is being submitted afterward.",
+                "tone": "bad",
+            }
+        )
+    if proof_submissions and verified_payments == 0:
+        what_does_not.append(
+            {
+                "title": "Submitted payment proofs are not verifying",
+                "detail": f"{proof_submissions} proof submission(s) are recorded, but none reached payment_verified.",
                 "tone": "bad",
             }
         )
@@ -6423,9 +6593,9 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "Payment proof submission",
-            "status": "pass" if proof_submissions else "fail" if prompts else "watch",
-            "value": f"{proof_submissions}/{prompts}",
-            "detail": "Proof submissions after x402 prompts; this is the first conversion checkpoint.",
+            "status": "pass" if verified_payments else "fail" if proof_submissions or prompts else "watch",
+            "value": f"{verified_payments} verified / {proof_submissions} submitted / {prompts} prompted",
+            "detail": "A proof submission is only successful when it reaches payment_verified.",
         },
         {
             "name": "Wallet inflows",
@@ -6453,9 +6623,9 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         },
         {
             "name": "Raw evidence",
-            "status": "pass" if proof_hash_events or not (prompts or delivered) else "watch",
+            "status": "pass" if verified_payments or not (prompts or delivered) else "watch",
             "value": f"{proof_hash_events} proof/tx event(s), {synthetic_evidence_events} synthetic",
-            "detail": "Source, user agent, endpoint, and transaction/proof-hash support for growth claims.",
+            "detail": "Submitted proof hashes support debugging; verified payments are required for monetization claims.",
         },
     ]
 
@@ -6528,6 +6698,7 @@ async def ingest_marketplace_metrics(request: Request) -> JSONResponse:
 async def observability_stats(
     request: Request,
     days: int = Query(30, ge=1, le=180),
+    include_synthetic: bool = Query(True),
 ) -> JSONResponse:
     """Return dashboard-ready usage, registry, MCP, and monetization rollups."""
     if not _observability_authorized(request):
@@ -6538,7 +6709,12 @@ async def observability_stats(
             headers={"Cache-Control": "no-store"},
             content={"error": "Observability disabled"},
         )
-    content = _with_external_observability_context(OBSERVABILITY.summarize(days=days))
+    content = _with_external_observability_context(
+        OBSERVABILITY.summarize(
+            days=days,
+            include_synthetic=include_synthetic,
+        )
+    )
     credits = getattr(request.app.state, "credits", None)
     if credits is not None and hasattr(credits, "wallet_inflow_summary"):
         content["wallet_inflows"] = credits.wallet_inflow_summary(days=days)
@@ -6788,12 +6964,32 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       background: var(--green);
     }
     .unprotected::before { background: var(--amber); }
+    .confidence-banner {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      background: var(--amber-soft);
+      color: var(--ink);
+    }
+    .confidence-banner.ready {
+      border-left-color: var(--green);
+      background: var(--green-soft);
+    }
+    .confidence-banner strong { font-size: 13px; white-space: nowrap; }
+    .confidence-banner span { color: var(--muted); font-size: 13px; line-height: 1.4; }
     .grid { display: grid; gap: 14px; }
     .hero {
-      grid-template-columns: minmax(360px, 1.35fr) minmax(280px, .65fr);
+      grid-template-columns: 1fr;
+      align-items: start;
       margin-bottom: 14px;
     }
-    .kpis { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+    .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .two { grid-template-columns: minmax(0, 1fr) minmax(320px, .78fr); }
     .three { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
     .card {
@@ -6953,10 +7149,17 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     .bars { display: grid; gap: 9px; }
     .bar-row {
       display: grid;
-      grid-template-columns: minmax(100px, 180px) minmax(90px, 1fr) 54px;
+      grid-template-columns: minmax(0, 140px) minmax(48px, 1fr) minmax(32px, auto);
       gap: 10px;
       align-items: center;
       font-size: 13px;
+    }
+    .bar-row code {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .track { height: 10px; background: #eef1ee; border-radius: 999px; overflow: hidden; }
     .fill { height: 100%; background: var(--green); }
@@ -7085,7 +7288,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       .layout { grid-template-columns: 1fr; }
       aside { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
       nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .hero, .two, .three, .kpis { grid-template-columns: 1fr 1fr; }
+      .hero { grid-template-columns: 1fr; }
+      .two, .three, .kpis { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 760px) {
       main { padding: 18px; }
@@ -7093,7 +7297,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       .hero, .two, .three, .kpis, .brief-grid, .check-grid { grid-template-columns: 1fr; }
       .brief-header { grid-template-columns: 1fr; }
       nav { grid-template-columns: 1fr 1fr; }
-      .bar-row { grid-template-columns: minmax(95px, 1fr) 1fr 44px; }
+      .bar-row { grid-template-columns: minmax(0, 1fr) minmax(48px, 1fr) 44px; }
     }
   </style>
 </head>
@@ -7136,8 +7340,19 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
               <option value="180">180 days</option>
             </select>
           </label>
+          <label class="sub">Telemetry
+            <select id="telemetry-scope">
+              <option value="false" selected>Exclude tagged tests</option>
+              <option value="true">Include tests</option>
+            </select>
+          </label>
         </div>
       </header>
+
+      <section id="decision-confidence" class="confidence-banner" role="status" aria-live="polite">
+        <strong id="confidence-label">Checking evidence</strong>
+        <span id="confidence-summary">Evaluating whether this snapshot is suitable for operational, growth, and revenue decisions.</span>
+      </section>
 
       <section class="grid hero">
         <div class="card headline">
@@ -7265,6 +7480,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
 
       <section class="grid three section" id="acquisition">
         <div class="card"><h2>Platform Sources</h2><div id="registry-sources" class="bars"></div></div>
+        <div class="card"><h2>Campaigns</h2><div id="campaigns" class="bars"></div></div>
+        <div class="card"><h2>Conversion Destinations</h2><div id="outbound-destinations" class="bars"></div></div>
         <div class="card"><h2>Pay.sh Marketplace</h2><div id="pay-sh-source" class="source-card"></div></div>
         <div class="card"><h2>Smithery Hosted Activity</h2><div id="smithery-source" class="source-card"></div></div>
         <div class="card"><h2>Most Used Services</h2><div id="services" class="bars"></div></div>
@@ -7556,7 +7773,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
             <td><strong>${escapeAttr(platform.name)}</strong></td>
             <td>${fmt.format(platform.local_recorded_calls || 0)}</td>
             <td><span class="badge ${badgeClass}">${status}</span></td>
-            <td><a href="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">${escapeAttr(platform.listing_url || "n/a")}</a></td>
+            <td><a href="${escapeAttr(platform.listing_url || "")}" title="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">Open listing ↗</a></td>
             <td>${escapeAttr(platform.note || "")}</td>
           </tr>`;
         }).join("") : `<tr><td colspan="5" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
@@ -7735,9 +7952,9 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     function renderAttention(data) {
       const o = data.overview || {};
       const prompts = Number(data.event_counts?.payment_required || 0);
-      const verified = Number(data.event_counts?.payment_verified || 0) + Number(data.event_counts?.credit_drawdown_success || 0);
+      const verified = Number(data.event_counts?.payment_verified || 0);
       const abandoned = Math.max(0, prompts - verified);
-      const errorRate = o.http_error_rate == null ? 0 : Number(o.http_error_rate);
+      const errorRate = o.server_error_rate == null ? 0 : Number(o.server_error_rate);
       const registrySources = Object.keys(data.registry_source_mix || {}).length;
       const items = [
         {
@@ -7747,8 +7964,8 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         },
         {
           tone: errorRate > 0 ? "bad" : "",
-          title: `${pct(errorRate)} HTTP error rate`,
-          note: errorRate > 0 ? "Review rejected, failed, or upstream events in the trace." : "No HTTP errors observed in this window."
+          title: `${pct(errorRate)} server error rate`,
+          note: errorRate > 0 ? "Review HTTP 5xx and upstream failures in the trace." : "No HTTP 5xx responses observed in this window."
         },
         {
           tone: registrySources ? "" : "warn",
@@ -7801,8 +8018,10 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
 
     async function load() {
       const days = document.getElementById("window").value;
+      const includeSynthetic = document.getElementById("telemetry-scope").value;
       const statsUrl = new URL(statsPath, window.location.origin);
       statsUrl.searchParams.set("days", days);
+      statsUrl.searchParams.set("include_synthetic", includeSynthetic);
       const res = await fetch(statsUrl.toString(), { cache: "no-store", credentials: "same-origin" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Unable to load stats");
@@ -7812,7 +8031,16 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       const prompts = Number(data.event_counts?.payment_required || 0);
       const paid = Number(o.paid_calls || 0);
       const conversion = prompts ? paid / prompts : null;
-      document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}. ${live ? "Live refresh is on." : "Live refresh is paused."}`;
+      const scope = data.telemetry_scope || {};
+      const scopeNote = scope.include_synthetic
+        ? ` Includes ${fmt.format(scope.detected_synthetic_events || 0)} test/synthetic events.`
+        : ` Excludes ${fmt.format(scope.excluded_synthetic_events || 0)} test/synthetic events.`;
+      document.getElementById("freshness").textContent = `Generated ${new Date(data.generated_at).toLocaleString()} over the last ${data.window_days} day${data.window_days === 1 ? "" : "s"}.${scopeNote} ${live ? "Live refresh is on." : "Live refresh is paused."}`;
+      const confidence = data.decision_confidence || {};
+      const confidenceBanner = document.getElementById("decision-confidence");
+      confidenceBanner.classList.toggle("ready", confidence.level === "decision_ready");
+      document.getElementById("confidence-label").textContent = confidence.label || "Evidence status unavailable";
+      document.getElementById("confidence-summary").textContent = confidence.summary || "Review the raw event trace before using this snapshot for decisions.";
       document.getElementById("headline-value").textContent = g.activated_identities ? `${fmt.format(g.activated_identities)} activated` : "No activation yet";
       document.getElementById("headline-note").textContent = g.activated_identities ? "Explicit identities that received their first live price in the selected window." : "No identity-attributed first live price has been recorded in this window.";
       document.getElementById("kpis").innerHTML = [
@@ -7820,7 +8048,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         metric("Time to Value", g.median_time_to_first_live_price_seconds == null ? "n/a" : `${fmt.format(g.median_time_to_first_live_price_seconds)}s`, "Median discovery-to-first-live-price time"),
         metric("7-Day Repeat", pct(g.repeat_7d_rate), "Mature activated identities with repeat delivery"),
         metric("Starter to Paid", pct(g.starter_to_paid_rate), "Starter activations later tied to verified revenue"),
-        metric("Paid Calls", fmt.format(paid), "Verified x402, credits, and MCP paid usage"),
+        metric("Successful Deliveries", fmt.format(paid), "Completed x402, credit-backed HTTP, and authenticated MCP data returns"),
         metric("Revenue", money.format(o.estimated_revenue_usdc || 0), "Direct x402 + bulk credit claims"),
         metric("Server Errors", pct(data.reliability?.server_error_rate), "HTTP 5xx responses / all HTTP requests"),
         metric("Unsupported Demand", fmt.format(o.unsupported_symbol_requests || 0), "Bounded zero-result symbol searches"),
@@ -7835,6 +8063,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
         "proof submissions": data.event_counts?.payment_proof_submitted || 0,
         "verified payments": data.event_counts?.payment_verified || 0,
         "credit drawdowns": data.event_counts?.credit_drawdown_success || 0,
+        "successful deliveries": paid,
         "bulk claims": data.event_counts?.bulk_credit_claimed || 0,
       }, "amber");
       renderPopularity(data);
@@ -7866,6 +8095,7 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
     }
 
     document.getElementById("window").addEventListener("change", load);
+    document.getElementById("telemetry-scope").addEventListener("change", load);
     document.getElementById("refresh").addEventListener("click", load);
     document.getElementById("data-search").addEventListener("input", rerenderTables);
     document.getElementById("outcome-filter").addEventListener("change", rerenderTables);
@@ -7876,6 +8106,14 @@ def _observability_command_center_html(*, stats_path: str, token_required: bool)
       load();
     });
     scheduleLive();
+    function syncActiveNav() {
+      const activeHash = window.location.hash || "#overview";
+      document.querySelectorAll("nav a").forEach(link => {
+        link.classList.toggle("active", link.getAttribute("href") === activeHash);
+      });
+    }
+    window.addEventListener("hashchange", syncActiveNav);
+    syncActiveNav();
     load().catch(err => {
       document.getElementById("freshness").textContent = err.message;
     });
@@ -8180,6 +8418,8 @@ async def observability_legacy_dashboard(request: Request) -> Any:
       bars("services", data.service_mix);
       bars("origins", data.origin_mix, "blue");
       bars("registry-sources", data.registry_source_mix, "amber");
+      bars("campaigns", data.campaign_mix, "blue");
+      bars("outbound-destinations", data.outbound_destination_mix, "amber");
       bars("registries", data.registry_mix, "amber");
       bars("mcp", data.mcp_tool_mix, "blue");
       bars("paid", data.paid_endpoint_mix);
@@ -8303,6 +8543,8 @@ async def health_check() -> dict[str, Any]:
             "claude_connector": CLAUDE_CONNECTOR_URL,
             "cursor_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/cursor/mcp/",
             "cursor_oauth_callback": cursor_auth.oauth_callback_url(),
+            "openai_mcp": f"{PUBLIC_BASE_URL.rstrip('/')}/openai/mcp/",
+            "openai_oauth_callback": openai_auth.oauth_callback_url(),
         },
         "anthropic_connector": {
             "mcp_url": _anthropic_mcp_url(),
@@ -8321,6 +8563,16 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": CURSOR_TOOL_COSTS,
+            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
+        },
+        "openai_connector": {
+            "mcp_url": _openai_mcp_url(),
+            "auth_provider": os.environ.get("OPENAI_AUTH_PROVIDER", "none"),
+            "oauth_callback_url": openai_auth.oauth_callback_url(),
+            "oauth_scopes": openai_auth.oauth_scopes(),
+            "beta_tokens_enabled": openai_auth.beta_tokens_enabled(),
+            "tool_surface": "read-only-live-data",
+            "tool_costs": OPENAI_TOOL_COSTS,
             "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
         },
     }

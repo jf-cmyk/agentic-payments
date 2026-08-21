@@ -75,6 +75,25 @@ def test_wallet_inflow_summary_combines_direct_payments_and_credit_topups(tmp_pa
     assert topup["credits_added"] == 1000.0
 
 
+def test_wallet_inflow_summary_excludes_zero_value_proofs_and_promotional_credits(tmp_path):
+    db_path = tmp_path / "credits.db"
+    manager = CreditManager(str(db_path))
+
+    assert manager.record_payment_proof(
+        "zero-proof",
+        "solana",
+        0,
+        "merchant-recipient",
+        "GET /v1/vwap/BTC-USD",
+    ) is True
+    manager.add_credits("wallet-promotional-12345678", 50, "promo-tx", 0)
+
+    summary = manager.wallet_inflow_summary(days=1)
+
+    assert summary["total_inflows"] == 0
+    assert summary["total_usdc"] == 0
+
+
 @pytest.mark.asyncio
 async def test_starter_allowance_grants_50_credits_for_user_subject(tmp_path):
     db_path = tmp_path / "credits.db"

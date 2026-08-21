@@ -134,6 +134,20 @@ def create_authenticated_market_data_mcp(
             "status": status.status,
         }
 
+    def telemetry_identity_payload(
+        identity: ConnectorIdentity | None,
+    ) -> dict[str, object]:
+        """Return privacy-safe identity attribution and an explicit test marker."""
+        if identity is None:
+            return {}
+        payload: dict[str, object] = {
+            "identity_hash": fingerprint(identity.user_id),
+            "identity_type": "user",
+        }
+        if identity.source == "test":
+            payload["synthetic"] = True
+        return payload
+
     def normalise_symbol(value: str, field_name: str = "symbol") -> str:
         raw = value.strip()
         if len(raw) > 64:
@@ -154,14 +168,19 @@ def create_authenticated_market_data_mcp(
         call: Callable[[], Awaitable[T]],
         render: Callable[[T], str],
     ) -> str:
+        identity = resolve_identity()
+        identity_metadata = telemetry_identity_payload(identity)
         record_usage_event(
             "mcp_tool_call",
             surface=observability_surface,
             tool_name=tool_name,
             subject=subject,
-            metadata={"credit_cost": TOOL_COSTS[tool_name]},
+            wallet_hash=fingerprint(identity.user_id) if identity is not None else None,
+            metadata={
+                "credit_cost": TOOL_COSTS[tool_name],
+                **identity_metadata,
+            },
         )
-        identity = resolve_identity()
         if identity is None:
             record_usage_event(
                 "mcp_auth_failed",
@@ -192,7 +211,10 @@ def create_authenticated_market_data_mcp(
                 subject=subject,
                 wallet_hash=fingerprint(identity.user_id),
                 reason="daily_credit_limit_reached",
-                metadata=telemetry_credit_payload(status),
+                metadata={
+                    **telemetry_credit_payload(status),
+                    **identity_metadata,
+                },
             )
             return error_payload(
                 "DAILY_CREDIT_LIMIT_REACHED",
@@ -209,7 +231,10 @@ def create_authenticated_market_data_mcp(
             tool_name=tool_name,
             subject=subject,
             wallet_hash=fingerprint(identity.user_id),
-            metadata=telemetry_credit_payload(status),
+            metadata={
+                **telemetry_credit_payload(status),
+                **identity_metadata,
+            },
         )
 
         try:
@@ -229,6 +254,7 @@ def create_authenticated_market_data_mcp(
                 subject=subject,
                 wallet_hash=fingerprint(identity.user_id),
                 reason="blocksize_api_error",
+                metadata=identity_metadata,
             )
             return error_payload(
                 "BLOCKSIZE_API_ERROR",
@@ -250,6 +276,7 @@ def create_authenticated_market_data_mcp(
                 subject=subject,
                 wallet_hash=fingerprint(identity.user_id),
                 reason="internal_error",
+                metadata=identity_metadata,
             )
             return error_payload(
                 "INTERNAL_ERROR",
@@ -258,6 +285,18 @@ def create_authenticated_market_data_mcp(
             )
 
         current = entitlements.status(identity.user_id, identity.email)
+        record_usage_event(
+            "mcp_data_delivered",
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            wallet_hash=fingerprint(identity.user_id),
+            metadata={
+                **telemetry_credit_payload(current),
+                **identity_metadata,
+                "payment_mode": "starter_credit",
+            },
+        )
         record_usage_event_once(
             "first_live_price_delivered",
             fingerprint(f"user:{identity.user_id}"),
@@ -266,8 +305,7 @@ def create_authenticated_market_data_mcp(
             subject=subject,
             wallet_hash=fingerprint(identity.user_id),
             metadata={
-                "identity_hash": fingerprint(identity.user_id),
-                "identity_type": "user",
+                **identity_metadata,
                 "payment_mode": "starter_credit",
             },
         )

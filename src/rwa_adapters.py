@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import base64
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
+
+from src.cex_stream_cache import CEXBookCache, CEXBookUnavailable
 
 from src.rwa_coverage import VENUES
 from src.rwa_hyperliquid import (
@@ -393,7 +396,7 @@ P0_BLOCKED_ADAPTER_SPECS: dict[str, dict[str, Any]] = {
 
 
 class KrakenXStocksAdapter:
-    """Kraken public REST adapter for xStocks ticker and L2 depth."""
+    """Kraken xStocks adapter preferring public WebSocket state with REST fallback."""
 
     venue_id = "kraken_xstocks"
 
@@ -402,14 +405,16 @@ class KrakenXStocksAdapter:
         *,
         base_url: str = "https://api.kraken.com",
         client: httpx.AsyncClient | None = None,
+        stream_cache: CEXBookCache | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._client = client
+        self._stream_cache = stream_cache
 
     def metadata(self) -> dict[str, Any]:
         return AdapterCapability(
             venue_id=self.venue_id,
-            adapter_type="rest_public",
+            adapter_type="websocket_public_with_rest_fallback",
             status="implemented_unprobed",
             source_type="native_l2",
             supports_bidask=True,
@@ -418,7 +423,7 @@ class KrakenXStocksAdapter:
             requires_auth=False,
             implementation="src.rwa_adapters.KrakenXStocksAdapter",
             notes=[
-                "Uses Kraken public Ticker and Depth endpoints.",
+                "Prefers a fresh Kraken WebSocket v2 L2 book and falls back to public Ticker and Depth REST endpoints.",
                 "Non-crypto tokenized-asset symbol discovery should be validated dynamically before production rollout.",
             ],
         ).as_dict()
@@ -485,6 +490,18 @@ class KrakenXStocksAdapter:
 
     async def fetch_bidask(self, symbol: str) -> dict[str, Any]:
         api_pair, display_pair = await self.resolve_pair(symbol)
+        streamed = self._streamed_book(display_pair)
+        if streamed is not None and streamed["bids"] and streamed["asks"]:
+            return {
+                "symbol": display_pair,
+                "venue": self.venue_id,
+                "asset_class": "equity",
+                "source_type": "native_l1",
+                "bid": streamed["bids"][0]["price"],
+                "ask": streamed["asks"][0]["price"],
+                "timestamp": streamed["exchange_timestamp"],
+                "metadata": {"transport": "websocket", "sequence": streamed["sequence"], "age_ms": streamed["age_ms"]},
+            }
         payload = await self._get("/0/public/Ticker", {"pair": api_pair})
         result = self._first_result(payload)
         ask = float(result["a"][0])
@@ -509,16 +526,16 @@ class KrakenXStocksAdapter:
         clean_side = side.strip().lower()
         if clean_side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
-        payload = await self._get("/0/public/Depth", {"pair": api_pair, "count": depth})
-        result = self._first_result(payload)
-        source_rows = result["asks"] if clean_side == "buy" else result["bids"]
-        levels = [
-            {
-                "price": float(row[0]),
-                "size": float(row[1]),
-            }
-            for row in source_rows
-        ]
+        streamed = self._streamed_book(display_pair)
+        if streamed is not None:
+            levels = (streamed["asks"] if clean_side == "buy" else streamed["bids"])[:depth]
+            metadata = {"transport": "websocket", "sequence": streamed["sequence"], "age_ms": streamed["age_ms"]}
+        else:
+            payload = await self._get("/0/public/Depth", {"pair": api_pair, "count": depth})
+            result = self._first_result(payload)
+            source_rows = result["asks"] if clean_side == "buy" else result["bids"]
+            levels = [{"price": float(row[0]), "size": float(row[1])} for row in source_rows]
+            metadata = {"transport": "rest"}
         return {
             "symbol": display_pair,
             "venue": self.venue_id,
@@ -526,6 +543,215 @@ class KrakenXStocksAdapter:
             "source_type": "native_l2",
             "side": clean_side,
             "levels": levels,
+            "metadata": metadata,
+        }
+
+    def _streamed_book(self, symbol: str) -> dict[str, Any] | None:
+        if self._stream_cache is None:
+            return None
+        try:
+            return self._stream_cache.get(self.venue_id, symbol)
+        except CEXBookUnavailable:
+            return None
+
+    def fetch_trade_vwap(self, symbol: str, *, max_age_seconds: float = 60.0) -> dict[str, Any]:
+        if self._stream_cache is None:
+            raise RWAAdapterBlockedError("stream_not_configured", f"{self.venue_id} trade stream is not configured")
+        display_pair = self.normalize_symbol(symbol)
+        return self._stream_cache.trade_vwap(self.venue_id, display_pair, max_age_seconds=max_age_seconds)
+
+
+class KrakenSpotAdapter(KrakenXStocksAdapter):
+    """Kraken public spot adapter for dynamically listed crypto and FX pairs."""
+
+    venue_id = "kraken_spot"
+
+    @staticmethod
+    def normalize_symbol(symbol: str) -> str:
+        clean = _clean_symbol_key(symbol)
+        if "/" not in clean:
+            for quote in ("USDT", "USDC", "USD", "EUR", "XBT"):
+                if clean.endswith(quote) and len(clean) > len(quote):
+                    return f"{clean[:-len(quote)]}/{quote}"
+            return f"{clean}/USD"
+        return clean
+
+    def metadata(self) -> dict[str, Any]:
+        metadata = super().metadata()
+        metadata.update({
+            "venue_id": self.venue_id,
+            "implementation": "src.rwa_adapters.KrakenSpotAdapter",
+            "status": "implemented_unprobed",
+        })
+        metadata["notes"] = [
+            "Uses dynamically listed Kraken spot pairs; it does not infer xStocks availability.",
+            *metadata["notes"],
+        ]
+        return metadata
+
+
+class RevolutXAdapter:
+    """Read-only Revolut X native order-book adapter using signed REST requests."""
+
+    venue_id = "revolut_x"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        private_key_pem: str | None = None,
+        base_url: str = "https://revx.revolut.com/api",
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.api_key = api_key or os.getenv("REVOLUT_X_API_KEY")
+        self.private_key_pem = private_key_pem or os.getenv("REVOLUT_X_PRIVATE_KEY_PEM")
+        self.base_url = base_url.rstrip("/")
+        self._client = client
+
+    def metadata(self) -> dict[str, Any]:
+        configured = bool(self.api_key and self.private_key_pem)
+        return AdapterCapability(
+            venue_id=self.venue_id,
+            adapter_type="signed_rest_read_only",
+            status="implemented_unprobed" if configured else "implemented_blocked_on_credentials",
+            source_type="native_l2",
+            supports_bidask=True,
+            supports_l2_vwap=True,
+            supports_trade_vwap=True,
+            requires_auth=True,
+            implementation="src.rwa_adapters.RevolutXAdapter",
+            notes=[
+                "Uses the official signed Revolut X order-book endpoint; no trading methods are implemented.",
+                "REST snapshots remain supplemental until freshness, liquidity, replay, rights, and benchmark gates pass.",
+                "A Cursor MCP proxy must not be treated as native exchange depth without equivalent provenance.",
+            ],
+        ).as_dict()
+
+    @staticmethod
+    def normalize_symbol(symbol: str) -> str:
+        return _clean_symbol_key(symbol).replace("/", "-")
+
+    def _headers(self, method: str, path: str, query: str = "", body: str = "") -> dict[str, str]:
+        if not self.api_key or not self.private_key_pem:
+            raise RWAAdapterBlockedError(
+                "credentials",
+                "Revolut X requires REVOLUT_X_API_KEY and REVOLUT_X_PRIVATE_KEY_PEM",
+            )
+        timestamp = str(int(datetime.now(UTC).timestamp() * 1000))
+        message = f"{timestamp}{method.upper()}{path}{query}{body}".encode()
+        try:
+            from cryptography.hazmat.primitives import serialization
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("cryptography is required for Revolut X Ed25519 signing") from exc
+        private_key = serialization.load_pem_private_key(self.private_key_pem.encode(), password=None)
+        signature = base64.b64encode(private_key.sign(message)).decode()
+        return {
+            "X-Revx-API-Key": self.api_key,
+            "X-Revx-Timestamp": timestamp,
+            "X-Revx-Signature": signature,
+        }
+
+    async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        params = params or {}
+        query = str(httpx.QueryParams(params))
+        headers = self._headers("GET", f"/api{path}", query)
+
+        async def request(client: httpx.AsyncClient) -> dict[str, Any]:
+            response = await client.get(f"{self.base_url}{path}", params=params, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Revolut X response was not an object")
+            return payload
+
+        if self._client is not None:
+            return await request(self._client)
+        async with httpx.AsyncClient(timeout=15) as client:
+            return await request(client)
+
+    async def _public_get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not self.api_key:
+            raise RWAAdapterBlockedError("credentials", "Revolut X public-data endpoints require REVOLUT_X_API_KEY")
+        async def request(client: httpx.AsyncClient) -> dict[str, Any]:
+            response = await client.get(
+                f"{self.base_url}{path}",
+                params=params or {},
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Revolut X public response was not an object")
+            return payload
+        if self._client is not None:
+            return await request(self._client)
+        async with httpx.AsyncClient(timeout=15) as client:
+            return await request(client)
+
+    async def discover_pairs(self, *, region: str = "EEA") -> dict[str, Any]:
+        return await self._public_get_json("/1.0/public/configuration/pairs", {"region": region})
+
+    async def fetch_public_trades(
+        self,
+        symbols: list[str],
+        *,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        return await self._public_get_json(
+            "/1.0/public/trades/all",
+            {"symbols": ",".join(self.normalize_symbol(symbol) for symbol in symbols), "limit": limit},
+        )
+
+    async def _book(self, symbol: str, depth: int) -> tuple[str, dict[str, Any]]:
+        market = self.normalize_symbol(symbol)
+        payload = await self._get_json(f"/1.0/order-book/{market}", {"limit": depth})
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("Revolut X order-book response did not contain data")
+        return market.replace("-", "/"), payload
+
+    @staticmethod
+    def _revx_levels(rows: Any) -> list[dict[str, float]]:
+        if not isinstance(rows, list):
+            return []
+        return [
+            {"price": float(row["p"]), "size": float(row["q"])}
+            for row in rows
+            if isinstance(row, dict) and row.get("p") is not None and row.get("q") is not None
+        ]
+
+    async def fetch_bidask(self, symbol: str) -> dict[str, Any]:
+        display, payload = await self._book(symbol, 1)
+        data = payload["data"]
+        bids, asks = self._revx_levels(data.get("bids")), self._revx_levels(data.get("asks"))
+        if not bids or not asks:
+            raise ValueError(f"Revolut X returned an incomplete order book for {display}")
+        return {
+            "symbol": display,
+            "venue": self.venue_id,
+            "asset_class": "crypto",
+            "source_type": "native_l1",
+            "bid": max(row["price"] for row in bids),
+            "ask": min(row["price"] for row in asks),
+            "timestamp": (payload.get("metadata") or {}).get("timestamp"),
+            "metadata": {"transport": "signed_rest", "raw_payload": payload},
+        }
+
+    async def fetch_order_book(self, symbol: str, *, side: str = "buy", depth: int = 100) -> dict[str, Any]:
+        clean_side = side.strip().lower()
+        if clean_side not in {"buy", "sell"}:
+            raise ValueError("side must be buy or sell")
+        display, payload = await self._book(symbol, depth)
+        source = payload["data"].get("asks" if clean_side == "buy" else "bids")
+        return {
+            "symbol": display,
+            "venue": self.venue_id,
+            "asset_class": "crypto",
+            "source_type": "native_l2",
+            "side": clean_side,
+            "levels": self._revx_levels(source),
+            "timestamp": (payload.get("metadata") or {}).get("timestamp"),
+            "metadata": {"transport": "signed_rest", "raw_payload": payload},
         }
 
 
@@ -3298,6 +3524,8 @@ def build_default_registry() -> RWAAdapterRegistry:
     jupiter_token_mints = _load_jupiter_token_mints()
     jupiter_blocked_tokens = _load_jupiter_blocked_tokens()
     registry.register(KrakenXStocksAdapter())
+    registry.register(KrakenSpotAdapter())
+    registry.register(RevolutXAdapter())
     registry.register(XStocksPublicPriceAdapter())
     registry.register(HyperliquidPAXGAdapter())
     registry.register(HyperliquidSpotRWAAdapter())
@@ -3345,6 +3573,8 @@ def build_default_registry() -> RWAAdapterRegistry:
         venue_id = str(venue["id"])
         if venue_id in {
             KrakenXStocksAdapter.venue_id,
+            KrakenSpotAdapter.venue_id,
+            RevolutXAdapter.venue_id,
             XStocksPublicPriceAdapter.venue_id,
             HyperliquidPAXGAdapter.venue_id,
             HyperliquidSpotRWAAdapter.venue_id,

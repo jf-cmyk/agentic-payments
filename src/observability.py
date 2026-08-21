@@ -68,8 +68,12 @@ def surface_for_path(path: str) -> str:
         return "anthropic_mcp"
     if path == "/cursor/mcp" or path.startswith("/cursor/mcp/"):
         return "cursor_mcp"
+    if path == "/openai/mcp" or path.startswith("/openai/mcp/"):
+        return "openai_mcp"
     if registry_name_for_path(path):
         return "registry"
+    if path == "/go" or path.startswith("/go/"):
+        return "marketing_redirect"
     if path.startswith("/v1/"):
         return "http_api"
     if path in {"/", "/quickstart/remote-mcp", "/prompt-examples", "/support", "/privacy"}:
@@ -316,7 +320,12 @@ class UsageEventStore:
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
-    def summarize(self, *, days: int = 30) -> dict[str, Any]:
+    def summarize(
+        self,
+        *,
+        days: int = 30,
+        include_synthetic: bool = True,
+    ) -> dict[str, Any]:
         cutoff = datetime.now(UTC) - timedelta(days=days)
         with self._connect() as conn:
             rows = conn.execute(
@@ -332,7 +341,15 @@ class UsageEventStore:
                 (cutoff.isoformat(),),
             ).fetchall()
 
-        events = [self._row_to_dict(row) for row in rows]
+        all_events = [self._row_to_dict(row) for row in rows]
+        synthetic_events = [
+            event for event in all_events if self._is_synthetic_event(event)
+        ]
+        events = (
+            all_events
+            if include_synthetic
+            else [event for event in all_events if not self._is_synthetic_event(event)]
+        )
         event_counts = Counter(event["event"] for event in events)
         surface_counts = Counter(event.get("surface") or "unknown" for event in events)
         endpoint_counts = Counter(event.get("endpoint") or "unknown" for event in events)
@@ -347,24 +364,39 @@ class UsageEventStore:
                 "payment_verified",
                 "credit_drawdown_success",
                 "data_delivered",
+                "mcp_data_delivered",
                 "bulk_credit_claimed",
             }
         }
 
         paid_call_events = {
             "data_delivered",
-            "mcp_credit_drawdown_success",
+            "mcp_data_delivered",
         }
         called_data_events = {
             "free_discovery_call",
             "mcp_tool_call",
             "payment_required",
             "mcp_credit_drawdown_success",
+            "mcp_credit_drawdown_failed",
+            "mcp_data_delivered",
+            "mcp_tool_error",
             "data_delivered",
             "charged_delivery_failed",
         }
         revenue_events = {"payment_verified", "bulk_credit_claimed"}
-        paid_calls = sum(1 for event in events if event["event"] in paid_call_events)
+        # Authenticated MCP records a credit drawdown before calling the data
+        # provider. Older events therefore need error reconciliation; newer
+        # events also emit the explicit mcp_data_delivered outcome.
+        legacy_mcp_deliveries = max(
+            0,
+            event_counts["mcp_credit_drawdown_success"] - event_counts["mcp_tool_error"],
+        )
+        mcp_deliveries = max(
+            event_counts["mcp_data_delivered"],
+            legacy_mcp_deliveries,
+        )
+        paid_calls = event_counts["data_delivered"] + mcp_deliveries
         revenue = sum(
             float(event.get("price_usdc") or 0.0)
             for event in events
@@ -438,6 +470,27 @@ class UsageEventStore:
             for event in events
             if event.get("referrer")
         )
+        campaign_mix = Counter(
+            str(event["metadata"].get("utm_campaign"))
+            for event in events
+            if event["event"] == "http_request"
+            and isinstance(event.get("metadata"), dict)
+            and event["metadata"].get("utm_campaign")
+        )
+        campaign_source_mix = Counter(
+            str(event["metadata"].get("utm_source"))
+            for event in events
+            if event["event"] == "http_request"
+            and isinstance(event.get("metadata"), dict)
+            and event["metadata"].get("utm_source")
+        )
+        outbound_destination_mix = Counter(
+            str(event["metadata"].get("destination") or event.get("subject"))
+            for event in events
+            if event["event"] == "outbound_conversion_click"
+            and isinstance(event.get("metadata"), dict)
+            and (event["metadata"].get("destination") or event.get("subject"))
+        )
         user_agent_mix = Counter(
             self._user_agent_family(event.get("user_agent"))
             for event in events
@@ -455,11 +508,58 @@ class UsageEventStore:
         evidence = self._source_evidence(events)
         unsupported_symbol_opportunities = self._unsupported_symbol_opportunities(events)
         most_used_service = service_mix.most_common(1)[0][0] if service_mix else None
+        marketplace_metrics = self.marketplace_metrics_summary(days=days)
+        confidence_reasons: list[str] = []
+        if include_synthetic:
+            confidence_reasons.append("Tagged test and synthetic events are included.")
+        elif synthetic_events:
+            confidence_reasons.append(
+                "Tagged test events are excluded, but historical untagged automation cannot be identified retroactively."
+            )
+        if not marketplace_metrics["platforms_configured"]:
+            confidence_reasons.append("No external marketplace metrics are configured.")
+        if not event_counts["registry_request"]:
+            confidence_reasons.append("No registry-attributed requests are present in this window.")
+        if proof_submissions and not event_counts["payment_verified"]:
+            confidence_reasons.append(
+                f"{proof_submissions} payment proof submissions are present, but none are verified."
+            )
+        elif not evidence["transaction_or_proof_hash_events"]:
+            confidence_reasons.append("No transaction or payment-proof evidence is present.")
+        if reliability["charged_delivery_failures"]:
+            confidence_reasons.append(
+                f"{reliability['charged_delivery_failures']} delivery attempts failed after credit or payment acceptance."
+            )
+        decision_confidence = {
+            "level": "limited" if confidence_reasons else "decision_ready",
+            "label": "Operational only" if confidence_reasons else "Decision-ready",
+            "summary": (
+                "Use this snapshot for reliability debugging and demand triage, not external growth or revenue claims."
+                if confidence_reasons
+                else "The reviewed evidence supports operational, acquisition, and monetization decisions."
+            ),
+            "safe_uses": ["Reliability debugging", "Demand triage", "Connector QA"],
+            "unsafe_uses": (
+                ["External growth claims", "Marketplace conversion", "Revenue attribution"]
+                if confidence_reasons
+                else []
+            ),
+            "reasons": confidence_reasons,
+        }
 
         timeline = self._timeline(events, days)
         return {
             "window_days": days,
             "generated_at": utc_now_iso(),
+            "telemetry_scope": {
+                "include_synthetic": include_synthetic,
+                "matching_events": len(all_events),
+                "included_events": len(events),
+                "excluded_synthetic_events": (
+                    0 if include_synthetic else len(synthetic_events)
+                ),
+                "detected_synthetic_events": len(synthetic_events),
+            },
             "overview": {
                 "total_events": len(events),
                 "total_http_requests": event_counts["http_request"],
@@ -496,6 +596,9 @@ class UsageEventStore:
             "service_mix": dict(service_mix.most_common(20)),
             "origin_mix": dict(origin_mix.most_common(20)),
             "referrer_mix": dict(referrer_mix.most_common(20)),
+            "campaign_mix": dict(campaign_mix.most_common(20)),
+            "campaign_source_mix": dict(campaign_source_mix.most_common(20)),
+            "outbound_destination_mix": dict(outbound_destination_mix.most_common(20)),
             "user_agent_mix": dict(user_agent_mix.most_common(20)),
             "client_fingerprint_mix": dict(client_fingerprint_mix.most_common(20)),
             "data_called": data_called,
@@ -503,19 +606,22 @@ class UsageEventStore:
             "growth_funnel": growth_funnel,
             "reliability": reliability,
             "source_evidence": evidence,
+            "decision_confidence": decision_confidence,
             "unsupported_symbol_opportunities": unsupported_symbol_opportunities,
-            "marketplace_metrics": self.marketplace_metrics_summary(days=days),
+            "marketplace_metrics": marketplace_metrics,
             "failure_reasons": dict(failure_reasons.most_common(10)),
             "top_subjects": dict(top_subjects.most_common(20)),
             "timeline": timeline,
             "recent_events": self.recent_events(limit=50),
             "notes": [
                 "Client IPs, wallets, and payment proofs are stored only as salted hashes.",
-                "Credit drawdown calls count as paid product usage; revenue is counted when direct x402 payment or bulk credit purchase is verified.",
+                "Paid calls count completed HTTP deliveries plus completed authenticated MCP deliveries; credit drawdown alone is not treated as delivery.",
                 "First-live-price activation is counted once per privacy-safe explicit user, agent, wallet, device, or session identity.",
                 "Growth-funnel identity attribution uses salted identity hashes or wallet hashes; IP fingerprints are never used as funnel identities.",
                 "Unsupported-symbol opportunities include only bounded symbol-like searches with zero results; arbitrary free text is excluded.",
+                "Campaign attribution retains only bounded allowlisted UTM values; full query strings are never stored.",
                 "Server reliability is measured from HTTP 5xx responses and charged-delivery failures; expected payment, auth, rate-limit, and client/protocol responses are reported separately.",
+                "Synthetic filtering is tag-based: testclient, smoke, and synthetic user agents plus mock/test metadata are excluded; untagged historical automation cannot be identified retroactively.",
             ],
         }
 
@@ -612,7 +718,7 @@ class UsageEventStore:
             "payment_required",
             "credit_drawdown_success",
         }
-        delivery_event_names = {"data_delivered", "mcp_credit_drawdown_success"}
+        delivery_event_names = {"data_delivered", "mcp_data_delivered"}
         conversion_event_names = {"payment_verified", "bulk_credit_claimed"}
 
         eligible_first_seen: dict[str, datetime] = {}
@@ -978,6 +1084,11 @@ class UsageEventStore:
                     "surface": surface,
                     "calls": 0,
                     "paid_successes": 0,
+                    "_request_signals": 0,
+                    "_delivery_attempts": 0,
+                    "_mcp_drawdowns": 0,
+                    "_mcp_errors": 0,
+                    "_explicit_mcp_deliveries": 0,
                     "first_seen": event.get("timestamp"),
                     "last_seen": event.get("timestamp"),
                     "latest_event": event.get("event"),
@@ -995,16 +1106,30 @@ class UsageEventStore:
                 row["latest_event"] = event.get("event")
                 row["latest_status_code"] = event.get("status_code")
                 row["latest_outcome"] = cls._outcome_for_event(event)
-            if event["event"] in called_data_events:
-                row["calls"] += 1
+            if event["event"] in {
+                "free_discovery_call",
+                "mcp_tool_call",
+                "payment_required",
+            }:
+                row["_request_signals"] += 1
+            if event["event"] in {
+                "data_delivered",
+                "charged_delivery_failed",
+                "mcp_data_delivered",
+                "mcp_tool_error",
+            }:
+                row["_delivery_attempts"] += 1
             if event["event"] == "payment_required":
                 row["payment_prompted"] = True
                 row["prompt_price_usdc"] = float(event.get("price_usdc") or 0.0)
-            if event["event"] in {
-                "data_delivered",
-                "mcp_credit_drawdown_success",
-            }:
+            if event["event"] == "data_delivered":
                 row["paid_successes"] += 1
+            if event["event"] == "mcp_credit_drawdown_success":
+                row["_mcp_drawdowns"] += 1
+            if event["event"] == "mcp_tool_error":
+                row["_mcp_errors"] += 1
+            if event["event"] == "mcp_data_delivered":
+                row["_explicit_mcp_deliveries"] += 1
             metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
             if (
                 event["event"] == "data_delivered"
@@ -1015,8 +1140,30 @@ class UsageEventStore:
 
         rows = list(grouped.values())
         for row in rows:
+            legacy_mcp_deliveries = max(
+                0,
+                int(row.pop("_mcp_drawdowns")) - int(row.pop("_mcp_errors")),
+            )
+            explicit_mcp_deliveries = int(row.pop("_explicit_mcp_deliveries"))
+            row["paid_successes"] += max(
+                legacy_mcp_deliveries,
+                explicit_mcp_deliveries,
+            )
+            row["calls"] = max(
+                int(row.pop("_request_signals")),
+                int(row.pop("_delivery_attempts")),
+            )
             row["revenue_usdc"] = round(row["revenue_usdc"], 6)
-            if int(row["paid_successes"] or 0) > 0:
+            if (
+                int(row["paid_successes"] or 0) > 0
+                and (
+                    row.get("latest_event") == "mcp_credit_drawdown_success"
+                    or (
+                        row.get("latest_event") == "http_request"
+                        and int(row.get("latest_status_code") or 0) < 400
+                    )
+                )
+            ):
                 row["latest_outcome"] = "Data returned after payment or credits"
         rows.sort(key=lambda row: (-int(row["calls"]), row["service"], row["subject"]))
         return rows[:50]
@@ -1028,12 +1175,9 @@ class UsageEventStore:
             "free_discovery_call",
             "mcp_tool_call",
             "payment_required",
-            "mcp_credit_drawdown_success",
-            "data_delivered",
         }
         delivered_events = {
             "data_delivered",
-            "mcp_credit_drawdown_success",
         }
         blocked_events = {
             "payment_required",
@@ -1045,7 +1189,13 @@ class UsageEventStore:
 
         for event in events:
             event_name = str(event.get("event") or "")
-            if event_name not in request_events | blocked_events | failed_after_credit_events:
+            if event_name not in (
+                request_events
+                | delivered_events
+                | blocked_events
+                | failed_after_credit_events
+                | {"mcp_credit_drawdown_success", "mcp_data_delivered"}
+            ):
                 continue
             service = cls._service_for_event(event)
             subject = str(
@@ -1070,6 +1220,9 @@ class UsageEventStore:
                     "credits_spent": 0.0,
                     "estimated_revenue_usdc": 0.0,
                     "synthetic_events": 0,
+                    "_mcp_drawdowns": 0,
+                    "_mcp_errors": 0,
+                    "_explicit_mcp_deliveries": 0,
                     "first_seen": event.get("timestamp"),
                     "last_seen": event.get("timestamp"),
                     "latest_outcome": cls._outcome_for_event(event),
@@ -1082,11 +1235,7 @@ class UsageEventStore:
                 row["latest_outcome"] = cls._outcome_for_event(event)
 
             metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
-            if (
-                event_name in request_events
-                or event_name in blocked_events
-                or event_name == "charged_delivery_failed"
-            ):
+            if event_name in request_events:
                 row["requested"] += 1
             if event_name == "payment_required":
                 row["payment_prompts"] += 1
@@ -1098,6 +1247,12 @@ class UsageEventStore:
                 row["blocked"] += 1
             if event_name in failed_after_credit_events:
                 row["failed_after_credit"] += 1
+            if event_name == "mcp_credit_drawdown_success":
+                row["_mcp_drawdowns"] += 1
+            if event_name == "mcp_tool_error":
+                row["_mcp_errors"] += 1
+            if event_name == "mcp_data_delivered":
+                row["_explicit_mcp_deliveries"] += 1
             if event_name in {"credit_drawdown_success", "mcp_credit_drawdown_success"}:
                 row["credits_spent"] += float(metadata.get("credits_spent") or 0.0)
             if cls._is_synthetic_event(event):
@@ -1105,9 +1260,15 @@ class UsageEventStore:
 
         rows = list(grouped.values())
         for row in rows:
-            row["delivered"] = max(
+            legacy_mcp_deliveries = max(
                 0,
-                int(row["delivered"]) - int(row["failed_after_credit"]),
+                int(row.pop("_mcp_drawdowns")) - int(row.pop("_mcp_errors")),
+            )
+            explicit_mcp_deliveries = int(row.pop("_explicit_mcp_deliveries"))
+            row["delivered"] += max(legacy_mcp_deliveries, explicit_mcp_deliveries)
+            row["requested"] = max(
+                int(row["requested"]),
+                int(row["delivered"]) + int(row["failed_after_credit"]),
             )
             row["credits_spent"] = round(float(row["credits_spent"] or 0.0), 3)
             row["estimated_revenue_usdc"] = round(float(row["estimated_revenue_usdc"] or 0.0), 6)
@@ -1151,7 +1312,11 @@ class UsageEventStore:
         subject = str(event.get("subject") or "").lower()
         return (
             "testclient" in user_agent
+            or "smoke" in user_agent
+            or "synthetic" in user_agent
             or bool(metadata.get("mock"))
+            or bool(metadata.get("synthetic"))
+            or bool(metadata.get("test"))
             or subject.startswith("mock_")
             or subject.startswith("test_")
         )
@@ -1173,6 +1338,8 @@ class UsageEventStore:
                 "credit_drawdown_failed",
                 "registry_request",
                 "mcp_tool_call",
+                "mcp_credit_drawdown_success",
+                "mcp_data_delivered",
                 "mcp_tool_error",
             }
         ]
@@ -1182,7 +1349,12 @@ class UsageEventStore:
             1
             for event in evidence_events
             if event.get("event")
-            in {"payment_proof_submitted", "payment_verified", "data_delivered"}
+            in {
+                "payment_proof_submitted",
+                "payment_verified",
+                "data_delivered",
+                "mcp_data_delivered",
+            }
         )
         tx_hash_evidence_count = sum(
             1
@@ -1232,8 +1404,12 @@ class UsageEventStore:
         status_code = event.get("status_code")
         if event_name == "payment_required" or status_code == 402:
             return "Prompted to pay; no data returned"
-        if event_name in {"data_delivered", "mcp_credit_drawdown_success"}:
+        if event_name in {"data_delivered", "mcp_data_delivered"}:
             return "Data returned after payment or credits"
+        if event_name == "mcp_credit_drawdown_success":
+            return "Credits accepted; waiting for delivery result"
+        if event_name == "mcp_tool_error":
+            return "Credit used then refunded after data retrieval failed"
         if event_name == "charged_delivery_failed":
             return "Charged or credited call failed; refund or retry needed"
         if event_name in {"payment_verified", "credit_drawdown_success"}:
@@ -1291,12 +1467,13 @@ class UsageEventStore:
                 "registry_requests": 0,
                 "registry_sources": {},
                 "revenue_usdc": 0.0,
+                "_mcp_drawdowns": 0,
+                "_mcp_errors": 0,
+                "_mcp_deliveries": 0,
             }
 
         paid_call_events = {
-            "payment_verified",
-            "credit_drawdown_success",
-            "mcp_credit_drawdown_success",
+            "data_delivered",
         }
         for event in events:
             day = str(event["timestamp"])[:10]
@@ -1306,6 +1483,12 @@ class UsageEventStore:
                 buckets[day]["http_requests"] += 1
             if event["event"] in paid_call_events:
                 buckets[day]["paid_calls"] += 1
+            if event["event"] == "mcp_credit_drawdown_success":
+                buckets[day]["_mcp_drawdowns"] += 1
+            if event["event"] == "mcp_tool_error":
+                buckets[day]["_mcp_errors"] += 1
+            if event["event"] == "mcp_data_delivered":
+                buckets[day]["_mcp_deliveries"] += 1
             if event["event"] == "mcp_tool_call":
                 buckets[day]["mcp_tool_calls"] += 1
             if event["event"] == "registry_request":
@@ -1317,6 +1500,14 @@ class UsageEventStore:
                 buckets[day]["revenue_usdc"] += float(event.get("price_usdc") or 0.0)
 
         for bucket in buckets.values():
+            bucket["paid_calls"] += max(
+                int(bucket.pop("_mcp_deliveries")),
+                max(
+                    0,
+                    int(bucket.pop("_mcp_drawdowns"))
+                    - int(bucket.pop("_mcp_errors")),
+                ),
+            )
             bucket["revenue_usdc"] = round(bucket["revenue_usdc"], 6)
         return list(buckets.values())
 

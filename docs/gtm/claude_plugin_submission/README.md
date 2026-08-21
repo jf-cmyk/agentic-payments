@@ -1,6 +1,6 @@
 # Claude Plugin Submission Packet
 
-Prepared: 2026-05-13
+Prepared: 2026-07-29
 
 This packet is for the optional Claude plugin directory track. The primary
 Claude marketplace path remains the remote MCP connector submission at:
@@ -46,7 +46,7 @@ https://gitlab.com/jfocke/agentic-payments/-/tree/main/claude-plugin/blocksize-m
 Prepared upload archive:
 
 ```text
-deliverables/blocksize-market-data-claude-plugin-0.1.0.zip
+deliverables/blocksize-market-data-claude-plugin-0.2.0.zip
 ```
 
 Remote MCP endpoint:
@@ -66,7 +66,8 @@ https://platform.claude.com/plugins/submit
 
 - `.claude-plugin/plugin.json` with plugin metadata.
 - `.mcp.json` pointing to the production Claude MCP endpoint.
-- `skills/market-data-workflow/SKILL.md` with safe market-data workflow guidance.
+- `skills/use-blocksize-market-data/SKILL.md` with safe market-data workflow
+  guidance shared across Claude, OpenAI, and Cursor.
 - `SETUP.md` with installation and OAuth troubleshooting instructions.
 - `README.md` and `LICENSE`.
 
@@ -78,13 +79,13 @@ https://platform.claude.com/plugins/submit
 - If Anthropic requires a GitHub URL, sync this plugin path to the public GitHub
   remote before using the GitHub option.
 - Until GitHub is synced, upload
-  `deliverables/blocksize-market-data-claude-plugin-0.1.0.zip`.
+  `deliverables/blocksize-market-data-claude-plugin-0.2.0.zip`.
 - Run `claude plugin validate claude-plugin/blocksize-market-data` before plugin
   submission where the Claude CLI is available.
 
 ## Validation Status
 
-Verified on 2026-05-13:
+Verified on 2026-07-29:
 
 ```bash
 python3 -m json.tool claude-plugin/blocksize-market-data/.claude-plugin/plugin.json

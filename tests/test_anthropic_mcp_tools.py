@@ -60,7 +60,7 @@ async def test_credit_balance_returns_daily_status(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_vwap_spends_one_credit(monkeypatch):
+async def test_vwap_spends_one_credit(monkeypatch, isolate_usage_event_store):
     monkeypatch.setattr(server.anthropic_auth, "resolve_anthropic_identity", _identity)
     mock_client = AsyncMock()
     mock_client.get_vwap_latest = AsyncMock(
@@ -79,6 +79,13 @@ async def test_vwap_spends_one_credit(monkeypatch):
     assert "Credits remaining today: 1/2" in result
     mock_client.get_vwap_latest.assert_awaited_once_with("BTCUSD")
     assert server._entitlements.status("user-1").credits_remaining == 1
+
+    all_stats = isolate_usage_event_store.summarize(days=1, include_synthetic=True)
+    production_stats = isolate_usage_event_store.summarize(days=1, include_synthetic=False)
+    assert all_stats["event_counts"]["mcp_data_delivered"] == 1
+    assert all_stats["overview"]["paid_calls"] == 1
+    assert production_stats["overview"]["paid_calls"] == 0
+    assert production_stats["telemetry_scope"]["excluded_synthetic_events"] >= 1
 
 
 @pytest.mark.asyncio

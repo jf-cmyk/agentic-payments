@@ -476,6 +476,7 @@ class CreditManager:
                 SELECT tx_hash, network, amount_atomic, recipient, purpose, timestamp
                 FROM payment_proofs
                 WHERE timestamp >= ?
+                  AND amount_atomic > 0
                   AND (purpose IS NULL OR purpose NOT LIKE 'credits:%')
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -489,6 +490,7 @@ class CreditManager:
                 FROM credit_purchases cp
                 LEFT JOIN payment_proofs pp ON pp.tx_hash = cp.tx_hash
                 WHERE cp.timestamp >= ?
+                  AND cp.amount_usdc > 0
                 ORDER BY cp.timestamp DESC
                 LIMIT ?
                 ''',
