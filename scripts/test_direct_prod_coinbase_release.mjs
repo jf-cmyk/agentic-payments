@@ -160,6 +160,13 @@ function fakeRailway(overrides = {}) {
     }
     if (argv[1] === "up") {
       assert(argv.includes("--yes"), "shadow upload is not fully unattended");
+      assert(!argv.includes("--verbose"), "shadow upload enabled unsafe verbose output");
+      if (state.uploadFailure) {
+        return {
+          ...result(state.uploadFailure.stdout || "", 1),
+          stderr: state.uploadFailure.stderr || "",
+        };
+      }
       const message = argv[argv.indexOf("--message") + 1];
       const priorActive = [...state.active];
       const deploymentStatus = state.nextUploadStatus || "SUCCESS";
@@ -590,6 +597,100 @@ test("shadow deploy stages exact variables, binds one deployment, and requires t
     assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
       && argv[2].includes("DirectProdBackup")).length, 2);
     assert.equal(state.backupRevalidatedAt, new Date(NOW).toISOString());
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("structured shadow upload failure exposes only sanitized Railway JSON fields", async () => {
+  const temporary = await tempState();
+  const secret = "super-secret-upload-token";
+  const bareSecret = "ghp_1234567890abcdefghijklmnopqrstuv";
+  const signedUrl = "https://uploads.railway.example/object?X-Amz-Signature=abcdef";
+  try {
+    const fake = fakeRailway({
+      uploadFailure: {
+        stdout: JSON.stringify({
+          code: "UPLOAD_FAILED",
+          error: `connection reset at ${signedUrl}`,
+          hint: `token=${secret} path=/Users/operator/private.pem bearer ${bareSecret}`,
+        }),
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), (error) => {
+      assert.match(error.message, /Railway shadow upload failed \(exit=1,signal=none/);
+      assert.match(error.message, /code=UPLOAD_FAILED/);
+      assert.match(error.message, /markers=connection/);
+      assert.match(error.message, /errorBytes=\d+; hintBytes=\d+; hasHint=true/);
+      assert.doesNotMatch(error.message, /super-secret-upload-token/);
+      assert.doesNotMatch(error.message, /ghp_1234567890/);
+      assert.doesNotMatch(error.message, /uploads\.railway\.example/);
+      assert.doesNotMatch(error.message, /Users\/operator/);
+      assert.doesNotMatch(error.message, /connection reset at/);
+      return true;
+    });
+    assert.equal((await readState(temporary.path)).phase, "shadow_upload_armed");
+    assert.equal(fake.state.history.length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "up").length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("malformed shadow upload failure retains only markers and byte counts", async () => {
+  const temporary = await tempState();
+  const secret = "do-not-emit-this-upload-secret";
+  try {
+    const fake = fakeRailway({
+      uploadFailure: {
+        stdout: `not-json connection reset token=${secret}`,
+        stderr: "socket closed with EOF",
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), (error) => {
+      assert.match(error.message, /unstructuredMarkers=connection/);
+      assert.match(error.message, /stdoutBytes=\d+,stderrBytes=\d+/);
+      assert.doesNotMatch(error.message, /diagnosticSha256/);
+      assert.doesNotMatch(error.message, /do-not-emit-this-upload-secret/);
+      assert.doesNotMatch(error.message, /not-json/);
+      return true;
+    });
+    assert.equal((await readState(temporary.path)).phase, "shadow_upload_armed");
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "up").length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("structured failure parser uses only one bounded final JSON line", async () => {
+  const temporary = await tempState();
+  const secretPrefix = "provider-secret-that-must-never-appear-";
+  try {
+    const fake = fakeRailway({
+      uploadFailure: {
+        stdout: `${secretPrefix}${"{".repeat(100_000)}\n${JSON.stringify({
+          code: "UPLOAD_TIMEOUT",
+          error: "connection timeout after upload",
+          hint: null,
+        })}`,
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), (error) => {
+      assert.match(error.message, /code=UPLOAD_TIMEOUT; markers=timeout,connection/);
+      assert.doesNotMatch(error.message, /provider-secret/);
+      assert(error.message.length < 700);
+      return true;
+    });
+    assert.equal((await readState(temporary.path)).phase, "shadow_upload_armed");
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }

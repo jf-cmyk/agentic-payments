@@ -299,6 +299,80 @@ function commandOutput(result, label) {
   return result.stdout;
 }
 
+function railwayDiagnosticMarkers(...values) {
+  const sample = values.map((value) => {
+    const text = String(value || "");
+    return `${text.slice(0, 2_048)}\n${text.slice(-2_048)}`;
+  }).join("\n");
+  const patterns = [
+    ["dns", /\b(?:dns|resolve|resolution|unknown host)\b/i],
+    ["timeout", /\b(?:timeout|timed out|deadline)\b/i],
+    ["connection", /\b(?:connection|socket|broken pipe|reset by peer|eof)\b/i],
+    ["authentication", /\b(?:unauthorized|not authenticated|authentication)\b/i],
+    ["authorization", /\b(?:forbidden|not authorized|permission denied)\b/i],
+    ["payload", /\b(?:payload too large|request entity too large|http 413)\b/i],
+    ["rate_limit", /\b(?:rate limit|too many requests|http 429)\b/i],
+    ["tls", /\b(?:tls|certificate|ssl)\b/i],
+  ];
+  const markers = patterns.filter(([, pattern]) => pattern.test(sample)).map(([name]) => name);
+  return markers.length > 0 ? markers.join(",") : "none";
+}
+
+function parseStructuredRailwayFailure(output) {
+  const raw = String(output || "");
+  const trimmed = raw.length <= 8_192 ? raw.trim() : "";
+  const tail = raw.slice(-8_192).trim();
+  const lastLine = tail.slice(Math.max(tail.lastIndexOf("\n"), tail.lastIndexOf("\r")) + 1);
+  const candidates = [...new Set([trimmed, lastLine].filter(Boolean))];
+  for (const candidate of candidates) {
+    if (candidate.length > 8_192) continue;
+    if (!candidate.startsWith("{") || !candidate.endsWith("}")) continue;
+    let value;
+    try { value = JSON.parse(candidate); } catch { continue; }
+    if (!value || Array.isArray(value) || typeof value !== "object"
+      || !/^[A-Z0-9_]{1,64}$/.test(value.code || "")
+      || typeof value.error !== "string"
+      || !(value.hint == null || typeof value.hint === "string")) continue;
+    return {
+      code: value.code,
+      markers: railwayDiagnosticMarkers(value.error, value.hint),
+      errorBytes: Buffer.byteLength(value.error),
+      hintBytes: Buffer.byteLength(value.hint || ""),
+      hasHint: typeof value.hint === "string" && value.hint.length > 0,
+    };
+  }
+  return null;
+}
+
+function railwayUploadOutput(result) {
+  if (result && result.code === 0 && !result.spawnError && !result.exceeded && !result.timedOut) {
+    return result.stdout;
+  }
+  const stdout = String(result?.stdout || "");
+  const stderr = String(result?.stderr || "");
+  const signal = /^[A-Z0-9]{1,16}$/.test(result?.signal || "") ? result.signal : "none";
+  const processEvidence = [
+    `exit=${Number.isInteger(result?.code) ? result.code : "unknown"}`,
+    `signal=${signal}`,
+    `spawnError=${Boolean(result?.spawnError)}`,
+    `timedOut=${result?.timedOut === true}`,
+    `exceeded=${result?.exceeded === true}`,
+    `stdoutBytes=${Buffer.byteLength(stdout)}`,
+    `stderrBytes=${Buffer.byteLength(stderr)}`,
+  ].join(",");
+  const structured = parseStructuredRailwayFailure(stdout);
+  if (structured) {
+    fail(`Railway shadow upload failed (${processEvidence}; code=${structured.code}; markers=${
+      structured.markers
+    }; errorBytes=${structured.errorBytes}; hintBytes=${structured.hintBytes}; hasHint=${
+      structured.hasHint
+    })`);
+  }
+  fail(`Railway shadow upload failed (${processEvidence}; unstructuredMarkers=${
+    railwayDiagnosticMarkers(stdout, stderr)
+  })`);
+}
+
 function parseJsonOutput(output, label) {
   try {
     return JSON.parse(String(output || "").trim());
@@ -1041,7 +1115,7 @@ async function deployShadow(options, deps) {
   } finally {
     await exactArchive.cleanup();
   }
-  const uploadOutput = commandOutput(upload, "Railway shadow upload");
+  const uploadOutput = railwayUploadOutput(upload);
   let deploymentId = parseUploadDeploymentId(uploadOutput);
   if (!deploymentId) {
     const after = await listDeployments(deps);
