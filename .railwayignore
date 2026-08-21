@@ -4,6 +4,9 @@
 __pycache__/
 *.pyc
 *.db
+x402_payments*.sqlite3
+x402_payments*.sqlite3-wal
+x402_payments*.sqlite3-shm
 .DS_Store
 .pytest_cache/
 .ruff_cache/

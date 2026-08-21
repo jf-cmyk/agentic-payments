@@ -14,7 +14,9 @@ aiohttp-retry==2.9.1
 aiosignal==1.4.0
     # via aiohttp
 annotated-doc==0.0.4
-    # via fastapi
+    # via
+    #   fastapi
+    #   typer
 annotated-types==0.7.0
     # via pydantic
 anyio==4.13.0
@@ -54,6 +56,7 @@ certifi==2026.4.22
     #   httpcore
     #   httpx
     #   requests
+    #   sentry-sdk
 cffi==2.0.0 ; platform_python_implementation != 'PyPy'
     # via cryptography
 charset-normalizer==3.4.9
@@ -61,7 +64,10 @@ charset-normalizer==3.4.9
 ckzg==2.1.8
     # via eth-account
 click==8.3.3
-    # via uvicorn
+    # via
+    #   rich-toolkit
+    #   typer
+    #   uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   click
@@ -89,7 +95,9 @@ docstring-parser==0.18.0
 docutils==0.22.4
     # via rich-rst
 email-validator==2.3.0
-    # via pydantic
+    # via
+    #   fastapi
+    #   pydantic
 eth-abi==5.2.0
     # via
     #   eth-account
@@ -126,7 +134,17 @@ eth-utils==6.0.0
 exceptiongroup==1.3.1
     # via fastmcp
 fastapi==0.136.0
-    # via blocksize-mcp-x402
+    # via
+    #   blocksize-mcp-x402
+    #   x402
+fastapi-cli==0.0.24
+    # via fastapi
+fastapi-cloud-cli==0.17.0
+    # via fastapi-cli
+fastar==0.11.0
+    # via
+    #   fastapi
+    #   fastapi-cloud-cli
 fastmcp==3.2.4
     # via blocksize-mcp-x402
 frozenlist==1.8.0
@@ -151,6 +169,8 @@ httptools==0.7.1
 httpx==0.28.1
     # via
     #   blocksize-mcp-x402
+    #   fastapi
+    #   fastapi-cloud-cli
     #   fastmcp
     #   mcp
     #   solana
@@ -178,7 +198,9 @@ jeepney==0.9.0 ; sys_platform == 'linux'
     # via
     #   keyring
     #   secretstorage
-joserfc==1.7.4
+jinja2==3.1.6
+    # via fastapi
+joserfc==1.6.8
     # via
     #   authlib
     #   blocksize-mcp-x402
@@ -196,7 +218,9 @@ keyring==25.7.0
     # via py-key-value-aio
 markdown-it-py==4.0.0
     # via rich
-mcp==1.29.0
+markupsafe==3.0.3
+    # via jinja2
+mcp==1.28.1
     # via
     #   blocksize-mcp-x402
     #   fastmcp
@@ -243,17 +267,22 @@ pydantic==2.13.3
     #   eth-account
     #   eth-utils
     #   fastapi
+    #   fastapi-cloud-cli
     #   fastmcp
     #   mcp
     #   openapi-pydantic
+    #   pydantic-extra-types
     #   pydantic-settings
     #   web3
     #   x402
 pydantic-core==2.46.3
     # via pydantic
+pydantic-extra-types==2.11.1
+    # via fastapi
 pydantic-settings==2.14.2
     # via
     #   blocksize-mcp-x402
+    #   fastapi
     #   mcp
 pygments==2.20.0
     # via rich
@@ -272,9 +301,10 @@ python-dotenv==1.2.2
     #   fastmcp
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.32
+python-multipart==0.0.31
     # via
     #   blocksize-mcp-x402
+    #   fastapi
     #   mcp
 pyunormalize==17.0.0
     # via web3
@@ -303,8 +333,16 @@ rich==15.0.0
     #   cyclopts
     #   fastmcp
     #   rich-rst
+    #   rich-toolkit
+    #   typer
 rich-rst==1.3.2
     # via cyclopts
+rich-toolkit==0.19.7
+    # via
+    #   fastapi-cli
+    #   fastapi-cloud-cli
+rignore==0.7.6
+    # via fastapi-cloud-cli
 rlp==4.1.0
     # via
     #   eth-account
@@ -315,6 +353,10 @@ rpds-py==0.30.0
     #   referencing
 secretstorage==3.5.0 ; sys_platform == 'linux'
     # via keyring
+sentry-sdk==2.58.0
+    # via fastapi-cloud-cli
+shellingham==1.5.4
+    # via typer
 six==1.17.0
     # via python-dateutil
 solana==0.36.12
@@ -331,10 +373,15 @@ starlette==1.3.1
     #   fastapi
     #   mcp
     #   sse-starlette
+    #   x402
 toolz==1.1.0 ; implementation_name == 'cpython' or implementation_name == 'pypy'
     # via
     #   cytoolz
     #   eth-utils
+typer==0.24.1
+    # via
+    #   fastapi-cli
+    #   fastapi-cloud-cli
 types-requests==2.33.0.20260712
     # via web3
 typing-extensions==4.15.0
@@ -351,7 +398,9 @@ typing-extensions==4.15.0
     #   py-key-value-aio
     #   pydantic
     #   pydantic-core
+    #   pydantic-extra-types
     #   referencing
+    #   rich-toolkit
     #   solana
     #   solders
     #   starlette
@@ -371,10 +420,14 @@ urllib3==2.7.0
     #   blocksize-mcp-x402
     #   cdp-sdk
     #   requests
+    #   sentry-sdk
     #   types-requests
 uvicorn==0.45.0
     # via
     #   blocksize-mcp-x402
+    #   fastapi
+    #   fastapi-cli
+    #   fastapi-cloud-cli
     #   fastmcp
     #   mcp
 uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'

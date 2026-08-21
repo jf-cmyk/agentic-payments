@@ -36,7 +36,7 @@ jobs:
       - name: Test
         run: uv run pytest -q
       - name: Verify release contracts
-        run: uv run python scripts/check_release_contracts.py --expected-version 0.6.5 --require-clean
+        run: uv run python scripts/check_release_contracts.py --expected-version 0.6.6 --require-clean
       - name: Build release wheel
         run: uv run python -m build --wheel
       - name: Rebuild release wheel deterministically
