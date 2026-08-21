@@ -33,10 +33,12 @@ import asyncio
 import os
 import base64
 import binascii
+import ipaddress
 import json
 import logging
 import re
 import secrets
+import threading
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, suppress
@@ -67,6 +69,15 @@ from src.blocksize_client import (
 )
 from src.blocksize_stream_cache import BlocksizeStreamCache
 from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
+from src.coinbase_x402 import (
+    CachedResponse as X402CachedResponse,
+    CoinbaseX402Config,
+    CoinbaseX402Error,
+    CoinbaseX402Gateway,
+    DecisionKind as X402DecisionKind,
+    PaymentMode as X402PaymentMode,
+    SettlementReceipt as X402SettlementReceipt,
+)
 from src.config import TOP_250_CRYPTO, settings
 from src.credit_manager import (
     CREDIT_COSTS,
@@ -315,6 +326,29 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
         await asyncio.sleep(interval)
 
 
+async def _run_x402_supported_refresh_loop(app: FastAPI) -> None:
+    """Keep authenticated Coinbase facilitator capabilities fresh."""
+
+    interval = max(
+        15,
+        settings.x402.facilitator_refresh_interval_seconds,
+    )
+    while True:
+        await asyncio.sleep(interval)
+        gateway = getattr(app.state, "coinbase_x402", None)
+        if gateway is None:
+            return
+        try:
+            await gateway.refresh_supported()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Coinbase x402 supported refresh failed (%s)",
+                type(exc).__name__,
+            )
+
+
 def _marketplace_metrics_feed_overrides() -> dict[str, str]:
     raw = os.getenv("MARKETPLACE_METRICS_FEEDS_JSON", "").strip()
     if not raw:
@@ -468,6 +502,21 @@ async def lifespan(app: FastAPI):
             depth=int(os.environ.get("KRAKEN_SPOT_WS_DEPTH", "100")),
         )
     app.state.credits = CreditManager()
+    app.state.coinbase_x402 = None
+    app.state.coinbase_x402_init_error = None
+    app.state.coinbase_x402_refresh_task = None
+    try:
+        x402_config = CoinbaseX402Config.from_env()
+        app.state.coinbase_x402 = CoinbaseX402Gateway(x402_config)
+    except CoinbaseX402Error as exc:
+        app.state.coinbase_x402_init_error = exc.code
+        logger.warning("Coinbase x402 gateway unavailable (%s)", exc.code)
+    except Exception as exc:
+        app.state.coinbase_x402_init_error = "payment_gateway_initialization_failed"
+        logger.error(
+            "Coinbase x402 gateway initialization failed (%s)",
+            type(exc).__name__,
+        )
     app.state.rwa_store = RWAObservationStore(
         os.environ.get("RWA_OBSERVATION_DB_PATH", settings.server.observability_db_path)
     )
@@ -475,6 +524,11 @@ async def lifespan(app: FastAPI):
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
+    if app.state.coinbase_x402 is not None:
+        await app.state.coinbase_x402.refresh_supported()
+        app.state.coinbase_x402_refresh_task = asyncio.create_task(
+            _run_x402_supported_refresh_loop(app)
+        )
     await app.state.stream_cache.start()
     if app.state.kraken_book_stream is not None:
         await app.state.kraken_book_stream.start()
@@ -489,6 +543,10 @@ async def lifespan(app: FastAPI):
                     async with OPENAI_MCP_HTTP_APP.lifespan(OPENAI_MCP_HTTP_APP):
                         yield
     finally:
+        if app.state.coinbase_x402_refresh_task is not None:
+            app.state.coinbase_x402_refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.coinbase_x402_refresh_task
         if app.state.rwa_growth_pilot_task is not None:
             app.state.rwa_growth_pilot_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -499,6 +557,8 @@ async def lifespan(app: FastAPI):
         await app.state.kraken_spot_stream.stop()
     await app.state.stream_cache.stop()
     await app.state.blocksize.close()
+    if app.state.coinbase_x402 is not None:
+        await app.state.coinbase_x402.aclose()
     logger.info("Blocksize MCP Resource Server shut down")
 
 
@@ -858,6 +918,7 @@ def _anthropic_only_allowed_path(path: str) -> bool:
     clean_path = path.rstrip("/") or "/"
     allowed_exact_paths = {
         "/health",
+        "/readyz",
         "/privacy",
         "/prompt-examples",
         "/quickstart/first-price",
@@ -1599,12 +1660,14 @@ def _x402_v2_accepts(
     payment_requirements: list[dict],
     resource_url: str | None = None,
 ) -> list[dict[str, Any]]:
+    # resource_url remains an accepted argument for compatibility with callers,
+    # but v2 binds the URL in PaymentRequired.resource and PaymentPayload.resource;
+    # it is not a PaymentRequirements field.
+    _ = resource_url
     accepts: list[dict[str, Any]] = []
     for requirement in payment_requirements:
         extra = requirement.get("extra")
         accept_extra = dict(extra) if isinstance(extra, dict) else {}
-        if resource_url:
-            accept_extra["resource"] = resource_url
         fallback_asset = (
             settings.x402.solana_usdc_address
             if _network_kind(str(requirement.get("network", ""))) == "solana"
@@ -1623,8 +1686,6 @@ def _x402_v2_accepts(
             "maxTimeoutSeconds": int(requirement.get("maxTimeoutSeconds") or 60),
             "extra": accept_extra,
         }
-        if resource_url:
-            accept["resource"] = resource_url
         accepts.append(accept)
     return accepts
 
@@ -1658,6 +1719,170 @@ def _x402_payment_required(
 
 def _encode_payment_required(payment_required: dict[str, Any]) -> str:
     return base64.b64encode(json.dumps(payment_required).encode()).decode()
+
+
+def _payment_requirements_for_request(
+    request: Request,
+    price: Decimal,
+) -> list[dict[str, Any]]:
+    raw = _x402_v2_accepts(settings.payment_requirements(price))
+    gateway = getattr(request.app.state, "coinbase_x402", None)
+    if gateway is None:
+        return []
+    try:
+        return list(gateway.prepare_requirements(raw))
+    except CoinbaseX402Error:
+        # Never advertise a partial or stale challenge. Readiness and the live
+        # 402 contract must agree on exactly Solana + Base.
+        return []
+
+
+def _challenge_metadata_complete(requirements: list[dict[str, Any]]) -> bool:
+    by_network = {
+        str(requirement.get("network")): requirement
+        for requirement in requirements
+        if isinstance(requirement, dict)
+    }
+    if set(by_network) != {
+        settings.x402.solana_network,
+        settings.x402.base_network,
+    }:
+        return False
+    for requirement in by_network.values():
+        if not all(
+            requirement.get(field)
+            for field in ("scheme", "network", "asset", "amount", "payTo")
+        ):
+            return False
+    solana_extra = by_network[settings.x402.solana_network].get("extra")
+    base_extra = by_network[settings.x402.base_network].get("extra")
+    return bool(
+        isinstance(solana_extra, dict)
+        and solana_extra.get("feePayer")
+        and isinstance(base_extra, dict)
+        and base_extra.get("name") == settings.x402.base_usdc_name
+        and str(base_extra.get("version")) == settings.x402.base_usdc_version
+    )
+
+
+def _x402_route_id(request: Request) -> str:
+    if request.method.upper() == "GET" and request.url.path.startswith("/v1/vwap/"):
+        return "v1_vwap"
+    return "not_allowlisted"
+
+
+def _x402_error_response(
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    retry_after: int | None = None,
+) -> JSONResponse:
+    headers = {"Cache-Control": "no-store"}
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return _apply_x402_cors_headers(
+        request,
+        JSONResponse(
+            status_code=status_code,
+            headers=headers,
+            content={"error": "Payment Unavailable", "code": code, "message": message},
+        ),
+    )
+
+
+def _settlement_header(receipt: X402SettlementReceipt) -> str:
+    payload = {
+        "success": True,
+        "transaction": receipt.transaction,
+        "network": receipt.network,
+    }
+    if receipt.payer is not None:
+        payload["payer"] = receipt.payer
+    if receipt.amount is not None:
+        payload["amount"] = receipt.amount
+    return base64.b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+
+
+async def _materialize_paid_response(
+    response: Response,
+) -> tuple[X402CachedResponse | None, Response | None]:
+    """Bound a successful read-only response before settlement and replay."""
+
+    maximum = settings.x402.payment_max_cached_response_bytes
+    body_value = getattr(response, "body", None)
+    if isinstance(body_value, bytes):
+        body = body_value
+    else:
+        chunks: list[bytes] = []
+        total = 0
+        iterator = getattr(response, "body_iterator", None)
+        if iterator is None:
+            return None, None
+        async for chunk in iterator:
+            encoded = chunk.encode("utf-8") if isinstance(chunk, str) else bytes(chunk)
+            total += len(encoded)
+            if total <= maximum:
+                chunks.append(encoded)
+        if total > maximum:
+            return None, None
+        body = b"".join(chunks)
+    if len(body) > maximum:
+        return None, None
+
+    cacheable_header_names = {
+        "content-encoding",
+        "content-language",
+        "content-length",
+        "content-type",
+        "etag",
+        "last-modified",
+    }
+    headers = {
+        name: value
+        for name, value in response.headers.items()
+        if name.lower() in cacheable_header_names
+    }
+    cached = X402CachedResponse(
+        status_code=response.status_code,
+        headers=headers,
+        body=body,
+    )
+    rebuilt = Response(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        background=getattr(response, "background", None),
+    )
+    return cached, rebuilt
+
+
+async def _signed_get_has_empty_body(request: Request) -> bool:
+    """Validate body framing without reading attacker-controlled input."""
+
+    if request.headers.get("transfer-encoding") is not None:
+        return False
+    content_length = request.headers.get("content-length")
+    return content_length is None or content_length == "0"
+
+
+def _response_from_cached_payment(
+    cached: X402CachedResponse,
+    receipt: X402SettlementReceipt,
+) -> Response:
+    response = Response(
+        content=cached.body,
+        status_code=cached.status_code,
+        headers=dict(cached.headers),
+    )
+    settlement = _settlement_header(receipt)
+    response.headers["PAYMENT-RESPONSE"] = settlement
+    response.headers["X-PAYMENT-RESPONSE"] = settlement
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
@@ -1787,6 +2012,72 @@ class InMemoryRateLimiter:
 
 
 _DISCOVERY_RATE_LIMITER = InMemoryRateLimiter()
+
+
+class InFlightGate:
+    """Small process-local nonblocking concurrency gate."""
+
+    def __init__(self, maximum: int) -> None:
+        self._maximum = maximum
+        self._active = 0
+        self._lock = threading.Lock()
+
+    def try_acquire(self) -> bool:
+        with self._lock:
+            if self._active >= self._maximum:
+                return False
+            self._active += 1
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            if self._active > 0:
+                self._active -= 1
+
+    @property
+    def active(self) -> int:
+        with self._lock:
+            return self._active
+
+
+_X402_PAYMENT_RATE_LIMITER = InMemoryRateLimiter()
+_X402_FACILITATOR_GATE = InFlightGate(settings.x402.facilitator_max_inflight)
+
+
+def _x402_payment_client_key(request: Request) -> str:
+    """Return a non-spoofable Railway-aware payment limiter key."""
+
+    real_ip_values = request.headers.getlist("x-real-ip")
+    if len(real_ip_values) == 1:
+        candidate = real_ip_values[0].strip()
+        if candidate and "," not in candidate:
+            try:
+                return f"railway:{ipaddress.ip_address(candidate).compressed}"
+            except ValueError:
+                pass
+
+    peer = request.client.host if request.client else "unknown"
+    try:
+        return f"peer:{ipaddress.ip_address(peer).compressed}"
+    except ValueError:
+        return f"peer-hash:{fingerprint(peer)}"
+
+
+def _x402_payment_rate_limit_response(request: Request) -> JSONResponse | None:
+    allowed, retry_after, _ = _X402_PAYMENT_RATE_LIMITER.check(
+        f"signed-payment:{_x402_payment_client_key(request)}",
+        per_minute=settings.x402.payment_rate_limit_per_minute,
+        per_day=settings.x402.payment_rate_limit_per_day,
+    )
+    if allowed:
+        return None
+    return _x402_error_response(
+        request,
+        status_code=429,
+        code="x402_rate_limited",
+        message="Too many signed payment submissions.",
+        retry_after=retry_after or 60,
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -2893,7 +3184,7 @@ async def _verify_payment(
             
         if "solana" in network:
             rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
-            logger.info(f"Verifying Solana payment via RPC: {rpc_url.split('?')[0]}")
+            logger.info("Verifying legacy Solana payment via configured RPC")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.post(
                     rpc_url,
@@ -2971,8 +3262,11 @@ async def _verify_payment(
     except ValueError as e:
         return {"valid": False, "reason": str(e)}
     except Exception as e:
-        logger.error("Native RPC verification failed: %s", e)
-        return {"valid": False, "reason": f"Native RPC failure: {str(e)}"}
+        logger.error(
+            "Legacy native RPC verification failed (%s)",
+            type(e).__name__,
+        )
+        return {"valid": False, "reason": "Native RPC verification unavailable"}
 
 async def _settle_payment(payment_payload: str, payment_requirements: list[dict]) -> dict:
     """Payment has inherently settled on chain during Native RPC Verification."""
@@ -2999,6 +3293,13 @@ async def x402_payment_middleware(request: Request, call_next):
         return discovery_limit
 
     path = request.url.path
+    if path == "/v1/credits/claim":
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_route_not_enabled",
+            message="Bulk payment claims are disabled during the Coinbase rollout.",
+        )
     try:
         price = _get_price_for_request(request)
     except ValueError as e:
@@ -3014,25 +3315,35 @@ async def x402_payment_middleware(request: Request, call_next):
     if price is None:
         return await call_next(request)
 
-    try:
-        credit_subject = _starter_credit_subject(request)
-    except ValueError as e:
-        _record_product_event(
-            "credit_drawdown_failed",
-            request,
-            price_usdc=price,
-            reason="invalid_starter_identity_header",
-        )
-        return _apply_x402_cors_headers(
-            request,
-            JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Bad Request",
-                    "message": str(e),
-                },
-            ),
-        )
+    # Signed x402 traffic always takes precedence over starter credits. This is
+    # essential in shadow mode: adding an identity header must never bypass the
+    # signed-submission lock and execute a paid route.
+    payment_header = (
+        request.headers.get("PAYMENT-SIGNATURE")
+        or request.headers.get("X-PAYMENT")
+    )
+
+    credit_subject = None
+    if not payment_header:
+        try:
+            credit_subject = _starter_credit_subject(request)
+        except ValueError as e:
+            _record_product_event(
+                "credit_drawdown_failed",
+                request,
+                price_usdc=price,
+                reason="invalid_starter_identity_header",
+            )
+            return _apply_x402_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "Bad Request",
+                        "message": str(e),
+                    },
+                ),
+            )
 
     if credit_subject is not None:
         subject, subject_type, require_wallet_history = credit_subject
@@ -3135,17 +3446,20 @@ async def x402_payment_middleware(request: Request, call_next):
             )
             # Proceed to normal 402 challenge below
 
-    # Build multi-network payment requirements
-    payment_reqs = settings.payment_requirements(price)
+    # Build exact v2 requirements from fresh authenticated facilitator support.
+    payment_reqs = _payment_requirements_for_request(request, price)
 
-    # Check for x402 payment proof. X-PAYMENT is the standard retry header;
-    # PAYMENT-SIGNATURE is retained for existing Blocksize demo clients.
-    payment_header = (
-        request.headers.get("X-PAYMENT")
-        or request.headers.get("PAYMENT-SIGNATURE")
-    )
+    # PAYMENT-SIGNATURE is x402 v2; X-PAYMENT remains an input alias but the
+    # payload itself must validate as strict v2.
 
     if not payment_header:
+        if not _challenge_metadata_complete(payment_reqs):
+            return _x402_error_response(
+                request,
+                status_code=503,
+                code="x402_challenge_unavailable",
+                message="Payment requirements are temporarily unavailable.",
+            )
         payment_required = _x402_payment_required(request, payment_reqs)
         requirements_b64 = _encode_payment_required(payment_required)
         _record_product_event(
@@ -3170,7 +3484,7 @@ async def x402_payment_middleware(request: Request, call_next):
                     "error": "Payment Required",
                     "message": (
                         f"This endpoint requires a payment of ${price} USDC. "
-                        f"Send a signed x402 payment in the X-PAYMENT header. "
+                        f"Send a signed x402 v2 payment in the PAYMENT-SIGNATURE header. "
                         f"Accepted networks: Solana (preferred), Base L2."
                     ),
                     "price_usdc": str(price),
@@ -3200,88 +3514,253 @@ async def x402_payment_middleware(request: Request, call_next):
             ),
         )
 
-    # Verify the payment
+    # Every signed submission is controlled by the Coinbase-only gateway. In
+    # shadow mode begin() returns before parsing, ledger access, or facilitator
+    # calls. If gateway initialization failed, all signed traffic fails closed.
     _record_product_event(
         "payment_proof_submitted",
         request,
         price_usdc=price,
         metadata={"proof_hash": fingerprint(payment_header)},
     )
-    try:
-        verification = await _verify_payment(
-            payment_header,
-            payment_reqs,
-            request.app.state.credits,
-            purpose=f"{request.method} {path}",
+    gateway = getattr(request.app.state, "coinbase_x402", None)
+    if gateway is None:
+        configured_mode = settings.x402.payment_mode.strip().lower()
+        code = (
+            "x402_shadow_locked"
+            if configured_mode == X402PaymentMode.SHADOW.value
+            else "x402_gateway_unavailable"
         )
-        if not verification.get("valid", False):
-            _record_product_event(
-                "payment_failed",
-                request,
-                price_usdc=price,
-                reason=str(verification.get("reason", "unknown")),
-            )
-            return _apply_x402_cors_headers(
-                request,
-                JSONResponse(
-                    status_code=402,
-                    content={
-                        "error": "Payment Invalid",
-                        "message": "Payment verification failed.",
-                        "details": verification.get("reason", "Unknown"),
-                    },
-                ),
-            )
-    except httpx.HTTPError as e:
-        logger.error("Facilitator verification failed: %s", e)
         _record_product_event(
             "payment_failed",
             request,
             price_usdc=price,
-            reason="verification_unavailable",
+            reason=code,
         )
-        return _apply_x402_cors_headers(
+        return _x402_error_response(
             request,
-            JSONResponse(
-                status_code=502,
-                content={
-                    "error": "Payment Verification Unavailable",
-                    "message": "Could not reach payment facilitator.",
-                },
+            status_code=503,
+            code=code,
+            message="Signed x402 payments are temporarily locked.",
+        )
+
+    if (
+        gateway.mode is X402PaymentMode.ENFORCE
+        and not _challenge_metadata_complete(payment_reqs)
+    ):
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_challenge_unavailable",
+            message="Payment requirements are temporarily unavailable.",
+        )
+
+    route_id = _x402_route_id(request)
+    if (
+        gateway.mode is X402PaymentMode.ENFORCE
+        and route_id == "v1_vwap"
+        and not await _signed_get_has_empty_body(request)
+    ):
+        return _x402_error_response(
+            request,
+            status_code=400,
+            code="x402_request_body_not_allowed",
+            message="The signed VWAP GET request must not include a body.",
+        )
+
+    if gateway.mode is X402PaymentMode.ENFORCE:
+        rate_limited = _x402_payment_rate_limit_response(request)
+        if rate_limited is not None:
+            return rate_limited
+        if not _X402_FACILITATOR_GATE.try_acquire():
+            return _x402_error_response(
+                request,
+                status_code=429,
+                code="x402_facilitator_busy",
+                message="Payment verification capacity is temporarily full.",
+                retry_after=1,
+            )
+        try:
+            decision = await gateway.begin(
+                payment_header,
+                method=request.method,
+                resource_url=_public_request_url(request),
+                body=b"",
+                requirements=payment_reqs,
+                route_id=route_id,
+            )
+        finally:
+            _X402_FACILITATOR_GATE.release()
+    else:
+        decision = await gateway.begin(
+            payment_header,
+            method=request.method,
+            resource_url=_public_request_url(request),
+            body=b"",
+            requirements=payment_reqs,
+            route_id=route_id,
+        )
+
+    if decision.kind is X402DecisionKind.SHADOW_BLOCKED:
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_shadow_locked",
+            message="Signed x402 payments are locked while shadow checks run.",
+        )
+
+    if decision.kind is X402DecisionKind.REPLAY:
+        if decision.response is None or decision.receipt is None:
+            return _x402_error_response(
+                request,
+                status_code=503,
+                code="x402_reconciliation_required",
+                message="Payment state requires operator reconciliation.",
+            )
+        response = _response_from_cached_payment(decision.response, decision.receipt)
+        _record_charged_delivery_outcome(
+            request,
+            response,
+            price_usdc=price,
+            payment_mode="x402_replay",
+            network=decision.receipt.network,
+        )
+        return _apply_x402_cors_headers(request, response)
+
+    if decision.kind is X402DecisionKind.BUSY:
+        return _x402_error_response(
+            request,
+            status_code=409,
+            code="x402_payment_in_progress",
+            message="This payment is already being processed.",
+            retry_after=2,
+        )
+
+    if decision.kind in {
+        X402DecisionKind.SETTLEMENT_UNKNOWN,
+        X402DecisionKind.SETTLED_UNFINALIZED,
+    }:
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_reconciliation_required",
+            message="Payment state requires operator reconciliation.",
+        )
+
+    if decision.kind is X402DecisionKind.REJECTED:
+        unavailable_codes = {
+            "facilitator_not_ready",
+            "facilitator_verify_unavailable",
+            "payment_ledger_capacity",
+            "payment_ledger_unavailable",
+            "payment_route_not_allowed",
+        }
+        unavailable = decision.code in unavailable_codes
+        public_code = (
+            "x402_route_not_enabled"
+            if decision.code == "payment_route_not_allowed"
+            else "x402_gateway_unavailable"
+            if unavailable
+            else "x402_payment_invalid"
+        )
+        _record_product_event(
+            "payment_failed",
+            request,
+            price_usdc=price,
+            reason=decision.code,
+        )
+        return _x402_error_response(
+            request,
+            status_code=503 if unavailable else 402,
+            code=public_code,
+            message=(
+                "This paid route is not enabled for settlement."
+                if decision.code == "payment_route_not_allowed"
+                else "Payment verification is temporarily unavailable."
+                if unavailable
+                else "The signed payment was rejected."
             ),
         )
 
-    # Payment verified — serve the request
-    network = str(verification.get("network") or "")
+    if decision.kind is not X402DecisionKind.PROCEED or decision.ticket is None:
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_gateway_unavailable",
+            message="Payment processing is temporarily unavailable.",
+        )
+
     _record_product_event(
         "payment_verified",
         request,
         price_usdc=price,
-        network=network,
-        metadata={"mock": bool(verification.get("mock"))},
     )
     response = await call_next(request)
-    _record_charged_delivery_outcome(
-        request,
-        response,
-        price_usdc=price,
-        payment_mode="x402",
-        network=network,
-        metadata={"mock": bool(verification.get("mock"))},
-    )
+    if not 200 <= response.status_code <= 299:
+        gateway.release(decision.ticket, reason="paid_handler_not_successful")
+        _record_charged_delivery_outcome(
+            request,
+            response,
+            price_usdc=price,
+            payment_mode="x402_unsettled",
+        )
+        return response
 
-    # Settle payment (best-effort)
+    cached, rebuilt = await _materialize_paid_response(response)
+    if cached is None or rebuilt is None:
+        gateway.release(decision.ticket, reason="paid_response_not_cacheable")
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_response_not_cacheable",
+            message="The paid response could not be safely finalized.",
+        )
+
+    if not _X402_FACILITATOR_GATE.try_acquire():
+        gateway.release(decision.ticket, reason="facilitator_capacity_full")
+        return _x402_error_response(
+            request,
+            status_code=429,
+            code="x402_facilitator_busy",
+            message="Payment settlement capacity is temporarily full.",
+            retry_after=1,
+        )
     try:
-        settlement = await _settle_payment(payment_header, payment_reqs)
-        if settlement.get("success"):
-            settlement_b64 = base64.b64encode(json.dumps(settlement).encode()).decode()
-            response.headers["PAYMENT-RESPONSE"] = settlement_b64
-            response.headers["X-PAYMENT-RESPONSE"] = settlement_b64
-            logger.info("Payment settled: %s USDC for %s", price, path)
-    except httpx.HTTPError as e:
-        logger.error("Payment settlement failed: %s", e)
+        finalized = await gateway.settle_and_finalize(decision.ticket, cached)
+    finally:
+        _X402_FACILITATOR_GATE.release()
+    if (
+        finalized.kind is X402DecisionKind.FINALIZED
+        and finalized.response is not None
+        and finalized.receipt is not None
+    ):
+        paid_response = _response_from_cached_payment(
+            finalized.response,
+            finalized.receipt,
+        )
+        _record_charged_delivery_outcome(
+            request,
+            paid_response,
+            price_usdc=price,
+            payment_mode="x402",
+            network=finalized.receipt.network,
+        )
+        return _apply_x402_cors_headers(request, paid_response)
 
-    return response
+    return _x402_error_response(
+        request,
+        status_code=503,
+        code=(
+            "x402_reconciliation_required"
+            if finalized.kind
+            in {
+                X402DecisionKind.SETTLEMENT_UNKNOWN,
+                X402DecisionKind.SETTLED_UNFINALIZED,
+            }
+            else "x402_gateway_unavailable"
+        ),
+        message="Payment state requires operator reconciliation.",
+    )
 
 
 @app.middleware("http")
@@ -5879,7 +6358,14 @@ async def purchase_credits_challenge(
     price = Decimal(str(tier_data["price"]))
 
     # Return 402 challenge
-    requirements = settings.payment_requirements(price)
+    requirements = _payment_requirements_for_request(request, price)
+    if not _challenge_metadata_complete(requirements):
+        return _x402_error_response(
+            request,
+            status_code=503,
+            code="x402_challenge_unavailable",
+            message="Payment requirements are temporarily unavailable.",
+        )
     payment_required = _x402_payment_required(request, requirements)
     payload = _encode_payment_required(payment_required)
     _record_product_event(
@@ -8452,6 +8938,146 @@ async def observability_legacy_dashboard(request: Request) -> Any:
     )
 
 
+def _release_identity() -> dict[str, Any]:
+    deployment_id = os.environ.get("RAILWAY_DEPLOYMENT_ID", "").strip()
+    commit_sha = os.environ.get("RELEASE_GIT_COMMIT", "").strip().lower()
+    image_digest = os.environ.get("RELEASE_IMAGE_DIGEST", "").strip().lower()
+    return {
+        "deployment_id": deployment_id,
+        "commit_sha": commit_sha,
+        "image_digest": image_digest,
+        "ready": bool(
+            re.fullmatch(r"[0-9a-f]{40}", commit_sha)
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest)
+            and re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                deployment_id.lower(),
+            )
+        ),
+    }
+
+
+def _x402_runtime_readiness(app: FastAPI) -> dict[str, Any]:
+    gateway = getattr(app.state, "coinbase_x402", None)
+    configured_mode = settings.x402.payment_mode.strip().lower()
+    if gateway is None:
+        return {
+            "ready": False,
+            "mode": configured_mode,
+            "configuration_valid": False,
+            "facilitator_ready": False,
+            "supported_age_seconds": None,
+            "supported_networks": [],
+            "challenge_metadata_complete": False,
+            "unresolved_ledger_entries": 0,
+            "ledger_durable_path": False,
+            "verify_calls": 0,
+            "settle_calls": 0,
+            "shadow_locked": configured_mode == X402PaymentMode.SHADOW.value,
+            "payment_rate_limit_per_minute": settings.x402.payment_rate_limit_per_minute,
+            "payment_rate_limit_per_day": settings.x402.payment_rate_limit_per_day,
+            "facilitator_max_inflight": settings.x402.facilitator_max_inflight,
+            "facilitator_inflight": _X402_FACILITATOR_GATE.active,
+            "blockers": [
+                getattr(
+                    app.state,
+                    "coinbase_x402_init_error",
+                    "payment_gateway_not_initialized",
+                )
+                or "payment_gateway_not_initialized"
+            ],
+        }
+
+    snapshot = gateway.readiness_snapshot()
+    facilitator = snapshot.get("facilitator", {})
+    ledger = snapshot.get("ledger", {})
+    counters = snapshot.get("counters", {})
+    kinds = facilitator.get("kinds", []) if isinstance(facilitator, dict) else []
+    supported_networks = sorted(
+        {
+            str(kind.get("network"))
+            for kind in kinds
+            if isinstance(kind, dict) and kind.get("network")
+        }
+    )
+    raw_requirements = _x402_v2_accepts(
+        settings.payment_requirements(settings.pricing.core_crypto)
+    )
+    try:
+        prepared = list(gateway.prepare_requirements(raw_requirements))
+    except CoinbaseX402Error:
+        prepared = []
+    challenge_complete = _challenge_metadata_complete(prepared)
+    facilitator_ready = bool(
+        isinstance(facilitator, dict)
+        and facilitator.get("available")
+        and facilitator.get("fresh")
+        and facilitator.get("solana_fee_payer_ready")
+        and set(supported_networks)
+        == {settings.x402.solana_network, settings.x402.base_network}
+    )
+    blockers = list(snapshot.get("blockers", []))
+    ledger_durable_path = bool(ledger.get("durable_path"))
+    if not ledger_durable_path:
+        blockers.append("payment_ledger_not_durable")
+    if not challenge_complete:
+        blockers.append("payment_challenge_metadata_incomplete")
+    if not settings.x402.solana_wallet_address or not settings.x402.evm_wallet_address:
+        blockers.append("payment_recipient_not_configured")
+    return {
+        "ready": bool(
+            snapshot.get("ready")
+            and facilitator_ready
+            and challenge_complete
+            and ledger_durable_path
+            and settings.x402.solana_wallet_address
+            and settings.x402.evm_wallet_address
+        ),
+        "mode": snapshot.get("mode"),
+        "configuration_valid": True,
+        "facilitator_ready": facilitator_ready,
+        "supported_age_seconds": facilitator.get("age_seconds"),
+        "supported_networks": supported_networks,
+        "challenge_metadata_complete": challenge_complete,
+        "unresolved_ledger_entries": int(ledger.get("unresolved") or 0),
+        "ledger_durable_path": ledger_durable_path,
+        "verify_calls": int(counters.get("verify_calls_total") or 0),
+        "settle_calls": int(counters.get("settle_calls_total") or 0),
+        "shadow_locked": bool(snapshot.get("payment_locked")),
+        "payment_rate_limit_per_minute": settings.x402.payment_rate_limit_per_minute,
+        "payment_rate_limit_per_day": settings.x402.payment_rate_limit_per_day,
+        "facilitator_max_inflight": settings.x402.facilitator_max_inflight,
+        "facilitator_inflight": _X402_FACILITATOR_GATE.active,
+        "ledger_states": ledger.get("states", {}),
+        "allowed_get_routes": snapshot.get("allowed_get_routes", []),
+        "sdk": snapshot.get("sdk", {}),
+        "blockers": sorted(set(blockers)),
+    }
+
+
+@app.get("/readyz")
+async def readiness_check(request: Request) -> JSONResponse:
+    """Strict release and Coinbase payment readiness; free and non-secret."""
+
+    identity = _release_identity()
+    payment = _x402_runtime_readiness(request.app)
+    ready = bool(identity["ready"] and payment["ready"])
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        headers={"Cache-Control": "no-store"},
+        content={
+            "ready": ready,
+            "deployment_id": identity["deployment_id"],
+            "commit_sha": identity["commit_sha"],
+            "image_digest": identity["image_digest"],
+            "checks": {
+                "release_identity": {"ready": identity["ready"]},
+                "x402": payment,
+            },
+        },
+    )
+
+
 @app.get("/health")
 async def health_check() -> dict[str, Any]:
     """Health check — free."""
@@ -8485,11 +9111,23 @@ async def health_check() -> dict[str, Any]:
             "tool_costs": ANTHROPIC_TOOL_COSTS,
         }
 
+    identity = _release_identity()
+    payment = _x402_runtime_readiness(app)
     return {
         "status": "healthy",
         "service": "blocksize-mcp-x402",
         "version": APP_VERSION,
         "engine": "Shielded x402 Gateway (Iron Dome Active)",
+        "release": {
+            "deployment_id": identity["deployment_id"],
+            "commit_sha": identity["commit_sha"],
+            "image_digest": identity["image_digest"],
+        },
+        "payment": {
+            "mode": payment["mode"],
+            "ready": payment["ready"],
+            "shadow_locked": payment["shadow_locked"],
+        },
         "networks": {
             "primary": {
                 "name": "Solana",
