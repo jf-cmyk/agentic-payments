@@ -5,7 +5,7 @@
   "description": "Read-only MCP discovery for live crypto, equities, FX, metals, state prices, VWAP windows, trader indicators, and x402 HTTP endpoints.",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",

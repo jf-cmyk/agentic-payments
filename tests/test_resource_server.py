@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 
@@ -26,6 +27,8 @@ from src.resource_server import (
     _DISCOVERY_RATE_LIMITER,
     EVM_TRANSFER_TOPIC,
     _evm_transfer_satisfies_requirement,
+    _x402_payment_client_key,
+    _signed_get_has_empty_body,
     _solana_transfer_satisfies_requirement,
     _verify_payment,
 )
@@ -40,6 +43,12 @@ from src.models import (
 )
 from src.observability import UsageEventStore, configure_global_store
 from src.config import settings
+from src.coinbase_x402 import (
+    CachedResponse as X402CachedResponse,
+    DecisionKind as X402DecisionKind,
+    PaymentMode as X402PaymentMode,
+    SettlementReceipt as X402SettlementReceipt,
+)
 from src.credit_manager import CreditManager
 from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 from src.rwa_store import RWAObservationStore
@@ -49,7 +58,182 @@ from src.rwa_store import RWAObservationStore
 def test_client():
     """Create a FastAPI test client."""
     with TestClient(app) as client:
-        yield client
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = _ShadowGatewayStub()
+        try:
+            yield client
+        finally:
+            app.state.coinbase_x402 = previous
+
+
+@pytest.fixture(autouse=True)
+def isolate_payment_submission_limits(monkeypatch):
+    limiter = resource_server.InMemoryRateLimiter()
+    gate = resource_server.InFlightGate(settings.x402.facilitator_max_inflight)
+    monkeypatch.setattr(resource_server, "_X402_PAYMENT_RATE_LIMITER", limiter)
+    monkeypatch.setattr(resource_server, "_X402_FACILITATOR_GATE", gate)
+    yield
+    limiter.clear()
+    assert gate.active == 0
+
+
+class _EnforcedGatewayStub:
+    mode = X402PaymentMode.ENFORCE
+
+    def __init__(self):
+        self.begin_calls = []
+        self.settle_calls = []
+        self.release_calls = []
+        self.facilitator_available = True
+        self.facilitator_fresh = True
+        self.challenge_complete = True
+        self.unresolved = 0
+        self.ledger_durable_path = True
+
+    def prepare_requirements(self, requirements):
+        prepared = []
+        for requirement in requirements:
+            item = dict(requirement)
+            item["extra"] = dict(item.get("extra") or {})
+            if item["network"] == settings.x402.solana_network:
+                item["extra"]["feePayer"] = "11111111111111111111111111111111"
+            prepared.append(item)
+        if not self.challenge_complete:
+            return tuple(
+                item
+                for item in prepared
+                if item["network"] == settings.x402.base_network
+            )
+        return tuple(prepared)
+
+    def readiness_snapshot(self):
+        ready = self.facilitator_available and self.facilitator_fresh and self.unresolved == 0
+        return {
+            "ready": ready,
+            "mode": self.mode.value,
+            "payment_locked": self.mode is X402PaymentMode.SHADOW,
+            "allowed_get_routes": ["v1_vwap"],
+            "sdk": {"x402": "2.8.0", "cdp_sdk": "1.47.1"},
+            "facilitator": {
+                "available": self.facilitator_available,
+                "fresh": self.facilitator_fresh,
+                "age_seconds": 1.0 if self.facilitator_fresh else 181.0,
+                "solana_fee_payer_ready": self.facilitator_available,
+                "kinds": [
+                    {
+                        "x402Version": 2,
+                        "scheme": "exact",
+                        "network": settings.x402.solana_network,
+                    },
+                    {
+                        "x402Version": 2,
+                        "scheme": "exact",
+                        "network": settings.x402.base_network,
+                    },
+                ],
+            },
+            "ledger": {
+                "unresolved": self.unresolved,
+                "durable_path": self.ledger_durable_path,
+                "states": {
+                    "pending": self.unresolved,
+                    "settled": 0,
+                    "settlement_unknown": 0,
+                    "finalized": 0,
+                    "released": 0,
+                },
+            },
+            "counters": {
+                "verify_calls_total": 0 if self.mode is X402PaymentMode.SHADOW else 1,
+                "settle_calls_total": 0 if self.mode is X402PaymentMode.SHADOW else 1,
+            },
+            "blockers": [] if ready else ["test_blocker"],
+        }
+
+    async def begin(self, signature, **kwargs):
+        self.begin_calls.append((signature, kwargs))
+        if kwargs.get("route_id") != "v1_vwap":
+            return SimpleNamespace(
+                kind=X402DecisionKind.REJECTED,
+                code="payment_route_not_allowed",
+                ticket=None,
+                response=None,
+                receipt=None,
+            )
+        return SimpleNamespace(
+            kind=X402DecisionKind.PROCEED,
+            code="payment_verified",
+            ticket=object(),
+            response=None,
+            receipt=None,
+        )
+
+    async def settle_and_finalize(self, ticket, response: X402CachedResponse):
+        self.settle_calls.append((ticket, response))
+        receipt = X402SettlementReceipt(
+            network=settings.x402.solana_network,
+            transaction="1" * 88,
+            amount="2000",
+        )
+        return SimpleNamespace(
+            kind=X402DecisionKind.FINALIZED,
+            code="payment_finalized",
+            ticket=None,
+            response=response,
+            receipt=receipt,
+        )
+
+    def release(self, ticket, *, reason="handler_not_successful"):
+        self.release_calls.append((ticket, reason))
+        return True
+
+
+class _ShadowGatewayStub(_EnforcedGatewayStub):
+    mode = X402PaymentMode.SHADOW
+
+    async def begin(self, signature, **kwargs):
+        self.begin_calls.append((signature, kwargs))
+        return SimpleNamespace(
+            kind=X402DecisionKind.SHADOW_BLOCKED,
+            code="x402_shadow_locked",
+            ticket=None,
+            response=None,
+            receipt=None,
+        )
+
+
+@pytest.fixture
+def enforced_x402_gateway(test_client):
+    previous = getattr(app.state, "coinbase_x402", None)
+    gateway = _EnforcedGatewayStub()
+    app.state.coinbase_x402 = gateway
+    try:
+        yield gateway
+    finally:
+        app.state.coinbase_x402 = previous
+
+
+def _configure_ready_release(monkeypatch):
+    monkeypatch.setenv("RAILWAY_DEPLOYMENT_ID", "11111111-2222-4333-8444-555555555555")
+    monkeypatch.setenv("RELEASE_GIT_COMMIT", "a" * 40)
+    monkeypatch.setenv("RELEASE_GIT_REPOSITORY", "jf-cmyk/agentic-payments")
+    monkeypatch.setenv("RELEASE_GIT_BRANCH", "codex/production-x402")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "a" * 40)
+    monkeypatch.setenv("RAILWAY_GIT_REPO_OWNER", "jf-cmyk")
+    monkeypatch.setenv("RAILWAY_GIT_REPO_NAME", "agentic-payments")
+    monkeypatch.setenv("RAILWAY_GIT_BRANCH", "codex/production-x402")
+    monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "sha256:" + "b" * 64)
+    monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "bound")
+    monkeypatch.setattr(
+        settings.x402,
+        "solana_wallet_address",
+        "11111111111111111111111111111111",
+    )
+    monkeypatch.setattr(
+        settings.x402,
+        "evm_wallet_address",
+        "0x1111111111111111111111111111111111111111",
+    )
 
 
 @pytest.fixture
@@ -77,6 +261,239 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert "pricing" in data
         assert "networks" in data
+
+    def test_readyz_exposes_exact_release_and_payment_contract(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+
+        response = test_client.get("/readyz")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["deployment_id"] == "11111111-2222-4333-8444-555555555555"
+        assert data["commit_sha"] == "a" * 40
+        assert data["image_digest"] == "sha256:" + "b" * 64
+        payment = data["checks"]["x402"]
+        assert payment["ready"] is True
+        assert payment["mode"] == "enforce"
+        assert payment["configuration_valid"] is True
+        assert payment["facilitator_ready"] is True
+        assert payment["supported_age_seconds"] == 1.0
+        assert payment["supported_networks"] == [
+            settings.x402.base_network,
+            settings.x402.solana_network,
+        ]
+        assert payment["challenge_metadata_complete"] is True
+        assert payment["unresolved_ledger_entries"] == 0
+        assert payment["ledger_durable_path"] is True
+        assert payment["verify_calls"] == 1
+        assert payment["settle_calls"] == 1
+        assert payment["shadow_locked"] is False
+        assert payment["payment_rate_limit_per_minute"] == 12
+        assert payment["payment_rate_limit_per_day"] == 200
+        assert payment["facilitator_max_inflight"] == 4
+        assert payment["facilitator_inflight"] == 0
+
+    def test_deployz_gates_initial_source_build_on_shadow_readiness(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "unbound")
+        monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "source_build")
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = _ShadowGatewayStub()
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["checks"]["source_release_identity"]["ready"] is True
+        assert data["checks"]["bound_release_identity"]["ready"] is False
+        assert data["gate"] == "initial_shadow"
+        assert data["checks"]["x402"]["mode"] == "shadow"
+        assert data["checks"]["x402"]["shadow_locked"] is True
+        assert "image_digest" not in data
+
+    def test_deployz_accepts_a_fully_bound_enforce_release(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+
+        response = test_client.get("/deployz")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["gate"] == "bound_release"
+        assert data["checks"]["bound_release_identity"]["ready"] is True
+        assert data["checks"]["x402"]["mode"] == "enforce"
+
+    def test_deployz_accepts_a_fully_bound_locked_shadow_release(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = _ShadowGatewayStub()
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["gate"] == "bound_release"
+        assert data["checks"]["bound_shadow_gate"]["ready"] is True
+        assert data["checks"]["bound_enforce_gate"]["ready"] is False
+
+    @pytest.mark.parametrize("blocker", ["unlocked", "verified", "settled"])
+    def test_deployz_rejects_an_inconsistent_bound_shadow_release(
+        self,
+        blocker,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        gateway = _ShadowGatewayStub()
+        snapshot = gateway.readiness_snapshot()
+        if blocker == "unlocked":
+            snapshot["payment_locked"] = False
+        elif blocker == "verified":
+            snapshot["counters"]["verify_calls_total"] = 1
+        else:
+            snapshot["counters"]["settle_calls_total"] = 1
+        gateway.readiness_snapshot = lambda: snapshot
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = gateway
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 503
+        assert data["ready"] is False
+        assert data["checks"]["bound_shadow_gate"]["ready"] is False
+
+    @pytest.mark.parametrize(
+        "blocker",
+        [
+            "missing_commit",
+            "provider_commit_mismatch",
+            "provider_repository_mismatch",
+            "provider_branch_mismatch",
+            "enforce_mode",
+            "facilitator_stale",
+            "ledger_unresolved",
+        ],
+    )
+    def test_deployz_fails_closed_for_initial_source_build_blockers(
+        self,
+        blocker,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "unbound")
+        monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "source_build")
+        gateway = _ShadowGatewayStub()
+        if blocker == "missing_commit":
+            monkeypatch.delenv("RELEASE_GIT_COMMIT")
+        elif blocker == "provider_commit_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "c" * 40)
+        elif blocker == "provider_repository_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_REPO_NAME", "wrong-repository")
+        elif blocker == "provider_branch_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_BRANCH", "wrong-branch")
+        elif blocker == "enforce_mode":
+            gateway.mode = X402PaymentMode.ENFORCE
+        elif blocker == "facilitator_stale":
+            gateway.facilitator_fresh = False
+        else:
+            gateway.unresolved = 1
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = gateway
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        assert response.status_code == 503
+        assert response.json()["ready"] is False
+
+    def test_readyz_fails_when_release_identity_is_missing(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        monkeypatch.delenv("RELEASE_IMAGE_DIGEST")
+
+        response = test_client.get("/readyz")
+
+        assert response.status_code == 503
+        assert response.json()["ready"] is False
+        assert response.json()["checks"]["release_identity"]["ready"] is False
+        assert response.json()["checks"]["x402"]["ready"] is True
+
+    @pytest.mark.parametrize(
+        "blocker",
+        [
+            "facilitator_stale",
+            "challenge_incomplete",
+            "ledger_unresolved",
+            "ledger_not_durable",
+        ],
+    )
+    def test_readyz_fails_closed_for_each_payment_blocker(
+        self,
+        blocker,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        if blocker == "facilitator_stale":
+            enforced_x402_gateway.facilitator_fresh = False
+        elif blocker == "challenge_incomplete":
+            enforced_x402_gateway.challenge_complete = False
+        elif blocker == "ledger_unresolved":
+            enforced_x402_gateway.unresolved = 1
+        else:
+            enforced_x402_gateway.ledger_durable_path = False
+
+        response = test_client.get("/readyz")
+        payment = response.json()["checks"]["x402"]
+
+        assert response.status_code == 503
+        assert response.json()["ready"] is False
+        assert payment["ready"] is False
+        if blocker == "facilitator_stale":
+            assert payment["facilitator_ready"] is False
+            assert payment["supported_age_seconds"] == 181.0
+        elif blocker == "challenge_incomplete":
+            assert payment["challenge_metadata_complete"] is False
+        elif blocker == "ledger_unresolved":
+            assert payment["unresolved_ledger_entries"] == 1
+        else:
+            assert payment["ledger_durable_path"] is False
+            assert "payment_ledger_not_durable" in payment["blockers"]
 
     def test_cache_status_is_free(self, test_client):
         response = test_client.get("/v1/cache/status")
@@ -794,6 +1211,292 @@ class TestPaymentGate:
         response = test_client.get("/v1/bidask/btc-usd")
         assert response.status_code == 402
 
+    def test_shadow_signed_submission_cannot_bypass_lock_with_starter_identity(
+        self,
+        test_client,
+        tmp_path,
+    ):
+        previous_gateway = getattr(app.state, "coinbase_x402", None)
+        previous_manager = app.state.credits
+        manager = CreditManager(str(tmp_path / "shadow_starter.db"))
+        app.state.coinbase_x402 = None
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock()
+        app.state.blocksize = mock_client
+        try:
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={
+                    "PAYMENT-SIGNATURE": "must-not-be-parsed",
+                    "X-AGENT-ID": "shadow-agent-12345678",
+                },
+            )
+        finally:
+            app.state.coinbase_x402 = previous_gateway
+            app.state.credits = previous_manager
+
+        assert response.status_code == 503
+        assert response.json()["code"] == "x402_shadow_locked"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert manager.get_balance("shadow-agent-12345678") == 0.0
+        mock_client.get_vwap_latest.assert_not_awaited()
+
+    def test_enforce_rejects_nonempty_signed_get_body_before_gateway_or_handler(
+        self,
+        test_client,
+        enforced_x402_gateway,
+    ):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock()
+        app.state.blocksize = mock_client
+
+        response = test_client.request(
+            "GET",
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "must-not-be-parsed"},
+            content=b"unexpected",
+        )
+
+        assert response.status_code == 400
+        assert response.json()["code"] == "x402_request_body_not_allowed"
+        assert enforced_x402_gateway.begin_calls == []
+        mock_client.get_vwap_latest.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_signed_chunked_get_is_rejected_without_reading_stream(self):
+        receive_called = False
+
+        async def receive():
+            nonlocal receive_called
+            receive_called = True
+            raise AssertionError("chunked body stream must not be read")
+
+        request = resource_server.Request(
+            {
+                "type": "http",
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "https",
+                "path": "/v1/vwap/btc-usd",
+                "raw_path": b"/v1/vwap/btc-usd",
+                "query_string": b"",
+                "headers": [(b"transfer-encoding", b"chunked")],
+                "client": ("127.0.0.1", 1234),
+                "server": ("mcp.blocksize.info", 443),
+            },
+            receive,
+        )
+
+        assert await _signed_get_has_empty_body(request) is False
+        assert receive_called is False
+
+    def test_chunked_rejection_does_not_consume_payment_budget(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_day", 10)
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=1.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+
+        rejected = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={
+                "PAYMENT-SIGNATURE": "must-not-be-parsed",
+                "Transfer-Encoding": "chunked",
+            },
+        )
+        accepted = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "accepted"},
+        )
+
+        assert rejected.status_code == 400
+        assert rejected.json()["code"] == "x402_request_body_not_allowed"
+        assert accepted.status_code == 200
+        assert len(enforced_x402_gateway.begin_calls) == 1
+        mock_client.get_vwap_latest.assert_awaited_once()
+
+    def test_enforce_rate_limit_rejects_before_second_gateway_call(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_day", 10)
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=1.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+
+        first = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "first"},
+        )
+        second = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "second"},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert second.json()["code"] == "x402_rate_limited"
+        assert second.headers["Cache-Control"] == "no-store"
+        assert len(enforced_x402_gateway.begin_calls) == 1
+        mock_client.get_vwap_latest.assert_awaited_once()
+
+    def test_payment_limiter_uses_strict_railway_real_ip(self):
+        def make_request(headers, client=("10.0.0.8", 1234)):
+            return resource_server.Request(
+                {
+                    "type": "http",
+                    "http_version": "1.1",
+                    "method": "GET",
+                    "scheme": "https",
+                    "path": "/v1/vwap/btc-usd",
+                    "raw_path": b"/v1/vwap/btc-usd",
+                    "query_string": b"",
+                    "headers": headers,
+                    "client": client,
+                    "server": ("mcp.blocksize.info", 443),
+                }
+            )
+
+        assert _x402_payment_client_key(
+            make_request([(b"x-real-ip", b"203.0.113.7")])
+        ) == "railway:203.0.113.7"
+        assert _x402_payment_client_key(
+            make_request([(b"x-real-ip", b"2001:0db8::1")])
+        ) == "railway:2001:db8::1"
+        assert _x402_payment_client_key(
+            make_request([(b"x-real-ip", b"invalid")])
+        ) == "peer:10.0.0.8"
+        assert _x402_payment_client_key(
+            make_request(
+                [
+                    (b"x-real-ip", b"203.0.113.7"),
+                    (b"x-real-ip", b"203.0.113.8"),
+                ]
+            )
+        ) == "peer:10.0.0.8"
+
+    def test_distinct_railway_clients_receive_distinct_payment_budgets(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_day", 10)
+        app.state.blocksize = AsyncMock(
+            get_vwap_latest=AsyncMock(
+                return_value=VWAPData(
+                    pair="btc-usd",
+                    vwap=1.0,
+                    timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                    currency="USD",
+                )
+            )
+        )
+
+        first = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "first", "X-Real-IP": "203.0.113.7"},
+        )
+        second_client = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "second", "X-Real-IP": "203.0.113.8"},
+        )
+        repeated = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "third", "X-Real-IP": "203.0.113.7"},
+        )
+
+        assert first.status_code == 200
+        assert second_client.status_code == 200
+        assert repeated.status_code == 429
+        assert len(enforced_x402_gateway.begin_calls) == 2
+
+    def test_enforce_global_overload_never_calls_gateway_or_handler(
+        self,
+        test_client,
+        enforced_x402_gateway,
+    ):
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock()
+        app.state.blocksize = mock_client
+        acquired = 0
+        try:
+            while resource_server._X402_FACILITATOR_GATE.try_acquire():
+                acquired += 1
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": "overloaded"},
+            )
+        finally:
+            for _ in range(acquired):
+                resource_server._X402_FACILITATOR_GATE.release()
+
+        assert acquired == settings.x402.facilitator_max_inflight
+        assert response.status_code == 429
+        assert response.json()["code"] == "x402_facilitator_busy"
+        assert enforced_x402_gateway.begin_calls == []
+        mock_client.get_vwap_latest.assert_not_awaited()
+
+    def test_shadow_submissions_do_not_consume_enforce_rate_budget(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.x402, "payment_rate_limit_per_day", 10)
+        for index in range(3):
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": f"shadow-{index}"},
+            )
+            assert response.status_code == 503
+            assert response.json()["code"] == "x402_shadow_locked"
+
+        enforced = _EnforcedGatewayStub()
+        app.state.coinbase_x402 = enforced
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=1.0,
+                timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": "first-enforce"},
+        )
+
+        assert response.status_code == 200
+        assert len(enforced.begin_calls) == 1
+
     def test_bidask_equity_ticker_uses_equity_price(self, test_client):
         response = test_client.get("/v1/bidask/AAPL")
         assert response.status_code == 402
@@ -910,15 +1613,26 @@ class TestPaymentGate:
         assert req_json["x402Version"] == 2
         assert req_json["resource"]["url"].startswith("https://mcp.blocksize.info/")
         assert req_json["resource"]["url"].endswith("/v1/vwap/btc-usd")
-        resource_url = req_json["resource"]["url"]
         assert isinstance(req_json["accepts"], list)
-        assert len(req_json["accepts"]) >= 1
-        assert "payTo" in req_json["accepts"][0]
-        assert "amount" in req_json["accepts"][0]
-        assert req_json["accepts"][0]["asset"] == settings.x402.solana_usdc_address
-        assert req_json["accepts"][0]["scheme"] == "exact"
-        assert req_json["accepts"][0]["resource"] == resource_url
-        assert req_json["accepts"][0]["extra"]["resource"] == resource_url
+        assert len(req_json["accepts"]) == 2
+        accepts = {item["network"]: item for item in req_json["accepts"]}
+        assert set(accepts) == {
+            settings.x402.solana_network,
+            settings.x402.base_network,
+        }
+        solana = accepts[settings.x402.solana_network]
+        base = accepts[settings.x402.base_network]
+        for requirement in (solana, base):
+            assert "payTo" in requirement
+            assert "amount" in requirement
+            assert requirement["scheme"] == "exact"
+            assert "resource" not in requirement
+        assert solana["asset"] == settings.x402.solana_usdc_address
+        assert solana["extra"] == {
+            "feePayer": "11111111111111111111111111111111",
+        }
+        assert base["asset"] == settings.x402.base_usdc_address
+        assert base["extra"] == {"name": "USD Coin", "version": "2"}
         assert "bazaar" in req_json["extensions"]
 
     def test_402_exposes_payment_challenge_to_allowed_browser_origin(self, test_client):
@@ -955,8 +1669,8 @@ class TestPaymentGate:
         assert data["starter_credits"]["allowance_credits"] == 50.0
         assert "networks" in data
         assert "accepts" in data
-        assert data["accepts"][0]["resource"] == data["resource"]["url"]
-        assert data["accepts"][0]["extra"]["resource"] == data["resource"]["url"]
+        assert "resource" not in data["accepts"][0]
+        assert data["resource"]["url"].endswith("/v1/vwap/btc-usd")
         assert "legacy_requirements" in data
 
     def test_search_is_free(self, test_client):
@@ -3109,6 +3823,7 @@ class TestObservabilityDashboard:
         self,
         observability_store,
         test_client,
+        enforced_x402_gateway,
     ):
         mock_vwap = VWAPData(
             pair="btc-usd",
@@ -3120,19 +3835,10 @@ class TestObservabilityDashboard:
         mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
         app.state.blocksize = mock_client
 
-        with patch(
-            "src.resource_server._verify_payment",
-            new_callable=AsyncMock,
-            return_value={"valid": True, "network": "solana"},
-        ), patch(
-            "src.resource_server._settle_payment",
-            new_callable=AsyncMock,
-            return_value={"success": True},
-        ):
-            response = test_client.get(
-                "/v1/vwap/btc-usd",
-                headers={"X-PAYMENT": "mock_sig"},
-            )
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"X-PAYMENT": "mock_sig"},
+        )
 
         assert response.status_code == 200
         stats = observability_store.summarize(days=1)
@@ -3247,6 +3953,7 @@ class TestObservabilityDashboard:
         observability_store,
         test_client,
         tmp_path,
+        enforced_x402_gateway,
     ):
         mock_client = AsyncMock()
         mock_client.search_pairs = AsyncMock(return_value=[])
@@ -3270,19 +3977,10 @@ class TestObservabilityDashboard:
                 for _ in range(50)
             ]
             exhausted = test_client.get("/v1/vwap/btc-usd", headers=headers)
-            with patch(
-                "src.resource_server._verify_payment",
-                new_callable=AsyncMock,
-                return_value={"valid": True, "network": "solana"},
-            ), patch(
-                "src.resource_server._settle_payment",
-                new_callable=AsyncMock,
-                return_value={"success": True},
-            ):
-                paid = test_client.get(
-                    "/v1/vwap/btc-usd",
-                    headers={**headers, "X-PAYMENT": "growth_journey_proof"},
-                )
+            paid = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={**headers, "X-PAYMENT": "growth_journey_proof"},
+            )
         finally:
             app.state.credits = previous_manager
 
@@ -3717,13 +4415,7 @@ class TestNativePaymentValidation:
 # ---------------------------------------------------------------------------
 
 class TestDataEndpoints:
-    @pytest.fixture(autouse=True)
-    def _mock_payment(self):
-        with patch("src.resource_server._verify_payment", new_callable=AsyncMock, return_value={"valid": True}), \
-             patch("src.resource_server._settle_payment", new_callable=AsyncMock, return_value={"success": True}):
-            yield
-
-    def test_vwap_endpoint(self, test_client):
+    def test_vwap_endpoint(self, test_client, enforced_x402_gateway):
         mock_vwap = VWAPData(pair="btc-usd", vwap=95432.50, timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc), currency="USD")
         mock_client = AsyncMock()
         mock_client.get_vwap_latest = AsyncMock(return_value=mock_vwap)
@@ -4299,7 +4991,11 @@ class TestDataEndpoints:
         assert data["price_usdc"] == "0.25"
         assert data["starter_credits"]["credit_cost"] == 10.0
 
-    def test_vwap_endpoint_accepts_x_payment_header(self, test_client):
+    def test_vwap_endpoint_accepts_x_payment_header(
+        self,
+        test_client,
+        enforced_x402_gateway,
+    ):
         mock_vwap = VWAPData(
             pair="btc-usd",
             vwap=95432.50,
@@ -4325,20 +5021,22 @@ class TestDataEndpoints:
         assert "PAYMENT-RESPONSE" in response.headers
         assert "X-PAYMENT-RESPONSE" in response.headers
 
-    def test_bidask_endpoint(self, test_client):
+    def test_bidask_endpoint(self, test_client, enforced_x402_gateway):
         mock_bidask = BidAskData(pair="btc-usd", bid=95400.0, ask=95450.0, spread=50.0, spread_pct=0.0524, timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc))
         mock_client = AsyncMock()
         mock_client.get_bidask_snapshot = AsyncMock(return_value=mock_bidask)
         app.state.blocksize = mock_client
 
         response = test_client.get("/v1/bidask/btc-usd", headers={"PAYMENT-SIGNATURE": "mock_sig"})
-        assert response.status_code == 200
-        data = response.json()
-        assert data["data"]["bid"] == 95400.0
-        assert data["data"]["spread"] == 50.0
-        assert data["meta"]["asset_class"] == "multi_asset"
+        assert response.status_code == 503
+        assert response.json()["code"] == "x402_route_not_enabled"
+        mock_client.get_bidask_snapshot.assert_not_awaited()
 
-    def test_bidask_equity_endpoint_marks_equity_metadata(self, test_client):
+    def test_bidask_equity_endpoint_marks_equity_metadata(
+        self,
+        test_client,
+        enforced_x402_gateway,
+    ):
         mock_bidask = BidAskData(
             pair="AAPL",
             bid=181.4,
@@ -4353,10 +5051,6 @@ class TestDataEndpoints:
 
         response = test_client.get("/v1/bidask/AAPL", headers={"PAYMENT-SIGNATURE": "mock_sig"})
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["data"]["pair"] == "AAPL"
-        assert data["meta"]["asset_class"] == "equity"
-        assert data["meta"]["equity_ticker"] == "AAPL"
-        assert data["meta"]["route_family"] == "shared_bidask"
-        mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")
+        assert response.status_code == 503
+        assert response.json()["code"] == "x402_route_not_enabled"
+        mock_client.get_bidask_snapshot.assert_not_awaited()

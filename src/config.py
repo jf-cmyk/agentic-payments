@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from decimal import Decimal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -134,10 +134,64 @@ class X402Settings(BaseSettings):
         "", alias="X402_EVM_WALLET_ADDRESS",
     )
 
-    # Facilitator
-    facilitator_url: str = Field(
-        "https://x402.org/facilitator",
-        alias="X402_FACILITATOR_URL",
+    # Coinbase production facilitator authentication. The facilitator URL is
+    # intentionally pinned in src.coinbase_x402 and is not environment-overridable.
+    cdp_api_key_id: SecretStr = Field(SecretStr(""), alias="CDP_API_KEY_ID")
+    cdp_api_key_secret: SecretStr = Field(SecretStr(""), alias="CDP_API_KEY_SECRET")
+    payment_mode: str = Field("shadow", alias="X402_PAYMENT_MODE")
+    payment_db_path: str = Field(
+        "x402_payments.sqlite3",
+        alias="X402_PAYMENT_DB_PATH",
+    )
+    facilitator_readiness_timeout_seconds: float = Field(
+        5.0,
+        alias="X402_FACILITATOR_READINESS_TIMEOUT_SECONDS",
+    )
+    facilitator_readiness_max_age_seconds: int = Field(
+        180,
+        alias="X402_FACILITATOR_READINESS_MAX_AGE_SECONDS",
+    )
+    facilitator_refresh_interval_seconds: int = Field(
+        60,
+        alias="X402_FACILITATOR_REFRESH_INTERVAL_SECONDS",
+    )
+    payment_verification_lease_seconds: int = Field(
+        120,
+        alias="X402_PAYMENT_VERIFICATION_LEASE_SECONDS",
+    )
+    payment_replay_ttl_seconds: int = Field(
+        3600,
+        alias="X402_PAYMENT_REPLAY_TTL_SECONDS",
+    )
+    payment_replay_max_entries: int = Field(
+        500,
+        alias="X402_PAYMENT_REPLAY_MAX_ENTRIES",
+    )
+    payment_max_cached_response_bytes: int = Field(
+        524288,
+        alias="X402_PAYMENT_MAX_CACHED_RESPONSE_BYTES",
+    )
+    payment_rate_limit_per_minute: int = Field(
+        12,
+        alias="X402_PAYMENT_RATE_LIMIT_PER_MINUTE",
+        ge=1,
+        le=60,
+    )
+    payment_rate_limit_per_day: int = Field(
+        200,
+        alias="X402_PAYMENT_RATE_LIMIT_PER_DAY",
+        ge=1,
+        le=5000,
+    )
+    facilitator_max_inflight: int = Field(
+        4,
+        alias="X402_FACILITATOR_MAX_INFLIGHT",
+        ge=1,
+        le=32,
+    )
+    enforce_get_routes: str = Field(
+        "v1_vwap",
+        alias="X402_ENFORCE_GET_ROUTES",
     )
 
     # Solana config (primary)
@@ -159,6 +213,8 @@ class X402Settings(BaseSettings):
         "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         alias="X402_BASE_USDC_ADDRESS",
     )
+    base_usdc_name: str = Field("USD Coin", alias="X402_BASE_USDC_NAME")
+    base_usdc_version: str = Field("2", alias="X402_BASE_USDC_VERSION")
 
     @property
     def primary_wallet(self) -> str:
@@ -243,7 +299,12 @@ class Settings:
         self.pricing = PricingSettings(**env_kwargs)  # type: ignore[arg-type]
         self.server = ServerSettings(**env_kwargs)  # type: ignore[arg-type]
 
-    def payment_requirements(self, price: Decimal) -> list[dict]:
+    def payment_requirements(
+        self,
+        price: Decimal,
+        *,
+        solana_fee_payer: str | None = None,
+    ) -> list[dict]:
         """
         Build x402 PaymentRequired objects for all supported networks.
 
@@ -260,14 +321,19 @@ class Settings:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.solana_network,
+                "amount": amount_atomic,
                 "maxAmountRequired": amount_atomic,
                 "resource": self.x402.solana_wallet_address,
                 "description": "Blocksize Capital institutional market data",
                 "mimeType": "application/json",
                 "payTo": self.x402.solana_wallet_address,
                 "maxTimeoutSeconds": 30,
-                "asset": f"{self.x402.solana_network}/{self.x402.solana_usdc_address}",
-                "extra": {},
+                "asset": self.x402.solana_usdc_address,
+                "extra": (
+                    {"feePayer": solana_fee_payer}
+                    if solana_fee_payer
+                    else {}
+                ),
             })
 
         # Base (fallback) — if wallet is configured
@@ -275,14 +341,18 @@ class Settings:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.base_network,
+                "amount": amount_atomic,
                 "maxAmountRequired": amount_atomic,
                 "resource": self.x402.evm_wallet_address,
                 "description": "Blocksize Capital institutional market data",
                 "mimeType": "application/json",
                 "payTo": self.x402.evm_wallet_address,
                 "maxTimeoutSeconds": 60,
-                "asset": f"{self.x402.base_network}/{self.x402.base_usdc_address}",
-                "extra": {},
+                "asset": self.x402.base_usdc_address,
+                "extra": {
+                    "name": self.x402.base_usdc_name,
+                    "version": self.x402.base_usdc_version,
+                },
             })
 
         return requirements
