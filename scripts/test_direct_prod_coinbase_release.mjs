@@ -15,6 +15,7 @@ import {
   executeReleaseCommand,
   parseArguments,
   readState,
+  summarizeReleaseState,
 } from "./direct_prod_coinbase_release.mjs";
 import {
   AUDIT_DOMAINS,
@@ -33,6 +34,7 @@ const AMBIGUOUS_ID = "99999999-9999-4999-8999-999999999999";
 const VOLUME_ID = "44444444-4444-4444-8444-444444444444";
 const BACKUP_ID = "55555555-5555-4555-8555-555555555555";
 const SNAPSHOT_ID = "66666666-6666-4666-8666-666666666666";
+const TRIGGER_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const NOW = Date.parse("2026-08-21T18:00:00.000Z");
 const GITHUB_RUN_ID = 123456789;
 const GITHUB_RULESET_ID = 987654;
@@ -72,8 +74,13 @@ function variablesFrom(argv) {
   return values;
 }
 
+function jsonVariablesFrom(argv) {
+  const index = argv.indexOf("--variables");
+  return index >= 0 ? JSON.parse(argv[index + 1]) : {};
+}
+
 function isSourceConnect(argv) {
-  return argv[1] === "service" && argv[2] === "source" && argv[3] === "connect";
+  return argv[1] === "environment" && argv[2] === "edit";
 }
 
 function fakeRailway(overrides = {}) {
@@ -226,22 +233,31 @@ function fakeRailway(overrides = {}) {
       return json({ ok: true });
     }
     if (argv[1] === "service" && argv[2] === "source" && argv[3] === "disconnect") {
-      state.sourceRepo = null;
-      state.trigger = false;
-      state.checkSuites = false;
-      return json({ ok: true });
+      assert.fail("controller used the service-global source disconnect");
     }
-    if (argv[1] === "service" && argv[2] === "source" && argv[3] === "connect") {
-      assert.equal(argv[argv.indexOf("--repo") + 1], GITHUB_SOURCE.repository);
-      assert.equal(argv[argv.indexOf("--branch") + 1], GITHUB_SOURCE.branch);
+    if (isSourceConnect(argv)) {
+      assert.equal(argv[argv.indexOf("--project") + 1], TARGET.project);
+      assert.equal(argv[argv.indexOf("--environment") + 1], TARGET.environment);
+      assert.deepEqual(JSON.parse(String(options.stdin || "")), {
+        services: { [TARGET.service]: { source: {
+          repo: GITHUB_SOURCE.repository,
+          branch: GITHUB_SOURCE.branch,
+          commitSha: COMMIT,
+          checkSuites: true,
+        } } },
+      });
       assert(!argv.includes("--verbose"), "source connection enabled unsafe verbose output");
-      if (state.uploadFailure) {
+      if (state.uploadFailure && !state.uploadFailureAfterAccepted) {
         return {
           ...result(state.uploadFailure.stdout || "", 1),
           stderr: state.uploadFailure.stderr || "",
         };
       }
       const priorActive = [...state.active];
+      const priorHistory = state.history.map((row) => ({
+        ...row,
+        meta: { ...(row.meta || {}) },
+      }));
       const deploymentStatus = state.nextUploadStatus || "SUCCESS";
       const unhealthySuccess = state.nextUploadUnhealthySuccess === true;
       const uploadDigest = state.nextUploadNoDigest === true ? "" : CANDIDATE_DIGEST;
@@ -280,17 +296,69 @@ function fakeRailway(overrides = {}) {
         },
         unhealthySuccess,
       });
+      if (state.uploadHistoryVisibilityPolls > 0) {
+        state.pendingHistoryRows = [state.history[0]];
+        state.pendingSourceActive = becomesActive ? state.active[0] : null;
+        state.history = priorHistory;
+        state.active = priorActive;
+        state.historyVisibilityPollsRemaining = state.uploadHistoryVisibilityPolls;
+      }
       state.sourceRepo = GITHUB_SOURCE.repository;
       state.trigger = true;
+      state.checkSuites = true;
       if (state.crashAfterAccepted === "upload") {
         state.crashAfterAccepted = null;
         throw new Error("simulated crash after accepted upload");
       }
-      return json({ ok: true });
+      if (state.uploadFailureAfterAccepted) {
+        return {
+          ...result(state.uploadFailure?.stdout || "", 1),
+          stderr: state.uploadFailure?.stderr || "",
+        };
+      }
+      return json({
+        staged: true,
+        committed: true,
+        environmentId: TARGET.environment,
+        environmentName: "production",
+      });
     }
     if (argv[1] === "api") {
       const query = argv[2];
       const vars = variablesFrom(argv);
+      if (query.includes("DirectProdStagedPatch")) {
+        return json({ data: { environmentStagedChanges: {
+          id: state.stagedPatchId || "<empty>",
+          environmentId: TARGET.environment,
+          status: "STAGED",
+          appliedAt: null,
+          patch: state.stagedPatch || {},
+        } } });
+      }
+      if (query.includes("DirectProdStageSourceDisconnect")
+        || query.includes("DirectProdCommitSourceDisconnect")) {
+        assert.fail("controller used the shared production staged-patch channel");
+      }
+      if (query.includes("DirectProdDisableTrigger")) {
+        assert.match(query,
+          /deploymentTriggerDelete\(id:\$id\)/,
+          "trigger disable is not bound to one immutable id");
+        assert.equal(vars.id, TRIGGER_ID);
+        if (state.triggerDeleteFailure && !state.triggerDeleteFailureAfterAccepted) {
+          return {
+            ...result(state.triggerDeleteFailure.stdout || "", 1),
+            stderr: state.triggerDeleteFailure.stderr || "",
+          };
+        }
+        state.trigger = false;
+        if (state.triggerDeleteFailureAfterAccepted) {
+          return {
+            ...result(state.triggerDeleteFailure?.stdout || "", 1),
+            stderr: state.triggerDeleteFailure?.stderr || "",
+          };
+        }
+        return json({ data: { deploymentTriggerDelete: true } });
+      }
       if (query.includes("DirectProdDomains")) {
         assert.match(query,
           /tcpProxies\(environmentId:\$environmentId,serviceId:\$serviceId\)/,
@@ -322,6 +390,12 @@ function fakeRailway(overrides = {}) {
         } });
       }
       if (query.includes("DirectProdAuthority")) {
+        assert.match(query,
+          /deploymentTriggers\(projectId:\$projectId,environmentId:\$environmentId,serviceId:\$serviceId,first:100\)/,
+          "repository-trigger inventory query is not target-environment scoped");
+        assert.equal(vars.projectId, TARGET.project);
+        assert.equal(vars.environmentId, TARGET.environment);
+        assert.equal(vars.serviceId, TARGET.service);
         return json({ data: {
           serviceInstance: {
             environmentId: TARGET.environment,
@@ -331,27 +405,29 @@ function fakeRailway(overrides = {}) {
           service: {
             id: TARGET.service,
             projectId: TARGET.project,
-            repoTriggers: {
-              edges: state.trigger ? [{ node: {
-                id: "trigger",
-                projectId: TARGET.project,
-                environmentId: TARGET.environment,
-                serviceId: TARGET.service,
-                branch: state.triggerBranch || GITHUB_SOURCE.branch,
-                repository: state.triggerRepository || GITHUB_SOURCE.repository,
-                provider: GITHUB_SOURCE.provider,
-                checkSuites: state.checkSuites,
-                validCheckSuites: state.validCheckSuites ?? 1,
-              } }] : [],
-              pageInfo: { hasNextPage: false },
-            },
+          },
+          deploymentTriggers: {
+            edges: state.trigger ? [{ node: {
+              id: state.triggerId || TRIGGER_ID,
+              projectId: TARGET.project,
+              environmentId: TARGET.environment,
+              serviceId: TARGET.service,
+              branch: state.triggerBranch || GITHUB_SOURCE.branch,
+              repository: state.triggerRepository || GITHUB_SOURCE.repository,
+              provider: GITHUB_SOURCE.provider,
+              checkSuites: state.checkSuites,
+              validCheckSuites: state.validCheckSuites ?? 1,
+            } }] : [],
+            pageInfo: { hasNextPage: false },
           },
         } });
       }
       if (query.includes("DirectProdWaitForCI")) {
-        assert.equal(vars.id, "trigger");
+        assert.equal(vars.id, TRIGGER_ID);
         state.checkSuites = true;
-        return json({ data: { deploymentTriggerUpdate: { id: "trigger", checkSuites: true } } });
+        return json({ data: {
+          deploymentTriggerUpdate: { id: TRIGGER_ID, checkSuites: true },
+        } });
       }
       if (query.includes("DirectProdActive")) {
         const queued = state.activePollQueue?.length ? state.activePollQueue.shift() : state.active;
@@ -555,6 +631,46 @@ async function runPreflight(fake, path) {
   });
 }
 
+async function leaveSourceArmedWithCompletedAbsenceControl(fake, path) {
+  fake.state.onCommand = async (argv, _options, commandState) => {
+    if (isSourceConnect(argv) && !commandState.crashedBeforeSourceResult) {
+      commandState.crashedBeforeSourceResult = true;
+      commandState.sourceRepo = null;
+      commandState.trigger = false;
+      throw new Error("simulated source-connect crash before authority visibility");
+    }
+  };
+  await runPreflight(fake, path);
+  await assert.rejects(executeReleaseCommand([
+    "deploy-shadow", "--state", path, "--commit", COMMIT, "--yes",
+  ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+  /source-connect crash before authority visibility/);
+
+  let crashedAfterControl = false;
+  fake.state.onCommand = async (argv) => {
+    if (crashedAfterControl || argv[1] !== "api"
+      || !argv[2].includes("DirectProdAuthority")) return;
+    const journal = await readState(path);
+    if (journal.phase === "github_source_connect_armed"
+      && journal.sourceTriggerControl?.githubTriggerDisabled === true) {
+      crashedAfterControl = true;
+      throw new Error("simulated crash after completed absence control");
+    }
+  };
+  await assert.rejects(executeReleaseCommand([
+    "recover", "--state", path, "--reason", "persist absence evidence",
+    "--poll-seconds", "30", "--yes",
+  ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+  /crash after completed absence control/);
+  fake.state.onCommand = null;
+  const journal = await readState(path);
+  assert.equal(journal.phase, "github_source_connect_armed");
+  assert.equal(journal.pendingTriggerDisable, undefined);
+  assert.equal(journal.sourceTriggerControl.triggerId, null);
+  assert.equal(journal.sourceTriggerControl.sourceMetadataRetained, false);
+  return journal;
+}
+
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
@@ -562,7 +678,7 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(TARGET.project, "9fc6c062-6d58-4cb9-af11-df68670bfca5");
   assert.equal(TARGET.environment, "9d51961d-759c-441b-be1d-186515b9ed7f");
   assert.equal(TARGET.service, "8853c53e-521e-4876-a796-f94c1adf5700");
-  assert.equal(LEGACY.deploymentId, "b068645d-f233-4031-b47e-efcd835c8ecb");
+  assert.equal(LEGACY.deploymentId, "eedc20d8-ab8d-4a33-8627-e4088aa0376e");
   assert.equal(LEGACY.snapshotId, "e37a3aeb-562f-4712-9d37-f68c59c8c648");
   assert.deepEqual(DOMAINS, [
     "mcp.blocksize.info",
@@ -581,6 +697,37 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(SHADOW_VARIABLES.X402_PAYMENT_RATE_LIMIT_PER_DAY, "200");
   assert.equal(SHADOW_VARIABLES.X402_FACILITATOR_MAX_INFLIGHT, "4");
   assert.equal(Object.hasOwn(SHADOW_VARIABLES, "X402_FACILITATOR_URL"), false);
+});
+
+test("release summary reports trigger containment without exposing state internals", async () => {
+  const summary = summarizeReleaseState({
+    phase: "recovered_legacy",
+    rollbackBoundary: "legacy_allowed_before_enforce",
+    current: { deploymentId: LEGACY.deploymentId, imageDigest: LEGACY.imageDigest },
+    recovery: {
+      githubTriggerDisabled: true,
+      sourceMetadataRetained: true,
+      triggerDeletionMayHaveBeenAttempted: true,
+      githubTriggerDisabledAt: "2026-08-21T18:00:00.000Z",
+    },
+    sourceTriggerControl: {
+      githubTriggerDisabled: true,
+      triggerId: TRIGGER_ID,
+      sourceMetadataRetained: true,
+      triggerDeletionMayHaveBeenAttempted: true,
+      providerReportedSuccess: false,
+      disabledAt: "2026-08-21T18:00:00.000Z",
+      privateProviderOutput: "must-not-be-reported",
+    },
+    unrelatedSecret: "must-not-be-reported",
+  });
+  assert.equal(summary.githubTriggerDisabled, true);
+  assert.equal(summary.sourceMetadataRetained, true);
+  assert.equal(summary.triggerDeletionMayHaveBeenAttempted, true);
+  assert.equal(summary.triggerId, TRIGGER_ID);
+  assert.equal(summary.triggerDisableProviderReportedSuccess, false);
+  assert.equal(summary.githubTriggerDisabledAt, "2026-08-21T18:00:00.000Z");
+  assert.equal(JSON.stringify(summary).includes("must-not-be-reported"), false);
 });
 
 test("preflight binds exact production evidence and atomically writes mode 0600 state", async () => {
@@ -631,6 +778,9 @@ for (const [label, overrides, pattern] of [
   ["cross-target TCP proxy", { tcpProxy: true, tcpProxyServiceId: "wrong-service" }, /TCP proxy inventory is not bound/],
   ["missing TCP proxy inventory", { missingTcpProxyInventory: true }, /incomplete TCP proxy inventory/],
   ["repository trigger", { trigger: true }, /auto-deploy trigger/],
+  ["unrelated staged environment patch", {
+    stagedPatch: { services: { "other-service": { source: { image: "nginx:latest" } } } },
+  }, /unrelated staged environment patch/],
   ["remote branch drift", { remoteCommit: "d".repeat(40) }, /exact reviewed commit/],
   ["failed production-branch workflow", { githubWorkflowFailure: true }, /completed successful push workflow/],
   ["mutable production branch", { githubMutableBranch: true }, /not immutable and deletion-protected/],
@@ -765,10 +915,15 @@ test("shadow deploy stages exact variables, binds one deployment, and requires t
     assert(audit);
     assert.equal(audit.argv[audit.argv.indexOf("--checks") + 1], "2");
     const upload = fake.state.commands.find(({ argv }) => isSourceConnect(argv));
-    assert(upload.argv.includes(TARGET.project) && upload.argv.includes(TARGET.environment)
-      && upload.argv.includes(TARGET.service));
-    assert.equal(upload.argv[upload.argv.indexOf("--repo") + 1], GITHUB_SOURCE.repository);
-    assert.equal(upload.argv[upload.argv.indexOf("--branch") + 1], GITHUB_SOURCE.branch);
+    assert(upload.argv.includes(TARGET.project) && upload.argv.includes(TARGET.environment));
+    assert.deepEqual(JSON.parse(upload.options.stdin), {
+      services: { [TARGET.service]: { source: {
+        repo: GITHUB_SOURCE.repository,
+        branch: GITHUB_SOURCE.branch,
+        commitSha: COMMIT,
+        checkSuites: true,
+      } } },
+    });
     assert.equal(state.uploadSource.kind, "github");
     assert.equal(state.uploadSource.tree, TREE);
     assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
@@ -777,6 +932,66 @@ test("shadow deploy stages exact variables, binds one deployment, and requires t
     assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
       && argv[2].includes("DirectProdBackup")).length, 2);
     assert.equal(state.backupRevalidatedAt, new Date(NOW).toISOString());
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("shadow deploy reconciles an exact source mutation after the provider reports failure", async () => {
+  const temporary = await tempState();
+  const secret = "provider-detail-that-must-not-enter-state";
+  try {
+    const fake = fakeRailway({
+      uploadFailureAfterAccepted: true,
+      uploadFailure: {
+        stderr: `service connection partially failed token=${secret}`,
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    const state = await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "shadow_validated");
+    assert.equal(state.candidate.buildDeploymentId, CANDIDATE_ID);
+    assert.deepEqual(state.sourceConnectProcess, {
+      providerReportedSuccess: false,
+      exactMutationObservedAfterProviderFailure: true,
+      reconciledAt: new Date(NOW).toISOString(),
+    });
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+    assert.equal(fake.state.checkSuites, true);
+    assert.doesNotMatch(await readFile(temporary.path, "utf8"), new RegExp(secret));
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("provider-reported source failure observes the final 60-second evidence poll", async () => {
+  const temporary = await tempState();
+  let sleeps = 0;
+  try {
+    const fake = fakeRailway({
+      uploadFailureAfterAccepted: true,
+      uploadFailure: { stderr: "upstream returned an error after mutation" },
+      uploadHistoryVisibilityPolls: 2,
+    });
+    await runPreflight(fake, temporary.path);
+    const state = await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT,
+      "--timeout-seconds", "60", "--poll-seconds", "30", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => { sleeps += 1; },
+    });
+    assert.equal(state.phase, "shadow_validated");
+    assert.equal(fake.state.historyVisibilityPollsRemaining, 0);
+    assert.equal(sleeps, 2);
+    const connectIndex = fake.state.commands.findIndex(({ argv }) => isSourceConnect(argv));
+    const postConnectHistoryPolls = fake.state.commands.slice(connectIndex + 1)
+      .filter(({ argv }) => argv[1] === "deployment" && argv[2] === "list");
+    assert(postConnectHistoryPolls.length >= 3);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
@@ -1024,6 +1239,387 @@ test("recovery uses legacy only before enforce and never restores a volume", asy
   }
 });
 
+test("recovery disables the exact production trigger and retains inert source metadata", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    const commandOffset = fake.state.commands.length;
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path, "--reason", "disable exact trigger", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    const recoveryCommands = fake.state.commands.slice(commandOffset);
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
+    assert.equal(state.recovery.githubTriggerDisabled, true);
+    assert.equal(state.recovery.sourceMetadataRetained, true);
+    assert.equal(recoveryCommands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+    assert.equal(recoveryCommands.some(({ argv }) => argv[1] === "service"
+      && argv[2] === "source" && argv[3] === "disconnect"), false);
+    assert.equal(recoveryCommands.some(({ argv }) => argv[1] === "api"
+      && /environmentStageChanges|environmentPatchCommit/.test(argv[2])), false);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("recovery preserves an unrelated staged production patch while disabling the trigger", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.stagedPatch = { variables: { UNRELATED_CHANGE: "keep-me" } };
+    fake.state.stagedPatchId = "unrelated-staged-patch";
+    const commandOffset = fake.state.commands.length;
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "preserve unrelated staged patch", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.deepEqual(fake.state.stagedPatch, {
+      variables: { UNRELATED_CHANGE: "keep-me" },
+    });
+    assert.equal(fake.state.stagedPatchId, "unrelated-staged-patch");
+    const recoveryCommands = fake.state.commands.slice(commandOffset);
+    assert.equal(recoveryCommands.some(({ argv }) => argv[1] === "api"
+      && /environmentStageChanges|environmentPatchCommit/.test(argv[2])), false);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("final recovery containment refuses an unknown active deployment after deleting its trigger", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] !== "api" || !argv[2].includes("DirectProdAuthority")
+        || commandState.injectedUnknownRecoveryActive) return;
+      const journal = await readState(temporary.path);
+      if (journal.phase !== "recovery_deployment_bound") return;
+      commandState.injectedUnknownRecoveryActive = true;
+      commandState.trigger = true;
+      commandState.sourceRepo = GITHUB_SOURCE.repository;
+      commandState.active = [deployment(AMBIGUOUS_ID, CANDIDATE_DIGEST)];
+    };
+
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "refuse unknown final active", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /trigger disable ended with an unknown active deployment/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "recovery_deployment_bound");
+    assert.equal(state.pendingTriggerDisable.triggerId, TRIGGER_ID);
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 2);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("completed final containment rechecks and refuses an unknown active deployment", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] !== "api" || !argv[2].includes("DirectProdAuthority")
+        || commandState.injectedUnknownRecoveryActive) return;
+      const journal = await readState(temporary.path);
+      if (journal.phase !== "recovery_deployment_bound") return;
+      commandState.injectedUnknownRecoveryActive = true;
+      commandState.trigger = false;
+      commandState.sourceRepo = GITHUB_SOURCE.repository;
+      commandState.active = [deployment(AMBIGUOUS_ID, CANDIDATE_DIGEST)];
+    };
+
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "recheck completed final containment", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /trigger disable ended with an unknown active deployment/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "recovery_deployment_bound");
+    assert.equal(state.sourceTriggerControl.githubTriggerDisabled, true);
+    assert.equal(state.pendingTriggerDisable, undefined);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("no-source final containment rechecks and refuses an unknown active deployment", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] !== "api" || !argv[2].includes("DirectProdAuthority")
+        || commandState.injectedUnknownRecoveryActive) return;
+      const journal = await readState(temporary.path);
+      if (journal.phase !== "recovery_deployment_bound") return;
+      commandState.injectedUnknownRecoveryActive = true;
+      commandState.sourceRepo = null;
+      commandState.trigger = false;
+      commandState.active = [deployment(AMBIGUOUS_ID, CANDIDATE_DIGEST)];
+    };
+
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "recheck no-source final containment", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /trigger disable ended with an unknown active deployment/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "recovery_deployment_bound");
+    assert.equal(state.pendingTriggerDisable, undefined);
+    assert.equal(state.sourceTriggerControl, undefined);
+    assert.equal(fake.state.commands.some(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")), false);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("trigger disable reconciles an accepted mutation after a sanitized provider failure", async () => {
+  const temporary = await tempState();
+  const secret = "provider-secret-must-not-persist";
+  try {
+    const fake = fakeRailway({
+      triggerDeleteFailureAfterAccepted: true,
+      triggerDeleteFailure: { stderr: `upstream error ${secret}` },
+    });
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "reconcile accepted trigger disable", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.sourceTriggerControl.providerReportedSuccess, false);
+    assert.equal(state.sourceTriggerControl.githubTriggerDisabled, true);
+    assert.equal(fake.state.trigger, false);
+    assert.doesNotMatch(await readFile(temporary.path, "utf8"), new RegExp(secret));
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("crash after accepted trigger disable resumes without a second delete", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] === "api" && argv[2].includes("DirectProdDisableTrigger")
+        && !commandState.crashedAfterTriggerDisable) {
+        const journal = await readState(temporary.path);
+        assert.equal(journal.pendingTriggerDisable.triggerId, TRIGGER_ID);
+        commandState.crashedAfterTriggerDisable = true;
+        commandState.trigger = false;
+        throw new Error("simulated crash after accepted trigger disable");
+      }
+    };
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "crash after trigger disable", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /simulated crash after accepted trigger disable/);
+    assert.equal((await readState(temporary.path)).pendingTriggerDisable.triggerId, TRIGGER_ID);
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "resume accepted trigger disable", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.pendingTriggerDisable, undefined);
+    assert.equal(state.sourceTriggerControl.providerReportedSuccess, null);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("externally disappeared trigger remains a valid observed-id control outcome", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] !== "api" || !argv[2].includes("DirectProdAuthority")
+        || commandState.externalTriggerDisappearance) return;
+      const journal = await readState(temporary.path);
+      if (journal.pendingTriggerDisable?.triggerId === TRIGGER_ID) {
+        commandState.externalTriggerDisappearance = true;
+        commandState.trigger = false;
+      }
+    };
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "observe external trigger disappearance", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.sourceTriggerControl.triggerId, TRIGGER_ID);
+    assert.equal(state.sourceTriggerControl.triggerDeletionMayHaveBeenAttempted, false);
+    assert.equal(state.sourceTriggerControl.providerReportedSuccess, null);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 0);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("failed trigger disable remains armed and retries only on a recovery rerun", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      triggerDeleteFailure: { stderr: "provider rejected trigger deletion" },
+    });
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "arm failed trigger disable", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /Railway production trigger disable failed/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.pendingTriggerDisable.triggerId, TRIGGER_ID);
+    assert.equal(fake.state.trigger, true);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+    await assert.rejects(executeReleaseCommand([
+      "promote-enforce", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /promote-enforce refuses an active production trigger-disable recovery/);
+    fake.state.triggerDeleteFailure = null;
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "retry armed trigger disable", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 2);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("completed trigger containment blocks enforce promotion across a recovery crash", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    const shadowState = JSON.parse(await readFile(temporary.path, "utf8"));
+    const recovered = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "capture completed containment evidence", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    shadowState.sourceTriggerControl = recovered.sourceTriggerControl;
+    await writeFile(temporary.path, `${JSON.stringify(shadowState)}\n`, { mode: 0o600 });
+    fake.state.trigger = true;
+    fake.state.sourceRepo = GITHUB_SOURCE.repository;
+    const commandOffset = fake.state.commands.length;
+
+    await assert.rejects(executeReleaseCommand([
+      "promote-enforce", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /promote-enforce refuses an active production trigger-disable recovery/);
+    assert.equal(fake.state.commands.length, commandOffset);
+    assert.equal((await readState(temporary.path)).phase, "shadow_validated");
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("trigger disable detects but never commits a concurrent staged-patch change", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    fake.state.onCommand = async (argv, _options, commandState) => {
+      if (argv[1] === "api" && argv[2].includes("DirectProdDisableTrigger")) {
+        commandState.stagedPatch = { variables: { CONCURRENT_CHANGE: "keep-me" } };
+        commandState.stagedPatchId = "concurrent-staged-patch";
+      }
+    };
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "concurrent staged patch", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /staged patch changed during trigger-disable quiescence/);
+    assert.deepEqual(fake.state.stagedPatch, {
+      variables: { CONCURRENT_CHANGE: "keep-me" },
+    });
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.some(({ argv }) => argv[1] === "api"
+      && /environmentStageChanges|environmentPatchCommit/.test(argv[2])), false);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("trigger disable refuses a replacement trigger that appears during quiescence", async () => {
+  const temporary = await tempState();
+  let replaced = false;
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "replacement trigger safety test", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => {
+        if (!replaced) {
+          replaced = true;
+          fake.state.trigger = true;
+          fake.state.triggerId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+        }
+      },
+    }), /trigger was replaced or reappeared/);
+    assert.equal((await readState(temporary.path)).pendingTriggerDisable.triggerId, TRIGGER_ID);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
 test("Boolean rollback waits for one delayed history row before binding", async () => {
   const temporary = await tempState();
   let sleeps = 0;
@@ -1143,9 +1739,10 @@ test("post-deploy checks tolerate only the known retiring deployment until singl
     assert.deepEqual(fake.state.activePollQueue, []);
     assert.equal(fake.state.active.length, 1);
     assert.equal(fake.state.active[0].id, RECOVERY_ID);
-    assert.equal(fake.state.sourceRepo, null);
+    assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
     assert.equal(fake.state.trigger, false);
-    assert.equal(state.recovery.githubSourceDisconnected, true);
+    assert.equal(state.recovery.githubTriggerDisabled, true);
+    assert.equal(state.recovery.sourceMetadataRetained, true);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
@@ -1633,7 +2230,7 @@ test("terminal upload build failures without an image reconcile inactive and sto
       } else {
         assert.equal(rollback, undefined);
         assert.equal(state.recovery.rollbackPerformed, false);
-        assert.equal(state.recovery.githubSourceDisconnected, true);
+        assert.equal(state.recovery.githubTriggerDisabled, true);
       }
     } finally {
       await rm(temporary.directory, { recursive: true, force: true });
@@ -1776,7 +2373,7 @@ test("recovery refuses unknown, multiple, and target-drifted active deployments"
   }
 });
 
-test("armed source mutation disconnects a zero-deploy outcome and rejects ambiguity", async () => {
+test("armed source mutation disables authority for a zero-deploy outcome and rejects ambiguity", async () => {
   for (const ambiguous of [false, true]) {
     const temporary = await tempState();
     try {
@@ -1818,7 +2415,8 @@ test("armed source mutation disconnects a zero-deploy outcome and rejects ambigu
         const state = await recovery;
         assert.equal(state.phase, "recovered_legacy");
         assert.equal(state.recovery.rollbackPerformed, false);
-        assert.equal(state.recovery.githubSourceDisconnected, false);
+        assert.equal(state.recovery.githubTriggerDisabled, true);
+        assert.equal(state.recovery.sourceMetadataRetained, false);
       }
       assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, upCalls);
     } finally {
@@ -1848,7 +2446,7 @@ test("source recovery catches an accepted deployment that appears during quiesce
     ], { run: fake.run, now: () => NOW, sleep: async () => {} });
     assert.equal(state.phase, "recovered_legacy");
     assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
-    assert.equal(state.recovery.githubSourceDisconnected, true);
+    assert.equal(state.recovery.githubTriggerDisabled, true);
     assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
       && argv[2].includes("DirectProdRollback")).length, 1);
   } finally {
@@ -1856,7 +2454,236 @@ test("source recovery catches an accepted deployment that appears during quiesce
   }
 });
 
-test("source recovery refuses a deployment that appears only after disconnect", async () => {
+test("source recovery establishes durable absence before binding an accepted zero-trigger deployment", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({ crashAfterAccepted: "upload" });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /crash after accepted upload/);
+    fake.state.trigger = false;
+    let interruptedAbsence = false;
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "journal accepted zero-trigger source", "--poll-seconds", "30", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => {
+        const journal = await readState(temporary.path);
+        if (!interruptedAbsence && journal.pendingTriggerDisable?.triggerId == null) {
+          interruptedAbsence = true;
+          throw new Error("simulated crash during accepted-source absence quiescence");
+        }
+      },
+    }), /crash during accepted-source absence quiescence/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.pendingTriggerDisable.triggerId, null);
+    assert.equal(armed.pendingTriggerDisable.baselineDeploymentIds.includes(CANDIDATE_ID), true);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "resume accepted zero-trigger source", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
+    assert.equal(state.sourceTriggerControl.triggerId, null);
+    assert.equal(state.pendingTriggerDisable, undefined);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 0);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("source recovery supersedes stale absence evidence when exact metadata appears", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await leaveSourceArmedWithCompletedAbsenceControl(fake, temporary.path);
+    acceptDelayedSourceMutation(fake.state, 0);
+    fake.state.trigger = false;
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "supersede stale metadata absence", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
+    assert.equal(state.sourceTriggerControl.triggerId, null);
+    assert.equal(state.sourceTriggerControl.sourceMetadataRetained, true);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 0);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("source recovery supersedes stale absence evidence and deletes a revealed exact trigger", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await leaveSourceArmedWithCompletedAbsenceControl(fake, temporary.path);
+    acceptDelayedSourceMutation(fake.state, 0);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "supersede stale trigger absence", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
+    assert.equal(state.sourceTriggerControl.triggerId, TRIGGER_ID);
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("zero-deploy recovery freshly re-quiesces completed absence evidence", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await leaveSourceArmedWithCompletedAbsenceControl(fake, temporary.path);
+    let interruptedFreshControl = false;
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "refresh completed absence evidence", "--poll-seconds", "30", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => {
+        const journal = await readState(temporary.path);
+        if (!interruptedFreshControl && journal.pendingTriggerDisable?.triggerId == null
+          && journal.sourceTriggerControl == null) {
+          interruptedFreshControl = true;
+          throw new Error("simulated crash during fresh absence control");
+        }
+      },
+    }), /crash during fresh absence control/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.phase, "github_source_connect_armed");
+    assert.equal(armed.pendingTriggerDisable.triggerId, null);
+    assert.equal(armed.sourceTriggerControl, undefined);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "complete fresh absence control", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("source recovery never completes around a newly visible in-flight source deployment", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      onCommand: async (argv, _options, commandState) => {
+        if (isSourceConnect(argv) && !commandState.crashedBeforeSourceResult) {
+          commandState.crashedBeforeSourceResult = true;
+          commandState.sourceRepo = GITHUB_SOURCE.repository;
+          commandState.trigger = true;
+          throw new Error("simulated source connection before deployment visibility");
+        }
+        if (argv[1] === "api" && argv[2].includes("DirectProdDisableTrigger")
+          && !commandState.inFlightSourceQueued) {
+          commandState.inFlightSourceQueued = true;
+          commandState.pendingHistoryRows = [{
+            id: CANDIDATE_ID,
+            status: "BUILDING",
+            createdAt: new Date(NOW).toISOString(),
+            meta: {
+              imageDigest: null,
+              repo: GITHUB_SOURCE.repository,
+              branch: GITHUB_SOURCE.branch,
+              commitHash: COMMIT,
+            },
+          }];
+          commandState.historyVisibilityPollsRemaining = 0;
+        }
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /before deployment visibility/);
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "contain late in-flight source", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /late source deployment still in flight/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "github_source_connect_armed");
+    assert.equal(state.pendingTriggerDisable.triggerId, TRIGGER_ID);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("zero-deploy recovery rejects an in-flight row captured inside the containment baseline", async () => {
+  const temporary = await tempState();
+  let deploymentListCalls = 0;
+  try {
+    const fake = fakeRailway({
+      onCommand: async (argv, _options, commandState) => {
+        if (argv[1] === "deployment" && argv[2] === "list") deploymentListCalls += 1;
+        if (isSourceConnect(argv) && !commandState.crashedBeforeSourceResult) {
+          commandState.crashedBeforeSourceResult = true;
+          commandState.sourceRepo = GITHUB_SOURCE.repository;
+          commandState.trigger = true;
+          throw new Error("simulated source connection before baseline-gap row");
+        }
+        if (argv[1] === "api" && argv[2].includes("DirectProdAuthority")
+          && deploymentListCalls >= 4 && !commandState.baselineGapRowVisible) {
+          commandState.baselineGapRowVisible = true;
+          commandState.history.unshift({
+            id: CANDIDATE_ID,
+            status: "BUILDING",
+            createdAt: new Date(NOW).toISOString(),
+            meta: {
+              imageDigest: null,
+              repo: GITHUB_SOURCE.repository,
+              branch: GITHUB_SOURCE.branch,
+              commitHash: COMMIT,
+            },
+          });
+        }
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /before baseline-gap row/);
+    deploymentListCalls = 0;
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "fence containment baseline gap", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /source-connected deployment appeared after the zero-deploy observation/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "github_source_connect_armed");
+    assert.equal(state.sourceTriggerControl.githubTriggerDisabled, true);
+    assert.equal(fake.state.commands.filter(({ argv }) => isSourceConnect(argv)).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("source recovery refuses a deployment that appears only after trigger disable", async () => {
   const temporary = await tempState();
   try {
     const fake = fakeRailway({
@@ -1873,16 +2700,26 @@ test("source recovery refuses a deployment that appears only after disconnect", 
       "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
     ], { run: fake.run, now: () => NOW, sleep: async () => {} }), /very-late/);
     await assert.rejects(executeReleaseCommand([
-      "recover", "--state", temporary.path, "--reason", "observe post-disconnect quiescence", "--yes",
-    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), /late source-connected deployment/);
+      "recover", "--state", temporary.path, "--reason", "observe post-disable quiescence", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /source-connected deployment appeared after the zero-deploy observation|late source-connected deployment|unhandled late source deployment|legacy production changed during source-connect recovery quiescence/);
     assert.equal((await readState(temporary.path)).phase, "github_source_connect_armed");
-    assert.equal(fake.state.sourceRepo, null);
+    assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "reconcile post-disable deployment", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
 });
 
-test("source recovery observes the full 60-second post-disconnect window at a 30-second poll", async () => {
+test("source recovery observes the full 60-second post-disable window at a 30-second poll", async () => {
   const temporary = await tempState();
   try {
     const fake = fakeRailway({
@@ -1893,8 +2730,8 @@ test("source recovery observes the full 60-second post-disconnect window at a 30
           state.trigger = true;
           throw new Error("simulated source connection with no immediate deployment");
         }
-        if (argv[1] === "service" && argv[2] === "source"
-          && argv[3] === "disconnect" && !state.lateSourceAccepted) {
+        if (argv[1] === "api" && argv[2].includes("DirectProdDisableTrigger")
+          && !state.lateSourceAccepted) {
           state.lateSourceAccepted = true;
           // The fake reveals this on the third observation: t=0, t=30, t=60.
           acceptDelayedSourceMutation(state, 2);
@@ -1908,9 +2745,91 @@ test("source recovery observes the full 60-second post-disconnect window at a 30
     await assert.rejects(executeReleaseCommand([
       "recover", "--state", temporary.path, "--reason", "full quiescence window", "--yes",
       "--poll-seconds", "30",
-    ], { run: fake.run, now: () => NOW, sleep: async () => {} }), /late source-connected deployment/);
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /unhandled late source deployment|late source-connected deployment|legacy production changed during source-connect recovery quiescence/);
     assert.equal((await readState(temporary.path)).phase, "github_source_connect_armed");
-    assert.equal(fake.state.sourceRepo, null);
+    assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "reconcile final-window deployment", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(state.lastAcceptedUpload.deploymentId, CANDIDATE_ID);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("source recovery journals a delayed trigger before deleting it on rerun", async () => {
+  const temporary = await tempState();
+  let delayedTriggerVisible = false;
+  try {
+    const fake = fakeRailway({
+      onCommand: async (argv, _options, commandState) => {
+        if (isSourceConnect(argv) && !commandState.crashedBeforeSourceResult) {
+          commandState.crashedBeforeSourceResult = true;
+          commandState.sourceRepo = GITHUB_SOURCE.repository;
+          commandState.trigger = false;
+          throw new Error("simulated source metadata before trigger visibility");
+        }
+      },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /source metadata before trigger visibility/);
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "observe delayed trigger", "--poll-seconds", "30", "--yes",
+    ], {
+      run: fake.run,
+      now: () => NOW,
+      sleep: async () => {
+        if (delayedTriggerVisible) return;
+        const journal = await readState(temporary.path);
+        if (Object.hasOwn(journal, "pendingTriggerDisable")
+          && journal.pendingTriggerDisable.triggerId == null) {
+          delayedTriggerVisible = true;
+          fake.state.trigger = true;
+        }
+      },
+    }), /trigger appeared during absence quiescence/);
+    assert.equal((await readState(temporary.path)).pendingTriggerDisable.triggerId, TRIGGER_ID);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 0);
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "delete journaled delayed trigger", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("trigger-disable recovery refuses a timeout shorter than the full quiescence window", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway();
+    await runPreflight(fake, temporary.path);
+    await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    await assert.rejects(executeReleaseCommand([
+      "recover", "--state", temporary.path, "--reason", "reject short timeout",
+      "--timeout-seconds", "30", "--poll-seconds", "30", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /--timeout-seconds is outside its safe range/);
+    assert.equal(fake.state.trigger, true);
+    assert.equal((await readState(temporary.path)).pendingTriggerDisable, undefined);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 0);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
