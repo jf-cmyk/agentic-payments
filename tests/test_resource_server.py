@@ -143,7 +143,10 @@ class _EnforcedGatewayStub:
                     "released": 0,
                 },
             },
-            "counters": {"verify_calls_total": 1, "settle_calls_total": 1},
+            "counters": {
+                "verify_calls_total": 0 if self.mode is X402PaymentMode.SHADOW else 1,
+                "settle_calls_total": 0 if self.mode is X402PaymentMode.SHADOW else 1,
+            },
             "blockers": [] if ready else ["test_blocker"],
         }
 
@@ -213,7 +216,14 @@ def enforced_x402_gateway(test_client):
 def _configure_ready_release(monkeypatch):
     monkeypatch.setenv("RAILWAY_DEPLOYMENT_ID", "11111111-2222-4333-8444-555555555555")
     monkeypatch.setenv("RELEASE_GIT_COMMIT", "a" * 40)
+    monkeypatch.setenv("RELEASE_GIT_REPOSITORY", "jf-cmyk/agentic-payments")
+    monkeypatch.setenv("RELEASE_GIT_BRANCH", "codex/production-x402")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "a" * 40)
+    monkeypatch.setenv("RAILWAY_GIT_REPO_OWNER", "jf-cmyk")
+    monkeypatch.setenv("RAILWAY_GIT_REPO_NAME", "agentic-payments")
+    monkeypatch.setenv("RAILWAY_GIT_BRANCH", "codex/production-x402")
     monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "sha256:" + "b" * 64)
+    monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "bound")
     monkeypatch.setattr(
         settings.x402,
         "solana_wallet_address",
@@ -288,6 +298,143 @@ class TestHealthEndpoint:
         assert payment["payment_rate_limit_per_day"] == 200
         assert payment["facilitator_max_inflight"] == 4
         assert payment["facilitator_inflight"] == 0
+
+    def test_deployz_gates_initial_source_build_on_shadow_readiness(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "unbound")
+        monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "source_build")
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = _ShadowGatewayStub()
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["checks"]["source_release_identity"]["ready"] is True
+        assert data["checks"]["bound_release_identity"]["ready"] is False
+        assert data["gate"] == "initial_shadow"
+        assert data["checks"]["x402"]["mode"] == "shadow"
+        assert data["checks"]["x402"]["shadow_locked"] is True
+        assert "image_digest" not in data
+
+    def test_deployz_accepts_a_fully_bound_enforce_release(
+        self,
+        test_client,
+        enforced_x402_gateway,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+
+        response = test_client.get("/deployz")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["gate"] == "bound_release"
+        assert data["checks"]["bound_release_identity"]["ready"] is True
+        assert data["checks"]["x402"]["mode"] == "enforce"
+
+    def test_deployz_accepts_a_fully_bound_locked_shadow_release(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = _ShadowGatewayStub()
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["gate"] == "bound_release"
+        assert data["checks"]["bound_shadow_gate"]["ready"] is True
+        assert data["checks"]["bound_enforce_gate"]["ready"] is False
+
+    @pytest.mark.parametrize("blocker", ["unlocked", "verified", "settled"])
+    def test_deployz_rejects_an_inconsistent_bound_shadow_release(
+        self,
+        blocker,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        gateway = _ShadowGatewayStub()
+        snapshot = gateway.readiness_snapshot()
+        if blocker == "unlocked":
+            snapshot["payment_locked"] = False
+        elif blocker == "verified":
+            snapshot["counters"]["verify_calls_total"] = 1
+        else:
+            snapshot["counters"]["settle_calls_total"] = 1
+        gateway.readiness_snapshot = lambda: snapshot
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = gateway
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        data = response.json()
+        assert response.status_code == 503
+        assert data["ready"] is False
+        assert data["checks"]["bound_shadow_gate"]["ready"] is False
+
+    @pytest.mark.parametrize(
+        "blocker",
+        [
+            "missing_commit",
+            "provider_commit_mismatch",
+            "provider_repository_mismatch",
+            "provider_branch_mismatch",
+            "enforce_mode",
+            "facilitator_stale",
+            "ledger_unresolved",
+        ],
+    )
+    def test_deployz_fails_closed_for_initial_source_build_blockers(
+        self,
+        blocker,
+        test_client,
+        monkeypatch,
+    ):
+        _configure_ready_release(monkeypatch)
+        monkeypatch.setenv("RELEASE_IMAGE_DIGEST", "unbound")
+        monkeypatch.setenv("RELEASE_IDENTITY_PHASE", "source_build")
+        gateway = _ShadowGatewayStub()
+        if blocker == "missing_commit":
+            monkeypatch.delenv("RELEASE_GIT_COMMIT")
+        elif blocker == "provider_commit_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "c" * 40)
+        elif blocker == "provider_repository_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_REPO_NAME", "wrong-repository")
+        elif blocker == "provider_branch_mismatch":
+            monkeypatch.setenv("RAILWAY_GIT_BRANCH", "wrong-branch")
+        elif blocker == "enforce_mode":
+            gateway.mode = X402PaymentMode.ENFORCE
+        elif blocker == "facilitator_stale":
+            gateway.facilitator_fresh = False
+        else:
+            gateway.unresolved = 1
+        previous = getattr(app.state, "coinbase_x402", None)
+        app.state.coinbase_x402 = gateway
+        try:
+            response = test_client.get("/deployz")
+        finally:
+            app.state.coinbase_x402 = previous
+
+        assert response.status_code == 503
+        assert response.json()["ready"] is False
 
     def test_readyz_fails_when_release_identity_is_missing(
         self,

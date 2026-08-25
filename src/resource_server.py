@@ -8941,13 +8941,30 @@ async def observability_legacy_dashboard(request: Request) -> Any:
 def _release_identity() -> dict[str, Any]:
     deployment_id = os.environ.get("RAILWAY_DEPLOYMENT_ID", "").strip()
     commit_sha = os.environ.get("RELEASE_GIT_COMMIT", "").strip().lower()
+    repository = os.environ.get("RELEASE_GIT_REPOSITORY", "").strip().lower()
+    branch = os.environ.get("RELEASE_GIT_BRANCH", "").strip()
     image_digest = os.environ.get("RELEASE_IMAGE_DIGEST", "").strip().lower()
+    phase = os.environ.get("RELEASE_IDENTITY_PHASE", "").strip().lower()
+    provider_commit_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip().lower()
+    provider_branch = os.environ.get("RAILWAY_GIT_BRANCH", "").strip()
+    provider_owner = os.environ.get("RAILWAY_GIT_REPO_OWNER", "").strip().lower()
+    provider_name = os.environ.get("RAILWAY_GIT_REPO_NAME", "").strip().lower()
+    provider_repository = (
+        f"{provider_owner}/{provider_name}" if provider_owner and provider_name else ""
+    )
     return {
         "deployment_id": deployment_id,
         "commit_sha": commit_sha,
+        "repository": repository,
+        "branch": branch,
         "image_digest": image_digest,
+        "phase": phase,
+        "provider_commit_sha": provider_commit_sha,
+        "provider_repository": provider_repository,
+        "provider_branch": provider_branch,
         "ready": bool(
-            re.fullmatch(r"[0-9a-f]{40}", commit_sha)
+            phase == "bound"
+            and re.fullmatch(r"[0-9a-f]{40}", commit_sha)
             and re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest)
             and re.fullmatch(
                 r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -8955,6 +8972,25 @@ def _release_identity() -> dict[str, Any]:
             )
         ),
     }
+
+
+def _source_release_identity_ready(identity: dict[str, Any]) -> bool:
+    """Validate source-build identity before its immutable digest is known."""
+
+    return bool(
+        identity.get("phase") == "source_build"
+        and identity.get("image_digest") == "unbound"
+        and re.fullmatch(r"[0-9a-f]{40}", str(identity.get("commit_sha") or ""))
+        and identity.get("provider_commit_sha") == identity.get("commit_sha")
+        and identity.get("repository")
+        and identity.get("provider_repository") == identity.get("repository")
+        and identity.get("branch")
+        and identity.get("provider_branch") == identity.get("branch")
+        and re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            str(identity.get("deployment_id") or "").lower(),
+        )
+    )
 
 
 def _x402_runtime_readiness(app: FastAPI) -> dict[str, Any]:
@@ -9053,6 +9089,59 @@ def _x402_runtime_readiness(app: FastAPI) -> dict[str, Any]:
         "sdk": snapshot.get("sdk", {}),
         "blockers": sorted(set(blockers)),
     }
+
+
+@app.get("/deployz")
+async def source_deployment_readiness_check(request: Request) -> JSONResponse:
+    """Gate the first GitHub build while its immutable digest is not yet known."""
+
+    identity = _release_identity()
+    payment = _x402_runtime_readiness(request.app)
+    source_identity_ready = _source_release_identity_ready(identity)
+    initial_shadow_ready = bool(
+        source_identity_ready
+        and payment["ready"]
+        and payment["mode"] == X402PaymentMode.SHADOW.value
+        and payment["shadow_locked"]
+        and payment["unresolved_ledger_entries"] == 0
+        and payment["verify_calls"] == 0
+        and payment["settle_calls"] == 0
+    )
+    bound_shadow_ready = bool(
+        identity["ready"]
+        and payment["ready"]
+        and payment["mode"] == X402PaymentMode.SHADOW.value
+        and payment["shadow_locked"]
+        and payment["unresolved_ledger_entries"] == 0
+        and payment["verify_calls"] == 0
+        and payment["settle_calls"] == 0
+    )
+    bound_enforce_ready = bool(
+        identity["ready"]
+        and payment["ready"]
+        and payment["mode"] == X402PaymentMode.ENFORCE.value
+        and not payment["shadow_locked"]
+    )
+    bound_release_ready = bound_shadow_ready or bound_enforce_ready
+    ready = initial_shadow_ready or bound_release_ready
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        headers={"Cache-Control": "no-store"},
+        content={
+            "ready": ready,
+            "deployment_id": identity["deployment_id"],
+            "commit_sha": identity["commit_sha"],
+            "identity_phase": identity["phase"],
+            "gate": "bound_release" if bound_release_ready else "initial_shadow",
+            "checks": {
+                "source_release_identity": {"ready": source_identity_ready},
+                "bound_release_identity": {"ready": identity["ready"]},
+                "bound_shadow_gate": {"ready": bound_shadow_ready},
+                "bound_enforce_gate": {"ready": bound_enforce_ready},
+                "x402": payment,
+            },
+        },
+    )
 
 
 @app.get("/readyz")

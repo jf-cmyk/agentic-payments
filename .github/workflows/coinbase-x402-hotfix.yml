@@ -20,6 +20,10 @@ on:
       - "scripts/audit_coinbase_hotfix.mjs"
       - "scripts/direct_prod_coinbase_release.mjs"
       - "scripts/test_direct_prod_coinbase_release.mjs"
+      - "railway.toml"
+  push:
+    branches:
+      - "codex/production-x402"
 
 permissions:
   contents: read
@@ -56,6 +60,11 @@ jobs:
           tests/test_resource_server.py
       - name: Compile application modules
         run: uv run python -m compileall -q src
+      - name: Validate Railway deployment health gate
+        run: >-
+          uv run python -c
+          'import tomllib; config = tomllib.load(open("railway.toml", "rb"));
+          assert config["deploy"]["healthcheckPath"] == "/deployz"'
       - name: Test gateway and resource integration
         run: uv run pytest tests/test_coinbase_x402.py tests/test_resource_server.py -q
       - name: Test direct-production safety controller

@@ -1,0 +1,10 @@
+[build]
+builder = "RAILPACK"
+railpackVersion = "0.35.0"
+
+[deploy]
+# /readyz requires the post-build digest; /deployz gates the initial shadow build.
+healthcheckPath = "/deployz"
+healthcheckTimeout = 180
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

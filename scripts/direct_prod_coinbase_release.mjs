@@ -5,7 +5,7 @@
  *
  * This controller intentionally has no funded-payment command.  It can only:
  *   1. attest the fixed production target and legacy rollback point;
- *   2. upload an exact Git head with payments locked in shadow mode;
+ *   2. connect an exact, immutable GitHub branch with payments locked in shadow mode;
  *   3. promote that exact image to enforce mode; or
  *   4. recover according to the recorded economic rollback boundary.
  *
@@ -41,6 +41,14 @@ export const LEGACY = Object.freeze({
   imageDigest: "sha256:435dc858af3fcb3eb44b4e249e0d8e4a917f62f174881fd320f8df1d57c5d6c3",
   snapshotId: "e37a3aeb-562f-4712-9d37-f68c59c8c648",
 });
+
+export const GITHUB_SOURCE = Object.freeze({
+  repository: "jf-cmyk/agentic-payments",
+  branch: "codex/production-x402",
+  provider: "github",
+});
+const GITHUB_WORKFLOW = "coinbase-x402-hotfix.yml";
+const SOURCE_CONNECT_QUIESCENCE_MS = 60_000;
 
 export const DOMAINS = Object.freeze([
   "mcp.blocksize.info",
@@ -162,6 +170,8 @@ export function parseArguments(argv) {
     "solana-pay-to",
     "base-pay-to",
     "artifact-root",
+    "repo",
+    "branch",
     "reason",
     "timeout-seconds",
     "poll-seconds",
@@ -199,11 +209,17 @@ export function parseArguments(argv) {
     assert(EVM_ADDRESS.test(values.get("base-pay-to") || "")
       && !/^0x0{40}$/i.test(values.get("base-pay-to") || ""),
     "--base-pay-to is required and must be a nonzero EVM address");
+    assert(values.get("repo") === GITHUB_SOURCE.repository,
+      `--repo must be the fixed production repository ${GITHUB_SOURCE.repository}`);
+    assert(values.get("branch") === GITHUB_SOURCE.branch,
+      `--branch must be the fixed production branch ${GITHUB_SOURCE.branch}`);
   }
   if (command !== "preflight") {
     assert(!values.has("volume-instance-id"), "--volume-instance-id is accepted only by preflight");
     assert(!values.has("solana-pay-to") && !values.has("base-pay-to"),
       "payment recipients are accepted only by preflight");
+    assert(!values.has("repo") && !values.has("branch"),
+      "repository source is accepted only by preflight");
   }
   const mutating = command !== "preflight";
   assert(!mutating || values.get("yes") === true, `${command} requires --yes`);
@@ -223,6 +239,11 @@ export function parseArguments(argv) {
     paymentRecipients: command === "preflight" ? {
       solana: values.get("solana-pay-to"),
       base: values.get("base-pay-to"),
+    } : null,
+    githubSource: command === "preflight" ? {
+      repository: values.get("repo"),
+      branch: values.get("branch"),
+      provider: GITHUB_SOURCE.provider,
     } : null,
     artifactRoot: resolve(values.get("artifact-root") || process.cwd()),
     reason: reason || null,
@@ -244,7 +265,7 @@ export function parseArguments(argv) {
 function usage() {
   return [
     "usage:",
-    "  direct_prod_coinbase_release.mjs preflight --state ABS --commit SHA --volume-instance-id UUID --solana-pay-to ADDRESS --base-pay-to ADDRESS",
+    "  direct_prod_coinbase_release.mjs preflight --state ABS --commit SHA --volume-instance-id UUID --solana-pay-to ADDRESS --base-pay-to ADDRESS --repo jf-cmyk/agentic-payments --branch codex/production-x402",
     "  direct_prod_coinbase_release.mjs deploy-shadow --state ABS --commit SHA [--artifact-root DIR] --yes",
     "  direct_prod_coinbase_release.mjs promote-enforce --state ABS --commit SHA --yes",
     "  direct_prod_coinbase_release.mjs recover --state ABS --reason TEXT --yes",
@@ -344,7 +365,7 @@ function parseStructuredRailwayFailure(output) {
   return null;
 }
 
-function railwayUploadOutput(result) {
+function railwaySourceConnectOutput(result) {
   if (result && result.code === 0 && !result.spawnError && !result.exceeded && !result.timedOut) {
     return result.stdout;
   }
@@ -362,13 +383,13 @@ function railwayUploadOutput(result) {
   ].join(",");
   const structured = parseStructuredRailwayFailure(stdout);
   if (structured) {
-    fail(`Railway shadow upload failed (${processEvidence}; code=${structured.code}; markers=${
+    fail(`Railway GitHub source connection failed (${processEvidence}; code=${structured.code}; markers=${
       structured.markers
     }; errorBytes=${structured.errorBytes}; hintBytes=${structured.hintBytes}; hasHint=${
       structured.hasHint
     })`);
   }
-  fail(`Railway shadow upload failed (${processEvidence}; unstructuredMarkers=${
+  fail(`Railway GitHub source connection failed (${processEvidence}; unstructuredMarkers=${
     railwayDiagnosticMarkers(stdout, stderr)
   })`);
 }
@@ -456,19 +477,111 @@ async function getDomains(deps) {
   return actual;
 }
 
-async function assertNoTriggers(deps) {
+async function getSourceAuthority(deps) {
   const data = await railwayApi(
     deps,
-    "query DirectProdAuthority($serviceId:String!){service(id:$serviceId){id projectId repoTriggers(first:100){edges{node{id projectId environmentId serviceId branch repository provider}} pageInfo{hasNextPage}}}}",
-    { serviceId: TARGET.service },
+    "query DirectProdAuthority($environmentId:String!,$serviceId:String!){serviceInstance(environmentId:$environmentId,serviceId:$serviceId){environmentId serviceId source{repo image}} service(id:$serviceId){id projectId repoTriggers(first:100){edges{node{id projectId environmentId serviceId branch repository provider checkSuites validCheckSuites}} pageInfo{hasNextPage}}}}",
+    { environmentId: TARGET.environment, serviceId: TARGET.service },
   );
   const service = data?.service;
+  const instance = data?.serviceInstance;
   assert(service?.id === TARGET.service && service?.projectId === TARGET.project,
     "repository-trigger evidence is not target-bound");
+  assert(instance?.environmentId === TARGET.environment && instance?.serviceId === TARGET.service
+    && instance?.source && Object.hasOwn(instance.source, "repo")
+    && Object.hasOwn(instance.source, "image"),
+  "repository-source evidence is incomplete or not target-bound");
   assert(Array.isArray(service?.repoTriggers?.edges)
     && service.repoTriggers.pageInfo?.hasNextPage === false,
   "repository-trigger inventory is incomplete");
-  assert(service.repoTriggers.edges.length === 0, "production has a repository auto-deploy trigger");
+  return {
+    source: instance.source,
+    triggers: service.repoTriggers.edges.map((edge) => edge?.node),
+  };
+}
+
+function triggerMatchesSource(trigger, source) {
+  return trigger?.projectId === TARGET.project
+    && trigger?.environmentId === TARGET.environment
+    && trigger?.serviceId === TARGET.service
+    && trigger?.repository === source.repository
+    && trigger?.branch === source.branch
+    && String(trigger?.provider || "").toLowerCase() === source.provider;
+}
+
+async function assertNoSourceAuthority(deps) {
+  const authority = await getSourceAuthority(deps);
+  assert(authority.source.repo == null && authority.source.image == null,
+    "production already has a service source");
+  assert(authority.triggers.length === 0, "production has a repository auto-deploy trigger");
+  return authority;
+}
+
+async function assertExpectedSourceAuthority(deps, source, { requireWaitForCi = true } = {}) {
+  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
+    "release state GitHub source drifted");
+  const authority = await getSourceAuthority(deps);
+  assert(authority.source.repo === source.repository && authority.source.image == null,
+    "production GitHub source differs from the release-bound repository");
+  assert(authority.triggers.length === 1
+    && triggerMatchesSource(authority.triggers[0], source),
+  "production repository trigger differs from the release-bound GitHub branch");
+  if (requireWaitForCi) {
+    assert(authority.triggers[0].checkSuites === true,
+      "production repository trigger is not waiting for GitHub checks");
+    assert(Number.isSafeInteger(authority.triggers[0].validCheckSuites)
+      && authority.triggers[0].validCheckSuites >= 1,
+    "production repository trigger has no valid GitHub check suite");
+  }
+  return authority;
+}
+
+async function enableWaitForCi(deps, source) {
+  let authority = await assertExpectedSourceAuthority(
+    deps,
+    source,
+    { requireWaitForCi: false },
+  );
+  if (authority.triggers[0].checkSuites !== true) {
+    const data = await railwayApi(
+      deps,
+      "mutation DirectProdWaitForCI($id:String!){deploymentTriggerUpdate(id:$id,input:{checkSuites:true}){id checkSuites}}",
+      { id: authority.triggers[0].id },
+    );
+    assert(data?.deploymentTriggerUpdate?.id === authority.triggers[0].id
+      && data.deploymentTriggerUpdate.checkSuites === true,
+    "Railway did not enable Wait for CI on the exact production trigger");
+  }
+  authority = await assertExpectedSourceAuthority(deps, source);
+  return authority.triggers[0];
+}
+
+async function disconnectExpectedSource(deps, source, options) {
+  let authority = await getSourceAuthority(deps);
+  if (authority.source.repo == null && authority.source.image == null
+    && authority.triggers.length === 0) return false;
+  assert((authority.source.repo == null || authority.source.repo === source.repository)
+    && authority.source.image == null
+    && authority.triggers.length <= 1
+    && authority.triggers.every((trigger) => triggerMatchesSource(trigger, source)),
+  "refusing to disconnect an unexpected production source or trigger");
+  commandOutput(await deps.run([
+    "railway", "service", "source", "disconnect", "--json",
+    "--project", TARGET.project, "--environment", TARGET.environment, "--service", TARGET.service,
+  ]), "Railway GitHub source disconnect");
+  const attempts = Math.max(1, Math.ceil(options.timeoutMs / options.pollMs));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    authority = await getSourceAuthority(deps);
+    if (authority.source.repo == null && authority.source.image == null
+      && authority.triggers.length === 0) return true;
+    assert((authority.source.repo == null || authority.source.repo === source.repository)
+      && authority.source.image == null
+      && authority.triggers.length <= 1
+      && authority.triggers.every((trigger) => triggerMatchesSource(trigger, source)),
+    "production source drifted while disconnecting GitHub");
+    if (attempt + 1 < attempts) await deps.sleep(options.pollMs);
+  }
+  fail("timed out disconnecting the exact production GitHub source");
 }
 
 function validateDeployment(row, label) {
@@ -699,6 +812,88 @@ async function assertExactGitHead(deps, artifactRoot, expectedCommit) {
   return tree;
 }
 
+async function assertRemoteBranchHead(deps, source, expectedCommit) {
+  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
+    "remote verification source is not the fixed production GitHub branch");
+  const ref = `refs/heads/${source.branch}`;
+  const output = commandOutput(await deps.run([
+    "git", "ls-remote", "--exit-code", "--heads",
+    `https://github.com/${source.repository}.git`, ref,
+  ]), "GitHub production branch check").trim();
+  const lines = output.split(/\r?\n/).filter(Boolean);
+  assert(lines.length === 1, "GitHub production branch is missing or ambiguous");
+  const [commit, actualRef, ...extra] = lines[0].split(/\s+/);
+  assert(extra.length === 0 && actualRef === ref && String(commit).toLowerCase() === expectedCommit,
+    "GitHub production branch does not resolve to the exact reviewed commit");
+}
+
+async function assertGitHubReleaseGuardrails(deps, source, expectedCommit) {
+  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
+    "GitHub guardrail source is not the fixed production branch");
+  const runs = await runJson(
+    deps,
+    [
+      "gh", "api", "-X", "GET",
+      `repos/${source.repository}/actions/workflows/${GITHUB_WORKFLOW}/runs`,
+      "-f", `branch=${source.branch}`,
+      "-f", `head_sha=${expectedCommit}`,
+      "-f", "event=push",
+      "-f", "per_page=100",
+    ],
+    "GitHub production workflow evidence",
+  );
+  const matchingRuns = Array.isArray(runs?.workflow_runs) ? runs.workflow_runs : [];
+  assert(matchingRuns.length >= 1
+    && matchingRuns.every((run) => run?.head_sha === expectedCommit
+      && run?.head_branch === source.branch
+      && run?.event === "push"
+      && run?.status === "completed"
+      && run?.conclusion === "success"
+      && Number.isSafeInteger(run?.id)),
+  "exact production branch commit lacks a completed successful push workflow");
+
+  const effectiveRules = await runJson(
+    deps,
+    [
+      "gh", "api",
+      `repos/${source.repository}/rules/branches/${encodeURIComponent(source.branch)}`,
+    ],
+    "GitHub production branch rules",
+  );
+  assert(Array.isArray(effectiveRules), "GitHub production branch rules are incomplete");
+  const immutableRule = effectiveRules.find((rule) => rule?.type === "update");
+  const ruleTypes = new Set(effectiveRules.map((rule) => rule?.type));
+  assert(Number.isSafeInteger(immutableRule?.ruleset_id)
+    && ruleTypes.has("deletion")
+    && ruleTypes.has("non_fast_forward"),
+  "GitHub production branch is not immutable and deletion-protected");
+  const ruleset = await runJson(
+    deps,
+    ["gh", "api", `repos/${source.repository}/rulesets/${immutableRule.ruleset_id}`],
+    "GitHub production immutability ruleset",
+  );
+  const expectedRef = `refs/heads/${source.branch}`;
+  assert(ruleset?.id === immutableRule.ruleset_id
+    && ruleset?.target === "branch"
+    && ruleset?.enforcement === "active"
+    && Array.isArray(ruleset?.bypass_actors)
+    && ruleset.bypass_actors.length === 0
+    && JSON.stringify(ruleset?.conditions?.ref_name?.include) === JSON.stringify([expectedRef])
+    && JSON.stringify(ruleset?.conditions?.ref_name?.exclude) === JSON.stringify([])
+    && Array.isArray(ruleset?.rules)
+    && ["update", "deletion", "non_fast_forward"].every(
+      (type) => ruleset.rules.some((rule) => rule?.type === type),
+    ),
+  "GitHub production branch immutability ruleset is missing, bypassable, or drifted");
+  return {
+    workflow: GITHUB_WORKFLOW,
+    successfulPushRunIds: matchingRuns.map((run) => run.id).sort((left, right) => left - right),
+    rulesetId: ruleset.id,
+    immutable: true,
+    attestedAt: new Date(deps.now()).toISOString(),
+  };
+}
+
 async function prepareExactArchive(deps, artifactRoot, commit) {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "blocksize-coinbase-release-"));
   const archivePath = join(temporaryRoot, "source.tar");
@@ -748,7 +943,7 @@ export async function readState(path) {
   assert(details.isFile() && (details.mode & 0o777) === 0o600,
     "release state must be a mode-0600 regular file");
   const value = JSON.parse(await readFile(path, "utf8"));
-  assert(value?.schemaVersion === 1, "unsupported release state schema");
+  assert(value?.schemaVersion === 2, "unsupported release state schema");
   assert(JSON.stringify(value.target) === JSON.stringify(TARGET), "release state target drifted");
   assert(value?.legacy?.deploymentId === LEGACY.deploymentId
     && canonicalDigest(value?.legacy?.imageDigest) === LEGACY.imageDigest
@@ -756,6 +951,16 @@ export async function readState(path) {
   "release state legacy rollback point drifted");
   assert(SHA.test(value?.commit || "") && SHA.test(value?.artifactTree || ""),
     "release state artifact identity is invalid");
+  assert(JSON.stringify(value?.githubSource) === JSON.stringify(GITHUB_SOURCE),
+    "release state GitHub source drifted");
+  assert(value?.githubRelease?.workflow === GITHUB_WORKFLOW
+    && Array.isArray(value.githubRelease.successfulPushRunIds)
+    && value.githubRelease.successfulPushRunIds.length >= 1
+    && value.githubRelease.successfulPushRunIds.every((id) => Number.isSafeInteger(id))
+    && Number.isSafeInteger(value.githubRelease.rulesetId)
+    && value.githubRelease.immutable === true
+    && Number.isFinite(Date.parse(value.githubRelease.attestedAt || "")),
+  "release state GitHub workflow or immutability attestation is invalid");
   assert(SOLANA_ADDRESS.test(value?.paymentRecipients?.solana || "")
     && EVM_ADDRESS.test(value?.paymentRecipients?.base || "")
     && !/^0x0{40}$/i.test(value?.paymentRecipients?.base || ""),
@@ -767,31 +972,28 @@ export async function readState(path) {
   assert(["legacy_allowed_before_enforce", "same_commit_shadow_only"].includes(
     value.rollbackBoundary,
   ), "release state rollback boundary is invalid");
-  if (value.phase === "shadow_upload_armed") validateUploadIntent(value);
+  if (value.phase === "github_source_connect_armed") validateUploadIntent(value);
   if (value.pendingRedeploy) validateRedeployIntent(value);
   return value;
 }
 
 function validateUploadIntent(state) {
-  const prefix = `coinbase-x402-shadow:${state.commit}:`;
-  assert(typeof state.uploadMessage === "string"
-    && state.uploadMessage.startsWith(prefix)
-    && UUID.test(state.uploadMessage.slice(prefix.length)),
-  "release state upload intent is invalid");
+  assert(JSON.stringify(state.githubSource) === JSON.stringify(GITHUB_SOURCE),
+    "release state source-connect intent is invalid");
   assert(state.uploadPriorActiveDeploymentId === LEGACY.deploymentId,
-    "release state upload baseline drifted");
+    "release state source-connect baseline drifted");
   assert(Array.isArray(state.uploadBaselineDeploymentIds)
     && state.uploadBaselineDeploymentIds.length > 0
     && new Set(state.uploadBaselineDeploymentIds).size
       === state.uploadBaselineDeploymentIds.length
     && state.uploadBaselineDeploymentIds.every((id) => UUID.test(id)),
-  "release state upload history baseline is invalid");
+  "release state source-connect history baseline is invalid");
   assert(Number.isFinite(Date.parse(state.uploadArmedAt || "")),
-    "release state upload intent has no timestamp");
+    "release state source-connect intent has no timestamp");
   assert(state.rollbackBoundary === "legacy_allowed_before_enforce"
     && state.fundedAttemptMayHaveStarted !== true,
-  "release state upload intent crossed the funded-attempt boundary");
-  return state.uploadMessage;
+  "release state source-connect intent crossed the funded-attempt boundary");
+  return state.githubSource;
 }
 
 function expectedRedeployBinding(state, purpose) {
@@ -954,13 +1156,51 @@ async function stageVariables(deps, values) {
   for (const [name, value] of Object.entries(values)) await setVariable(deps, name, value);
 }
 
-function parseUploadDeploymentId(output) {
-  try {
-    const parsed = JSON.parse(output.trim());
-    return UUID.test(parsed?.deploymentId || "") ? parsed.deploymentId : null;
-  } catch {
-    return null;
+function sourceDeploymentMatches(row, state) {
+  return row?.meta?.repo === state.githubSource.repository
+    && row?.meta?.branch === state.githubSource.branch
+    && String(row?.meta?.commitHash || "").toLowerCase() === state.commit;
+}
+
+async function waitForSourceDeployment(deps, state, options) {
+  const baseline = new Set(state.uploadBaselineDeploymentIds);
+  const attempts = Math.max(1, Math.ceil(options.timeoutMs / options.pollMs));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const additions = (await listDeployments(deps)).filter((row) => !baseline.has(row.id));
+    assert(additions.length <= 1,
+      "GitHub source connection created an ambiguous deployment-history delta");
+    if (additions.length === 1) {
+      assert(sourceDeploymentMatches(additions[0], state),
+        "source-connected deployment does not match the exact repository, branch, and commit");
+      assertDeploymentCreatedForIntent(
+        additions[0],
+        state.uploadArmedAt,
+        deps.now(),
+        "GitHub source connection",
+      );
+      return additions[0];
+    }
+    if (attempt + 1 < attempts) await deps.sleep(options.pollMs);
   }
+  fail("GitHub source connection produced no uniquely observable deployment; refusing a second deploy");
+}
+
+async function observeSourceConnectDeltaThroughQuiescence(deps, state, options, label) {
+  const attempts = Math.max(
+    2,
+    Math.ceil(Math.min(options.timeoutMs, SOURCE_CONNECT_QUIESCENCE_MS) / options.pollMs) + 1,
+  );
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const additions = await postIntentDeploymentDelta(
+      deps,
+      state.uploadBaselineDeploymentIds,
+      label,
+    );
+    assert(additions.length <= 1, `${label} has an ambiguous deployment-history delta`);
+    if (additions.length === 1) return additions;
+    if (attempt + 1 < attempts) await deps.sleep(options.pollMs);
+  }
+  return [];
 }
 
 async function waitForDeployment(deps, id, options) {
@@ -1018,10 +1258,16 @@ async function preflight(options, deps) {
     },
   );
   const artifactTree = await assertExactGitHead(deps, options.artifactRoot, options.commit);
+  await assertRemoteBranchHead(deps, options.githubSource, options.commit);
+  const githubRelease = await assertGitHubReleaseGuardrails(
+    deps,
+    options.githubSource,
+    options.commit,
+  );
   await resolveTarget(deps);
   const domains = await getDomains(deps);
-  await assertNoTriggers(deps);
-  // Shadow upload, identity-bound shadow redeploy, enforce redeploy, and one
+  await assertNoSourceAuthority(deps);
+  // Source build, identity-bound shadow redeploy, enforce redeploy, and one
   // recovery redeploy must all fit without hitting Railway's 1000-row cap.
   const history = await listDeployments(deps, 4);
   assert(!history.some((row) => IN_FLIGHT.has(String(row?.status || "").toUpperCase())),
@@ -1042,7 +1288,7 @@ async function preflight(options, deps) {
     "exact legacy deployment snapshot changed");
   const backup = await getBackupEvidence(deps, options.volumeInstanceId, deps.now());
   const state = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     phase: "preflight_passed",
     rollbackBoundary: "legacy_allowed_before_enforce",
     fundedExecutionSupported: false,
@@ -1052,6 +1298,8 @@ async function preflight(options, deps) {
     commit: options.commit,
     artifactTree,
     artifactRoot: options.artifactRoot,
+    githubSource: options.githubSource,
+    githubRelease,
     legacy: LEGACY,
     backup,
     paymentRecipients: options.paymentRecipients,
@@ -1072,9 +1320,15 @@ async function deployShadow(options, deps) {
   const artifactTree = await assertExactGitHead(deps, options.artifactRoot, options.commit);
   assert(state.artifactTree === artifactTree, "artifact Git tree differs from preflight");
   assert(state.artifactRoot === options.artifactRoot, "artifact root differs from preflight");
+  await assertRemoteBranchHead(deps, state.githubSource, state.commit);
+  state.githubRelease = await assertGitHubReleaseGuardrails(
+    deps,
+    state.githubSource,
+    state.commit,
+  );
   await resolveTarget(deps);
   await getDomains(deps);
-  await assertNoTriggers(deps);
+  await assertNoSourceAuthority(deps);
   await assertOneActive(deps, LEGACY.deploymentId, LEGACY.imageDigest);
   const before = await listDeployments(deps, 4);
   assert(!before.some((row) => IN_FLIGHT.has(String(row?.status || "").toUpperCase())),
@@ -1091,50 +1345,51 @@ async function deployShadow(options, deps) {
   await stageVariables(deps, {
     ...SHADOW_VARIABLES,
     RELEASE_GIT_COMMIT: state.commit,
+    RELEASE_GIT_REPOSITORY: state.githubSource.repository,
+    RELEASE_GIT_BRANCH: state.githubSource.branch,
+    RELEASE_IMAGE_DIGEST: "unbound",
+    RELEASE_IDENTITY_PHASE: "source_build",
   });
+  await assertRemoteBranchHead(deps, state.githubSource, state.commit);
+  state.githubRelease = await assertGitHubReleaseGuardrails(
+    deps,
+    state.githubSource,
+    state.commit,
+  );
   await assertOneActive(deps, LEGACY.deploymentId, LEGACY.imageDigest);
+  await assertNoSourceAuthority(deps);
   const finalRows = await listDeployments(deps, 4);
   assert(JSON.stringify(finalRows.map((row) => row.id).sort())
     === JSON.stringify(before.map((row) => row.id).sort()),
   "deployment history changed while shadow variables were staged");
-  const message = `coinbase-x402-shadow:${state.commit}:${randomUUID()}`;
-  state.phase = "shadow_upload_armed";
-  state.uploadMessage = message;
+  state.phase = "github_source_connect_armed";
   state.uploadPriorActiveDeploymentId = LEGACY.deploymentId;
   state.uploadBaselineDeploymentIds = before.map((row) => row.id);
   state.uploadArmedAt = new Date(deps.now()).toISOString();
   state.updatedAt = new Date(deps.now()).toISOString();
   await atomicWriteState(options.stateFile, state);
-  const exactArchive = await prepareExactArchive(deps, options.artifactRoot, state.commit);
-  let upload;
-  try {
-    upload = await deps.run([
-      "railway", "up", exactArchive.sourceRoot, "--detach", "--yes", "--json", "--message", message,
-      "--project", TARGET.project, "--environment", TARGET.environment, "--service", TARGET.service,
-    ], { cwd: exactArchive.sourceRoot, timeoutMs: 180_000 });
-  } finally {
-    await exactArchive.cleanup();
-  }
-  const uploadOutput = railwayUploadOutput(upload);
-  let deploymentId = parseUploadDeploymentId(uploadOutput);
-  if (!deploymentId) {
-    const after = await listDeployments(deps);
-    const beforeIds = new Set(before.map((row) => row.id));
-    const matches = after.filter((row) => !beforeIds.has(row.id) && row?.meta?.cliMessage === message);
-    assert(matches.length === 1, "shadow upload did not bind exactly one new deployment id");
-    deploymentId = matches[0].id;
-  }
-  assert(!before.some((row) => row.id === deploymentId), "shadow upload returned an old deployment id");
+  const connection = await deps.run([
+    "railway", "service", "source", "connect", "--json",
+    "--project", TARGET.project, "--environment", TARGET.environment, "--service", TARGET.service,
+    "--repo", state.githubSource.repository, "--branch", state.githubSource.branch,
+  ], { timeoutMs: 180_000 });
+  railwaySourceConnectOutput(connection);
+  const sourceDeployment = await waitForSourceDeployment(deps, state, options);
+  const deploymentId = sourceDeployment.id;
+  await assertExpectedSourceAuthority(deps, state.githubSource, { requireWaitForCi: false });
+  await enableWaitForCi(deps, state.githubSource);
   state.candidate = {
     buildDeploymentId: deploymentId,
     imageDigest: null,
     shadowDeploymentId: null,
   };
   state.uploadSource = {
-    kind: "git_archive",
+    kind: "github",
+    repository: state.githubSource.repository,
+    branch: state.githubSource.branch,
     commit: state.commit,
     tree: state.artifactTree,
-    ignoredWorkspaceFilesIncluded: false,
+    waitForCi: true,
   };
   state.current = { deploymentId, imageDigest: null, mode: "shadow_pending" };
   state.phase = "shadow_deployment_bound";
@@ -1149,11 +1404,12 @@ async function deployShadow(options, deps) {
   state.updatedAt = new Date(deps.now()).toISOString();
   await atomicWriteState(options.stateFile, state);
 
-  // Railway's immutable image digest only exists after the source upload.  Bind
+  // Railway's immutable image digest only exists after the source build. Bind
   // it into the runtime by staging the observed digest without a deploy, then
   // redeploy that exact deployment ID/image.  The hosted audit runs only on
   // this second, fully identity-bound shadow revision.
   await setVariable(deps, "RELEASE_IMAGE_DIGEST", digest);
+  await setVariable(deps, "RELEASE_IDENTITY_PHASE", "bound");
   await waitForOneActiveConvergence(
     deps,
     deploymentId,
@@ -1175,7 +1431,7 @@ async function deployShadow(options, deps) {
   await atomicWriteState(options.stateFile, state);
   const shadowExact = await waitForDeployment(deps, shadowDeploymentId, options);
   assert(imageDigest(shadowExact) === digest,
-    "identity-bound shadow redeploy did not use the exact uploaded image");
+    "identity-bound shadow redeploy did not use the exact source-built image");
   state.current = { deploymentId: shadowDeploymentId, imageDigest: digest, mode: "shadow" };
   state.phase = "shadow_soak_pending";
   state.updatedAt = new Date(deps.now()).toISOString();
@@ -1430,9 +1686,15 @@ async function promoteEnforce(options, deps) {
   assert(state.phase === "shadow_validated", "promote-enforce requires a validated shadow soak");
   assert(state.commit === options.commit, "promote-enforce commit differs from shadow");
   await assertExactGitHead(deps, state.artifactRoot, options.commit);
+  await assertRemoteBranchHead(deps, state.githubSource, state.commit);
+  state.githubRelease = await assertGitHubReleaseGuardrails(
+    deps,
+    state.githubSource,
+    state.commit,
+  );
   await resolveTarget(deps);
   await getDomains(deps);
-  await assertNoTriggers(deps);
+  await assertExpectedSourceAuthority(deps, state.githubSource);
   const activeShadow = await assertOneActive(
     deps,
     state.candidate.shadowDeploymentId,
@@ -1486,6 +1748,7 @@ async function promoteEnforce(options, deps) {
     X402_PAYMENT_MODE: "enforce",
     RELEASE_GIT_COMMIT: state.commit,
     RELEASE_IMAGE_DIGEST: state.candidate.imageDigest,
+    RELEASE_IDENTITY_PHASE: "bound",
   });
   await assertOneActive(deps, state.candidate.shadowDeploymentId, state.candidate.imageDigest);
   await armExactRedeploy(
@@ -1577,15 +1840,14 @@ function assertKnownActiveIdentity(state, row, expectedId, label) {
     return row;
   }
   const failedUpload = state.lastFailedMutation;
-  if (failedUpload?.kind === "shadow_upload"
+  if (failedUpload?.kind === "github_source"
     && failedUpload.deploymentId === expectedId
     && failedUpload.expectedImageDigest == null) {
     const status = String(row?.status || "").toUpperCase();
     assert(TERMINAL_FAILURES.has(status)
       && status === failedUpload.providerStatus
       && status === failedUpload.status
-      && row?.meta?.cliMessage === failedUpload.message
-      && failedUpload.message === state.uploadMessage
+      && sourceDeploymentMatches(row, state)
       && failedUpload.commit === state.commit
       && state.rollbackBoundary === "legacy_allowed_before_enforce"
       && state.fundedAttemptMayHaveStarted !== true
@@ -1593,11 +1855,14 @@ function assertKnownActiveIdentity(state, row, expectedId, label) {
       && (row.instances || []).every(
         (instance) => String(instance?.status || "").toUpperCase() !== "RUNNING",
       ),
-    `${label} is not the exact stopped no-image upload failure`);
+    `${label} is not the exact stopped no-image source-build failure`);
     return row;
   }
   assert(expectedId === state.candidate?.buildDeploymentId
-    && row?.meta?.cliMessage === state.uploadMessage
+    && sourceDeploymentMatches(row, state)
+    && state.uploadSource?.kind === "github"
+    && state.uploadSource?.repository === state.githubSource.repository
+    && state.uploadSource?.branch === state.githubSource.branch
     && state.uploadSource?.commit === state.commit
     && state.uploadSource?.tree === state.artifactTree
     && DIGEST.test(imageDigest(row))
@@ -1738,16 +2003,23 @@ function assertFailedOutcomeActive(
 
 async function reconcileArmedMutation(state, active, options, deps) {
   assert(active.length <= 1, "recovery refuses an ambiguous multi-active target");
-  if (state.phase === "shadow_upload_armed") {
-    const message = validateUploadIntent(state);
+  if (state.phase === "github_source_connect_armed") {
+    validateUploadIntent(state);
     const addition = await uniquePostIntentDeployment(
       deps,
       state.uploadBaselineDeploymentIds,
-      "shadow upload",
+      "GitHub source connection",
     );
-    assert(addition?.meta?.cliMessage === message,
-      "post-intent deployment is not the uniquely marked shadow upload");
-    assertDeploymentCreatedForIntent(addition, state.uploadArmedAt, deps.now(), "shadow upload");
+    assert(sourceDeploymentMatches(addition, state),
+      "post-intent deployment is not bound to the exact GitHub source");
+    assertDeploymentCreatedForIntent(
+      addition,
+      state.uploadArmedAt,
+      deps.now(),
+      "GitHub source connection",
+    );
+    await assertExpectedSourceAuthority(deps, state.githubSource, { requireWaitForCi: false });
+    await enableWaitForCi(deps, state.githubSource);
     const exact = await getExactDeployment(deps, addition.id);
     const providerStatus = String(exact?.status || "").toUpperCase();
     const outcome = failedDeploymentOutcome(exact);
@@ -1762,30 +2034,31 @@ async function reconcileArmedMutation(state, active, options, deps) {
         addition.id,
         state.uploadPriorActiveDeploymentId,
         outcome,
-        "failed shadow upload",
+        "failed GitHub source deployment",
         {
           allowTerminalFailedActive: true,
           expectedImageDigest: observedDigest || null,
         },
       );
       assert(exact?.id === addition.id
-        && exact?.meta?.cliMessage === message
+        && sourceDeploymentMatches(exact, state)
         && stopped
         && (observedDigest
           ? DIGEST.test(observedDigest) && observedDigest !== LEGACY.imageDigest
           : TERMINAL_FAILURES.has(providerStatus)),
-      "failed shadow upload is not the exact stopped marker-bound build outcome");
+      "failed GitHub source deployment is not the exact stopped source-bound build outcome");
       state.lastFailedMutation = {
-        kind: "shadow_upload",
+        kind: "github_source",
         deploymentId: addition.id,
         status: outcome,
         providerStatus,
-        message,
+        repository: state.githubSource.repository,
+        branch: state.githubSource.branch,
         commit: state.commit,
         expectedImageDigest: observedDigest || null,
         reconciledAt: new Date(deps.now()).toISOString(),
       };
-      state.phase = "shadow_upload_failed";
+      state.phase = "github_source_deploy_failed";
       preserveObservedActive(state, active);
       state.updatedAt = new Date(deps.now()).toISOString();
       await atomicWriteState(options.stateFile, state);
@@ -1793,26 +2066,29 @@ async function reconcileArmedMutation(state, active, options, deps) {
     }
     assert(active.length === 1 && addition.id === active[0].id
       && exact?.id === active[0].id && runningSuccess(exact) && runningSuccess(active[0]),
-    "marked shadow upload is not the exact active running-success deployment");
+    "source-bound shadow build is not the exact active running-success deployment");
     const digest = imageDigest(exact);
     assert(DIGEST.test(digest) && digest !== LEGACY.imageDigest,
-      "reconciled shadow upload has no new immutable image");
+      "reconciled GitHub source build has no new immutable image");
     state.candidate = {
       buildDeploymentId: addition.id,
       imageDigest: digest,
       shadowDeploymentId: null,
     };
     state.uploadSource = {
-      kind: "git_archive",
+      kind: "github",
+      repository: state.githubSource.repository,
+      branch: state.githubSource.branch,
       commit: state.commit,
       tree: state.artifactTree,
-      ignoredWorkspaceFilesIncluded: false,
+      waitForCi: true,
     };
     state.current = { deploymentId: addition.id, imageDigest: digest, mode: "shadow_pending" };
     state.phase = "shadow_deployment_bound";
     state.lastAcceptedUpload = {
       deploymentId: addition.id,
-      message,
+      repository: state.githubSource.repository,
+      branch: state.githubSource.branch,
       commit: state.commit,
       imageDigest: digest,
       reconciledAfterCrash: true,
@@ -2052,6 +2328,14 @@ async function finishBoundRecovery(state, binding, options, deps) {
       auditedAt: new Date(deps.now()).toISOString(),
     };
   }
+  const disconnectedAfterRecovery = await disconnectExpectedSource(
+    deps,
+    state.githubSource,
+    options,
+  );
+  state.recovery.githubSourceDisconnected = disconnectedAfterRecovery
+    || Number.isFinite(Date.parse(state.githubSourceDisconnectedBeforeRecoveryAt || ""));
+  state.recovery.githubSourceDisconnectedAt = new Date(deps.now()).toISOString();
   state.phase = binding.afterBoundary ? "recovered_same_commit_shadow" : "recovered_legacy";
   state.recovery.completedAt = new Date(deps.now()).toISOString();
   state.updatedAt = new Date(deps.now()).toISOString();
@@ -2063,18 +2347,117 @@ async function recover(options, deps) {
   let state = await readState(options.stateFile);
   await resolveTarget(deps);
   await getDomains(deps);
-  await assertNoTriggers(deps);
+  const authority = await getSourceAuthority(deps);
+  assert((authority.source.repo == null || authority.source.repo === state.githubSource.repository)
+    && authority.source.image == null
+    && authority.triggers.length <= 1
+    && authority.triggers.every((trigger) => triggerMatchesSource(trigger, state.githubSource)),
+  "recovery refuses an unexpected production source or trigger");
   let active = await getActive(deps);
   assert(active.length <= 1, "recovery refuses an ambiguous multi-active target");
-  if (state.phase === "shadow_upload_armed" || state.pendingRedeploy) {
-    state = await reconcileArmedMutation(state, active, options, deps);
-    active = await getActive(deps);
-  }
-  assert(!active[0]?.id || knownDeploymentIds(state).has(active[0].id),
-    "recovery refuses an unknown active deployment");
   assert((await listDeployments(deps, 1)).every(
     (row) => !IN_FLIGHT.has(String(row.status).toUpperCase()),
   ), "recovery refuses while another deployment is in flight");
+  if (state.phase === "github_source_connect_armed" || state.pendingRedeploy) {
+    if (state.phase === "github_source_connect_armed") {
+      const additions = await observeSourceConnectDeltaThroughQuiescence(
+        deps,
+        state,
+        options,
+        "GitHub source recovery",
+      );
+      if (additions.length === 0) {
+        assert(active.length === 1 && active[0].id === LEGACY.deploymentId
+          && runningSuccess(active[0]) && imageDigest(active[0]) === LEGACY.imageDigest,
+        "source-connect recovery without a deployment requires the exact legacy active image");
+        const disconnected = await disconnectExpectedSource(
+          deps,
+          state.githubSource,
+          options,
+        );
+        const lateAdditions = await observeSourceConnectDeltaThroughQuiescence(
+          deps,
+          state,
+          options,
+          "post-disconnect GitHub source recovery",
+        );
+        assert(lateAdditions.length === 0,
+          "a late source-connected deployment appeared after disconnect; rerun recovery");
+        const finalActive = await getActive(deps);
+        assert(finalActive.length === 1
+          && finalActive[0].id === LEGACY.deploymentId
+          && runningSuccess(finalActive[0])
+          && imageDigest(finalActive[0]) === LEGACY.imageDigest,
+        "legacy production changed during source-connect recovery quiescence");
+        state.recovery = {
+          reason: options.reason,
+          sourceDeploymentId: LEGACY.deploymentId,
+          expectedImageDigest: LEGACY.imageDigest,
+          rollbackPerformed: false,
+          githubSourceDisconnected: disconnected,
+          githubSourceDisconnectedAt: new Date(deps.now()).toISOString(),
+          volumeRestoreAttempted: false,
+          completedAt: new Date(deps.now()).toISOString(),
+        };
+        state.current = {
+          deploymentId: LEGACY.deploymentId,
+          imageDigest: LEGACY.imageDigest,
+          mode: "legacy",
+        };
+        state.phase = "recovered_legacy";
+        state.updatedAt = new Date(deps.now()).toISOString();
+        await atomicWriteState(options.stateFile, state);
+        return state;
+      }
+      active = await getActive(deps);
+    }
+    state = await reconcileArmedMutation(state, active, options, deps);
+    active = await getActive(deps);
+  }
+  const disconnectedBeforeRecovery = await disconnectExpectedSource(
+    deps,
+    state.githubSource,
+    options,
+  );
+  if (disconnectedBeforeRecovery) {
+    state.githubSourceDisconnectedBeforeRecoveryAt = new Date(deps.now()).toISOString();
+    state.updatedAt = new Date(deps.now()).toISOString();
+    await atomicWriteState(options.stateFile, state);
+  }
+  assert(!active[0]?.id || knownDeploymentIds(state).has(active[0].id),
+    "recovery refuses an unknown active deployment");
+  const noRollbackSourceFailure = [
+    "github_source_connect_armed",
+    "github_source_deploy_failed",
+    "shadow_deployment_bound",
+  ].includes(state.phase);
+  if (noRollbackSourceFailure
+    && state.rollbackBoundary === "legacy_allowed_before_enforce"
+    && active.length === 1
+    && active[0].id === LEGACY.deploymentId
+    && runningSuccess(active[0])
+    && imageDigest(active[0]) === LEGACY.imageDigest) {
+    const disconnected = await disconnectExpectedSource(deps, state.githubSource, options);
+    state.recovery = {
+      reason: options.reason,
+      sourceDeploymentId: LEGACY.deploymentId,
+      expectedImageDigest: LEGACY.imageDigest,
+      rollbackPerformed: false,
+      githubSourceDisconnected: disconnected || disconnectedBeforeRecovery,
+      githubSourceDisconnectedAt: new Date(deps.now()).toISOString(),
+      volumeRestoreAttempted: false,
+      completedAt: new Date(deps.now()).toISOString(),
+    };
+    state.current = {
+      deploymentId: LEGACY.deploymentId,
+      imageDigest: LEGACY.imageDigest,
+      mode: "legacy",
+    };
+    state.phase = "recovered_legacy";
+    state.updatedAt = new Date(deps.now()).toISOString();
+    await atomicWriteState(options.stateFile, state);
+    return state;
+  }
 
   const binding = recoveryBinding(state);
   if (state.phase === "recovery_deployment_bound") {
@@ -2113,6 +2496,7 @@ async function recover(options, deps) {
       ...SHADOW_VARIABLES,
       RELEASE_GIT_COMMIT: state.commit,
       RELEASE_IMAGE_DIGEST: state.candidate.imageDigest,
+      RELEASE_IDENTITY_PHASE: "bound",
     });
   }
   await armExactRedeploy(
