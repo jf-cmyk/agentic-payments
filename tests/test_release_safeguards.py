@@ -3521,64 +3521,18 @@ def test_release_acceptance_requires_the_exact_active_ready_commit(
         assert accepted_state["accepted"] is False
 
 
-def test_gitlab_requires_distinct_staging_and_exact_commit_smoke_promotion() -> None:
+def test_gitlab_is_deployment_inert_after_github_cutover() -> None:
     pipeline = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
-    staging_job = pipeline.split("deploy_staging:", 1)[1].split("deploy_production:", 1)[0]
-    production_job = pipeline.split("deploy_production:", 1)[1]
 
-    assert "deploy_staging:" in pipeline
-    assert "needs:\n    - deploy_staging" in pipeline
-    assert 'test "$STAGING_BASE_URL" != "$PUBLIC_BASE_URL"' in pipeline
-    assert 'test "$STAGING_RAILWAY_ENVIRONMENT" != "$RAILWAY_ENVIRONMENT"' in pipeline
-    assert 'test "$STAGING_RAILWAY_SERVICE_NAME" != "$RAILWAY_SERVICE_NAME"' in pipeline
-    assert (
-        "STAGING_RAILWAY_PROJECT_ID:$STAGING_RAILWAY_ENVIRONMENT:$STAGING_RAILWAY_SERVICE_NAME"
-        in pipeline
-    )
-    assert 'audit_hosted_release.mjs "$STAGING_BASE_URL" "$CI_COMMIT_SHA"' in pipeline
-    assert 'audit_hosted_release.mjs "$PUBLIC_BASE_URL" "$CI_COMMIT_SHA"' in pipeline
-    assert 'audit_hosted_release.mjs "${PUBLIC_BASE_URL:-' not in pipeline
-    assert 'RAILWAY_TOKEN: "$STAGING_RAILWAY_TOKEN"' in pipeline
-    assert 'RAILWAY_TOKEN: "$PRODUCTION_RAILWAY_TOKEN"' in pipeline
-    assert "environment:\n    name: staging" in staging_job
-    assert "environment:\n    name: production" in production_job
-    assert "PRODUCTION_RAILWAY_TOKEN" not in staging_job
-    assert "STAGING_RAILWAY_TOKEN" not in production_job
-    assert pipeline.count("npm install -g @railway/cli@5.30.1") == 2
-    assert pipeline.count("audit_railpack_build_log.mjs") == 2
-    assert pipeline.count("deploy_railway_exact.mjs") == 2
-    assert "--latest" not in staging_job
-    assert "--latest" not in production_job
-    assert "for attempt in" not in production_job
-    assert 'railway logs "$STAGING_DEPLOYMENT_ID" --build' in staging_job
-    assert 'railway logs "$PRODUCTION_DEPLOYMENT_ID" --build' in production_job
-    assert '--service "$RAILWAY_SERVICE_ID"' in production_job
-    assert "npm install -g @railway/cli\n" not in pipeline
-    assert "when: manual" in production_job
-    assert "allow_failure: false" in production_job
-    assert "PRODUCTION_VOLUME_INSTANCE_ID" in production_job
-    assert 'test -f "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"' in production_job
-    assert 'test -r "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"' in production_job
-    assert "recover_railway_release.mjs" in staging_job
-    assert "recover_railway_release.mjs" in production_job
-    assert "RUNNER_SCRIPT_TIMEOUT: \"25m\"" in staging_job
-    assert "RUNNER_SCRIPT_TIMEOUT: \"25m\"" in production_job
-    assert "RUNNER_AFTER_SCRIPT_TIMEOUT: \"20m\"" in staging_job
-    assert "RUNNER_AFTER_SCRIPT_TIMEOUT: \"20m\"" in production_job
-    assert 'AFTER_SCRIPT_IGNORE_ERRORS: "false"' in staging_job
-    assert 'AFTER_SCRIPT_IGNORE_ERRORS: "false"' in production_job
-    assert 'RELEASE_RECOVERY_TIMEOUT_MS: "900000"' in staging_job
-    assert 'RELEASE_RECOVERY_TIMEOUT_MS: "900000"' in production_job
-    assert staging_job.count('--expected-commit "$CI_COMMIT_SHA"') == 1
-    assert production_job.count('--expected-commit "$CI_COMMIT_SHA"') == 3
-    assert production_job.count(
-        '--drain-attestation-sha256 "$PRODUCTION_LEGACY_DRAIN_ATTESTATION_SHA256"'
-    ) == 3
-    assert production_job.count(
-        '--drain-attestation-file "$PRODUCTION_LEGACY_DRAIN_ATTESTATION"'
-    ) == 1
-    assert staging_job.count("timeout 120s node scripts/accept_railway_release.mjs") == 1
-    assert production_job.count("timeout 120s node scripts/accept_railway_release.mjs") == 1
+    assert "validate_gitlab_deploy_authority_disabled:" in pipeline
+    assert "GitLab CI is intentionally deployment-inert" in pipeline
+    assert "deploy_staging:" not in pipeline
+    assert "deploy_production:" not in pipeline
+    assert "railway up" not in pipeline
+    assert "railway deploy" not in pipeline
+    assert "RAILWAY_TOKEN" not in pipeline
+    assert "PRODUCTION_RAILWAY_TOKEN" not in pipeline
+    assert "STAGING_RAILWAY_TOKEN" not in pipeline
 
 
 def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> None:
@@ -3916,122 +3870,32 @@ def test_release_ci_builds_twice_and_smokes_the_installed_wheel() -> None:
     github = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     gitlab = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
 
-    for pipeline in (github, gitlab):
-        assert "dist-repro" in pipeline
-        assert "--reproducible-with" in pipeline
-        assert "verify_installed_release.py" in pipeline
-        assert "--requirements requirements.txt" in pipeline
-        assert "scripts/check_secret_hygiene.py" in pipeline
-        assert "pip-audit==2.10.1" in pipeline
+    assert "dist-repro" in github
+    assert "--reproducible-with" in github
+    assert "verify_installed_release.py" in github
+    assert "--requirements requirements.txt" in github
+    assert "scripts/check_secret_hygiene.py" in github
+    assert "pip-audit==2.10.1" in github
 
     assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == "3.12"
     assert 'python-version: "3.12"' in github
-    assert "image: python:3.12" in gitlab
     assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4" in github
     assert "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5" in github
     assert "cancel-in-progress: true" in github
     assert "timeout-minutes: 20" in github
-    assert gitlab.count("timeout: 20m") == 1
-    assert gitlab.count("timeout: 50m") == 2
-    assert gitlab.count('RUNNER_SCRIPT_TIMEOUT: "25m"') == 2
-    assert gitlab.count('RUNNER_AFTER_SCRIPT_TIMEOUT: "20m"') == 2
-    assert 25 + 20 < 50
+    assert "railway up --" not in gitlab.lower()
+    assert "npm install -g @railway/cli" not in gitlab.lower()
 
 
-def test_gitlab_python_tests_install_verified_node20_and_preflight_versions(
-    tmp_path: Path,
-) -> None:
+def test_gitlab_validation_job_cannot_checkout_or_deploy() -> None:
     pipeline = (ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
-    test_job = pipeline.split("test_python:", 1)[1].split("deploy_staging:", 1)[0]
-    node_preflight = 'test "$(node --version)" = "v20.19.4"'
-    python_preflight = (
-        'test "$(python -c \'import sys; '
-        'print(f"{sys.version_info.major}.{sys.version_info.minor}")\')" = "3.12"'
-    )
 
-    assert "image: python:3.12" in test_job
-    assert "node-v20.19.4-linux-x64.tar.gz" in test_job
-    assert "node-v20.19.4-linux-arm64.tar.gz" in test_job
-    assert (
-        "d80a33707605ced9a31b8f543cea9ab512bc3d2fef2c148f31a50e939ff07560"
-        in test_job
-    )
-    assert (
-        "d200798332b7a56d355888ce58e6a639fac7939a4833e5bc8780c66888e1ce4d"
-        in test_job
-    )
-    assert '"https://nodejs.org/dist/v20.19.4/${NODE_ARCHIVE}"' in test_job
-    assert "sha256sum --check --strict -" in test_job
-    assert 'tar -xzf "/tmp/${NODE_ARCHIVE}"' in test_job
-    assert "Unsupported GitLab runner architecture" in test_job
-    assert python_preflight in test_job
-    assert node_preflight in test_job
-    assert test_job.index("sha256sum --check --strict -") < test_job.index(
-        node_preflight
-    )
-    assert test_job.index(node_preflight) < test_job.index("uv run pytest -q")
-
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_node = fake_bin / "node"
-    fake_node.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"${FAKE_NODE_VERSION}\"\n",
-        encoding="utf-8",
-    )
-    fake_node.chmod(0o755)
-    fake_python = fake_bin / "python"
-    fake_python.write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"${FAKE_PYTHON_VERSION}\"\n",
-        encoding="utf-8",
-    )
-    fake_python.chmod(0o755)
-    environment = {
-        **os.environ,
-        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
-        "FAKE_NODE_VERSION": "v20.19.4",
-        "FAKE_PYTHON_VERSION": "3.12",
-    }
-    accepted_node = subprocess.run(
-        ["/bin/sh", "-eu", "-c", node_preflight],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    accepted_python = subprocess.run(
-        ["/bin/sh", "-eu", "-c", python_preflight],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    environment["FAKE_NODE_VERSION"] = "v20.19.5"
-    environment["FAKE_PYTHON_VERSION"] = "3.13"
-    rejected_node = subprocess.run(
-        ["/bin/sh", "-eu", "-c", node_preflight],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    rejected_python = subprocess.run(
-        ["/bin/sh", "-eu", "-c", python_preflight],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-
-    assert accepted_node.returncode == 0, accepted_node.stdout + accepted_node.stderr
-    assert accepted_python.returncode == 0, (
-        accepted_python.stdout + accepted_python.stderr
-    )
-    assert rejected_node.returncode != 0
-    assert rejected_python.returncode != 0
+    assert "GIT_STRATEGY: none" in pipeline
+    assert "image: alpine:3.20" in pipeline
+    assert "checkout" not in pipeline.lower()
+    assert "curl" not in pipeline.lower()
+    assert "npm" not in pipeline.lower()
+    assert "uv " not in pipeline.lower()
 
 
 def test_installed_release_uses_only_exact_frozen_runtime_dependencies(
