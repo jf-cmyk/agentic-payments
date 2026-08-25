@@ -37,7 +37,7 @@ export const TARGET = Object.freeze({
 });
 
 export const LEGACY = Object.freeze({
-  deploymentId: "eedc20d8-ab8d-4a33-8627-e4088aa0376e",
+  deploymentId: "66920048-282d-45e6-a302-db6da1702058",
   imageDigest: "sha256:435dc858af3fcb3eb44b4e249e0d8e4a917f62f174881fd320f8df1d57c5d6c3",
   snapshotId: "e37a3aeb-562f-4712-9d37-f68c59c8c648",
 });

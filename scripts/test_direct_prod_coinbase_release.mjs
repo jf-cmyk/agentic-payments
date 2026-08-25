@@ -722,7 +722,7 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(TARGET.project, "9fc6c062-6d58-4cb9-af11-df68670bfca5");
   assert.equal(TARGET.environment, "9d51961d-759c-441b-be1d-186515b9ed7f");
   assert.equal(TARGET.service, "8853c53e-521e-4876-a796-f94c1adf5700");
-  assert.equal(LEGACY.deploymentId, "eedc20d8-ab8d-4a33-8627-e4088aa0376e");
+  assert.equal(LEGACY.deploymentId, "66920048-282d-45e6-a302-db6da1702058");
   assert.equal(LEGACY.snapshotId, "e37a3aeb-562f-4712-9d37-f68c59c8c648");
   assert.deepEqual(DOMAINS, [
     "mcp.blocksize.info",
