@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   DOMAINS,
@@ -12,6 +13,7 @@ import {
   SHADOW_VARIABLES,
   TARGET,
   TARGET_LOCK_PATH,
+  defaultRun,
   executeReleaseCommand,
   parseArguments,
   readState,
@@ -741,6 +743,24 @@ test("fixed target, rollback point, and funded command refusal", async () => {
   assert.equal(SHADOW_VARIABLES.X402_PAYMENT_RATE_LIMIT_PER_DAY, "200");
   assert.equal(SHADOW_VARIABLES.X402_FACILITATOR_MAX_INFLIGHT, "4");
   assert.equal(Object.hasOwn(SHADOW_VARIABLES, "X402_FACILITATOR_URL"), false);
+});
+
+test("hosted audit executes through a symlinked canonical path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "blocksize-audit-symlink-"));
+  const target = fileURLToPath(new URL("./audit_coinbase_hotfix.mjs", import.meta.url));
+  const linked = join(root, "audit_coinbase_hotfix.mjs");
+  try {
+    await symlink(target, linked);
+    const executed = await defaultRun([
+      process.execPath,
+      linked,
+      "--mode", "invalid",
+    ], { timeoutMs: 5_000 });
+    assert.equal(executed.code, 1);
+    assert.match(executed.stderr, /--mode must be shadow or enforce/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("release summary reports trigger containment without exposing state internals", async () => {

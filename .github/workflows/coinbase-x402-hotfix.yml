@@ -18,6 +18,7 @@ on:
       - "tests/test_coinbase_x402.py"
       - "tests/test_resource_server.py"
       - "scripts/audit_coinbase_hotfix.mjs"
+      - "scripts/direct_execution.mjs"
       - "scripts/direct_prod_coinbase_release.mjs"
       - "scripts/test_direct_prod_coinbase_release.mjs"
       - "railway.toml"

@@ -8,8 +8,7 @@
  * signature, wallet, payment amount, facilitator verify, or settlement call.
  */
 
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isDirectExecution } from "./direct_execution.mjs";
 
 export const AUDIT_DOMAINS = Object.freeze([
   "https://mcp.blocksize.info",
@@ -379,7 +378,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`Coinbase hotfix audit refused: ${error.message}\n`);
     process.exitCode = 1;

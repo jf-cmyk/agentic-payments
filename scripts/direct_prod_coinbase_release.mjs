@@ -28,7 +28,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+
+import { isDirectExecution } from "./direct_execution.mjs";
 
 export const TARGET = Object.freeze({
   project: "9fc6c062-6d58-4cb9-af11-df68670bfca5",
@@ -3365,7 +3366,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify(summarizeReleaseState(state))}\n`);
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+if (isDirectExecution(process.argv[1], import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`direct production release refused: ${error.message}\n`);
     process.exitCode = 1;
