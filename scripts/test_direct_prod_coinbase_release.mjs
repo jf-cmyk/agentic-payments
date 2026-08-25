@@ -304,8 +304,8 @@ function fakeRailway(overrides = {}) {
         state.historyVisibilityPollsRemaining = state.uploadHistoryVisibilityPolls;
       }
       state.sourceRepo = GITHUB_SOURCE.repository;
-      state.trigger = true;
-      state.checkSuites = true;
+      state.trigger = state.sourceConnectCreatesTrigger === true;
+      state.checkSuites = state.trigger;
       if (state.crashAfterAccepted === "upload") {
         state.crashAfterAccepted = null;
         throw new Error("simulated crash after accepted upload");
@@ -338,6 +338,50 @@ function fakeRailway(overrides = {}) {
       if (query.includes("DirectProdStageSourceDisconnect")
         || query.includes("DirectProdCommitSourceDisconnect")) {
         assert.fail("controller used the shared production staged-patch channel");
+      }
+      if (query.includes("DirectProdCreateTrigger")) {
+        assert.match(query,
+          /deploymentTriggerCreate\(input:\$input\)/,
+          "trigger creation is not bound to one exact input");
+        assert.deepEqual(jsonVariablesFrom(argv), { input: {
+          projectId: TARGET.project,
+          environmentId: TARGET.environment,
+          serviceId: TARGET.service,
+          repository: GITHUB_SOURCE.repository,
+          branch: GITHUB_SOURCE.branch,
+          provider: GITHUB_SOURCE.provider,
+          checkSuites: true,
+        } });
+        if (state.triggerCreateFailure && !state.triggerCreateFailureAfterAccepted) {
+          return {
+            ...result(state.triggerCreateFailure.stdout || "", 1),
+            stderr: state.triggerCreateFailure.stderr || "",
+          };
+        }
+        state.trigger = true;
+        state.checkSuites = true;
+        if (state.crashAfterAccepted === "trigger_create") {
+          state.crashAfterAccepted = null;
+          throw new Error("simulated crash after accepted trigger creation");
+        }
+        if (state.triggerCreateFailureAfterAccepted) {
+          return {
+            ...result(state.triggerCreateFailure?.stdout || "", 1),
+            stderr: state.triggerCreateFailure?.stderr || "",
+          };
+        }
+        const id = state.triggerCreateResponseId || TRIGGER_ID;
+        return json({ data: { deploymentTriggerCreate: {
+          id,
+          projectId: TARGET.project,
+          environmentId: TARGET.environment,
+          serviceId: TARGET.service,
+          repository: GITHUB_SOURCE.repository,
+          branch: GITHUB_SOURCE.branch,
+          provider: GITHUB_SOURCE.provider,
+          checkSuites: true,
+          validCheckSuites: state.validCheckSuites ?? 1,
+        } } });
       }
       if (query.includes("DirectProdDisableTrigger")) {
         assert.match(query,
@@ -759,6 +803,23 @@ test("preflight refuses to overwrite an existing release state", async () => {
   }
 });
 
+test("preflight accepts only retained exact inert GitHub source metadata", async () => {
+  const retained = await tempState();
+  const drifted = await tempState();
+  try {
+    const exact = fakeRailway({ sourceRepo: GITHUB_SOURCE.repository, trigger: false });
+    const state = await runPreflight(exact, retained.path);
+    assert.equal(state.preflightSourceMetadataRetained, true);
+
+    const wrong = fakeRailway({ sourceRepo: "someone/else", trigger: false });
+    await assert.rejects(runPreflight(wrong, drifted.path),
+      /unexpected service source/);
+  } finally {
+    await rm(retained.directory, { recursive: true, force: true });
+    await rm(drifted.directory, { recursive: true, force: true });
+  }
+});
+
 test("release state rejects the retired legacy rollback deployment", async () => {
   const temporary = await tempState();
   try {
@@ -929,9 +990,116 @@ test("shadow deploy stages exact variables, binds one deployment, and requires t
     assert.equal(fake.state.sourceRepo, GITHUB_SOURCE.repository);
     assert.equal(fake.state.trigger, true);
     assert.equal(fake.state.checkSuites, true);
+    const triggerCreates = fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger"));
+    assert.equal(triggerCreates.length, 1);
+    assert.deepEqual(jsonVariablesFrom(triggerCreates[0].argv), { input: {
+      projectId: TARGET.project,
+      environmentId: TARGET.environment,
+      serviceId: TARGET.service,
+      repository: GITHUB_SOURCE.repository,
+      branch: GITHUB_SOURCE.branch,
+      provider: GITHUB_SOURCE.provider,
+      checkSuites: true,
+    } });
+    assert.equal(state.sourceTrigger.origin, "explicit_create");
+    assert.equal(state.sourceTrigger.mutationMayHaveBeenAttempted, true);
     assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
       && argv[2].includes("DirectProdBackup")).length, 2);
     assert.equal(state.backupRevalidatedAt, new Date(NOW).toISOString());
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("shadow deploy accepts an exact trigger created atomically with the source patch", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({ sourceConnectCreatesTrigger: true });
+    await runPreflight(fake, temporary.path);
+    const state = await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "shadow_validated");
+    assert.equal(state.sourceTrigger.origin, "source_patch");
+    assert.equal(state.sourceTrigger.mutationMayHaveBeenAttempted, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 0);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("trigger creation reconciles an accepted mutation after a provider failure", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      triggerCreateFailureAfterAccepted: true,
+      triggerCreateFailure: { stderr: "upstream failed after accepting trigger" },
+    });
+    await runPreflight(fake, temporary.path);
+    const state = await executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "shadow_validated");
+    assert.equal(state.sourceTrigger.origin, "explicit_create");
+    assert.equal(state.sourceTrigger.providerReportedSuccess, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("crash after accepted trigger creation recovers without recreating it", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({ crashAfterAccepted: "trigger_create" });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /crash after accepted trigger creation/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.phase, "github_source_connect_armed");
+    assert.equal(armed.pendingTriggerCreate.sourceDeploymentId, CANDIDATE_ID);
+    assert(Number.isFinite(Date.parse(armed.pendingTriggerCreate.dispatchArmedAt)));
+    assert.equal(fake.state.trigger, true);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "contain accepted trigger create", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.trigger, false);
+    assert.equal(state.pendingTriggerCreate, undefined);
+    assert.equal(state.triggerCreateProcess.mutationMayHaveBeenAttempted, true);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 1);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("failed trigger creation stays armed and is never retried by deploy", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      triggerCreateFailure: { stderr: "provider rejected exact trigger" },
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /Railway production trigger creation failed/);
+    const state = await readState(temporary.path);
+    assert.equal(state.phase, "github_source_connect_armed");
+    assert.equal(state.pendingTriggerCreate.providerReportedSuccess, false);
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 1);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }
@@ -986,7 +1154,7 @@ test("provider-reported source failure observes the final 60-second evidence pol
     });
     assert.equal(state.phase, "shadow_validated");
     assert.equal(fake.state.historyVisibilityPollsRemaining, 0);
-    assert.equal(sleeps, 2);
+    assert.equal(sleeps, 4);
     const connectIndex = fake.state.commands.findIndex(({ argv }) => isSourceConnect(argv));
     const postConnectHistoryPolls = fake.state.commands.slice(connectIndex + 1)
       .filter(({ argv }) => argv[1] === "deployment" && argv[2] === "list");
@@ -1020,8 +1188,74 @@ test("shadow deploy refuses a Railway trigger with no valid check suite", async 
     await assert.rejects(executeReleaseCommand([
       "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
     ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
-    /no valid GitHub check suite/);
+    /valid GitHub check suite/);
     assert.equal((await readState(temporary.path)).phase, "github_source_connect_armed");
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("recovery contains an auto-created trigger with no valid check suite", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      sourceConnectCreatesTrigger: true,
+      validCheckSuites: 0,
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /no valid GitHub check suite/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.phase, "github_source_connect_armed");
+    assert.equal(armed.pendingTriggerCreate.sourceDeploymentId, CANDIDATE_ID);
+    assert.equal(armed.pendingTriggerCreate.observedTriggerId, TRIGGER_ID);
+    assert.equal(fake.state.trigger, true);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "contain invalid auto-created trigger", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 0);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
+  } finally {
+    await rm(temporary.directory, { recursive: true, force: true });
+  }
+});
+
+test("recovery contains an invalid auto-trigger after an unjournaled source crash", async () => {
+  const temporary = await tempState();
+  try {
+    const fake = fakeRailway({
+      sourceConnectCreatesTrigger: true,
+      validCheckSuites: 0,
+      crashAfterAccepted: "upload",
+    });
+    await runPreflight(fake, temporary.path);
+    await assert.rejects(executeReleaseCommand([
+      "deploy-shadow", "--state", temporary.path, "--commit", COMMIT, "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} }),
+    /crash after accepted upload/);
+    const armed = await readState(temporary.path);
+    assert.equal(armed.phase, "github_source_connect_armed");
+    assert.equal(armed.pendingTriggerCreate, undefined);
+    assert.equal(fake.state.trigger, true);
+
+    const state = await executeReleaseCommand([
+      "recover", "--state", temporary.path,
+      "--reason", "contain unjournaled invalid auto-trigger", "--yes",
+    ], { run: fake.run, now: () => NOW, sleep: async () => {} });
+    assert.equal(state.phase, "recovered_legacy");
+    assert.equal(fake.state.trigger, false);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdCreateTrigger")).length, 0);
+    assert.equal(fake.state.commands.filter(({ argv }) => argv[1] === "api"
+      && argv[2].includes("DirectProdDisableTrigger")).length, 1);
   } finally {
     await rm(temporary.directory, { recursive: true, force: true });
   }

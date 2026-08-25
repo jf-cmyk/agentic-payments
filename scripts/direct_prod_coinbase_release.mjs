@@ -535,6 +535,38 @@ function triggerMatchesSource(trigger, source) {
     && String(trigger?.provider || "").toLowerCase() === source.provider;
 }
 
+function assertExpectedSourceMetadata(authority, source, label) {
+  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
+    "release state GitHub source drifted");
+  assert(authority.source.repo === source.repository && authority.source.image == null
+    && authority.triggers.length <= 1
+    && authority.triggers.every((trigger) => triggerMatchesSource(trigger, source)),
+  label);
+  return authority;
+}
+
+async function assertInertDeploySourceAuthority(
+  deps,
+  source,
+  expectedMetadataRetained = null,
+) {
+  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
+    "release state GitHub source drifted");
+  const authority = await getSourceAuthority(deps);
+  const sourceMetadataRetained = authority.source.repo === source.repository;
+  assert((authority.source.repo == null || sourceMetadataRetained)
+    && authority.source.image == null,
+  "production has an unexpected service source");
+  assert(authority.triggers.length === 0,
+    "production has a repository auto-deploy trigger");
+  if (expectedMetadataRetained != null) {
+    assert(typeof expectedMetadataRetained === "boolean"
+      && sourceMetadataRetained === expectedMetadataRetained,
+    "production inert GitHub source metadata changed after preflight");
+  }
+  return { authority, sourceMetadataRetained };
+}
+
 async function assertNoSourceAuthority(deps) {
   const authority = await getSourceAuthority(deps);
   assert(authority.source.repo == null && authority.source.image == null,
@@ -544,11 +576,12 @@ async function assertNoSourceAuthority(deps) {
 }
 
 async function assertExpectedSourceAuthority(deps, source, { requireWaitForCi = true } = {}) {
-  assert(JSON.stringify(source) === JSON.stringify(GITHUB_SOURCE),
-    "release state GitHub source drifted");
   const authority = await getSourceAuthority(deps);
-  assert(authority.source.repo === source.repository && authority.source.image == null,
-    "production GitHub source differs from the release-bound repository");
+  assertExpectedSourceMetadata(
+    authority,
+    source,
+    "production GitHub source differs from the release-bound repository",
+  );
   assert(authority.triggers.length === 1
     && triggerMatchesSource(authority.triggers[0], source),
   "production repository trigger differs from the release-bound GitHub branch");
@@ -580,6 +613,195 @@ async function enableWaitForCi(deps, source) {
   }
   authority = await assertExpectedSourceAuthority(deps, source);
   return authority.triggers[0];
+}
+
+async function ensureExpectedSourceTrigger(deps, state, sourceDeployment, options) {
+  validateUploadIntent(state);
+  assertSourceDeploymentIntent(sourceDeployment, state, deps.now());
+  let authority = await getSourceAuthority(deps);
+  assertExpectedSourceMetadata(
+    authority,
+    state.githubSource,
+    "production GitHub source differs before trigger creation",
+  );
+  const [history, staged] = await Promise.all([
+    listDeployments(deps),
+    getProductionStagedPatch(deps),
+  ]);
+  const uploadBaseline = new Set(state.uploadBaselineDeploymentIds);
+  const additions = history.filter((row) => !uploadBaseline.has(row.id));
+  assert(additions.length === 1 && additions[0].id === sourceDeployment.id,
+    "trigger creation requires the one exact source-connected deployment");
+  let intent = {
+    projectId: TARGET.project,
+    environmentId: TARGET.environment,
+    serviceId: TARGET.service,
+    repository: state.githubSource.repository,
+    branch: state.githubSource.branch,
+    provider: state.githubSource.provider,
+    checkSuites: true,
+    sourceDeploymentId: sourceDeployment.id,
+    baselineDeploymentIds: history.map((row) => row.id),
+    stagedPatchId: staged.id,
+    stagedPatchFingerprint: stagedPatchFingerprint(staged),
+    armedAt: new Date(deps.now()).toISOString(),
+  };
+  state.pendingTriggerCreate = intent;
+  state.updatedAt = new Date(deps.now()).toISOString();
+  await atomicWriteState(options.stateFile, state);
+
+  const stagedBeforeMutation = await getProductionStagedPatch(deps);
+  assert(stagedBeforeMutation.id === intent.stagedPatchId
+    && stagedPatchFingerprint(stagedBeforeMutation) === intent.stagedPatchFingerprint,
+  "production staged patch changed after trigger-create intent was armed");
+  const preDispatchDelta = await postIntentDeploymentDelta(
+    deps,
+    intent.baselineDeploymentIds,
+    "production trigger creation",
+  );
+  assert(preDispatchDelta.length === 0,
+    "production deployment history changed before trigger creation");
+  authority = await getSourceAuthority(deps);
+  assertExpectedSourceMetadata(
+    authority,
+    state.githubSource,
+    "production source drifted before trigger creation",
+  );
+
+  let providerFailure = null;
+  let origin = "source_patch";
+  if (authority.triggers.length === 0) {
+    origin = "explicit_create";
+    intent = {
+      ...intent,
+      dispatchArmedAt: new Date(deps.now()).toISOString(),
+    };
+    state.pendingTriggerCreate = intent;
+    state.updatedAt = new Date(deps.now()).toISOString();
+    await atomicWriteState(options.stateFile, state);
+    const input = {
+      projectId: TARGET.project,
+      environmentId: TARGET.environment,
+      serviceId: TARGET.service,
+      repository: state.githubSource.repository,
+      branch: state.githubSource.branch,
+      provider: state.githubSource.provider,
+      checkSuites: true,
+    };
+    const result = await deps.run([
+      "railway", "api",
+      "mutation DirectProdCreateTrigger($input:DeploymentTriggerCreateInput!){deploymentTriggerCreate(input:$input){id projectId environmentId serviceId repository branch provider checkSuites validCheckSuites}}",
+      "--variables", JSON.stringify({ input }),
+      "--compact",
+    ]);
+    providerFailure = railwayCommandFailure(
+      result,
+      "Railway production trigger creation",
+    );
+    if (!providerFailure) {
+      const acknowledged = railwayGraphqlData(
+        result,
+        "Railway production trigger creation",
+      )?.deploymentTriggerCreate;
+      assertExpectedSourceTriggerRecord(
+        acknowledged,
+        state.githubSource,
+        "Railway trigger-create acknowledgement is not target-bound",
+      );
+      intent = {
+        ...intent,
+        observedTriggerId: acknowledged.id,
+        providerReportedSuccess: true,
+      };
+    } else {
+      intent = { ...intent, providerReportedSuccess: false };
+    }
+    state.pendingTriggerCreate = intent;
+    state.updatedAt = new Date(deps.now()).toISOString();
+    await atomicWriteState(options.stateFile, state);
+  } else {
+    intent = { ...intent, observedTriggerId: authority.triggers[0].id };
+    state.pendingTriggerCreate = intent;
+    state.updatedAt = new Date(deps.now()).toISOString();
+    await atomicWriteState(options.stateFile, state);
+    await enableWaitForCi(deps, state.githubSource);
+  }
+
+  const attempts = Math.ceil(SOURCE_CONNECT_QUIESCENCE_MS / options.pollMs) + 1;
+  let trigger = null;
+  let sawTrigger = false;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    authority = await getSourceAuthority(deps);
+    assertExpectedSourceMetadata(
+      authority,
+      state.githubSource,
+      "production source drifted during trigger-create quiescence",
+    );
+    if (authority.triggers.length === 1) {
+      const current = authority.triggers[0];
+      if (intent.observedTriggerId == null) {
+        intent = {
+          ...intent,
+          observedTriggerId: current.id,
+        };
+        state.pendingTriggerCreate = intent;
+        state.updatedAt = new Date(deps.now()).toISOString();
+        await atomicWriteState(options.stateFile, state);
+      }
+      assert(current.id === intent.observedTriggerId,
+        "production trigger was replaced during trigger-create quiescence");
+      trigger = current;
+      sawTrigger = true;
+    } else {
+      assert(!sawTrigger,
+        "production trigger disappeared during trigger-create quiescence");
+      trigger = null;
+    }
+    const [currentStaged, delta, active] = await Promise.all([
+      getProductionStagedPatch(deps),
+      postIntentDeploymentDelta(
+        deps,
+        intent.baselineDeploymentIds,
+        "production trigger creation",
+      ),
+      getActive(deps),
+    ]);
+    assert(currentStaged.id === intent.stagedPatchId
+      && stagedPatchFingerprint(currentStaged) === intent.stagedPatchFingerprint,
+    "production staged patch changed during trigger-create quiescence");
+    assert(delta.length === 0,
+      "production trigger creation changed deployment history");
+    assert(active.length <= 2 && active.every((row) => (
+      row.id === LEGACY.deploymentId || row.id === intent.sourceDeploymentId
+    )), "production active deployment changed during trigger creation");
+    for (const row of active) {
+      if (row.id === LEGACY.deploymentId) {
+        assert(imageDigest(row) === LEGACY.imageDigest,
+          "legacy image changed during trigger creation");
+      } else {
+        assert(sourceDeploymentMatches(row, state),
+          "source deployment changed during trigger creation");
+      }
+    }
+    if (attempt + 1 < attempts) await deps.sleep(options.pollMs);
+  }
+  if (!trigger) {
+    if (providerFailure) fail(providerFailure);
+    fail("Railway production trigger creation was not durably observable");
+  }
+  assertExpectedSourceTriggerRecord(
+    trigger,
+    state.githubSource,
+    "production trigger is not waiting for a valid GitHub check suite",
+    { requireValidCheckSuite: true },
+  );
+  return {
+    ...trigger,
+    origin,
+    providerReportedSuccess: intent.providerReportedSuccess ?? null,
+    mutationMayHaveBeenAttempted: intent.dispatchArmedAt != null,
+    reconciledAt: new Date(deps.now()).toISOString(),
+  };
 }
 
 function emptyEnvironmentPatch(patch) {
@@ -622,6 +844,71 @@ function stagedPatchFingerprint(staged) {
   return createHash("sha256")
     .update(JSON.stringify(canonicalJson(staged.patch)))
     .digest("hex");
+}
+
+function assertExpectedSourceTriggerRecord(trigger, source, label, {
+  requireValidCheckSuite = false,
+} = {}) {
+  assert(UUID.test(trigger?.id || "")
+    && triggerMatchesSource(trigger, source)
+    && trigger.checkSuites === true
+    && Number.isSafeInteger(trigger.validCheckSuites)
+    && trigger.validCheckSuites >= (requireValidCheckSuite ? 1 : 0),
+  label);
+  return trigger;
+}
+
+function validateTriggerCreateIntent(intent, state) {
+  assert(intent
+    && intent.projectId === TARGET.project
+    && intent.environmentId === TARGET.environment
+    && intent.serviceId === TARGET.service
+    && intent.repository === state.githubSource.repository
+    && intent.branch === state.githubSource.branch
+    && intent.provider === state.githubSource.provider
+    && intent.checkSuites === true
+    && UUID.test(intent.sourceDeploymentId || "")
+    && Array.isArray(intent.baselineDeploymentIds)
+    && new Set(intent.baselineDeploymentIds).size === intent.baselineDeploymentIds.length
+    && intent.baselineDeploymentIds.every((id) => UUID.test(id))
+    && intent.baselineDeploymentIds.includes(intent.sourceDeploymentId)
+    && state.uploadBaselineDeploymentIds.every(
+      (id) => intent.baselineDeploymentIds.includes(id),
+    )
+    && intent.baselineDeploymentIds.length
+      === state.uploadBaselineDeploymentIds.length + 1
+    && typeof intent.stagedPatchId === "string"
+    && /^[0-9a-f]{64}$/.test(intent.stagedPatchFingerprint || "")
+    && Number.isFinite(Date.parse(intent.armedAt || ""))
+    && (intent.dispatchArmedAt == null
+      || Number.isFinite(Date.parse(intent.dispatchArmedAt)))
+    && (intent.observedTriggerId == null
+      || UUID.test(intent.observedTriggerId || ""))
+    && (intent.providerReportedSuccess == null
+      || typeof intent.providerReportedSuccess === "boolean"),
+  "pending production trigger-create intent is invalid or target-drifted");
+  return intent;
+}
+
+function validateSourceTriggerRecord(record, source) {
+  assert(record
+    && UUID.test(record.id || "")
+    && record.projectId === TARGET.project
+    && record.environmentId === TARGET.environment
+    && record.serviceId === TARGET.service
+    && record.repository === source.repository
+    && record.branch === source.branch
+    && record.provider === source.provider
+    && record.checkSuites === true
+    && Number.isSafeInteger(record.validCheckSuites)
+    && record.validCheckSuites >= 1
+    && ["source_patch", "explicit_create"].includes(record.origin)
+    && (record.providerReportedSuccess == null
+      || typeof record.providerReportedSuccess === "boolean")
+    && typeof record.mutationMayHaveBeenAttempted === "boolean"
+    && Number.isFinite(Date.parse(record.reconciledAt || "")),
+  "completed production trigger-create evidence is invalid");
+  return record;
 }
 
 function activeIdentity(rows) {
@@ -1320,6 +1607,9 @@ export async function readState(path) {
     "release state artifact identity is invalid");
   assert(JSON.stringify(value?.githubSource) === JSON.stringify(GITHUB_SOURCE),
     "release state GitHub source drifted");
+  assert(value.preflightSourceMetadataRetained == null
+    || typeof value.preflightSourceMetadataRetained === "boolean",
+  "release state inert source baseline is invalid");
   assert(value?.githubRelease?.workflow === GITHUB_WORKFLOW
     && Array.isArray(value.githubRelease.successfulPushRunIds)
     && value.githubRelease.successfulPushRunIds.length >= 1
@@ -1340,6 +1630,8 @@ export async function readState(path) {
     value.rollbackBoundary,
   ), "release state rollback boundary is invalid");
   if (value.phase === "github_source_connect_armed") validateUploadIntent(value);
+  if (value.pendingTriggerCreate) validateTriggerCreateIntent(value.pendingTriggerCreate, value);
+  if (value.sourceTrigger) validateSourceTriggerRecord(value.sourceTrigger, value.githubSource);
   if (value.pendingTriggerDisable) {
     validateTriggerDisableIntent(value.pendingTriggerDisable, value.githubSource);
   }
@@ -1643,7 +1935,10 @@ async function preflight(options, deps) {
   );
   await resolveTarget(deps);
   const domains = await getDomains(deps);
-  await assertNoSourceAuthority(deps);
+  const inertSource = await assertInertDeploySourceAuthority(
+    deps,
+    options.githubSource,
+  );
   await assertNoProductionStagedPatch(deps);
   // Source build, identity-bound shadow redeploy, enforce redeploy, and one
   // recovery redeploy must all fit without hitting Railway's 1000-row cap.
@@ -1677,6 +1972,7 @@ async function preflight(options, deps) {
     artifactTree,
     artifactRoot: options.artifactRoot,
     githubSource: options.githubSource,
+    preflightSourceMetadataRetained: inertSource.sourceMetadataRetained,
     githubRelease,
     legacy: LEGACY,
     backup,
@@ -1693,7 +1989,8 @@ async function preflight(options, deps) {
 
 async function deployShadow(options, deps) {
   const state = await readState(options.stateFile);
-  assert(!state.pendingTriggerDisable
+  assert(!state.pendingTriggerCreate
+    && !state.pendingTriggerDisable
     && state.sourceTriggerControl?.githubTriggerDisabled !== true,
   "deploy-shadow refuses an active production trigger-disable recovery");
   assert(state.phase === "preflight_passed", "deploy-shadow requires a fresh passed preflight");
@@ -1709,7 +2006,11 @@ async function deployShadow(options, deps) {
   );
   await resolveTarget(deps);
   await getDomains(deps);
-  await assertNoSourceAuthority(deps);
+  await assertInertDeploySourceAuthority(
+    deps,
+    state.githubSource,
+    state.preflightSourceMetadataRetained,
+  );
   await assertNoProductionStagedPatch(deps);
   await assertOneActive(deps, LEGACY.deploymentId, LEGACY.imageDigest);
   const before = await listDeployments(deps, 4);
@@ -1739,7 +2040,11 @@ async function deployShadow(options, deps) {
     state.commit,
   );
   await assertOneActive(deps, LEGACY.deploymentId, LEGACY.imageDigest);
-  await assertNoSourceAuthority(deps);
+  await assertInertDeploySourceAuthority(
+    deps,
+    state.githubSource,
+    state.preflightSourceMetadataRetained,
+  );
   await assertNoProductionStagedPatch(deps);
   const finalRows = await listDeployments(deps, 4);
   assert(JSON.stringify(finalRows.map((row) => row.id).sort())
@@ -1784,8 +2089,12 @@ async function deployShadow(options, deps) {
     sourceDeployment = await waitForSourceDeployment(deps, state, options);
   }
   const deploymentId = sourceDeployment.id;
-  await assertExpectedSourceAuthority(deps, state.githubSource, { requireWaitForCi: false });
-  await enableWaitForCi(deps, state.githubSource);
+  const sourceTrigger = await ensureExpectedSourceTrigger(
+    deps,
+    state,
+    sourceDeployment,
+    options,
+  );
   state.candidate = {
     buildDeploymentId: deploymentId,
     imageDigest: null,
@@ -1799,6 +2108,8 @@ async function deployShadow(options, deps) {
     tree: state.artifactTree,
     waitForCi: true,
   };
+  state.sourceTrigger = sourceTrigger;
+  delete state.pendingTriggerCreate;
   state.sourceConnectProcess = {
     providerReportedSuccess: connectionFailure === null,
     exactMutationObservedAfterProviderFailure: connectionFailure !== null,
@@ -2096,7 +2407,8 @@ function bindAcceptedRedeploy(state, deploymentId, reconciled, now) {
 
 async function promoteEnforce(options, deps) {
   const state = await readState(options.stateFile);
-  assert(!state.pendingTriggerDisable
+  assert(!state.pendingTriggerCreate
+    && !state.pendingTriggerDisable
     && state.sourceTriggerControl?.githubTriggerDisabled !== true,
   "promote-enforce refuses an active production trigger-disable recovery");
   assert(state.phase === "shadow_validated", "promote-enforce requires a validated shadow soak");
@@ -2209,6 +2521,7 @@ function knownDeploymentIds(state) {
     state.enforceDeploymentId,
     state.recovery?.deploymentId,
     state.current?.deploymentId,
+    state.pendingTriggerCreate?.sourceDeploymentId,
     state.lastAcceptedUpload?.deploymentId,
     state.lastAcceptedRedeploy?.deploymentId,
     state.lastFailedMutation?.deploymentId,
@@ -2438,7 +2751,11 @@ async function reconcileArmedMutation(state, active, options, deps) {
     let triggerDisableIsInert = false;
     if (state.pendingTriggerDisable
       || state.sourceTriggerControl?.githubTriggerDisabled === true
-      || recoveryAuthority.triggers.length === 0) {
+      || recoveryAuthority.triggers.length === 0
+      || (recoveryAuthority.triggers.length === 1
+        && (recoveryAuthority.triggers[0].checkSuites !== true
+          || !Number.isSafeInteger(recoveryAuthority.triggers[0].validCheckSuites)
+          || recoveryAuthority.triggers[0].validCheckSuites < 1))) {
       await disableExpectedSourceTrigger(deps, state, options);
       await assertCompletedTriggerControlAuthority(
         deps,
@@ -2781,6 +3098,21 @@ async function finishBoundRecovery(state, binding, options, deps) {
   return state;
 }
 
+function containPendingTriggerCreate(state, now) {
+  if (!state.pendingTriggerCreate) return;
+  const intent = validateTriggerCreateIntent(state.pendingTriggerCreate, state);
+  const control = validateCompletedTriggerControl(state.sourceTriggerControl);
+  state.triggerCreateProcess = {
+    sourceDeploymentId: intent.sourceDeploymentId,
+    triggerId: control.triggerId || intent.observedTriggerId || null,
+    mutationMayHaveBeenAttempted: intent.dispatchArmedAt != null,
+    providerReportedSuccess: intent.providerReportedSuccess ?? null,
+    containedBeforeRecovery: true,
+    containedAt: new Date(now).toISOString(),
+  };
+  delete state.pendingTriggerCreate;
+}
+
 async function recover(options, deps) {
   let state = await readState(options.stateFile);
   await resolveTarget(deps);
@@ -2797,8 +3129,8 @@ async function recover(options, deps) {
     (row) => !IN_FLIGHT.has(String(row.status).toUpperCase()),
   ), "recovery refuses while another deployment is in flight");
   if (state.phase === "github_source_connect_armed"
-    && authority.triggers.length === 1
-    && (state.pendingTriggerDisable
+    && (state.pendingTriggerCreate
+      || state.pendingTriggerDisable
       || state.sourceTriggerControl?.githubTriggerDisabled === true)) {
     await disableExpectedSourceTrigger(deps, state, options);
     authority = await getSourceAuthority(deps);
@@ -2874,6 +3206,7 @@ async function recover(options, deps) {
     state,
     options,
   );
+  containPendingTriggerCreate(state, deps.now());
   if (triggerControlBeforeRecovery.githubTriggerDisabled) {
     state.githubTriggerDisabledBeforeRecoveryAt = triggerControlBeforeRecovery.disabledAt;
     state.updatedAt = new Date(deps.now()).toISOString();
@@ -3014,6 +3347,13 @@ export function summarizeReleaseState(state) {
       || triggerControl?.triggerDeletionMayHaveBeenAttempted === true,
     triggerId: triggerControl?.triggerId || null,
     triggerDisableProviderReportedSuccess: triggerControl?.providerReportedSuccess ?? null,
+    triggerCreateMayHaveBeenAttempted: state.sourceTrigger?.mutationMayHaveBeenAttempted === true
+      || state.pendingTriggerCreate?.dispatchArmedAt != null
+      || state.triggerCreateProcess?.mutationMayHaveBeenAttempted === true,
+    triggerCreateProviderReportedSuccess: state.sourceTrigger?.providerReportedSuccess
+      ?? state.pendingTriggerCreate?.providerReportedSuccess
+      ?? state.triggerCreateProcess?.providerReportedSuccess
+      ?? null,
     githubTriggerDisabledAt: state.recovery?.githubTriggerDisabledAt
       || triggerControl?.disabledAt
       || null,
