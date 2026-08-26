@@ -256,8 +256,23 @@ class PairSearchResponse(BaseModel):
 
     status: str = "ok"
     query: str = Field(..., description="Original search query")
-    total_matches: int = Field(..., description="Number of matching pairs")
-    pairs: list[PairInfo] = Field(..., description="Matching pairs (max 50)")
+    total_matches: int = Field(
+        ...,
+        description="Total number of matching pairs in the searched catalogs",
+    )
+    returned_matches: int = Field(
+        ...,
+        description="Number of matching pairs returned on this page",
+    )
+    offset: int = Field(..., ge=0, description="Zero-based result offset")
+    limit: int = Field(..., ge=1, description="Maximum page size")
+    has_more: bool = Field(..., description="Whether another page is available")
+    next_offset: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Offset for the next page, or null for the final page",
+    )
+    pairs: list[PairInfo] = Field(..., description="Matching pairs on this page")
     meta: dict = Field(default_factory=lambda: {
         "provider": "Blocksize Capital",
         "total_coverage": "Enabled symbols across crypto, equities, FX, and metals",

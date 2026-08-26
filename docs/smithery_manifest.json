@@ -1,6 +1,6 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Read-only MCP discovery for Blocksize real-time market data. Direct public HTTP uses signed x402; starter credits are for eligible authenticated connector users only; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",

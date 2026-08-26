@@ -41,6 +41,7 @@ from src.models import (
     BidAskData,
     FXData,
     MetalData,
+    PairInfo,
     StatePriceData,
     VWAP24HrData,
     VWAP30MinData,
@@ -1422,7 +1423,7 @@ class TestPaymentGate:
         """Search endpoint should NOT require payment."""
         # Set up mock client since search actually tries to call blocksize
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         app.state.blocksize = mock_client
 
         response = test_client.get("/v1/search?q=btc")
@@ -1430,13 +1431,58 @@ class TestPaymentGate:
 
     def test_search_accepts_equity_filter(self, test_client):
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         app.state.blocksize = mock_client
 
         response = test_client.get("/v1/search?q=AAPL&asset_class=equity")
 
         assert response.status_code == 200
-        mock_client.search_pairs.assert_awaited_once_with("AAPL", "equity")
+        mock_client.search_pairs_page.assert_awaited_once_with(
+            "AAPL", "equity", limit=50, offset=0
+        )
+
+    def test_search_reports_full_total_and_pagination(self, test_client):
+        mock_client = AsyncMock()
+        pairs = [
+            PairInfo(
+                pair="BTC-USD",
+                base_currency="BTC",
+                quote_currency="USD",
+                asset_class="crypto",
+                services=["vwap"],
+            )
+        ]
+        mock_client.search_pairs_page = AsyncMock(return_value=(pairs, 73))
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/search?q=BTC&limit=1&offset=20")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_matches"] == 73
+        assert data["returned_matches"] == 1
+        assert data["offset"] == 20
+        assert data["next_offset"] == 21
+        assert data["has_more"] is True
+
+    def test_unified_coverage_distinguishes_live_and_research(self, test_client):
+        mock_client = AsyncMock()
+        mock_client.list_vwap_instruments = AsyncMock(return_value=["BTCUSD", "ETHUSD"])
+        mock_client.list_bidask_instruments = AsyncMock(return_value=["BTCUSD", "AAPL"])
+        mock_client.list_fx_instruments = AsyncMock(return_value=["EURUSD"])
+        mock_client.list_metal_instruments = AsyncMock(return_value=["XAUUSD"])
+        app.state.blocksize = mock_client
+
+        response = test_client.get("/v1/coverage")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["live_data"]["namespaces"]["vwap"]["enabled_instrument_count"] == 2
+        assert data["rwa_registry"]["canonical_assets"] >= 1
+        assert data["rwa_registry"]["decision_grade_canonical_assets"] >= 1
+        assert data["rwa_registry"]["research_only_or_manual_verification_assets"] >= 1
+        assert data["commercial_model"]["discovery_cost_credits"] == 0
+        assert data["commercial_model"]["starter_credits_apply_to_products_not_symbols"] is True
 
     def test_instruments_is_free(self, test_client):
         """Instruments endpoint should NOT require payment."""
@@ -3622,7 +3668,7 @@ class TestDiscoveryRateLimit:
         _DISCOVERY_RATE_LIMITER.clear()
 
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         app.state.blocksize = mock_client
 
         headers = {"X-Forwarded-For": "203.0.113.10"}
@@ -3658,7 +3704,7 @@ class TestDiscoveryRateLimit:
         monkeypatch.setattr(settings.server, "discovery_rate_limit_per_day", 100)
 
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         app.state.blocksize = mock_client
 
         first = test_client.get(
@@ -4332,7 +4378,7 @@ class TestObservabilityDashboard:
         tmp_path,
     ):
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         mock_client.get_vwap_latest = AsyncMock(
             return_value=VWAPData(
                 pair="btc-usd",
@@ -4403,7 +4449,7 @@ class TestObservabilityDashboard:
         test_client,
     ):
         mock_client = AsyncMock()
-        mock_client.search_pairs = AsyncMock(return_value=[])
+        mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
         app.state.blocksize = mock_client
 
         assert test_client.get("/v1/search?q=nvda&asset_class=equity").status_code == 200

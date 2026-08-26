@@ -46,7 +46,7 @@ async def test_authenticated_discovery_is_bounded_and_provenanced(
     instruments = [f"PAIR-{index:04d}" for index in reversed(range(605))]
     client = AsyncMock()
     client.list_vwap_instruments = AsyncMock(return_value=instruments)
-    client.search_pairs = AsyncMock(return_value=[])
+    client.search_pairs_page = AsyncMock(return_value=([], 0))
     monkeypatch.setattr(module, "_client", client)
 
     listed = _details(await list_tool("vwap", limit=100, offset=100))
@@ -65,7 +65,9 @@ async def test_authenticated_discovery_is_bounded_and_provenanced(
     assert len(listed["meta"]["snapshot_sha256"]) == 64
 
     assert missing["total_matches"] == 0
-    assert missing["meta"]["snapshot_scope"] == "returned_result_set_max_50"
+    assert missing["returned_matches"] == 0
+    assert missing["has_more"] is False
+    assert missing["meta"]["snapshot_scope"] == "returned_search_page"
     assert len(missing["meta"]["snapshot_sha256"]) == 64
 
     assert schema["properties"]["limit"]["default"] == 100
@@ -73,3 +75,8 @@ async def test_authenticated_discovery_is_bounded_and_provenanced(
     assert schema["properties"]["limit"]["maximum"] == 500
     assert schema["properties"]["offset"]["default"] == 0
     assert schema["properties"]["offset"]["minimum"] == 0
+
+    search_schema = tools["search_pairs"].parameters
+    assert search_schema["properties"]["limit"]["default"] == 50
+    assert search_schema["properties"]["limit"]["maximum"] == 500
+    assert search_schema["properties"]["offset"]["default"] == 0

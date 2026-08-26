@@ -95,7 +95,9 @@ class TestSearchPairsTool:
             PairInfo(pair="btc-eur", base_currency="BTC", quote_currency="EUR", asset_class="crypto", services=["vwap", "bidask"], tier="core"),
         ]
         with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.search_pairs = AsyncMock(return_value=mock_pairs)
+            mock_client.return_value.search_pairs_page = AsyncMock(
+                return_value=(mock_pairs, len(mock_pairs))
+            )
             result = await search_pairs("btc")
         assert "2 instruments" in result
         assert "btc-usd" in result
@@ -103,13 +105,32 @@ class TestSearchPairsTool:
     @pytest.mark.asyncio
     async def test_search_pairs_no_results(self):
         with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
-            mock_client.return_value.search_pairs = AsyncMock(return_value=[])
+            mock_client.return_value.search_pairs_page = AsyncMock(return_value=([], 0))
             result = await search_pairs("zzzzz")
         assert "No instruments found" in result
         details = json.loads(result.split("<details>\n", 1)[1].split("\n</details>", 1)[0])
         assert details["total_matches"] == 0
+        assert details["returned_matches"] == 0
+        assert details["has_more"] is False
         assert details["meta"]["freshness_status"] == "upstream_timestamp_unavailable"
         assert len(details["meta"]["snapshot_sha256"]) == 64
+
+    @pytest.mark.asyncio
+    async def test_search_pairs_reports_total_and_continuation(self):
+        mock_pairs = [
+            PairInfo(pair="btc-usd", asset_class="crypto", services=["vwap"]),
+        ]
+        with patch("src.mcp_server._get_client", new_callable=AsyncMock) as mock_client:
+            mock_client.return_value.search_pairs_page = AsyncMock(
+                return_value=(mock_pairs, 73)
+            )
+            result = await search_pairs("btc", limit=1, offset=20)
+        details = json.loads(result.split("<details>\n", 1)[1].split("\n</details>", 1)[0])
+        assert details["total_matches"] == 73
+        assert details["returned_matches"] == 1
+        assert details["offset"] == 20
+        assert details["next_offset"] == 21
+        assert details["has_more"] is True
 
 
 class TestListInstrumentsTool:

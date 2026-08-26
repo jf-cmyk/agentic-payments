@@ -22,6 +22,7 @@ Endpoints:
   GET /v1/rwa/source-rights       — RWA rights-to-source register (FREE)
   GET /v1/rwa/replay-inventory    — RWA route/pool replay inventory (FREE)
   POST /v1/rwa/observations/store — Operator-only replayable RWA evidence ledger
+  GET /v1/coverage                  — Unified live and research coverage (FREE)
   GET /v1/search?q={query}        — Pair search (FREE)
   GET /v1/instruments/{service}   — Instrument list (FREE)
   GET /health                     — Health check (FREE)
@@ -2381,6 +2382,7 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/signals/trader-alpha-pack": Decimal("2.50"),
     "/v1/rwa/benchmark/blocksize": Decimal("0.25"),
     # Free
+    "/v1/coverage": None,
     "/v1/search": None,
     "/v1/instruments/": None,
     "/v1/rwa/coverage": None,
@@ -2438,7 +2440,12 @@ STARTER_ID_RE = re.compile(r"^[A-Za-z0-9:._@-]{8,160}$")
 EVM_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 EVM_TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 SOLANA_SIGNATURE_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{80,90}$")
-DISCOVERY_RATE_LIMIT_PATHS = ("/v1/search", "/v1/instruments/", "/v1/rwa/")
+DISCOVERY_RATE_LIMIT_PATHS = (
+    "/v1/coverage",
+    "/v1/search",
+    "/v1/instruments/",
+    "/v1/rwa/",
+)
 # ---------------------------------------------------------------------------
 # Documentation & Schemas
 # ---------------------------------------------------------------------------
@@ -6844,23 +6851,223 @@ async def search_pairs(
         pattern="^(all|crypto|equity|equities|fx|metal)$",
         description="Asset class filter",
     ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=DISCOVERY_INSTRUMENT_MAX_LIMIT,
+        description="Maximum matching instruments to return",
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Zero-based offset into the deterministic search results",
+    ),
     request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     """Search instruments. FREE."""
     try:
         client: BlocksizeClient = request.app.state.blocksize
-        pairs = await client.search_pairs(q, asset_class)
-        if not pairs and (opportunity := normalize_symbol_opportunity(q)) is not None:
+        pairs, total = await client.search_pairs_page(
+            q,
+            asset_class,
+            limit=limit,
+            offset=offset,
+        )
+        next_offset = offset + len(pairs)
+        has_more = next_offset < total
+        opportunity = normalize_symbol_opportunity(q)
+        _record_product_event(
+            "catalog_search_completed",
+            request,
+            metadata={
+                "normalized_query": opportunity,
+                "total_matches": total,
+                "returned_matches": len(pairs),
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+            },
+        )
+        if not pairs and total == 0 and opportunity is not None:
             _record_product_event(
                 "unsupported_symbol_request",
                 request,
                 metadata={"normalized_query": opportunity, "result_count": 0},
             )
-        return PairSearchResponse(query=q, total_matches=len(pairs), pairs=pairs).model_dump()
+        return PairSearchResponse(
+            query=q,
+            total_matches=total,
+            returned_matches=len(pairs),
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            next_offset=next_offset if has_more else None,
+            pairs=pairs,
+            meta={
+                "provider": "Blocksize Capital",
+                "snapshot_scope": "full_catalog_search_with_paginated_response",
+                "total_coverage": (
+                    "Enabled symbols across crypto, equities, FX, and metals"
+                ),
+            },
+        ).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Search failed for '{q}'", details=str(e),
         ).model_dump())
+
+
+@app.get("/v1/coverage")
+async def unified_coverage(request: Request) -> dict[str, Any]:
+    """Return one conservative coverage map for humans and agents. FREE."""
+    client: BlocksizeClient = request.app.state.blocksize
+    namespace_calls = {
+        "vwap": client.list_vwap_instruments(),
+        "bidask": client.list_bidask_instruments(),
+        "fx": client.list_fx_instruments(),
+        "metal": client.list_metal_instruments(),
+    }
+    results = await asyncio.gather(
+        *namespace_calls.values(),
+        return_exceptions=True,
+    )
+    live_namespaces: dict[str, dict[str, Any]] = {}
+    for name, result in zip(namespace_calls, results, strict=True):
+        if isinstance(result, Exception):
+            live_namespaces[name] = {
+                "status": "temporarily_unavailable",
+                "enabled_instrument_count": None,
+                "discovery_endpoint": f"/v1/instruments/{name}",
+            }
+        else:
+            live_namespaces[name] = {
+                "status": "available",
+                "enabled_instrument_count": len(result),
+                "discovery_endpoint": f"/v1/instruments/{name}",
+            }
+
+    registry = build_rwa_registry_overview(
+        include_aliases=False,
+        limit=1,
+        offset=0,
+        include_venue_instruments=False,
+    )
+    rwa = registry["summary"]
+    writes_locked = economic_writes_locked()
+    _record_product_event(
+        "coverage_catalog_view",
+        request,
+        metadata={
+            "available_live_namespaces": sum(
+                row["status"] == "available" for row in live_namespaces.values()
+            ),
+            "rwa_canonical_assets": rwa["canonical_asset_count"],
+            "rwa_decision_grade_assets": rwa[
+                "decision_grade_canonical_asset_count"
+            ],
+            "economic_writes_locked": writes_locked,
+        },
+    )
+    return {
+        "status": "ok",
+        "product": "unified_data_coverage",
+        "as_of": _utc_now_iso(),
+        "definitions": {
+            "enabled_live_namespace": (
+                "An instrument is discoverable from the live upstream namespace; "
+                "a usable observation still depends on source freshness and availability."
+            ),
+            "decision_grade": (
+                "Canonical identity checks passed for the current RWA catalog. "
+                "This is not a promise that every venue observation is live or licensed."
+            ),
+            "research_only": (
+                "Catalog coverage that requires identity, source-rights, adapter, "
+                "freshness, or quality verification before production decisions."
+            ),
+            "counting_note": (
+                "Namespaces and RWA venue rows overlap. Do not add their counts to "
+                "claim a unique instrument total."
+            ),
+        },
+        "live_data": {
+            "scope": "enabled_upstream_discovery_namespaces",
+            "namespaces": live_namespaces,
+            "search_endpoint": "/v1/search?q={query}&asset_class={asset_class}&limit=50&offset=0",
+        },
+        "rwa_registry": {
+            "canonical_assets": rwa["canonical_asset_count"],
+            "normalized_symbol_aliases": rwa["alias_count"],
+            "venue_instrument_rows": rwa["coverage_row_count"],
+            "venues": rwa["registry_venue_count"],
+            "decision_grade_canonical_assets": rwa[
+                "decision_grade_canonical_asset_count"
+            ],
+            "research_only_or_manual_verification_assets": rwa[
+                "manual_verification_asset_count"
+            ],
+            "ambiguous_source_scoped_assets": rwa[
+                "ambiguous_source_scoped_asset_count"
+            ],
+            "registry_endpoint": "/v1/rwa/registry",
+            "venue_rows_endpoint": "/v1/rwa/registry/venues",
+        },
+        "access": {
+            "free_discovery": [
+                "/v1/search",
+                "/v1/instruments/{service}",
+                "/v1/rwa/registry",
+                "/v1/rwa/coverage",
+                "/data-packages.json",
+                "/llms.txt",
+            ],
+            "live_http": {
+                "mode": "signed_x402_per_call",
+                "availability": (
+                    "locked_pending_funded_canary"
+                    if writes_locked
+                    else "available"
+                ),
+                "templates": [
+                    "/v1/vwap/{pair}",
+                    "/v1/bidask/{pair}",
+                    "/v1/fx/{pair}",
+                    "/v1/metal/{ticker}",
+                ],
+            },
+            "authenticated_connectors": {
+                "surfaces": ["OpenAI", "Claude", "Cursor"],
+                "starter_allowance_credits": STARTER_CREDIT_ALLOWANCE,
+                "availability": (
+                    "locked_pending_funded_canary"
+                    if writes_locked
+                    else "available_to_eligible_authenticated_users"
+                ),
+            },
+            "public_mcp": REMOTE_MCP_URL,
+            "pay_sh": "https://pay.sh/services/blocksize/market-data",
+            "product_catalog": DATA_PACKAGES_JSON_URL,
+        },
+        "commercial_model": {
+            "discovery_cost_credits": 0,
+            "starter_credits_apply_to_products_not_symbols": True,
+            "starter_credit_costs": CREDIT_COSTS,
+            "conversion_path": [
+                "discover coverage for free",
+                "select a supported instrument and product",
+                "receive a live result through starter credits or signed x402",
+                "move repeat or high-volume usage to an authenticated account plan",
+            ],
+            "measurement_events": [
+                "free_discovery_call",
+                "catalog_search_completed",
+                "coverage_catalog_view",
+                "payment_required",
+                "payment_settled",
+                "data_delivered",
+            ],
+        },
+    }
 
 
 @app.get("/v1/instruments/{service}")
@@ -12255,6 +12462,7 @@ async def health_check() -> dict[str, Any]:
             "price_usdc": str(settings.pricing.equities),
         },
         "links": {
+            "coverage": f"{PUBLIC_BASE_URL.rstrip('/')}/v1/coverage",
             "remote_mcp": REMOTE_MCP_URL,
             "manifest": MCP_MANIFEST_URL,
             "robots": ROBOTS_URL,
