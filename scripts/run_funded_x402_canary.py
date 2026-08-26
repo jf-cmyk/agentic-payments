@@ -90,14 +90,18 @@ def _parse_keypair(raw: bytes) -> Keypair:
     return Keypair.from_bytes(decoded)
 
 
-def _read_removable_key_once(path_value: str) -> Keypair:
+def _read_key_once(path_value: str, *, allow_local_key_file: bool = False) -> Keypair:
     path = Path(path_value).expanduser()
     if not path.is_absolute():
         raise CanaryError("key file path must be absolute")
     resolved = path.resolve(strict=True)
     if not resolved.is_file():
         raise CanaryError("key path is not a regular file")
-    if sys.platform == "darwin" and not resolved.is_relative_to(Path("/Volumes")):
+    if (
+        sys.platform == "darwin"
+        and not allow_local_key_file
+        and not resolved.is_relative_to(Path("/Volumes"))
+    ):
         raise CanaryError("on macOS the key file must remain on a volume under /Volumes")
     size = resolved.stat().st_size
     if size <= 0 or size > MAX_KEY_FILE_BYTES:
@@ -197,7 +201,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         if required.resource and str(required.resource.url) != str(parsed_url):
             raise CanaryError("invoice resource URL does not exactly match the requested URL")
 
-        keypair = _read_removable_key_once(args.key_file)
+        keypair = _read_key_once(
+            args.key_file,
+            allow_local_key_file=args.allow_local_key_file,
+        )
         signer = KeypairSigner(keypair)
         payer = signer.address
 
@@ -269,6 +276,11 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("key_file", help="Absolute key file path on the removable volume")
+    parser.add_argument(
+        "--allow-local-key-file",
+        action="store_true",
+        help="Explicitly allow a key file outside /Volumes on macOS",
+    )
     parser.add_argument("--rpc-url", default=os.getenv("SOLANA_RPC_URL"))
     parser.add_argument("--timeout", type=float, default=45.0)
     return parser

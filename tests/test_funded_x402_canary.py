@@ -13,6 +13,7 @@ from scripts.run_funded_x402_canary import (
     SOLANA_USDC,
     _atomic_usdc,
     _parse_keypair,
+    _read_key_once,
     _select_solana_requirement,
     _write_lock_is_open,
 )
@@ -44,6 +45,20 @@ def test_keypair_parser_rejects_invalid_or_oversized_shapes() -> None:
         _parse_keypair(json.dumps([1, 2, 3]).encode())
     with pytest.raises(CanaryError):
         _parse_keypair(base64.b64encode(b"too-short"))
+
+
+def test_local_key_file_requires_explicit_macos_opt_in(tmp_path, monkeypatch) -> None:
+    keypair = Keypair()
+    key_file = tmp_path / "Test.json"
+    key_file.write_text(json.dumps(list(bytes(keypair))))
+    monkeypatch.setattr("scripts.run_funded_x402_canary.sys.platform", "darwin")
+
+    with pytest.raises(CanaryError, match="under /Volumes"):
+        _read_key_once(str(key_file))
+    assert (
+        _read_key_once(str(key_file), allow_local_key_file=True).pubkey()
+        == keypair.pubkey()
+    )
 
 
 def _required(*, amount: str = "2000", pay_to: str | None = None) -> PaymentRequired:
