@@ -353,6 +353,67 @@ class TestPairSearch:
         assert results[0].tier == "equities"
 
     @pytest.mark.asyncio
+    async def test_search_normalizes_separators_and_ranks_exact_then_base_matches(self, client):
+        with patch.object(
+            client,
+            "list_vwap_instruments",
+            new_callable=AsyncMock,
+            return_value=["AAVESOL", "SOLBTC", "SOLUSD", "SOLUSDC", "XSOLUSD"],
+        ), patch.object(
+            client,
+            "_list_bidask_entries",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            client,
+            "list_metal_instruments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            exact, _ = await client.search_pairs_page(
+                "SOL-USD", asset_class="crypto", limit=50, offset=0
+            )
+            base, _ = await client.search_pairs_page(
+                "SOL", asset_class="crypto", limit=50, offset=0
+            )
+
+        assert exact[0].pair == "SOLUSD"
+        assert {item.pair for item in exact} == {"SOLUSD", "SOLUSDC", "XSOLUSD"}
+        assert [item.pair for item in base[:3]] == ["SOLBTC", "SOLUSD", "SOLUSDC"]
+        assert [item.pair for item in base].index("AAVESOL") >= 3
+
+    @pytest.mark.asyncio
+    async def test_fx_search_reports_customer_facing_fx_service(self, client):
+        with patch.object(
+            client,
+            "list_vwap_instruments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            client,
+            "_list_bidask_entries",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "ticker": "EURUSD",
+                    "base_currency": "EUR",
+                    "quote_currency": "USD",
+                    "asset_class": "fx",
+                }
+            ],
+        ), patch.object(
+            client,
+            "list_metal_instruments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            results = await client.search_pairs("EUR/USD", asset_class="fx")
+
+        assert len(results) == 1
+        assert results[0].pair == "EURUSD"
+        assert results[0].services == ["fx"]
+
+    @pytest.mark.asyncio
     async def test_search_pairs_no_match(self, client):
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["btc-usd"]), \
              patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \

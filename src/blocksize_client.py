@@ -690,7 +690,8 @@ class BlocksizeClient:
         if asset_filter == "equities":
             asset_filter = "equity"
 
-        query_lower = query.lower()
+        query_lower = query.strip().lower()
+        query_symbol = _normalize_ticker(query).strip().lower()
         matches: list[PairInfo] = []
         bidask_entries: list[dict[str, str]] | None = None
 
@@ -699,6 +700,42 @@ class BlocksizeClient:
             if bidask_entries is None:
                 bidask_entries = await self._list_bidask_entries()
             return bidask_entries
+
+        def matches_query(
+            pair: str,
+            base: str = "",
+            quote: str = "",
+            searchable: str = "",
+        ) -> bool:
+            if not query_lower:
+                return True
+            normalized_values = (
+                _normalize_ticker(pair).lower(),
+                _normalize_ticker(base).lower(),
+                _normalize_ticker(quote).lower(),
+            )
+            return (
+                bool(query_symbol)
+                and any(query_symbol in value for value in normalized_values if value)
+            ) or query_lower in searchable.lower()
+
+        def relevance(pair_info: PairInfo) -> tuple[int, str, str, str]:
+            pair = _normalize_ticker(pair_info.pair).lower()
+            base = _normalize_ticker(pair_info.base_currency).lower()
+            quote = _normalize_ticker(pair_info.quote_currency).lower()
+            if query_symbol and pair == query_symbol:
+                score = 0
+            elif query_symbol and base == query_symbol:
+                score = 1
+            elif query_symbol and pair.startswith(query_symbol):
+                score = 2
+            elif query_symbol and base.startswith(query_symbol):
+                score = 3
+            elif query_symbol and quote == query_symbol:
+                score = 4
+            else:
+                score = 5
+            return score, pair, base, quote
 
         # Search crypto instruments
         if asset_filter in ("all", "crypto"):
@@ -714,14 +751,14 @@ class BlocksizeClient:
                 all_crypto = vwap_instruments | bidask_instruments
 
                 for instrument in sorted(all_crypto):
-                    if query_lower in instrument.lower():
+                    base, quote = _split_pair(instrument)
+                    if matches_query(instrument, base, quote):
                         services = []
                         if instrument in vwap_instruments:
                             services.append("vwap")
                         if instrument in bidask_instruments:
                             services.append("bidask")
 
-                        base, quote = _split_pair(instrument)
                         tier = "core" if base in TOP_250_CRYPTO else "extended"
                         matches.append(PairInfo(
                             pair=instrument,
@@ -748,7 +785,7 @@ class BlocksizeClient:
                     ticker = entry["ticker"]
                     base = entry["base_currency"]
                     searchable = f"{ticker} {base} {base.removesuffix('X')}".lower()
-                    if query_lower in searchable:
+                    if matches_query(ticker, base, entry["quote_currency"], searchable):
                         matches.append(PairInfo(
                             pair=ticker,
                             base_currency=base.removesuffix("X"),
@@ -771,14 +808,14 @@ class BlocksizeClient:
                     if self._is_fx_entry(entry)
                 )
                 for inst in fx_instruments:
-                    if query_lower in inst.lower():
-                        base, quote = _split_pair(inst)
+                    base, quote = _split_pair(inst)
+                    if matches_query(inst, base, quote):
                         matches.append(PairInfo(
                             pair=inst,
                             base_currency=base,
                             quote_currency=quote,
                             asset_class="fx",
-                            services=["bidask"],
+                            services=["fx"],
                             tier="tradfi",
                         ))
             except BlocksizeAPIError:
@@ -789,8 +826,8 @@ class BlocksizeClient:
         # Search metals
         if asset_filter in ("all", "metal"):
             for inst in await self.list_metal_instruments():
-                if query_lower in inst.lower():
-                    base, quote = _split_pair(inst)
+                base, quote = _split_pair(inst)
+                if matches_query(inst, base, quote):
                     matches.append(PairInfo(
                         pair=inst,
                         base_currency=base,
@@ -800,7 +837,7 @@ class BlocksizeClient:
                         tier="tradfi",
                     ))
 
-        return matches
+        return sorted(matches, key=relevance)
 
     async def _list_bidask_entries(self) -> list[dict[str, str]]:
         """Return normalized bid/ask instrument entries from the shared catalog."""
@@ -979,7 +1016,13 @@ def _split_pair(pair: str) -> tuple[str, str]:
 
 def _normalize_ticker(ticker: str) -> str:
     """Normalize ticker strings to Blocksize's compact uppercase form."""
-    return ticker.replace("-", "").replace("/", "").replace("_", "").upper()
+    return (
+        ticker.replace("-", "")
+        .replace("/", "")
+        .replace("_", "")
+        .replace(" ", "")
+        .upper()
+    )
 
 
 def _latest_completed_30m_ms() -> int:

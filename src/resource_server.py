@@ -6914,6 +6914,18 @@ async def search_pairs(
                 "total_coverage": (
                     "Enabled symbols across crypto, equities, FX, and metals"
                 ),
+                "ranking": (
+                    "exact symbol, exact base asset, symbol prefix, base prefix, "
+                    "exact quote asset, then deterministic lexical order"
+                ),
+                "canonical_symbol_format": "compact uppercase without separators",
+                "accepted_search_formats": ["BTCUSD", "BTC-USD", "BTC/USD", "BTC_USD"],
+                "route_templates_by_service": {
+                    "vwap": "/v1/vwap/{pair}",
+                    "bidask": "/v1/bidask/{pair}",
+                    "fx": "/v1/fx/{pair}",
+                    "metal": "/v1/metal/{ticker}",
+                },
             },
         ).model_dump()
     except BlocksizeAPIError as e:
@@ -6959,6 +6971,28 @@ async def unified_coverage(request: Request) -> dict[str, Any]:
     )
     rwa = registry["summary"]
     writes_locked = economic_writes_locked()
+    payment_rails = settings.x402.payment_rail_status()
+
+    def rail_availability(rail: dict[str, object]) -> str:
+        if not rail["ready"]:
+            return "unavailable_configuration"
+        if not rail["enabled"]:
+            return "disabled_by_rail_control"
+        if writes_locked:
+            return "locked_pending_production_enablement"
+        return "available"
+
+    rail_access = {
+        name: {
+            "configured": bool(rail["configured"]),
+            "configuration_ready": bool(rail["ready"]),
+            "rail_enabled": bool(rail["enabled"]),
+            "accepting_payments": bool(rail["operational"]) and not writes_locked,
+            "availability": rail_availability(rail),
+            "blockers": list(rail["blockers"]),
+        }
+        for name, rail in payment_rails.items()
+    }
     _record_product_event(
         "coverage_catalog_view",
         request,
@@ -7029,10 +7063,15 @@ async def unified_coverage(request: Request) -> dict[str, Any]:
             "live_http": {
                 "mode": "signed_x402_per_call",
                 "availability": (
-                    "locked_pending_funded_canary"
+                    "locked_pending_production_enablement"
                     if writes_locked
-                    else "available"
+                    else (
+                        "available"
+                        if any(rail["accepting_payments"] for rail in rail_access.values())
+                        else "unavailable_no_enabled_rail"
+                    )
                 ),
+                "rails": rail_access,
                 "templates": [
                     "/v1/vwap/{pair}",
                     "/v1/bidask/{pair}",
@@ -7044,7 +7083,7 @@ async def unified_coverage(request: Request) -> dict[str, Any]:
                 "surfaces": ["OpenAI", "Claude", "Cursor"],
                 "starter_allowance_credits": STARTER_CREDIT_ALLOWANCE,
                 "availability": (
-                    "locked_pending_funded_canary"
+                    "locked_pending_production_enablement"
                     if writes_locked
                     else "available_to_eligible_authenticated_users"
                 ),

@@ -15,6 +15,7 @@ from scripts.run_funded_x402_canary import (
     _parse_keypair,
     _read_key_once,
     _select_solana_requirement,
+    _validate_vwap_payload,
     _write_lock_is_open,
 )
 
@@ -64,7 +65,7 @@ def test_local_key_file_requires_explicit_macos_opt_in(tmp_path, monkeypatch) ->
 def _required(*, amount: str = "2000", pay_to: str | None = None) -> PaymentRequired:
     return PaymentRequired(
         resource={
-            "url": "https://mcp.blocksize.info/v1/vwap/BTC-USD",
+            "url": "https://mcp.blocksize.info/v1/vwap/BTCUSD",
             "description": "canary",
             "mimeType": "application/json",
         },
@@ -118,3 +119,23 @@ def test_write_lock_must_be_explicitly_ready_and_open() -> None:
         }
     )
     assert not _write_lock_is_open({})
+
+
+def test_validate_vwap_payload_requires_real_typed_data() -> None:
+    payload = {
+        "status": "ok",
+        "data": {
+            "pair": "BTC-USD",
+            "vwap": 123.45,
+            "timestamp": "2026-08-26T22:45:00+00:00",
+            "currency": "USD",
+            "source": "blocksize",
+        },
+        "meta": {"provider": "Blocksize Capital"},
+    }
+
+    assert _validate_vwap_payload(payload) is payload
+    with pytest.raises(CanaryError, match="VWAP"):
+        _validate_vwap_payload({**payload, "data": {**payload["data"], "vwap": 0}})
+    with pytest.raises(CanaryError, match="pair"):
+        _validate_vwap_payload({**payload, "data": {**payload["data"], "pair": "ETHUSD"}})

@@ -1179,6 +1179,21 @@ class TestPaymentGate:
         ]
         assert "Solana" not in data["message"]
 
+    def test_disabled_base_rail_is_not_advertised(self, test_client, monkeypatch):
+        monkeypatch.setattr(settings.x402, "base_payments_enabled", False)
+
+        response = test_client.get("/v1/vwap/btc-usd")
+        data = response.json()
+
+        assert response.status_code == 402
+        assert [item["network"] for item in data["accepts"]] == [
+            settings.x402.solana_network
+        ]
+        assert data["networks"] == [
+            {"name": "Solana", "caip2": settings.x402.solana_network}
+        ]
+        assert "Base L2" not in data["message"]
+
     def test_challenge_intersects_configured_rails_with_facilitator_support(
         self,
         test_client,
@@ -1507,6 +1522,8 @@ class TestPaymentGate:
         assert data["rwa_registry"]["research_only_or_manual_verification_assets"] >= 1
         assert data["commercial_model"]["discovery_cost_credits"] == 0
         assert data["commercial_model"]["starter_credits_apply_to_products_not_symbols"] is True
+        assert data["access"]["live_http"]["availability"] != "locked_pending_funded_canary"
+        assert set(data["access"]["live_http"]["rails"]) == {"solana", "base"}
 
     def test_instruments_is_free(self, test_client):
         """Instruments endpoint should NOT require payment."""
