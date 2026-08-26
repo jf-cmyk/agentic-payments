@@ -314,10 +314,15 @@ def _load_release_build() -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         payload = {}
-    env_commit = os.environ.get("RELEASE_COMMIT_SHA", "").strip().lower()
-    if env_commit:
+    railway_commit = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "").strip().lower()
+    release_commit = os.environ.get("RELEASE_COMMIT_SHA", "").strip().lower()
+    env_commit = railway_commit or release_commit
+    if re.fullmatch(r"[0-9a-f]{40}", env_commit):
         payload["commit_sha"] = env_commit
         payload["stamped"] = True
+    railway_branch = os.environ.get("RAILWAY_GIT_BRANCH", "").strip()
+    if railway_branch:
+        payload["source_branch"] = railway_branch
     return payload
 
 

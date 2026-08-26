@@ -65,6 +65,30 @@ def _assert_oauth_unavailable(metadata: dict[str, object]) -> None:
     assert "registration_endpoint" not in metadata
 
 
+def test_release_provenance_prefers_git_trigger_sha(monkeypatch):
+    railway_sha = "a" * 40
+    stale_manual_sha = "b" * 40
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", railway_sha)
+    monkeypatch.setenv("RAILWAY_GIT_BRANCH", "main")
+    monkeypatch.setenv("RELEASE_COMMIT_SHA", stale_manual_sha)
+
+    provenance = resource_server._load_release_build()
+
+    assert provenance["commit_sha"] == railway_sha
+    assert provenance["source_branch"] == "main"
+    assert provenance["stamped"] is True
+
+
+def test_release_provenance_ignores_invalid_environment_sha(monkeypatch):
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    monkeypatch.setenv("RELEASE_COMMIT_SHA", "not-a-commit")
+
+    provenance = resource_server._load_release_build()
+
+    assert provenance["commit_sha"] is None
+    assert provenance["stamped"] is False
+
+
 @pytest.fixture
 def test_client(monkeypatch, tmp_path):
     """Create a FastAPI test client."""
