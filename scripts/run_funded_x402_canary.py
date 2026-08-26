@@ -13,7 +13,9 @@ import asyncio
 import base64
 import binascii
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -29,7 +31,7 @@ from x402.mechanisms.svm.exact.register import register_exact_svm_client
 from x402.schemas import PaymentRequired, PaymentRequirements
 
 
-DEFAULT_URL = "https://mcp.blocksize.info/v1/vwap/BTC-USD"
+DEFAULT_URL = "https://mcp.blocksize.info/v1/vwap/BTCUSD"
 MAX_USDC = "0.002"
 SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -159,6 +161,48 @@ def _write_lock_is_open(readiness: dict[str, Any]) -> bool:
         return False
 
 
+def _validate_vwap_payload(payload: Any) -> dict[str, Any]:
+    """Validate the paid product body, not only its HTTP and settlement status."""
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise CanaryError("paid response is not a successful JSON product payload")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise CanaryError("paid response is missing its data object")
+
+    pair = str(data.get("pair") or "")
+    canonical_pair = pair.replace("-", "").replace("/", "").replace("_", "").upper()
+    if canonical_pair != "BTCUSD":
+        raise CanaryError("paid response pair does not match BTCUSD")
+
+    vwap = data.get("vwap")
+    if (
+        not isinstance(vwap, (int, float))
+        or isinstance(vwap, bool)
+        or not math.isfinite(float(vwap))
+        or float(vwap) <= 0
+    ):
+        raise CanaryError("paid response VWAP must be a positive finite number")
+
+    timestamp = data.get("timestamp")
+    if not isinstance(timestamp, str):
+        raise CanaryError("paid response timestamp is missing")
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CanaryError("paid response timestamp is not ISO-8601") from exc
+    if parsed_timestamp.tzinfo is None:
+        raise CanaryError("paid response timestamp must include a timezone")
+
+    if str(data.get("currency") or "").upper() != "USD":
+        raise CanaryError("paid response quote currency does not match USD")
+    if not str(data.get("source") or "").strip():
+        raise CanaryError("paid response source is missing")
+    meta = payload.get("meta")
+    if not isinstance(meta, dict) or meta.get("provider") != "Blocksize Capital":
+        raise CanaryError("paid response provider metadata is missing")
+    return payload
+
+
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     max_atomic = _atomic_usdc(MAX_USDC)
     parsed_url = httpx.URL(DEFAULT_URL)
@@ -233,6 +277,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             except (json.JSONDecodeError, AttributeError):
                 pass
             raise CanaryError(f"paid request returned {paid.status_code}{detail}")
+        try:
+            paid_payload = _validate_vwap_payload(paid.json())
+        except json.JSONDecodeError as exc:
+            raise CanaryError("paid response is not JSON") from exc
         settlement = payment_http.get_payment_settle_response(
             lambda name: paid.headers.get(name)
         )
@@ -246,6 +294,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         replay = await http.get(DEFAULT_URL, headers=payment_headers)
         if replay.status_code != 200:
             raise CanaryError(f"idempotent replay returned {replay.status_code}, expected 200")
+        try:
+            replay_payload = _validate_vwap_payload(replay.json())
+        except json.JSONDecodeError as exc:
+            raise CanaryError("idempotent replay response is not JSON") from exc
+        if replay_payload != paid_payload:
+            raise CanaryError("idempotent replay did not return the original data payload")
         replay_settlement = payment_http.get_payment_settle_response(
             lambda name: replay.headers.get(name)
         )
@@ -264,8 +318,11 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "amount_atomic_usdc": int(selected.amount),
         "amount_usdc": str(Decimal(selected.amount) / (Decimal(10) ** USDC_DECIMALS)),
         "transaction": settlement.transaction,
+        "data": paid_payload["data"],
+        "data_meta": paid_payload["meta"],
         "replay_transaction": replay_settlement.transaction,
         "replay_was_idempotent": True,
+        "replay_data_identical": True,
     }
 
 

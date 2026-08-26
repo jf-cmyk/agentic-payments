@@ -78,6 +78,35 @@ def test_payment_requirements_do_not_advertise_solana_without_fee_payer():
     assert configured.x402.primary_wallet == BASE_RECIPIENT
 
 
+def test_payment_requirements_honor_independent_rail_controls():
+    configured = _settings_with_x402(
+        X402Settings(
+            _env_file=None,
+            X402_SOLANA_WALLET_ADDRESS=SOLANA_RECIPIENT,
+            X402_SOLANA_FEE_PAYER=SOLANA_FEE_PAYER,
+            X402_SOLANA_USDC_ADDRESS=SOLANA_USDC,
+            X402_EVM_WALLET_ADDRESS=BASE_RECIPIENT,
+            X402_BASE_USDC_ADDRESS=BASE_USDC,
+            X402_SOLANA_PAYMENTS_ENABLED=False,
+            X402_BASE_PAYMENTS_ENABLED=True,
+        )
+    )
+
+    requirements = configured.payment_requirements(Decimal("0.002"))
+    rail_status = configured.x402.payment_rail_status()
+
+    assert [item["network"] for item in requirements] == ["eip155:8453"]
+    assert rail_status["solana"]["ready"] is True
+    assert rail_status["solana"]["enabled"] is False
+    assert rail_status["solana"]["operational"] is False
+    assert rail_status["base"]["operational"] is True
+
+    configured.x402.base_payments_enabled = False
+    assert configured.payment_requirements(Decimal("0.002")) == []
+    assert configured.x402.primary_wallet == ""
+    assert configured.x402.primary_network == ""
+
+
 def test_malformed_payment_addresses_disable_their_rails():
     configured = _settings_with_x402(
         X402Settings(

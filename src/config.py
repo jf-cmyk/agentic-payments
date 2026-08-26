@@ -144,6 +144,16 @@ class X402Settings(BaseSettings):
         "", alias="X402_EVM_WALLET_ADDRESS",
     )
 
+    # Rail-specific rollout controls. The master economic-write lock remains the
+    # final guard for all credit and payment mutations; these switches determine
+    # which configured x402 rails are advertised and accepted once it is open.
+    solana_payments_enabled: bool = Field(
+        True, alias="X402_SOLANA_PAYMENTS_ENABLED",
+    )
+    base_payments_enabled: bool = Field(
+        True, alias="X402_BASE_PAYMENTS_ENABLED",
+    )
+
     # Facilitator
     facilitator_url: str = Field(
         "",
@@ -220,11 +230,15 @@ class X402Settings(BaseSettings):
             "solana": {
                 "configured": bool(self.solana_wallet_address),
                 "ready": not solana_blockers,
+                "enabled": self.solana_payments_enabled,
+                "operational": not solana_blockers and self.solana_payments_enabled,
                 "blockers": solana_blockers,
             },
             "base": {
                 "configured": bool(self.evm_wallet_address),
                 "ready": not base_blockers,
+                "enabled": self.base_payments_enabled,
+                "operational": not base_blockers and self.base_payments_enabled,
                 "blockers": base_blockers,
             },
         }
@@ -233,18 +247,21 @@ class X402Settings(BaseSettings):
     def primary_wallet(self) -> str:
         """Return the first recipient on an operational payment rail."""
         rail_status = self.payment_rail_status()
-        if rail_status["solana"]["ready"]:
+        if rail_status["solana"]["operational"]:
             return self.solana_wallet_address
-        if rail_status["base"]["ready"]:
+        if rail_status["base"]["operational"]:
             return self.evm_wallet_address
         return ""
 
     @property
     def primary_network(self) -> str:
         """Return the first operational payment network."""
-        if self.payment_rail_status()["solana"]["ready"]:
+        rail_status = self.payment_rail_status()
+        if rail_status["solana"]["operational"]:
             return self.solana_network
-        return self.base_network
+        if rail_status["base"]["operational"]:
+            return self.base_network
+        return ""
 
 
 class PricingSettings(BaseSettings):
@@ -369,7 +386,7 @@ class Settings:
         rail_status = self.x402.payment_rail_status()
 
         # Solana requires the facilitator fee payer advertised by `/supported`.
-        if rail_status["solana"]["ready"]:
+        if rail_status["solana"]["operational"]:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.solana_network,
@@ -384,7 +401,7 @@ class Settings:
             })
 
         # Base EIP-3009 clients need the token's EIP-712 domain metadata.
-        if rail_status["base"]["ready"]:
+        if rail_status["base"]["operational"]:
             requirements.append({
                 "scheme": "exact",
                 "network": self.x402.base_network,
