@@ -80,14 +80,24 @@ class BlocksizeStreamCache:
         self._task = None
 
     def status(self) -> dict[str, Any]:
+        configured_fixed_vwap = {_normalize(item) for item in self.fixed_vwap_tickers}
+        fresh_fixed_vwap = sum(
+            self._is_fresh(self._vwap24h, ticker)
+            for ticker in configured_fixed_vwap
+        )
         return {
             "enabled": self.enabled,
             "ready": self._ready.is_set(),
             "ws_url": self.ws_url,
-            "fixed_vwap_tickers": len(self.fixed_vwap_tickers),
+            "fixed_vwap_tickers": len(configured_fixed_vwap),
             "state_tickers": len(self.state_tickers),
             "state_mode": self.state_mode,
             "cached_24h_vwap": len(self._vwap24h),
+            "fresh_configured_24h_vwap": fresh_fixed_vwap,
+            "missing_configured_24h_vwap": max(
+                0,
+                len(configured_fixed_vwap) - fresh_fixed_vwap,
+            ),
             "cached_state": len(self._state),
             "ttl_seconds": self.ttl_seconds,
         }

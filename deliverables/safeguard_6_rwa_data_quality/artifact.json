@@ -1,0 +1,259 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Safeguard 6 RWA Data-Quality Acceptance",
+    "description": "Lossless catalog assembly, identity boundaries, public payload limits, freshness, reconciliation, and pilot-ledger acceptance for the candidate MCP server.",
+    "generatedAt": "2026-07-30T16:01:07Z",
+    "sources": [
+      {
+        "id": "executed-notebook",
+        "label": "Executed Safeguard 6 acceptance notebook",
+        "path": "analysis/safeguard_6_rwa_data_quality.ipynb",
+        "query": {
+          "engine": "Jupyter nbclient with repository Python environment",
+          "language": "python",
+          "description": "Read-only rebuild and assertion suite over current repository artifacts, application builders, local TestClient endpoints, and a temporary schema-v3 pilot ledger.",
+          "sql": "SELECT snapshot.datasets.headline_metrics AS headline_metrics FROM read_json_auto('deliverables/safeguard_6_rwa_data_quality/artifact.json');",
+          "executed_at": "2026-07-30T16:01:07Z",
+          "filters": [
+            "Candidate workspace only",
+            "No external refresh",
+            "No production mutation",
+            "Default public endpoint parameters"
+          ],
+          "metric_definitions": [
+            "Coverage retention = nested venue instruments divided by source coverage rows; required value 100%.",
+            "Verified RWA.xyz rate = verified source asset rows divided by all RWA.xyz asset rows.",
+            "Default payload acceptance = HTTP 200 and serialized response size no greater than 1,000,000 bytes.",
+            "Local latency acceptance = cold-process local response time no greater than 2.5 seconds; this is not a production SLO."
+          ],
+          "tables_used": [
+            "reports/rwa_xyz_new_asset_monitor.json",
+            "reports/rwa_daily_feed_agent.json",
+            "reports/rwa_derivative_venue_discovery.json",
+            "reports/hyperliquid_tradeable_feeds.json"
+          ]
+        }
+      },
+      {
+        "id": "audit-synthesis",
+        "label": "Safeguard 6 reviewed evidence synthesis",
+        "path": "deliverables/safeguard_6_rwa_data_quality/audit_queries.sql",
+        "query": {
+          "engine": "SQLite-compatible reviewed VALUES synthesis",
+          "language": "sql",
+          "description": "Reproduces the endpoint profile and ordered quality-gate table from the executed notebook and acceptance runs.",
+          "executed_at": "2026-07-30T16:01:07Z",
+          "sql": "WITH endpoint_profile(endpoint,before_bytes,after_bytes,before_seconds,after_seconds,byte_limit,local_seconds_limit,status) AS (VALUES ('/v1/rwa/registry',15161226,293545,1.3890,1.0138,1000000,2.5,'pass'),('/v1/rwa/sourcing/jobs',12903824,53023,1.1590,1.2706,1000000,2.5,'pass'),('/v1/rwa/registry/venues',5210277,143749,0.4740,0.8944,1000000,2.5,'pass'),('/v1/rwa/discovery',3372877,224844,0.7240,0.9459,1000000,2.5,'pass'),('/v1/rwa/derivative-venues',2879550,101262,0.0360,0.3575,1000000,2.5,'pass'),('/v1/rwa/identity-audit',1619023,70345,0.4630,0.9830,1000000,2.5,'pass'),('/v1/rwa/non-crypto-feeds',794705,167978,0.4510,0.8717,1000000,2.5,'pass'),('/v1/rwa/provider-catalog',302830,302830,0.0090,0.0091,1000000,2.5,'pass'),('/v1/rwa/assets',288601,480457,0.5160,0.9873,1000000,2.5,'pass'),('/v1/rwa/coverage',94842,132710,0.2300,0.4857,1000000,2.5,'pass'),('/v1/rwa/consensus/sources',57169,54741,18.4530,1.4763,1000000,2.5,'pass'),('/v1/rwa/market-expansion',26743,26743,17.6900,0.9833,1000000,2.5,'pass'),('/v1/rwa/equity-universes',25902,25902,7.5150,0.9500,1000000,2.5,'pass')) SELECT endpoint,before_bytes,after_bytes,ROUND(100.0*(before_bytes-after_bytes)/before_bytes,2) AS byte_reduction_pct,before_seconds,after_seconds,byte_limit,local_seconds_limit,status FROM endpoint_profile ORDER BY after_bytes DESC;",
+          "metric_definitions": [
+            "Before values are the initial Safeguard 6 cold local audit; after values are the final executed notebook run.",
+            "Byte reduction is (before bytes - after bytes) divided by before bytes.",
+            "Status passes only when final HTTP status is 200 and both final budgets pass."
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "retention-card",
+        "description": "Authoritative venue instruments retained from source rows.",
+        "dataset": "headline_metrics",
+        "sourceId": "executed-notebook",
+        "metrics": [
+          {"label": "Instruments retained", "field": "instruments_retained", "format": "number"},
+          {"label": "Source rows", "field": "source_rows", "format": "number"}
+        ]
+      },
+      {
+        "id": "contracts-card",
+        "description": "Decision-grade cross-asset contract collisions.",
+        "dataset": "headline_metrics",
+        "sourceId": "executed-notebook",
+        "metrics": [
+          {"label": "Cross-asset collisions", "field": "cross_asset_collisions", "format": "number"},
+          {"label": "Unique contracts", "field": "unique_contracts", "format": "number"}
+        ]
+      },
+      {
+        "id": "endpoints-card",
+        "description": "Profiled defaults satisfying status, size, and local latency budgets.",
+        "dataset": "headline_metrics",
+        "sourceId": "executed-notebook",
+        "metrics": [
+          {"label": "Endpoints passing", "field": "endpoints_passing", "format": "number"},
+          {"label": "Endpoints profiled", "field": "endpoints_profiled", "format": "number"}
+        ]
+      },
+      {
+        "id": "verification-card",
+        "description": "RWA.xyz source asset rows with verified identity mappings.",
+        "dataset": "headline_metrics",
+        "sourceId": "executed-notebook",
+        "metrics": [
+          {"label": "Verified identity rate", "field": "verified_rate", "format": "percent"},
+          {"label": "Unverified candidates", "field": "unverified_assets", "format": "number"}
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "endpoint-size-chart",
+        "title": "Final default response size by RWA endpoint",
+        "subtitle": "All 13 profiled defaults are below the 1,000,000-byte acceptance ceiling",
+        "type": "bar",
+        "dataset": "endpoint_profile",
+        "sourceId": "audit-synthesis",
+        "encodings": {
+          "x": {"field": "endpoint", "type": "nominal"},
+          "y": {"field": "after_bytes", "type": "quantitative"},
+          "tooltip": [
+            {"field": "endpoint", "type": "nominal"},
+            {"field": "before_bytes", "type": "quantitative"},
+            {"field": "after_bytes", "type": "quantitative"},
+            {"field": "byte_reduction_pct", "type": "quantitative"},
+            {"field": "after_seconds", "type": "quantitative"},
+            {"field": "status", "type": "nominal"}
+          ]
+        },
+        "options": {"orientation": "horizontal"}
+      }
+    ],
+    "tables": [
+      {
+        "id": "endpoint-table",
+        "title": "Endpoint payload and latency acceptance",
+        "subtitle": "Cold local comparison; latency is an acceptance diagnostic, not a production SLO",
+        "dataset": "endpoint_profile",
+        "defaultSort": {"field": "after_bytes", "direction": "desc"},
+        "density": "compact",
+        "sourceId": "audit-synthesis",
+        "layout": "full",
+        "columns": [
+          {"field": "endpoint", "label": "Endpoint", "type": "text"},
+          {"field": "before_bytes", "label": "Before bytes", "type": "number"},
+          {"field": "after_bytes", "label": "After bytes", "type": "number"},
+          {"field": "byte_reduction_pct", "label": "Reduction %", "type": "number"},
+          {"field": "after_seconds", "label": "Final seconds", "type": "number"},
+          {"field": "status", "label": "Status", "type": "text"}
+        ]
+      },
+      {
+        "id": "quality-gates-table",
+        "title": "Safeguard 6 acceptance and promotion gates",
+        "subtitle": "Local implementation acceptance is separate from production promotion",
+        "dataset": "quality_gates",
+        "defaultSort": {"field": "gate_order", "direction": "asc"},
+        "density": "spacious",
+        "sourceId": "audit-synthesis",
+        "layout": "full",
+        "columns": [
+          {"field": "gate_order", "label": "#", "type": "number"},
+          {"field": "gate", "label": "Gate", "type": "text"},
+          {"field": "status", "label": "Status", "type": "text"},
+          {"field": "evidence", "label": "Evidence", "type": "text"},
+          {"field": "acceptance_or_next_action", "label": "Acceptance / next action", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {"id": "title", "type": "markdown", "layout": "full", "body": "# Safeguard 6 RWA Data-Quality Acceptance"},
+      {
+        "id": "executive-summary",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Executive Summary\n\n- **Local Safeguard 6 acceptance passes.** The matrix retains all 5,161 source instruments, contract identity has zero cross-asset collisions, and every profiled default public endpoint stays within the byte and local latency ceilings.\n- **The identity boundary is materially safer.** Fifty-five raw mixed-class ids reconcile to zero canonical mixed ids; option is now a contract type rather than an underlying class; CAT and SPCX ambiguities remain source-scoped.\n- **Coverage is not the same as verification.** Only 93 of 1,169 RWA.xyz assets are verified; 1,076 remain explicitly unverified candidates.\n- **Production promotion remains blocked.** Hyperliquid and derivative catalog artifacts are stale, the daily feed is only at a reconciled baseline, and the 14-day, rights, benchmark, manipulation, independence, migration, and human gates remain open."
+      },
+      {"id": "headline-cards", "type": "metric-strip", "layout": "full", "cardIds": ["retention-card", "contracts-card", "endpoints-card", "verification-card"]},
+      {
+        "id": "payload-finding",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit-synthesis",
+        "body": "## Public defaults are bounded without deleting data\n\nThe largest initial collections ranged from 1.62 MB to 15.16 MB, and three nested builders took 7.5–18.5 seconds locally. Defaults now return deterministic first pages or compact summaries. Full counts remain available through totals, filters, exact identity resolution, and stable `limit`/`offset` traversal. Consumers that assumed the entire registry arrived in one default response must migrate to pagination."
+      },
+      {"id": "endpoint-size-chart-block", "type": "chart", "layout": "full", "chartId": "endpoint-size-chart", "sourceId": "audit-synthesis"},
+      {"id": "endpoint-table-block", "type": "table", "layout": "full", "tableId": "endpoint-table", "sourceId": "audit-synthesis"},
+      {
+        "id": "identity-finding",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "executed-notebook",
+        "body": "## Identity and contract grains are explicit\n\nAll 3,438 RWA.xyz token listings are preserved across 3,435 normalized network/address contracts. Three repeated listings belong to the same source assets and remain non-blocking; any incomplete identity or contract assigned to multiple source assets blocks decision-grade acceptance. The cross-class repair also preserves all 1,855 option contracts while assigning their actual underlyings, including XAUT metal and BTC crypto. A synthetic collision test proves the blocker now fails when it should."
+      },
+      {
+        "id": "freshness-finding",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "executed-notebook",
+        "body": "## Freshness remains fail-closed\n\nThe response assembly timestamp is no longer presented as source freshness. The RWA.xyz catalog snapshot is current within its declared cadence, while the Hyperliquid tradeable and derivative venue catalogs are stale. The daily agent reconciles to canonical SHA-256 `f07f4bed75a032c53ac226ebd0fda531cb2a31457bf0479d624dad13cc593a42` and correctly reports `baseline_created`; a second distinct verified snapshot is required before making a no-change or delta claim."
+      },
+      {"id": "quality-gates-table-block", "type": "table", "layout": "full", "tableId": "quality-gates-table", "sourceId": "audit-synthesis"},
+      {
+        "id": "next-actions",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Required Next Actions\n\n1. Refresh the Hyperliquid and derivative catalog artifacts through their reviewed read-only capture paths, then rerun snapshot and cross-class reconciliation.\n2. Capture a second distinct canonical RWA.xyz snapshot and prove daily delta/no-new behavior without silently reusing a baseline.\n3. Migrate the production pilot history into schema v3 with zero rejected valid rows and reconcile exact counts before any release.\n4. Continue the three-feed pilot until the full 14-day/672-sample window and every rights, benchmark, manipulation/depth, independence, and human approval gate pass.\n5. Update every registry client and generated integration skill to follow pagination and exact-resolution links."
+      },
+      {
+        "id": "reproducibility",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "executed-notebook",
+        "body": "## Reproducibility and Caveats\n\nThe executed notebook is the canonical local evidence record and contains eight successful code cells with no error outputs. Endpoint timing was measured in one local cold-process run and should not be interpreted as a production latency SLO. The analysis used checked-in catalog snapshots without external refresh and made no production mutation, commit, push, deployment, or promotion. Unverified RWA.xyz mappings remain source-scoped candidates regardless of catalog coverage."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-30T16:01:07Z",
+    "status": "partial",
+    "accessIssues": [
+      {"source": "hyperliquid_tradeable_discovery", "issue": "Required dynamic catalog snapshot is stale."},
+      {"source": "derivative_venue_discovery", "issue": "Required dynamic catalog snapshot is stale."},
+      {"source": "rwa_daily_feed_agent", "issue": "Only a reconciled baseline exists; a second distinct verified snapshot is required for delta claims."}
+    ],
+    "datasets": {
+      "headline_metrics": [
+        {
+          "instruments_retained": 5161,
+          "source_rows": 5161,
+          "cross_asset_collisions": 0,
+          "unique_contracts": 3435,
+          "endpoints_passing": 13,
+          "endpoints_profiled": 13,
+          "verified_rate": 0.079555,
+          "unverified_assets": 1076
+        }
+      ],
+      "endpoint_profile": [
+        {"endpoint": "/v1/rwa/assets", "before_bytes": 288601, "after_bytes": 480457, "byte_reduction_pct": -66.48, "before_seconds": 0.516, "after_seconds": 0.9873, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/provider-catalog", "before_bytes": 302830, "after_bytes": 302830, "byte_reduction_pct": 0.0, "before_seconds": 0.009, "after_seconds": 0.0091, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/registry", "before_bytes": 15161226, "after_bytes": 293545, "byte_reduction_pct": 98.06, "before_seconds": 1.389, "after_seconds": 1.0138, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/discovery", "before_bytes": 3372877, "after_bytes": 224844, "byte_reduction_pct": 93.33, "before_seconds": 0.724, "after_seconds": 0.9459, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/non-crypto-feeds", "before_bytes": 794705, "after_bytes": 167978, "byte_reduction_pct": 78.86, "before_seconds": 0.451, "after_seconds": 0.8717, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/registry/venues", "before_bytes": 5210277, "after_bytes": 143749, "byte_reduction_pct": 97.24, "before_seconds": 0.474, "after_seconds": 0.8944, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/coverage", "before_bytes": 94842, "after_bytes": 132710, "byte_reduction_pct": -39.93, "before_seconds": 0.23, "after_seconds": 0.4857, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/derivative-venues", "before_bytes": 2879550, "after_bytes": 101262, "byte_reduction_pct": 96.48, "before_seconds": 0.036, "after_seconds": 0.3575, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/identity-audit", "before_bytes": 1619023, "after_bytes": 70345, "byte_reduction_pct": 95.66, "before_seconds": 0.463, "after_seconds": 0.983, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/consensus/sources", "before_bytes": 57169, "after_bytes": 54741, "byte_reduction_pct": 4.25, "before_seconds": 18.453, "after_seconds": 1.4763, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/sourcing/jobs", "before_bytes": 12903824, "after_bytes": 53023, "byte_reduction_pct": 99.59, "before_seconds": 1.159, "after_seconds": 1.2706, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/market-expansion", "before_bytes": 26743, "after_bytes": 26743, "byte_reduction_pct": 0.0, "before_seconds": 17.69, "after_seconds": 0.9833, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"},
+        {"endpoint": "/v1/rwa/equity-universes", "before_bytes": 25902, "after_bytes": 25902, "byte_reduction_pct": 0.0, "before_seconds": 7.515, "after_seconds": 0.95, "byte_limit": 1000000, "local_seconds_limit": 2.5, "status": "pass"}
+      ],
+      "quality_gates": [
+        {"gate_order": 1, "gate": "Lossless venue-instrument matrix", "status": "pass", "evidence": "5,161 source rows and 5,161 nested instruments", "acceptance_or_next_action": "Retain authoritative venues.<venue>.instruments[] grain"},
+        {"gate_order": 2, "gate": "RWA.xyz contract identity", "status": "pass", "evidence": "3,438 token rows preserved; 3,435 contracts; zero cross-asset collisions", "acceptance_or_next_action": "Continue blocking incomplete or cross-asset identities"},
+        {"gate_order": 3, "gate": "Cross-class canonical identity", "status": "pass", "evidence": "55 raw mixed ids normalized to zero canonical mixed ids; two ambiguities source-scoped", "acceptance_or_next_action": "Keep ambiguous bare tickers out of decision-grade counts"},
+        {"gate_order": 4, "gate": "RWA.xyz verification boundary", "status": "pass_with_candidates", "evidence": "93 verified and 1,076 unverified assets", "acceptance_or_next_action": "Do not promote unverified mappings as canonical underlyings"},
+        {"gate_order": 5, "gate": "Yield metric semantics", "status": "pass", "evidence": "24 YTM and 175 trailing-30-day APY values finite with raw trends retained", "acceptance_or_next_action": "Preserve basis and units in every consumer"},
+        {"gate_order": 6, "gate": "Daily snapshot reconciliation", "status": "pass", "evidence": "Canonical SHA-256 reconciled; explicit baseline_created state", "acceptance_or_next_action": "Capture a second distinct verified snapshot before delta claims"},
+        {"gate_order": 7, "gate": "Default endpoint budgets", "status": "pass", "evidence": "13 of 13 HTTP 200; every response below 1,000,000 bytes and 2.5 seconds locally", "acceptance_or_next_action": "Require clients to follow deterministic pagination"},
+        {"gate_order": 8, "gate": "Pilot evidence ledger", "status": "pass", "evidence": "Schema v3 accepts valid evidence and rejects crossed claims and auto-promotion", "acceptance_or_next_action": "Zero-reject production history migration remains a release gate"},
+        {"gate_order": 9, "gate": "Dynamic source freshness", "status": "blocked", "evidence": "Hyperliquid and derivative catalog snapshots are stale", "acceptance_or_next_action": "Refresh and reconcile both artifacts without changing the source boundary"},
+        {"gate_order": 10, "gate": "Production promotion", "status": "blocked", "evidence": "14-day window, rights, benchmark, manipulation/depth, independence, and human approval remain open", "acceptance_or_next_action": "No deployment or production promotion from this local acceptance"}
+      ]
+    }
+  }
+}

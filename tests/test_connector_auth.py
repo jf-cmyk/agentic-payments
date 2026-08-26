@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from fastmcp.server.auth import AccessToken
+
 from src import connector_auth
 
 
@@ -40,3 +43,37 @@ async def test_oauth_client_storage_persists_in_configured_directory(tmp_path, m
         "upstream_token_id": "token-1"
     }
     assert storage_dir.exists()
+
+
+@pytest.mark.parametrize("namespace", ["ANTHROPIC", "CURSOR", "OPENAI"])
+def test_oauth_ledger_subject_is_connector_issuer_and_audience_scoped(namespace):
+    def identity(*, issuer: str, audience: list[str]):
+        return connector_auth.identity_from_access_token(
+            AccessToken(
+                token="oauth-token",
+                client_id="connector-client",
+                scopes=["openid"],
+                claims={
+                    "sub": "shared-upstream-subject",
+                    "iss": issuer,
+                    "aud": audience,
+                },
+            ),
+            namespace=namespace,
+        )
+
+    baseline = identity(issuer="https://issuer.example", audience=["api-b", "api-a"])
+    reordered = identity(issuer="https://issuer.example", audience=["api-a", "api-b"])
+    other_issuer = identity(issuer="https://other.example", audience=["api-a", "api-b"])
+    other_audience = identity(issuer="https://issuer.example", audience=["api-c"])
+
+    assert baseline is not None
+    assert reordered is not None
+    assert other_issuer is not None
+    assert other_audience is not None
+    assert baseline.user_id == "shared-upstream-subject"
+    assert baseline.legacy_ledger_subject == "shared-upstream-subject"
+    assert baseline.ledger_subject.startswith(f"{namespace.lower()}:")
+    assert baseline.ledger_subject == reordered.ledger_subject
+    assert baseline.ledger_subject != other_issuer.ledger_subject
+    assert baseline.ledger_subject != other_audience.ledger_subject

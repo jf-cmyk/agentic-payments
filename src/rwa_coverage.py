@@ -6,11 +6,17 @@ are explicit, while dynamic exchange catalogs are represented as adapter work.
 
 from __future__ import annotations
 
-from collections import defaultdict
+import hashlib
+import json
+from collections import Counter, defaultdict
 from copy import deepcopy
-from typing import Any
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Iterator
 
+from src.rwa_asset_semantics import normalize_instrument_semantics_rows
 from src.rwa_derivative_venues import (
+    DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH,
     DERIVATIVE_VENUE_DESCRIPTORS,
     load_derivative_coverage_rows,
 )
@@ -21,11 +27,13 @@ from src.rwa_hyperliquid import (
     hyperliquid_normalized_asset_class,
 )
 from src.rwa_hyperliquid_discovery import (
+    DEFAULT_HYPERLIQUID_TRADEABLE_FEEDS_JSON_PATH,
     HYPERLIQUID_PERPS_VENUE_ID,
     HYPERLIQUID_SPOT_VENUE_ID,
     load_hyperliquid_tradeable_coverage_rows,
 )
 from src.rwa_xyz_monitor import (
+    DEFAULT_RWA_XYZ_REPORT_JSON_PATH,
     RWA_XYZ_VENUE_DESCRIPTOR,
     load_rwa_xyz_coverage_rows,
 )
@@ -247,6 +255,19 @@ DEX_QUALITY_REQUIREMENTS: dict[str, Any] = {
 
 VENUES: list[dict[str, Any]] = [
     {
+        "id": "kraken_spot",
+        "name": "Kraken Spot",
+        "priority": 1,
+        "status": "cex_expansion",
+        "instrument_type": "centralized_exchange_spot",
+        "source_tier": "native_l2",
+        "data": ["l1_bid_ask", "l2_order_book", "trades", "ticker"],
+        "vwap_method": "walk native L2 by block size or compute trade-stream VWAP",
+        "bidask_method": "native WebSocket top of book with REST fallback",
+        "coverage_mode": "dynamic_public_asset_pairs",
+        "legal_note": "Use only dynamically listed online pairs and pass redistribution and quality gates.",
+    },
+    {
         "id": "kraken_xstocks",
         "name": "Kraken xStocks",
         "priority": 1,
@@ -258,6 +279,33 @@ VENUES: list[dict[str, Any]] = [
         "bidask_method": "native ticker or top of book",
         "coverage_mode": "dynamic_product_catalog_plus_targeted_endpoint_check",
         "legal_note": "Tokenized securities restrictions apply; do not market as official consolidated equity data.",
+    },
+    {
+        "id": "xstocks_public",
+        "name": "xStocks issuer reference",
+        "priority": 2,
+        "status": "issuer_reference_expansion",
+        "instrument_type": "tokenized_asset_issuer_reference",
+        "source_tier": "issuer_reference_price",
+        "data": ["asset_metadata", "reference_price"],
+        "vwap_method": "unsupported; issuer reference prices do not provide executable depth",
+        "bidask_method": "single issuer/reference quote only; never label as native bid/ask",
+        "coverage_mode": "dynamic_public_asset_catalog",
+        "legal_note": "Reference-only until redistribution, freshness, benchmark, and independent-consensus gates pass.",
+    },
+    {
+        "id": "revolut_x",
+        "name": "Revolut X",
+        "priority": 2,
+        "status": "cex_expansion",
+        "instrument_type": "centralized_exchange_spot",
+        "source_tier": "native_l2",
+        "data": ["l1_bid_ask", "l2_order_book", "trades", "ohlc"],
+        "vwap_method": "walk signed REST order-book snapshots by block size; use public trades for print VWAP",
+        "bidask_method": "native top of signed order-book snapshot",
+        "coverage_mode": "dynamic_pair_catalog_plus_signed_read_only_market_data",
+        "requires_auth": True,
+        "legal_note": "Treat as supplemental until Revolut X data rights, regional availability, freshness and quality gates pass.",
     },
     {
         "id": "ostium",
@@ -843,11 +891,35 @@ SUPPORTED_RWA_ASSET_CLASS_FILTERS = {
     "metal",
     "treasury",
     "treasury_fund",
+    "sovereign_debt",
     "tokenized_fund",
     "crypto",
     "yield_token",
     "option",
     "prediction",
+    "unknown",
+}
+
+# Collection endpoints deliberately use a conservative page size.  Several RWA
+# assets carry large venue-specific evidence objects, so an apparently modest
+# item count can otherwise produce a multi-megabyte response.
+RWA_COLLECTION_DEFAULT_LIMIT = 50
+RWA_COLLECTION_MAX_LIMIT = 100
+# Lossless venue instrument arrays can be substantially larger than flat
+# canonical-asset records (for example one options underlying at Aevo).
+RWA_ASSET_MATRIX_DEFAULT_LIMIT = 10
+
+STATIC_COVERAGE_COMPONENT = "static_coverage_catalog"
+HYPERLIQUID_COVERAGE_COMPONENT = "hyperliquid_tradeable_discovery"
+DERIVATIVE_COVERAGE_COMPONENT = "derivative_venue_discovery"
+RWA_XYZ_COVERAGE_COMPONENT = "rwa_xyz_new_asset_monitor"
+
+# Discovery artifacts are inputs to a catalog, not request-time observations.
+# These thresholds make their age explicit without promoting them to live data.
+SOURCE_COMPONENT_MAX_AGE_SECONDS: dict[str, int] = {
+    HYPERLIQUID_COVERAGE_COMPONENT: 86_400,
+    DERIVATIVE_COVERAGE_COMPONENT: 86_400,
+    RWA_XYZ_COVERAGE_COMPONENT: 172_800,
 }
 
 
@@ -866,6 +938,7 @@ def _add_symbol(
     vwap_support: str,
     bidask_support: str,
     metadata: dict[str, Any] | None = None,
+    source_component: str = STATIC_COVERAGE_COMPONENT,
 ) -> None:
     row = {
         "symbol": symbol,
@@ -877,6 +950,7 @@ def _add_symbol(
         "vwap_support": vwap_support,
         "bidask_support": bidask_support,
         "block_sizes_usd": _block_sizes_for_asset_class(asset_class),
+        "source_component": source_component,
     }
     if metadata:
         row["metadata"] = metadata
@@ -896,7 +970,13 @@ def _block_sizes_for_asset_class(asset_class: str) -> list[int]:
         return BLOCK_SIZES_USD["fx"]
     if asset_class in {"commodity", "metal"}:
         return BLOCK_SIZES_USD["metal_commodity"]
-    if asset_class in {"treasury", "treasury_nav", "treasury_fund", "tokenized_fund"}:
+    if asset_class in {
+        "treasury",
+        "treasury_nav",
+        "treasury_fund",
+        "sovereign_debt",
+        "tokenized_fund",
+    }:
         return BLOCK_SIZES_USD["treasury_nav"]
     return BLOCK_SIZES_USD["synthetic_equity"]
 
@@ -1031,6 +1111,7 @@ def _coverage_rows() -> list[dict[str, Any]]:
             vwap_support=str(live_row.get("vwap_support") or "native_l2_block_vwap"),
             bidask_support=str(live_row.get("bidask_support") or "native_top_of_book"),
             metadata=live_row.get("metadata") if isinstance(live_row.get("metadata"), dict) else None,
+            source_component=HYPERLIQUID_COVERAGE_COMPONENT,
         )
         existing_hyperliquid_keys.add((venue, symbol.upper()))
     existing_derivative_keys = {
@@ -1067,6 +1148,7 @@ def _coverage_rows() -> list[dict[str, Any]]:
             vwap_support=str(derivative_row.get("vwap_support") or "native_l2_derivative_block_vwap_requires_basis_adjustment"),
             bidask_support=str(derivative_row.get("bidask_support") or "native_derivative_top_of_book_requires_basis_adjustment"),
             metadata=derivative_metadata or None,
+            source_component=DERIVATIVE_COVERAGE_COMPONENT,
         )
         existing_derivative_keys.add(derivative_key)
     for symbol, asset_class in REFERENCE_SYMBOL_CLASSES.items():
@@ -1116,9 +1198,15 @@ def _coverage_rows() -> list[dict[str, Any]]:
         row = deepcopy(rwa_xyz_row)
         asset_class = str(row.get("asset_class") or "tokenized_fund")
         row["block_sizes_usd"] = _block_sizes_for_asset_class(asset_class)
+        row["source_component"] = RWA_XYZ_COVERAGE_COMPONENT
         rows.append(row)
         existing_rwa_xyz_keys.add(key)
-    return rows
+    normalized_rows = normalize_instrument_semantics_rows(rows)
+    for row in normalized_rows:
+        row["block_sizes_usd"] = _block_sizes_for_asset_class(
+            str(row["asset_class"])
+        )
+    return normalized_rows
 
 
 def _normalize_filter(value: str | None) -> str:
@@ -1138,12 +1226,270 @@ def _filter_rows(
     venue_ids = {item["id"] for item in VENUES}
     if venue_filter != "all" and venue_filter not in venue_ids:
         raise ValueError(f"Unsupported venue: {venue}")
-    return [
+    filtered = [
         row
         for row in rows
-        if (asset_filter == "all" or row["asset_class"] == asset_filter)
+        if (
+            asset_filter == "all"
+            or row["asset_class"] == asset_filter
+            # Compatibility: ``option`` was historically misused as an asset
+            # class. It now selects option contracts while rows expose their
+            # actual underlying asset class.
+            or (
+                asset_filter == "option"
+                and row.get("contract_type") == "option"
+            )
+        )
         and (venue_filter == "all" or row["venue"] == venue_filter)
     ]
+
+    return sorted(filtered, key=_stable_instrument_key)
+
+
+def _stable_instrument_key(row: dict[str, Any]) -> tuple[str, ...]:
+    metadata = row.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    instrument_identity = (
+        metadata.get("venue_market_id")
+        or metadata.get("market_id")
+        or metadata.get("pool_address")
+        or metadata.get("address")
+        or metadata.get("rwa_xyz_asset_id")
+        or row.get("symbol")
+        or ""
+    )
+    instrument_type = (
+        metadata.get("market_type")
+        or metadata.get("instrument_type")
+        or row.get("asset_class")
+        or ""
+    )
+    return (
+        str(row.get("asset_id") or ""),
+        str(row.get("venue") or ""),
+        str(instrument_type),
+        str(instrument_identity),
+        str(row.get("symbol") or ""),
+        str(row.get("source_type") or ""),
+        json.dumps(metadata, sort_keys=True, separators=(",", ":"), default=str),
+    )
+
+
+def _instrument_record(row: dict[str, Any], *, duplicate_ordinal: int = 1) -> dict[str, Any]:
+    """Return one stable, lossless venue-instrument record."""
+    record = {
+        "symbol": row["symbol"],
+        "asset_class": row["asset_class"],
+        "source_type": row["source_type"],
+        "coverage_status": row["coverage_status"],
+        "vwap_support": row["vwap_support"],
+        "bidask_support": row["bidask_support"],
+        "source_component": row.get("source_component", STATIC_COVERAGE_COMPONENT),
+        "raw_source_asset_id": row.get("raw_source_asset_id"),
+        "raw_source_asset_class": row.get("raw_source_asset_class"),
+        "canonical_underlying_id": row.get("canonical_underlying_id"),
+        "underlying_asset_class": row.get("underlying_asset_class"),
+        "contract_type": row.get("contract_type"),
+        "identity_status": row.get("identity_status"),
+        "decision_grade": bool(row.get("decision_grade")),
+        "manual_verification_required": bool(
+            row.get("manual_verification_required")
+        ),
+        "identity_evidence": row.get("identity_evidence"),
+    }
+    if row.get("metadata"):
+        record["metadata"] = deepcopy(row["metadata"])
+    identity_payload = {
+        "asset_id": row.get("asset_id"),
+        "venue": row.get("venue"),
+        **record,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            identity_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    record["instrument_id"] = f"{row['venue']}:{digest}"
+    if duplicate_ordinal > 1:
+        record["instrument_id"] += f":{duplicate_ordinal}"
+    return record
+
+
+def iter_asset_venue_instruments(
+    asset: dict[str, Any],
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield every venue instrument, including legacy flat venue payloads."""
+    venues = asset.get("venues")
+    if not isinstance(venues, dict):
+        return
+    for venue_id, venue_group in sorted(venues.items()):
+        if not isinstance(venue_group, dict):
+            continue
+        instruments = venue_group.get("instruments")
+        if isinstance(instruments, list):
+            for instrument in instruments:
+                if isinstance(instrument, dict):
+                    yield str(venue_id), instrument
+            continue
+        # Compatibility for previously persisted matrix payloads.
+        if venue_group.get("symbol"):
+            yield str(venue_id), venue_group
+
+
+def _load_component_generated_at(path: Path) -> tuple[str | None, str]:
+    if not path.is_file():
+        return None, "artifact_missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "artifact_unreadable"
+    if not isinstance(payload, dict):
+        return None, "artifact_unreadable"
+    generated_at = payload.get("generated_at")
+    return (str(generated_at), "reported_generated_at") if generated_at else (
+        None,
+        "generated_at_missing",
+    )
+
+
+def _parse_snapshot_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _source_snapshot_manifest(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe the actual age of each catalog component used in this response."""
+    assembled_at = datetime.now(UTC)
+    row_counts = Counter(
+        str(row.get("source_component") or STATIC_COVERAGE_COMPONENT)
+        for row in rows
+    )
+    dynamic_sources = (
+        (
+            HYPERLIQUID_COVERAGE_COMPONENT,
+            DEFAULT_HYPERLIQUID_TRADEABLE_FEEDS_JSON_PATH,
+            "Hyperliquid public market-catalog discovery artifact",
+        ),
+        (
+            DERIVATIVE_COVERAGE_COMPONENT,
+            DEFAULT_DERIVATIVE_VENUE_DISCOVERY_JSON_PATH,
+            "Derivative venue market-catalog discovery artifact",
+        ),
+        (
+            RWA_XYZ_COVERAGE_COMPONENT,
+            DEFAULT_RWA_XYZ_REPORT_JSON_PATH,
+            "RWA.xyz catalog discovery artifact; not executable price data",
+        ),
+    )
+    components: list[dict[str, Any]] = [
+        {
+            "component_id": STATIC_COVERAGE_COMPONENT,
+            "included_coverage_row_count": row_counts.get(
+                STATIC_COVERAGE_COMPONENT, 0
+            ),
+            "source_path": "src/rwa_coverage.py",
+            "snapshot_at": None,
+            "snapshot_basis": "code_embedded_catalog",
+            "freshness_status": "not_time_series_static_catalog",
+            "max_age_seconds": None,
+            "data_semantics": (
+                "Documented seed/configuration rows; request assembly time is not "
+                "a market-data observation timestamp."
+            ),
+        }
+    ]
+    dynamic_statuses: list[str] = []
+    for component_id, path, semantics in dynamic_sources:
+        snapshot_at, snapshot_basis = _load_component_generated_at(Path(path))
+        parsed = _parse_snapshot_time(snapshot_at)
+        max_age_seconds = SOURCE_COMPONENT_MAX_AGE_SECONDS[component_id]
+        age_seconds: int | None = None
+        if snapshot_basis in {"artifact_missing", "artifact_unreadable"}:
+            freshness_status = snapshot_basis
+        elif parsed is None:
+            freshness_status = "snapshot_time_missing_or_invalid"
+        else:
+            age_seconds = max(0, int((assembled_at - parsed).total_seconds()))
+            if parsed > assembled_at:
+                freshness_status = "future_dated"
+            elif age_seconds <= max_age_seconds:
+                freshness_status = "current_within_catalog_cadence"
+            else:
+                freshness_status = "stale"
+        dynamic_statuses.append(freshness_status)
+        components.append(
+            {
+                "component_id": component_id,
+                "included_coverage_row_count": row_counts.get(component_id, 0),
+                "source_path": str(path),
+                "snapshot_at": snapshot_at,
+                "snapshot_basis": snapshot_basis,
+                "freshness_status": freshness_status,
+                "age_seconds": age_seconds,
+                "max_age_seconds": max_age_seconds,
+                "data_semantics": semantics,
+            }
+        )
+    return {
+        "assembled_at": assembled_at.isoformat(),
+        "assembled_at_semantics": (
+            "Response assembly time only; it does not mean every component or "
+            "instrument was refreshed at request time."
+        ),
+        "component_count": len(components),
+        "included_coverage_row_count": sum(
+            int(component["included_coverage_row_count"])
+            for component in components
+        ),
+        "all_dynamic_components_current": bool(dynamic_statuses)
+        and all(
+            status == "current_within_catalog_cadence"
+            for status in dynamic_statuses
+        ),
+        "components": components,
+    }
+
+
+def _paginate_collection(
+    items: list[dict[str, Any]],
+    *,
+    limit: int | None,
+    offset: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Return a deterministic page and machine-readable pagination metadata."""
+    if offset < 0:
+        raise ValueError("offset must be greater than or equal to 0")
+    if limit is not None and not 1 <= limit <= RWA_COLLECTION_MAX_LIMIT:
+        raise ValueError(
+            f"limit must be between 1 and {RWA_COLLECTION_MAX_LIMIT}"
+        )
+    if limit is None:
+        if offset == 0:
+            return items, None
+        page = items[offset:]
+    else:
+        page = items[offset : offset + limit]
+    total = len(items)
+    next_offset = offset + len(page)
+    has_more = next_offset < total
+    return page, {
+        "limit": limit,
+        "offset": offset,
+        "returned": len(page),
+        "total": total,
+        "has_more": has_more,
+        "next_offset": next_offset if has_more else None,
+    }
 
 
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1154,12 +1500,126 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         by_asset_class[row["asset_class"]].add(row["asset_id"])
         by_venue[row["venue"]].add(row["asset_id"])
         source_types[row["source_type"]] += 1
+    coverage_row_count = len(rows)
+    canonical_asset_count = len({row["asset_id"] for row in rows})
+    canonical_asset_count_by_asset_class = {
+        key: len(value) for key, value in sorted(by_asset_class.items())
+    }
+    canonical_asset_count_by_venue = {
+        key: len(value) for key, value in sorted(by_venue.items())
+    }
+    coverage_row_count_by_source_type = dict(sorted(source_types.items()))
+    identity_quality = _identity_quality_summary(rows)
     return {
-        "rows": len(rows),
-        "unique_assets": len({row["asset_id"] for row in rows}),
-        "by_asset_class": {key: len(value) for key, value in sorted(by_asset_class.items())},
-        "by_venue": {key: len(value) for key, value in sorted(by_venue.items())},
-        "by_source_type": dict(sorted(source_types.items())),
+        # Explicit metric names prevent row-grain measures from being compared
+        # with canonical-asset-grain measures as if they were additive.
+        "coverage_row_count": coverage_row_count,
+        "canonical_asset_count": canonical_asset_count,
+        "canonical_asset_count_by_asset_class": canonical_asset_count_by_asset_class,
+        "canonical_asset_count_by_venue": canonical_asset_count_by_venue,
+        "coverage_row_count_by_source_type": coverage_row_count_by_source_type,
+        "identity_quality": identity_quality,
+        "metric_grains": {
+            "coverage_row_count": "venue_instrument",
+            "canonical_asset_count": "canonical_asset",
+            "canonical_asset_count_by_asset_class": "asset_class_canonical_asset",
+            "canonical_asset_count_by_venue": "venue_canonical_asset",
+            "coverage_row_count_by_source_type": "source_type_venue_instrument",
+            "identity_quality": "canonical_asset_identity_acceptance",
+        },
+        # Compatibility aliases retained for existing API clients. New clients
+        # should use the grain-qualified names above.
+        "rows": coverage_row_count,
+        "unique_assets": canonical_asset_count,
+        "by_asset_class": canonical_asset_count_by_asset_class,
+        "by_venue": canonical_asset_count_by_venue,
+        "by_source_type": coverage_row_count_by_source_type,
+        "legacy_aliases": {
+            "rows": "coverage_row_count",
+            "unique_assets": "canonical_asset_count",
+            "by_asset_class": "canonical_asset_count_by_asset_class",
+            "by_venue": "canonical_asset_count_by_venue",
+            "by_source_type": "coverage_row_count_by_source_type",
+        },
+    }
+
+
+def _identity_quality_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reconcile raw source classes to fail-closed canonical identities."""
+    raw_classes_by_id: dict[str, set[str]] = defaultdict(set)
+    canonical_classes_by_id: dict[str, set[str]] = defaultdict(set)
+    decision_flags_by_id: dict[str, list[bool]] = defaultdict(list)
+    identity_statuses_by_id: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        raw_asset_id = str(
+            row.get("raw_source_asset_id") or row.get("asset_id") or ""
+        )
+        raw_classes_by_id[raw_asset_id].add(
+            str(row.get("raw_source_asset_class") or "unknown")
+        )
+        canonical_id = str(row.get("asset_id") or "")
+        canonical_classes_by_id[canonical_id].add(
+            str(row.get("underlying_asset_class") or row.get("asset_class"))
+        )
+        decision_flags_by_id[canonical_id].append(
+            bool(row.get("decision_grade"))
+        )
+        identity_statuses_by_id[canonical_id].add(
+            str(row.get("identity_status") or "unknown")
+        )
+
+    decision_grade_candidate_ids = {
+        asset_id
+        for asset_id, flags in decision_flags_by_id.items()
+        if flags and all(flags)
+    }
+    ambiguous_ids = {
+        asset_id
+        for asset_id, statuses in identity_statuses_by_id.items()
+        if "source_scoped_ambiguous" in statuses
+    }
+    raw_mixed_ids = sorted(
+        asset_id
+        for asset_id, classes in raw_classes_by_id.items()
+        if len(classes) > 1
+    )
+    canonical_mixed_ids = sorted(
+        asset_id
+        for asset_id, classes in canonical_classes_by_id.items()
+        if len(classes) > 1
+    )
+    decision_grade_mixed_ids = sorted(
+        asset_id
+        for asset_id in decision_grade_candidate_ids
+        if len(canonical_classes_by_id[asset_id]) > 1
+    )
+    decision_grade_ids = decision_grade_candidate_ids - set(
+        decision_grade_mixed_ids
+    )
+    manual_ids = set(canonical_classes_by_id) - decision_grade_ids
+    return {
+        "raw_mixed_class_asset_id_count": len(raw_mixed_ids),
+        "canonical_mixed_class_asset_id_count": len(canonical_mixed_ids),
+        "decision_grade_mixed_class_asset_id_count": len(
+            decision_grade_mixed_ids
+        ),
+        "decision_grade_canonical_asset_count": len(decision_grade_ids),
+        "manual_verification_asset_count": len(manual_ids),
+        "ambiguous_source_scoped_asset_count": len(ambiguous_ids),
+        "raw_mixed_class_asset_ids": raw_mixed_ids,
+        "canonical_mixed_class_asset_ids": canonical_mixed_ids,
+        "decision_grade_mixed_class_asset_ids": decision_grade_mixed_ids,
+        "acceptance": {
+            "status": (
+                "pass"
+                if not canonical_mixed_ids and not decision_grade_mixed_ids
+                else "blocked"
+            ),
+            "criterion": (
+                "zero unresolved mixed-class canonical ids, including zero "
+                "mixed ids in decision-grade counts"
+            ),
+        },
     }
 
 
@@ -1168,11 +1628,15 @@ def build_rwa_coverage_overview(
     asset_class: str | None = None,
     venue: str | None = None,
     include_symbols: bool = True,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Return filtered RWA coverage that can back discovery and planning APIs."""
     rows = _filter_rows(_coverage_rows(), asset_class=asset_class, venue=venue)
+    page, pagination = _paginate_collection(rows, limit=limit, offset=offset)
     response: dict[str, Any] = {
         "source_report": FEASIBILITY_REPORT_PATH,
+        "source_snapshot_manifest": _source_snapshot_manifest(rows),
         "coverage_summary": _summarize(rows),
         "coverage_notes": [
             "Kraken xStocks coverage must be enumerated dynamically from public or authenticated venue instruments; current public AssetPairs checks reject the seed xStock aliases, so those rows are not promoted to feeds.",
@@ -1186,7 +1650,9 @@ def build_rwa_coverage_overview(
         "quality_alignment": deepcopy(QUALITY_ALIGNMENT),
     }
     if include_symbols:
-        response["symbols"] = rows
+        response["symbols"] = page
+        if pagination is not None:
+            response["pagination"] = pagination
     return response
 
 
@@ -1194,6 +1660,8 @@ def build_rwa_asset_matrix(
     *,
     asset_class: str | None = None,
     venue: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Return assets grouped across venues with sourcing gaps and next actions."""
     rows = _filter_rows(_coverage_rows(), asset_class=asset_class, venue=venue)
@@ -1208,32 +1676,104 @@ def build_rwa_asset_matrix(
                 "symbols": set(),
                 "venues": {},
                 "source_types": set(),
+                "raw_source_asset_ids": set(),
+                "raw_source_asset_classes": set(),
+                "identity_statuses": set(),
+                "decision_grade_flags": [],
+                "manual_verification_flags": [],
                 "block_sizes_usd": row["block_sizes_usd"],
             },
         )
         item["asset_classes"].add(row["asset_class"])
         item["symbols"].add(row["symbol"])
         item["source_types"].add(row["source_type"])
-        item["venues"][row["venue"]] = {
-            "symbol": row["symbol"],
-            "source_type": row["source_type"],
-            "coverage_status": row["coverage_status"],
-            "vwap_support": row["vwap_support"],
-            "bidask_support": row["bidask_support"],
-        }
-        if row.get("metadata"):
-            item["venues"][row["venue"]]["metadata"] = row["metadata"]
+        item["raw_source_asset_ids"].add(
+            row.get("raw_source_asset_id") or row["asset_id"]
+        )
+        item["raw_source_asset_classes"].add(
+            row.get("raw_source_asset_class") or row["asset_class"]
+        )
+        item["identity_statuses"].add(
+            row.get("identity_status") or "unknown"
+        )
+        item["decision_grade_flags"].append(bool(row.get("decision_grade")))
+        item["manual_verification_flags"].append(
+            bool(row.get("manual_verification_required"))
+        )
+        venue_group = item["venues"].setdefault(
+            row["venue"],
+            {"_instrument_rows": []},
+        )
+        venue_group["_instrument_rows"].append(row)
 
     assets = []
     all_registry_venues = {str(venue_item["id"]) for venue_item in VENUES}
     for item in grouped.values():
+        normalized_venues: dict[str, dict[str, Any]] = {}
+        for venue_id, pending_group in sorted(item["venues"].items()):
+            instrument_rows = sorted(
+                pending_group["_instrument_rows"],
+                key=_stable_instrument_key,
+            )
+            duplicate_counts: Counter[str] = Counter()
+            instruments: list[dict[str, Any]] = []
+            for instrument_row in instrument_rows:
+                signature = json.dumps(
+                    instrument_row,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                duplicate_counts[signature] += 1
+                instruments.append(
+                    _instrument_record(
+                        instrument_row,
+                        duplicate_ordinal=duplicate_counts[signature],
+                    )
+                )
+            representative = instruments[0]
+            normalized_venues[str(venue_id)] = {
+                # The flat fields remain a compatibility projection for clients
+                # built before matrix schema v2. They are never authoritative
+                # when instrument_count is greater than one.
+                **deepcopy(representative),
+                "instrument_count": len(instruments),
+                "instruments": instruments,
+                "compatibility_projection": {
+                    "mode": "first_in_stable_instrument_order",
+                    "representative_instrument_id": representative[
+                        "instrument_id"
+                    ],
+                    "authoritative_field": "instruments",
+                },
+            }
+        item["venues"] = normalized_venues
         venue_ids = set(item["venues"])
         source_types = sorted(item["source_types"])
         asset_classes = sorted(item["asset_classes"])
+        raw_source_asset_ids = sorted(item["raw_source_asset_ids"])
+        raw_source_asset_classes = sorted(item["raw_source_asset_classes"])
+        identity_statuses = sorted(item["identity_statuses"])
         symbols = sorted(item["symbols"])
-        executable_venues = [
+        venue_instruments = list(iter_asset_venue_instruments(item))
+        decision_grade = (
+            bool(item["decision_grade_flags"])
+            and all(item["decision_grade_flags"])
+            and len(asset_classes) == 1
+        )
+        if decision_grade:
+            identity_status = (
+                identity_statuses[0]
+                if len(identity_statuses) == 1
+                else "decision_grade_composite"
+            )
+        elif "source_scoped_ambiguous" in identity_statuses:
+            identity_status = "source_scoped_ambiguous"
+        else:
+            identity_status = "manual_verification_required"
+        executable_venues = sorted({
             venue_id
-            for venue_id, venue_data in item["venues"].items()
+            for venue_id, venue_data in venue_instruments
             if venue_data["source_type"] in {
                 "native_l2",
                 "synthetic_depth",
@@ -1242,10 +1782,10 @@ def build_rwa_asset_matrix(
                 "onchain_clmm_pool",
                 "onchain_stableswap_pool",
             }
-        ]
-        reference_venues = [
+        })
+        reference_venues = sorted({
             venue_id
-            for venue_id, venue_data in item["venues"].items()
+            for venue_id, venue_data in venue_instruments
             if venue_data["source_type"] in {
                 "nav_reference",
                 "issuer_reference",
@@ -1253,18 +1793,28 @@ def build_rwa_asset_matrix(
                 "blocksize_state_reference",
                 "platform_catalog_reference",
             }
-        ]
+        })
         missing_registry_venues = sorted(all_registry_venues - venue_ids)
         assets.append(
             {
                 "asset_id": item["asset_id"],
                 "asset_classes": asset_classes,
+                "canonical_underlying_asset_class": (
+                    asset_classes[0] if len(asset_classes) == 1 else None
+                ),
+                "raw_source_asset_ids": raw_source_asset_ids,
+                "raw_source_asset_classes": raw_source_asset_classes,
+                "identity_status": identity_status,
+                "identity_statuses": identity_statuses,
+                "decision_grade": decision_grade,
+                "manual_verification_required": not decision_grade,
                 "symbols": symbols,
                 "venue_count": len(venue_ids),
+                "instrument_count": len(venue_instruments),
                 "venues": item["venues"],
                 "source_types": source_types,
-                "executable_venues": sorted(executable_venues),
-                "reference_venues": sorted(reference_venues),
+                "executable_venues": executable_venues,
+                "reference_venues": reference_venues,
                 "missing_registry_venues": missing_registry_venues,
                 "block_sizes_usd": item["block_sizes_usd"],
                 "sourcing_status": (
@@ -1296,17 +1846,106 @@ def build_rwa_asset_matrix(
         if str(venue_item["coverage_mode"]).startswith(("dynamic", "api_keyed", "licensed", "issuer", "next_static_props"))
         or str(venue_item["coverage_mode"]) in {"issuer_catalog_and_attestation", "licensed_dynamic_catalog"}
     ]
-    return {
+    canonical_asset_count_by_sourcing_status = {
+        "multi_venue": len(multi_venue),
+        "single_venue": len(single_venue),
+        "reference_only": len(reference_only),
+        "coverage_gap": len(
+            [item for item in assets if item["sourcing_status"] == "coverage_gap"]
+        ),
+    }
+    nested_instrument_count = sum(
+        int(item["instrument_count"])
+        for item in assets
+    )
+    identity_quality = _identity_quality_summary(rows)
+    page, pagination = _paginate_collection(assets, limit=limit, offset=offset)
+    response = {
         "source_report": FEASIBILITY_REPORT_PATH,
+        "source_snapshot_manifest": _source_snapshot_manifest(rows),
+        "matrix_schema": {
+            "version": 2,
+            "authoritative_venue_grain": "venues.<venue_id>.instruments[]",
+            "identity_semantics_version": 1,
+            "underlying_asset_class_field": (
+                "canonical_underlying_asset_class"
+            ),
+            "instrument_contract_type_field": (
+                "venues.<venue_id>.instruments[].contract_type"
+            ),
+            "raw_source_class_field": (
+                "venues.<venue_id>.instruments[].raw_source_asset_class"
+            ),
+            "compatibility_projection": (
+                "Flat venue fields select the first instrument in stable order; "
+                "clients must use instruments[] when instrument_count exceeds one."
+            ),
+        },
         "summary": {
+            "canonical_asset_count": len(assets),
+            "coverage_row_count": len(rows),
+            "nested_instrument_count": nested_instrument_count,
+            "canonical_asset_count_by_sourcing_status": (
+                canonical_asset_count_by_sourcing_status
+            ),
+            "identity_quality": identity_quality,
+            "decision_grade_canonical_asset_count": identity_quality[
+                "decision_grade_canonical_asset_count"
+            ],
+            "manual_verification_asset_count": identity_quality[
+                "manual_verification_asset_count"
+            ],
+            "ambiguous_source_scoped_asset_count": identity_quality[
+                "ambiguous_source_scoped_asset_count"
+            ],
+            "decision_grade_mixed_class_asset_id_count": identity_quality[
+                "decision_grade_mixed_class_asset_id_count"
+            ],
+            "metric_grains": {
+                "canonical_asset_count": "canonical_asset",
+                "coverage_row_count": "venue_instrument",
+                "nested_instrument_count": "nested_venue_instrument",
+                "canonical_asset_count_by_sourcing_status": (
+                    "sourcing_status_canonical_asset"
+                ),
+                "registry_venue_count": "registry_venue",
+                "decision_grade_canonical_asset_count": (
+                    "decision_grade_canonical_asset"
+                ),
+                "manual_verification_asset_count": (
+                    "canonical_asset_requiring_manual_identity_verification"
+                ),
+                "ambiguous_source_scoped_asset_count": (
+                    "source_scoped_ambiguous_asset"
+                ),
+                "decision_grade_mixed_class_asset_id_count": (
+                    "decision_grade_canonical_asset_identity_violation"
+                ),
+            },
+            # Compatibility aliases retained for existing API clients.
             "asset_count": len(assets),
             "coverage_rows": len(rows),
+            "nested_instruments": nested_instrument_count,
             "multi_venue_assets": len(multi_venue),
             "single_venue_assets": len(single_venue),
             "reference_only_assets": len(reference_only),
             "registry_venue_count": len(VENUES),
+            "legacy_aliases": {
+                "asset_count": "canonical_asset_count",
+                "coverage_rows": "coverage_row_count",
+                "nested_instruments": "nested_instrument_count",
+                "multi_venue_assets": (
+                    "canonical_asset_count_by_sourcing_status.multi_venue"
+                ),
+                "single_venue_assets": (
+                    "canonical_asset_count_by_sourcing_status.single_venue"
+                ),
+                "reference_only_assets": (
+                    "canonical_asset_count_by_sourcing_status.reference_only"
+                ),
+            },
         },
-        "assets": assets,
+        "assets": page,
         "dynamic_registry_venues": dynamic_registry_venues,
         "sourcing_priorities": [
             "Fetch dynamic product catalogs for Kraken xStocks, Bybit xStocks, Jupiter xStocks, Ondo Stocks, Backed issuer metadata, and high-quality DEX pools/routes.",
@@ -1318,15 +1957,21 @@ def build_rwa_asset_matrix(
             "Use RWA.xyz New Asset Monitor rows as token/product discovery coverage only; executable real-time prices still require venue, pool, route, liquidity, freshness, and issuer alignment.",
         ],
     }
+    if pagination is not None:
+        response["pagination"] = pagination
+    return response
 
 
 def _target_symbol_key(symbol: str) -> str:
     return symbol.replace("_1", "").replace("x/", "/").split("/")[0].upper()
 
 
-def build_oracle_parity_matrix() -> dict[str, Any]:
+def build_oracle_parity_matrix(
+    *,
+    asset_matrix: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compare current sourcing coverage to Pyth/Chainlink-style oracle breadth."""
-    current = build_rwa_asset_matrix()
+    current = asset_matrix or build_rwa_asset_matrix()
     current_assets = {str(asset["asset_id"]): asset for asset in current["assets"]}
     categories: list[dict[str, Any]] = []
     total_targets = 0

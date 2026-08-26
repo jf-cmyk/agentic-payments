@@ -15,9 +15,10 @@ from src.rwa_rights_clearance import (
     rights_clearance_summary,
     rights_cleared_for_venue,
 )
+from src.runtime_data import RWA_REPORTS_DIR, effective_rwa_report_paths
 
 
-DEFAULT_REPORTS_DIR = Path("reports")
+DEFAULT_REPORTS_DIR = RWA_REPORTS_DIR
 DEFAULT_DISCOVERY_JSON_PATH = DEFAULT_REPORTS_DIR / "rwa_feed_discovery.json"
 DEFAULT_DISCOVERY_CSV_PATH = DEFAULT_REPORTS_DIR / "rwa_feed_discovery.csv"
 
@@ -155,7 +156,11 @@ def _blocked(message: str, evidence: dict[str, Any] | None = None) -> dict[str, 
 
 
 def _load_jupiter_route_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_jupiter_route_allowlist.json")
+    payload = _read_json(
+        effective_rwa_report_paths(reports_dir=reports_dir)[
+            "rwa_jupiter_route_allowlist.json"
+        ]
+    )
     route_rows = _rows_from(payload, "routes", "candidates", "allowlist")
     evidence: dict[str, dict[str, Any]] = {}
     for row in route_rows:
@@ -174,7 +179,11 @@ def _load_jupiter_route_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]
 
 
 def _load_solana_token_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_solana_token_mints.json")
+    payload = _read_json(
+        effective_rwa_report_paths(reports_dir=reports_dir)[
+            "rwa_solana_token_mints.json"
+        ]
+    )
     token_rows = _rows_from(payload, "tokens", "targets", "registry")
     evidence: dict[str, dict[str, Any]] = {}
     for row in token_rows:
@@ -193,7 +202,11 @@ def _load_solana_token_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _load_state_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_blocksize_state_discovery.json")
+    payload = _read_json(
+        effective_rwa_report_paths(reports_dir=reports_dir)[
+            "rwa_blocksize_state_discovery.json"
+        ]
+    )
     state_rows = _rows_from(payload, "symbols", "rows", "targets")
     evidence: dict[str, dict[str, Any]] = {}
     for row in state_rows:
@@ -204,7 +217,11 @@ def _load_state_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _load_hyperliquid_probe_evidence(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_hyperliquid_paxg_probe.json")
+    payload = _read_json(
+        effective_rwa_report_paths(reports_dir=reports_dir)[
+            "rwa_hyperliquid_paxg_probe.json"
+        ]
+    )
     evidence: dict[str, dict[str, Any]] = {}
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     for row in _rows_from(result, "results"):

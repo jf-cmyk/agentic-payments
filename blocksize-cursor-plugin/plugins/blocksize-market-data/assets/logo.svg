@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Blocksize Market Data</title>
+  <desc id="desc">Blocksize Capital square plugin logo</desc>
+  <rect width="512" height="512" rx="72" fill="#f7f4ed"/>
+  <g transform="translate(101 101) scale(3.72)" fill="#7a1f16">
+    <path d="M-.09,83.61h10.44s0-73.1,0-73.1h73.1s0-10.44,0-10.44H-.09s0,83.54,0,83.54ZM10.36,83.61v10.44s83.54,0,83.54,0V10.51s-10.44,0-10.44,0v73.1H10.36Z"/>
+    <rect x="41.68" y="7.97" width="10.44" height="83.47"/>
+    <rect x="47.17" y="41.84" width="43.52" height="10.44"/>
+  </g>
+</svg>

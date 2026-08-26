@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,9 @@ from src.rwa_rights_clearance import (
     load_rights_clearance,
     rights_clearance_summary,
     rights_cleared_for_venue,
+)
+from src.runtime_data import (
+    effective_rwa_report_paths,
 )
 
 
@@ -32,8 +34,8 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _artifact_path(env_name: str, default: str) -> Path:
-    return Path(os.getenv(env_name, default)).expanduser()
+def _artifact_path(filename: str, default: Path) -> Path:
+    return effective_rwa_report_paths(reports_dir=default.parent)[filename]
 
 
 def _base_quote(symbol: str) -> tuple[str, str]:
@@ -44,8 +46,8 @@ def _base_quote(symbol: str) -> tuple[str, str]:
     return base.upper(), quote.upper()
 
 
-def _load_jupiter_routes(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_jupiter_route_allowlist.json")
+def _load_jupiter_routes(path: Path) -> dict[str, dict[str, Any]]:
+    payload = _read_json(path)
     rows = payload.get("routes") if isinstance(payload.get("routes"), list) else []
     return {
         str(row.get("allowlist_id")): row
@@ -54,8 +56,8 @@ def _load_jupiter_routes(reports_dir: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def _load_token_registry(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_solana_token_mints.json")
+def _load_token_registry(path: Path) -> dict[str, dict[str, Any]]:
+    payload = _read_json(path)
     rows = payload.get("tokens") if isinstance(payload.get("tokens"), list) else []
     registry: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -93,8 +95,8 @@ def _load_pool_allowlist(path: Path) -> dict[str, dict[str, Any]]:
     return result
 
 
-def _load_state_discovery(reports_dir: Path) -> dict[str, dict[str, Any]]:
-    payload = _read_json(reports_dir / "rwa_blocksize_state_discovery.json")
+def _load_state_discovery(path: Path) -> dict[str, dict[str, Any]]:
+    payload = _read_json(path)
     rows = payload.get("symbols") if isinstance(payload.get("symbols"), list) else []
     return {
         str(row.get("state_symbol") or row.get("symbol") or "").upper().replace("/", ""): row
@@ -321,15 +323,36 @@ def build_route_pool_replay_inventory(
 ) -> dict[str, Any]:
     """Return replay evidence for route/pool candidates."""
     reports_path = Path(reports_dir)
-    route_rows = _load_jupiter_routes(reports_path)
-    token_registry = _load_token_registry(reports_path)
-    state_rows = _load_state_discovery(reports_path)
+    route_rows = _load_jupiter_routes(
+        _artifact_path(
+            "rwa_jupiter_route_allowlist.json",
+            reports_path / "rwa_jupiter_route_allowlist.json",
+        )
+    )
+    token_registry = _load_token_registry(
+        _artifact_path(
+            "rwa_solana_token_mints.json",
+            reports_path / "rwa_solana_token_mints.json",
+        )
+    )
+    state_rows = _load_state_discovery(
+        _artifact_path(
+            "rwa_blocksize_state_discovery.json",
+            reports_path / "rwa_blocksize_state_discovery.json",
+        )
+    )
     rights_clearance = load_rights_clearance()
     solana_pool_rows = _load_pool_allowlist(
-        _artifact_path("RWA_SOLANA_POOL_ALLOWLIST_PATH", "reports/rwa_solana_pool_allowlist.json")
+        _artifact_path(
+            "rwa_solana_pool_allowlist.json",
+            reports_path / "rwa_solana_pool_allowlist.json",
+        )
     )
     evm_pool_rows = _load_pool_allowlist(
-        _artifact_path("RWA_EVM_POOL_ALLOWLIST_PATH", "reports/rwa_evm_pool_allowlist.json")
+        _artifact_path(
+            "rwa_evm_pool_allowlist.json",
+            reports_path / "rwa_evm_pool_allowlist.json",
+        )
     )
 
     allowlist = build_dex_allowlist(venue=venue, status="all")

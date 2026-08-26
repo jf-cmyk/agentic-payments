@@ -1,0 +1,36 @@
+{
+  "name": "blocksize-market-data",
+  "displayName": "Blocksize Market Data",
+  "version": "1.3.0",
+  "description": "Clerk-authenticated remote MCP for read-only live crypto, supported equity ticker, FX, and metals market data in Cursor.",
+  "author": {
+    "name": "Blocksize Capital GmbH",
+    "email": "support@blocksize.info"
+  },
+  "publisher": "Blocksize Capital GmbH",
+  "homepage": "https://mcp.blocksize.info",
+  "repository": "https://github.com/jf-cmyk/blocksize-cursor-plugin",
+  "license": "MIT",
+  "logo": "assets/logo.png",
+  "keywords": [
+    "market-data",
+    "mcp",
+        "crypto",
+        "equities",
+        "stocks",
+        "bid-ask",
+        "fx",
+    "metals",
+    "clerk",
+    "oauth"
+  ],
+  "category": "data-analytics",
+  "tags": [
+    "data",
+    "finance",
+    "market-data",
+    "cursor",
+    "oauth"
+  ],
+  "mcpServers": "./mcp.json"
+}

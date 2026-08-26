@@ -273,8 +273,26 @@ class InstrumentListResponse(BaseModel):
 
     status: str = "ok"
     service: str = Field(..., description="Service type")
-    total_instruments: int = Field(..., description="Total count")
-    instruments: list[str] = Field(..., description="Instrument identifiers")
+    total_instruments: int = Field(
+        ...,
+        description="Total instruments in the source catalog",
+    )
+    returned_instruments: int = Field(
+        ...,
+        description="Instrument identifiers returned on this page",
+    )
+    offset: int = Field(..., ge=0, description="Zero-based page offset")
+    limit: int = Field(..., ge=1, description="Maximum page size")
+    has_more: bool = Field(..., description="Whether another page is available")
+    next_offset: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Offset for the next page, or null when this is the final page",
+    )
+    instruments: list[str] = Field(
+        ...,
+        description="Instrument identifiers on this page",
+    )
     meta: dict = Field(default_factory=lambda: {
         "provider": "Blocksize Capital",
     })

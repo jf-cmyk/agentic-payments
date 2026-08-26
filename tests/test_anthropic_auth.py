@@ -11,10 +11,11 @@ def _raise_no_access_token():
     raise RuntimeError("no request token in unit test")
 
 
-def test_beta_tokens_enabled_for_closed_beta(monkeypatch):
+def test_beta_tokens_disabled_without_explicit_flag(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_AUTH_PROVIDER", "none")
+    monkeypatch.delenv("ANTHROPIC_ENABLE_BETA_TOKENS", raising=False)
 
-    assert anthropic_auth.beta_tokens_enabled() is True
+    assert anthropic_auth.beta_tokens_enabled() is False
 
 
 def test_beta_tokens_disabled_by_default_when_oauth_provider(monkeypatch):
@@ -62,6 +63,7 @@ def test_beta_token_identity_can_be_explicitly_enabled_for_oauth_testing(monkeyp
     assert identity.user_id == "beta-user"
     assert identity.email == "beta@example.com"
     assert identity.source == "beta-token"
+    assert identity.ledger_subject == "anthropic:beta:beta-user"
 
 
 def test_oauth_identity_uses_upstream_claims(monkeypatch):
@@ -86,6 +88,8 @@ def test_oauth_identity_uses_upstream_claims(monkeypatch):
     assert identity.user_id == "clerk-user-123"
     assert identity.email == "user@example.com"
     assert identity.source == "oauth"
+    assert identity.ledger_subject.startswith("anthropic:")
+    assert identity.ledger_subject.endswith(":clerk-user-123")
 
 
 def test_default_client_redirect_allowlist_is_claude_and_loopback(monkeypatch):

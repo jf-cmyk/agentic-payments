@@ -99,7 +99,8 @@ venues, and exchanges to the Blocksize market-data aggregator.
   gaps, grouped by venue, status, and endpoint family.
 - `POST /v1/rwa/sourcing/probe`: bounded execution of `ready_to_probe`
   sourcing jobs, with normalized observations, optional depth VWAP,
-  real-time quality checks, and optional persistence.
+  real-time quality checks, and optional atomic persistence. This surface is
+  operator-only and disabled by default.
 - `GET /v1/rwa/feeds`: adapter registry, readiness, and remaining todos.
 - `POST /v1/rwa/vwap/calculate`: block-size VWAP over normalized depth.
 - `POST /v1/rwa/bidask/calculate`: normalized bid/ask and spread scoring.
@@ -113,13 +114,15 @@ venues, and exchanges to the Blocksize market-data aggregator.
 - `POST /v1/rwa/realtime/quality`: live usability gate for each submitted
   observation.
 - `POST /v1/rwa/observations/store`: replayable observation ledger with raw
-  payload hash, normalized hash, quality outputs, and metadata.
+  payload hash, normalized hash, quality outputs, and metadata. This surface
+  requires operator authentication and an explicit mutation feature flag.
 - `GET /v1/rwa/observations`: recent replayable observations with symbol,
-  venue, and limit filters.
+  venue, and limit filters; operator authentication is required.
 - `GET /v1/rwa/observations/summary`: compact persistence stats by venue and
   symbol.
 - `POST /v1/rwa/benchmark/blocksize`: live benchmark check against Blocksize
-  market-data feeds used by agentic-payment workflows.
+  market-data feeds used by agentic-payment workflows. The public benchmark
+  is stateless and cannot persist evidence.
 
 ## Adapter Completion Checklist
 
@@ -549,8 +552,8 @@ Derivative methodology:
    S&P 500 coverage plus APAC, UK/Europe, Canada, Australia, and Singapore
    equity feeds.
 15. Probe execution: run `/v1/rwa/sourcing/probe` for bounded `ready_to_probe`
-   jobs. Use `persist: true` for sourcing runs that should enter the replay
-   ledger.
+   jobs from an authenticated operator workflow. Use `persist: true` only
+   after the dedicated RWA database passes readiness.
 16. Derivative venue discovery: run
    `scripts/run_rwa_derivative_venue_discovery.py`, then execute
    `/v1/rwa/sourcing/jobs` for derivative venue jobs to capture market ids,
@@ -576,8 +579,8 @@ Derivative methodology:
    supplemental, benchmark, or replacement-candidate.
 24. Persistence: store raw payload hash, normalized observation, real-time
    quality result, Blocksize benchmark result, and promotion decision through
-   `/v1/rwa/observations/store`. Benchmark runs can set `persist: true` to
-   write comparable observations directly into the replay ledger.
+   the operator-only `/v1/rwa/observations/store`. Public benchmark runs are
+   stateless; an operator workflow may persist a validated result separately.
 
 ## Blocksize Benchmark Rule
 

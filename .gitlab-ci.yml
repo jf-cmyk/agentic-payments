@@ -1,25 +1,16 @@
-stages:
-  - deploy
-
-default:
-  image: node:20
-
-variables:
-  NPM_CONFIG_UPDATE_NOTIFIER: "false"
-
-deploy_production:
-  stage: deploy
+# Production deployment authority is intentionally disabled in GitLab.
+# Railway deployments are owned by the repository's GitHub source integration.
+workflow:
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  before_script:
-    - npm install -g @railway/cli
+    - when: always
+
+stages:
+  - validate
+
+validate_gitlab_deploy_authority_disabled:
+  stage: validate
+  image: alpine:3.20
+  variables:
+    GIT_STRATEGY: none
   script:
-    - |
-      for attempt in 1 2 3; do
-        railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE_NAME" && exit 0
-        status=$?
-        if [ "$attempt" = "3" ]; then
-          exit "$status"
-        fi
-        sleep $((attempt * 20))
-      done
+    - 'printf "%s\n" "GitLab CI is intentionally deployment-inert; no production action was taken."'

@@ -13,6 +13,7 @@ from src.rwa_daily_feed_agent import (
     DEFAULT_DAILY_AGENT_CSV_PATH,
     DEFAULT_DAILY_AGENT_HISTORY_DIR,
     DEFAULT_DAILY_AGENT_JSON_PATH,
+    write_daily_feed_agent_baseline,
     write_daily_feed_agent_report,
 )
 from src.rwa_xyz_monitor import (
@@ -32,18 +33,36 @@ def main() -> None:
     parser.add_argument("--refresh-assets-csv-out", default=str(DEFAULT_RWA_XYZ_ASSET_CSV_PATH))
     parser.add_argument("--refresh-tokens-csv-out", default=str(DEFAULT_RWA_XYZ_TOKEN_CSV_PATH))
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--reconcile-canonical",
+        action="store_true",
+        help=(
+            "Rebuild a verified baseline from the existing canonical monitor artifact without "
+            "claiming a historical daily diff"
+        ),
+    )
     args = parser.parse_args()
 
-    report = write_daily_feed_agent_report(
-        input_path=args.input,
-        json_path=args.json_out,
-        csv_path=args.csv_out,
-        history_dir=args.history_dir,
-        refresh_json_path=args.refresh_json_out,
-        refresh_asset_csv_path=args.refresh_assets_csv_out,
-        refresh_token_csv_path=args.refresh_tokens_csv_out,
-        timeout=args.timeout,
-    )
+    if args.reconcile_canonical:
+        if args.input:
+            parser.error("--input cannot be combined with --reconcile-canonical")
+        report = write_daily_feed_agent_baseline(
+            json_path=args.json_out,
+            csv_path=args.csv_out,
+            history_dir=args.history_dir,
+            current_report_path=args.refresh_json_out,
+        )
+    else:
+        report = write_daily_feed_agent_report(
+            input_path=args.input,
+            json_path=args.json_out,
+            csv_path=args.csv_out,
+            history_dir=args.history_dir,
+            refresh_json_path=args.refresh_json_out,
+            refresh_asset_csv_path=args.refresh_assets_csv_out,
+            refresh_token_csv_path=args.refresh_tokens_csv_out,
+            timeout=args.timeout,
+        )
     summary = report["summary"]
     print(
         "daily RWA feed agent complete: "

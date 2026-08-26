@@ -1,5 +1,13 @@
 # Blocksize Agent-Native Premium Products Plan
 
+> Superseded. Historical planning proposal; do not use it as current product or
+> sales guidance. References below to prepaid top-ups, bulk tiers, wallet
+> eligibility, and example package prices are not current production
+> availability. Current access is signed x402 for direct public HTTP,
+> starter credits only for eligible authenticated connector users, and a
+> contact-sales authenticated account plan. Use `docs/README_EXTERNAL.md` for
+> current public guidance.
+
 Date: 2026-06-12
 
 ## Positioning

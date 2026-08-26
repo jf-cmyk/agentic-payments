@@ -7,9 +7,13 @@ from urllib.parse import quote
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
 from src.mcp_server import (
+    DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    InstrumentPageLimit,
+    InstrumentPageOffset,
     READ_ONLY_TOOL_ANNOTATIONS,
     fetch as fetch_catalog,
     get_pricing_info as get_local_pricing_info,
@@ -137,6 +141,19 @@ public_mcp = FastMCP(
 )
 
 
+def _record_public_mcp_usage(tool_name: str, **fields: object) -> None:
+    """Record public MCP usage with only the request user-agent for test tagging."""
+    user_agent = get_http_headers().get("user-agent", "").strip()
+    if user_agent:
+        fields["user_agent"] = user_agent
+    record_usage_event(
+        "mcp_tool_call",
+        surface="public_mcp",
+        tool_name=tool_name,
+        **fields,
+    )
+
+
 @public_mcp.tool(
     name="search_pairs",
     title="Instrument Search",
@@ -153,10 +170,8 @@ async def public_search_pairs(
     asset_class: AssetClassFilter = "all",
 ) -> str:
     """Search supported instruments on the public remote MCP surface."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="search_pairs",
+    _record_public_mcp_usage(
+        "search_pairs",
         subject=query,
         asset_class=asset_class,
     )
@@ -173,34 +188,32 @@ async def public_search_pairs(
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def public_list_instruments(service: InstrumentService = "vwap") -> str:
+async def public_list_instruments(
+    service: InstrumentService = "vwap",
+    limit: InstrumentPageLimit = DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    offset: InstrumentPageOffset = 0,
+) -> str:
     """List supported instruments on the public remote MCP surface."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="list_instruments",
+    _record_public_mcp_usage(
+        "list_instruments",
         subject=service,
     )
-    return await list_local_instruments(service)
+    return await list_local_instruments(service, limit, offset)
 
 
 @public_mcp.tool(
     name="get_pricing_info",
     title="Pricing Information",
     description=(
-        "Inspect current per-call prices, bulk credit tiers, and supported Solana "
-        "and Base USDC settlement networks. This is free and read-only planning "
-        "metadata; it does not initiate payment."
+        "Inspect current direct x402 per-call prices, authenticated connector "
+        "starter-credit costs, supported USDC settlement networks, and the account-plan "
+        "contact path. This is free read-only metadata; it does not initiate payment."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
 async def public_get_pricing_info() -> str:
     """Return pricing guidance for public discovery clients."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_pricing_info",
-    )
+    _record_public_mcp_usage("get_pricing_info")
     return await get_local_pricing_info()
 
 
@@ -216,11 +229,7 @@ async def public_get_pricing_info() -> str:
 )
 async def public_get_product_catalog() -> str:
     """Return product catalog guidance for agents and listing surfaces."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_product_catalog",
-    )
+    _record_public_mcp_usage("get_product_catalog")
     return json.dumps(build_data_packages_json(), indent=2)
 
 
@@ -236,10 +245,8 @@ async def public_get_product_catalog() -> str:
 )
 async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
     """Return the paid HTTP endpoint and example body for a premium workflow."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_workflow_endpoint",
+    _record_public_mcp_usage(
+        "get_workflow_endpoint",
         subject=product,
     )
     catalog: dict[str, dict[str, object]] = {
@@ -368,15 +375,16 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
                 "starter_credit_cost": item["credit_cost"],
                 "paid_price_usdc": item["paid_price_usdc"],
                 "starter_positioning": "Start with 50 live data credits",
-                "upgrade_path": "x402 payment or prepaid credit top-ups",
+                "upgrade_path": "x402 payment or an authenticated account plan",
             },
             "behavior": {
                 "returns_live_data": False,
                 "starts_payment": False,
                 "side_effects": "none",
                 "next_step": (
-                    "Call the returned HTTP endpoint with a starter-credit identity "
-                    "header, or without credits to receive an x402 payment challenge."
+                    "Call the returned HTTP endpoint to receive a direct x402 payment "
+                    "challenge. Starter credits are available only through an "
+                    "authenticated connector, not caller-selected HTTP identity headers."
                 ),
             },
             "links": {
@@ -404,10 +412,8 @@ async def public_get_market_data_endpoint(
     symbol: LiveMarketDataSymbol,
 ) -> str:
     """Return the paid HTTP endpoint an agent should call for live data."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="get_market_data_endpoint",
+    _record_public_mcp_usage(
+        "get_market_data_endpoint",
         subject=symbol.strip().upper(),
         asset_class=service,
     )
@@ -473,10 +479,8 @@ async def public_get_market_data_endpoint(
 )
 async def public_search(query: CatalogSearchQuery) -> str:
     """Search docs and catalog entries in a document-oriented shape."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="search",
+    _record_public_mcp_usage(
+        "search",
         subject=query,
     )
     return await search_catalog(query)
@@ -494,10 +498,8 @@ async def public_search(query: CatalogSearchQuery) -> str:
 )
 async def public_fetch(id: CatalogFetchId) -> str:
     """Fetch one documentation or instrument payload."""
-    record_usage_event(
-        "mcp_tool_call",
-        surface="public_mcp",
-        tool_name="fetch",
+    _record_public_mcp_usage(
+        "fetch",
         subject=id,
     )
     return await fetch_catalog(id)
@@ -525,7 +527,7 @@ async def public_info() -> str:
             "paid_data_access": {
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,
-                "starter_allowance": "Start with 50 live data credits, then upgrade through x402 payment or prepaid credit top-ups.",
+                "starter_allowance": "Start with authenticated connector credits, then upgrade through x402 payment or an authenticated account plan.",
                 "notes": (
                     "Live paid market data is exposed through the x402-protected HTTP "
                     "API and advanced local MCP setup, not this public remote server."

@@ -67,6 +67,7 @@ def test_cursor_beta_token_identity_can_be_enabled_for_private_testing(monkeypat
     assert identity.user_id == "cursor-user"
     assert identity.email == "cursor@example.com"
     assert identity.source == "beta-token"
+    assert identity.ledger_subject == "cursor:beta:cursor-user"
 
 
 def test_cursor_oauth_callback_url_uses_cursor_public_url(monkeypatch):

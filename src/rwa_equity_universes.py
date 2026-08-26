@@ -280,9 +280,11 @@ EQUITY_UNIVERSES: dict[str, dict[str, Any]] = {
 }
 
 
-def _current_overlap(sample_symbols: list[str]) -> dict[str, Any]:
-    registry = build_rwa_symbol_registry()
-    alias_index = registry["alias_index"]
+def _current_overlap(
+    sample_symbols: list[str],
+    *,
+    alias_index: set[str],
+) -> dict[str, Any]:
     matched: list[str] = []
     missing: list[str] = []
     for symbol in sample_symbols:
@@ -356,8 +358,13 @@ def build_equity_universe_sourcing_plan(
     *,
     universe: str | None = None,
     region: str | None = None,
+    asset_matrix: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return sourceability and feed-build plan for major equity universes."""
+    registry = build_rwa_symbol_registry(
+        matrix=asset_matrix,
+    )
+    alias_index = set(registry["alias_index"])
     selected = []
     clean_universe = (universe or "all").strip().lower()
     clean_region = (region or "all").strip().lower()
@@ -370,7 +377,10 @@ def build_equity_universe_sourcing_plan(
         row = {
             "universe_id": universe_id,
             **data,
-            "current_registry_overlap": _current_overlap(data["sample_symbols"]),
+            "current_registry_overlap": _current_overlap(
+                data["sample_symbols"],
+                alias_index=alias_index,
+            ),
             "feed_shapes": _feed_shapes(universe_id, data),
         }
         selected.append(row)

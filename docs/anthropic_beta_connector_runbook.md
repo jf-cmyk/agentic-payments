@@ -111,6 +111,21 @@ ANTHROPIC_AUTH_PROVIDER=supabase
 SUPABASE_PROJECT_URL=https://<project-ref>.supabase.co
 ```
 
+## Entitlement identity and rollback continuity
+
+Keep `ANTHROPIC_ENTITLEMENT_DB_PATH` stable through deploys and rollbacks. The
+v0.6.2 server stored balances under the OAuth provider's raw `user_id`. Current
+releases retain that raw row as the canonical balance and charge owner, while
+`identity_aliases` durably binds it one-to-one to the connector-, issuer-, and
+audience-scoped principal. This additive layout prevents a new starter
+allowance on upgrade and lets v0.6.2 see candidate charges after a rollback.
+
+Do not delete or rewrite `identity_aliases`. A changed issuer/audience scope, a
+second scoped principal claiming the same raw ID, or a scoped balance created
+before this bridge is installed fails closed and requires backed-up operator
+reconciliation. Do not point another connector at this database; cross-connector
+account linking requires an explicit reviewed migration.
+
 ## Smoke Tests
 
 Public OAuth challenge check:

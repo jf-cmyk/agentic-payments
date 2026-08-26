@@ -467,12 +467,19 @@ FUTURES_PRICING_METHODS: list[dict[str, Any]] = [
 ]
 
 
-def _current_asset_ids() -> set[str]:
-    return {str(asset["asset_id"]) for asset in build_rwa_asset_matrix()["assets"]}
+def _current_asset_ids(
+    asset_matrix: dict[str, Any] | None = None,
+) -> set[str]:
+    matrix = asset_matrix or build_rwa_asset_matrix()
+    return {str(asset["asset_id"]) for asset in matrix["assets"]}
 
 
-def _coverage_for_examples(examples: list[str]) -> dict[str, Any]:
-    current = _current_asset_ids()
+def _coverage_for_examples(
+    examples: list[str],
+    *,
+    current_asset_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    current = current_asset_ids or _current_asset_ids()
     covered = []
     missing = []
     for symbol in examples:
@@ -484,10 +491,16 @@ def _coverage_for_examples(examples: list[str]) -> dict[str, Any]:
     return {"covered_examples": covered, "missing_examples": missing}
 
 
-def build_market_expansion_plan() -> dict[str, Any]:
+def build_market_expansion_plan(
+    *,
+    asset_matrix: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return venues, ticker scopes, and missing catalog work for expanded RWA coverage."""
-    current = build_rwa_asset_matrix()
-    equity_universes = build_equity_universe_sourcing_plan()
+    current = asset_matrix or build_rwa_asset_matrix()
+    current_asset_ids = _current_asset_ids(current)
+    equity_universes = build_equity_universe_sourcing_plan(
+        asset_matrix=current,
+    )
     by_region = Counter(str(venue["region"]) for venue in EXPANDED_SOURCE_VENUES)
     by_status = Counter(str(venue["status"]) for venue in EXPANDED_SOURCE_VENUES)
     by_asset_class = Counter(
@@ -498,7 +511,15 @@ def build_market_expansion_plan() -> dict[str, Any]:
     venues = []
     for venue in EXPANDED_SOURCE_VENUES:
         examples = [str(item) for item in venue["example_tickers"]]
-        venues.append({**venue, **_coverage_for_examples(examples)})
+        venues.append(
+            {
+                **venue,
+                **_coverage_for_examples(
+                    examples,
+                    current_asset_ids=current_asset_ids,
+                ),
+            }
+        )
     universe_rows = []
     for universe_id, universe in EQUITY_UNIVERSES.items():
         overlap = next(

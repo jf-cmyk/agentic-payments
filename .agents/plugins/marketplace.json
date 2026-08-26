@@ -1,0 +1,20 @@
+{
+  "name": "blocksize-plugins",
+  "interface": {
+    "displayName": "Blocksize Plugins"
+  },
+  "plugins": [
+    {
+      "name": "blocksize-market-data",
+      "source": {
+        "source": "local",
+        "path": "./openai-plugin/blocksize-market-data"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Data & Analytics"
+    }
+  ]
+}

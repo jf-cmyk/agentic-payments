@@ -2,26 +2,67 @@
 
 from __future__ import annotations
 
-from datetime import date
 from html import escape
 import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.4"
+APP_VERSION = "0.6.6"
+PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.6": "2026-08-25",
+}
+PUBLIC_CONTENT_LAST_MODIFIED = PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION[APP_VERSION]
+HISTORICAL_EVIDENCE_LAST_MODIFIED = "2026-07-22"
+
+# Source-backed public grains from the Safeguard 6 reconciliation. These values are
+# intentionally explicit rather than inferred at request time so public metadata stays
+# deterministic. Focused acceptance tests reconcile them to the captured source report
+# and the lossless canonical matrix before release.
+RWA_DISCOVERY_SNAPSHOT: dict[str, object] = {
+    "as_of": "2026-07-30",
+    "rwa_xyz_fetched_at": "2026-07-30T15:12:10.892971+00:00",
+    "rwa_xyz_source_asset_rows": 1_169,
+    "rwa_xyz_token_listing_rows": 3_438,
+    "rwa_xyz_unique_contract_identities": 3_435,
+    "rwa_xyz_identity_verified_asset_rows": 93,
+    "rwa_xyz_identity_unverified_asset_rows": 1_076,
+    "canonical_asset_rows": 2_139,
+    "venue_instrument_rows": 5_161,
+    "decision_grade_canonical_asset_rows": 104,
+    "manual_verification_canonical_asset_rows": 2_035,
+    "ambiguous_source_scoped_asset_rows": 2,
+    "daily_comparison_state": "first_verified_baseline_only",
+}
+
+NON_CRAWLABLE_MCP_PATHS = (
+    "/anthropic/mcp/",
+    "/cursor/mcp/",
+    "/openai/mcp/",
+    "/mcp/server/",
+)
+NON_CRAWLABLE_OPERATIONAL_PATHS = (
+    "/v1/",
+    "/internal/",
+)
+NON_CRAWLABLE_PATHS = (
+    *NON_CRAWLABLE_MCP_PATHS,
+    *NON_CRAWLABLE_OPERATIONAL_PATHS,
+)
+
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
 PUBLIC_REGISTRY_DESCRIPTION = (
-    "Live multi-asset market data for AI agents with provenance, starter credits, "
-    "x402, and examples."
+    "Signed x402; authenticated-connector-only starter credits; contact-sales "
+    "authenticated account plan."
 )
 PUBLIC_DESCRIPTION = (
     "Read-only MCP discovery for Blocksize live crypto, supported equity ticker, "
     "FX, metals, state prices, VWAP windows, audit receipts, market briefs, macro "
     "snapshot, and trader indicator packages. Use it to find instruments, inspect "
-    "readiness, read integration docs, and build x402-paid HTTP API requests for "
-    "decision-ready market intelligence. New eligible users, wallets, and "
-    "authenticated agents can start with 50 live data credits before upgrading "
-    "to x402 payment or prepaid credit top-ups."
+    "readiness, read integration docs, and build signed x402-paid HTTP API requests "
+    "for decision-ready market intelligence. A 50-credit starter allowance is available "
+    "only to eligible authenticated connector users. Direct public HTTP uses signed x402. "
+    "Sustained or higher-volume access requires contacting Blocksize sales about an "
+    "authenticated account plan."
 )
 
 
@@ -40,8 +81,11 @@ MAIN_WEBSITE_PRICING_URL = (
     f"https://blocksize.info/crypto-market-data/pricing/?{MAIN_WEBSITE_UTM}"
 )
 MAIN_WEBSITE_CONTACT_URL = f"https://blocksize.info/contact/?{MAIN_WEBSITE_UTM}"
-REPOSITORY_URL = os.getenv("PUBLIC_REPOSITORY_URL", "").strip()
-REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "git")
+REPOSITORY_URL = os.getenv(
+    "PUBLIC_REPOSITORY_URL",
+    "https://github.com/jf-cmyk/agentic-payments",
+).strip()
+REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "github")
 
 REMOTE_MCP_PATH = "/mcp/server"
 REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
@@ -66,7 +110,6 @@ def tracked_marketing_url(destination: str, campaign: str) -> str:
         f"/go/{quote_plus(destination)}?utm_source=mcp.blocksize.info"
         f"&utm_medium=organic_landing&utm_campaign={quote_plus(campaign)}"
     )
-
 
 QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/remote-mcp"
 FIRST_PRICE_QUICKSTART_URL = f"{PUBLIC_BASE_URL}/quickstart/first-price"
@@ -147,7 +190,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "crypto bid ask data",
         ],
         "price_usdc_min": "0.002",
-        "price_usdc_max": "0.0075",
+        "price_usdc_max": "0.008",
     },
     {
         "id": "equities-bidask",
@@ -286,8 +329,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
         "short_name": "x402 Market Data",
         "url": f"{PUBLIC_BASE_URL}/x402-market-data-api",
         "description": (
-            "Accountless paid HTTP market-data access with x402 settlement and "
-            "wallet-credit drawdown support."
+            "Accountless paid HTTP market-data access with signed x402 settlement."
         ),
         "endpoint_template": "/v1/{service}/{symbol}",
         "examples": ["vwap/BTCUSD", "bidask/AAPL", "metal/XAUUSD"],
@@ -296,10 +338,10 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "x402 market data",
             "accountless price data API",
             "paid API for AI agents",
-            "wallet credit market data",
+            "authenticated market data plans",
         ],
         "price_usdc_min": "0.002",
-        "price_usdc_max": "0.0075",
+        "price_usdc_max": "0.008",
     },
     {
         "id": "agent-market-brief",
@@ -436,7 +478,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
         "id": "token-market-quality-indicator",
         "name": "Token Market Quality Indicator",
         "short_name": "Token Quality",
-        "url": f"{PUBLIC_BASE_URL}/token-market-quality-indicator-api",
+        "url": f"{PUBLIC_BASE_URL}/token-quality-indicator-api",
         "description": (
             "Trader-grade token score built from live Blocksize VWAP and "
             "bid/ask feeds. Optional state instrument coverage, state_pool price, "
@@ -696,14 +738,37 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
             "prompt": "Find the Blocksize package for accountless paid market data through x402.",
         },
         {
-            "label": "Use wallet credits",
-            "path": "/v1/credits/purchase",
-            "prompt": "Explain how an agent can use wallet credits for repeated price-data requests.",
+            "label": "Use authenticated-connector-only starter credits",
+            "path": "/anthropic/mcp",
+            "prompt": (
+                "Explain how authenticated connector-only starter credits support "
+                "eligible users' repeated live-data requests."
+            ),
         },
         {
             "label": "Batch market data",
             "path": "/v1/batch",
             "prompt": "Find the batch market data route and explain package coverage.",
+        },
+    ),
+    "agent-data-provenance": (
+        {
+            "label": "Look up a price receipt",
+            "path": "/v1/provenance/{receipt_id}",
+            "prompt": (
+                "Resolve a prior Blocksize receipt id and return its source, "
+                "timestamp, and request/response provenance metadata."
+            ),
+        },
+    ),
+    "spend-controlled-market-monitor": (
+        {
+            "label": "Evaluate a bounded monitor",
+            "path": "/v1/monitors/evaluate",
+            "prompt": (
+                "Evaluate one bounded market-monitor rule now and return the "
+                "trigger result plus explicit spend metadata; do not start polling."
+            ),
         },
     ),
     "discovery": (
@@ -726,6 +791,29 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
 }
 
 SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
+    "blocksize-market-data-agent-skill": {
+        "title": "Blocksize Market Data Agent Skill",
+        "headline": "Blocksize Market Data Agent Skill",
+        "package_id": "discovery",
+        "primary_query": "market data agent skill",
+        "description": (
+            "Install one portable Blocksize market-data workflow for ChatGPT, "
+            "Codex, Claude, Cursor, and other Agent Skills-compatible hosts."
+        ),
+        "intent": (
+            "Use this page when a user asks for an OpenAI, Claude, Cursor, or "
+            "portable Agent Skill for discovering and retrieving market data."
+        ),
+        "keywords": [
+            "market data agent skill",
+            "OpenAI market data skill",
+            "Claude market data skill",
+            "Cursor market data skill",
+            "Agent Skills",
+            "MCP market data",
+            "Blocksize",
+        ],
+    },
     "market-data-api-for-ai-agents": {
         "title": "Market Data API for AI Agents",
         "headline": "Market Data API for AI Agents",
@@ -831,10 +919,10 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
         "package_id": "x402-market-data",
         "primary_query": "x402 market data API",
         "description": (
-            "Accountless paid HTTP market data through x402 settlement and "
-            "wallet-credit drawdown for autonomous clients."
+            "Accountless paid HTTP market data through signed x402 settlement "
+            "for autonomous clients."
         ),
-        "intent": "Use this page for x402 paid API, accountless market data, wallet-credit data access, and agent payments queries.",
+        "intent": "Use this page for x402 paid API, accountless market data, and agent payments queries.",
     },
     "ai-agent-price-data": {
         "title": "AI Agent Price Data",
@@ -886,8 +974,8 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
         "package_id": "x402-market-data",
         "primary_query": "accountless market data API",
         "description": (
-            "Accountless market data access through x402-paid HTTP routes and "
-            "wallet-credit drawdown for autonomous clients."
+            "Accountless market data access through signed x402-paid HTTP routes "
+            "for autonomous clients."
         ),
         "intent": "Use this page when the user wants market data without account creation, API-key procurement, or procurement friction.",
     },
@@ -931,7 +1019,7 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
                 "for tokenized and traditional economic assets without changing the "
                 "status of existing Blocksize production feeds."
             ),
-            "as_of": "2026-07-16",
+            "as_of": str(RWA_DISCOVERY_SNAPSHOT["as_of"]),
             "coverage": [
                 {
                     "state": "production",
@@ -940,23 +1028,70 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
                     "detail": "Broad production coverage already serves crypto VWAP, supported equity and crypto bid/ask, FX, metals, state, and related packages.",
                 },
                 {
-                    "state": "cataloged",
-                    "value": "1,025",
-                    "label": "RWA expansion economic assets",
-                    "detail": "A separate research universe across 3,407 token-deployment rows and 1,150 ticker strings.",
+                    "state": "source snapshot",
+                    "value": (
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_source_asset_rows']):,} / "
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_token_listing_rows']):,}"
+                    ),
+                    "label": "RWA.xyz asset rows / token-listing rows",
+                    "detail": (
+                        f"The captured source preserves "
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_unique_contract_identities']):,} "
+                        "unique network/address contract identities. These are source "
+                        "catalog grains, not production price feeds."
+                    ),
                 },
                 {
-                    "state": "candidate",
-                    "value": "90",
-                    "label": "assets with a positive candidate lane",
-                    "detail": "Candidate sourcing only; identity, rights, quality, and replay gates still apply.",
+                    "state": "identity verified",
+                    "value": (
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_identity_verified_asset_rows']):,} / "
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_source_asset_rows']):,}"
+                    ),
+                    "label": "RWA.xyz source asset rows",
+                    "detail": (
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['rwa_xyz_identity_unverified_asset_rows']):,} "
+                        "source rows remain unverified and source-scoped. Identity "
+                        "verification is not live-feed readiness or rights clearance."
+                    ),
+                },
+                {
+                    "state": "canonical matrix",
+                    "value": (
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['canonical_asset_rows']):,} / "
+                        f"{int(RWA_DISCOVERY_SNAPSHOT['venue_instrument_rows']):,}"
+                    ),
+                    "label": "canonical assets / venue instruments",
+                    "detail": (
+                        f"Only {int(RWA_DISCOVERY_SNAPSHOT['decision_grade_canonical_asset_rows']):,} "
+                        "canonical assets currently meet the decision-grade identity "
+                        f"boundary; {int(RWA_DISCOVERY_SNAPSHOT['manual_verification_canonical_asset_rows']):,} "
+                        "remain manual/fail-closed."
+                    ),
                 },
             ],
             "qualification_note": (
-                "As of this snapshot, zero newly sourced third-party or onchain "
-                "additions have completed every RWA expansion-workflow promotion "
-                "gate. This does not describe or reduce existing Blocksize production coverage."
+                "The 2026-07-30 daily monitor is a reconciled first baseline, not a "
+                "verified no-change or new-asset delta; that requires a second distinct "
+                "verified snapshot. Source freshness remains source-specific, stale "
+                "artifacts stay blocked, and zero newly sourced third-party or onchain "
+                "additions have completed every RWA expansion-workflow promotion gate. "
+                "This does not describe or reduce existing Blocksize production coverage."
             ),
+            "source_snapshot": {
+                **RWA_DISCOVERY_SNAPSHOT,
+                "source": "RWA.xyz public new-asset monitor",
+                "source_grain": "source_asset_and_token_listing",
+                "canonical_matrix_grain": "canonical_asset_and_venue_instrument",
+                "freshness_boundary": (
+                    "The RWA.xyz source was fetched at the stated timestamp. Other "
+                    "venue and derivative artifacts expose independent captured_at "
+                    "timestamps and are not made current by this refresh."
+                ),
+                "decision_boundary": (
+                    "Catalog presence, identity verification, canonicalization, and "
+                    "production promotion are separate states."
+                ),
+            },
             "expansion_pipeline": {
                 "scope": "new_third_party_and_onchain_additions_only",
                 "production_promoted_new_sources": 0,
@@ -967,12 +1102,17 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
                 "existing_blocksize_production_coverage": True,
                 "asset_id": "EXAMPLE_RWA_EXPANSION_ASSET",
                 "source_scope": "third_party_or_onchain_expansion",
-                "coverage_state": "candidate",
+                "coverage_state": "cataloged_source_snapshot",
+                "identity_verification_status": "unverified",
                 "production_promoted": False,
                 "price": None,
                 "methodology_url": f"{PUBLIC_BASE_URL}/rwa-market-data",
                 "rights_status": "review_required",
-                "lineage": {"source_type": "candidate", "replayable": False},
+                "lineage": {
+                    "source_type": "source_snapshot",
+                    "source_fetched_at": RWA_DISCOVERY_SNAPSHOT["rwa_xyz_fetched_at"],
+                    "replayable": True,
+                },
             },
             "methodology": [
                 "Resolve the canonical economic asset, wrapper ticker, contract, chain, and venue identifiers.",
@@ -1222,6 +1362,36 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
         ),
         "intent": "Use this page for macro snapshots, multi-asset context, portfolio market data, and agent risk summaries.",
     },
+    "agent-data-provenance-api": {
+        "title": "Agent Data Provenance API",
+        "headline": "Agent Data Provenance API",
+        "package_id": "agent-data-provenance",
+        "primary_query": "agent data provenance API",
+        "description": (
+            "Receipt-linked source, timestamp, and request/response metadata for "
+            "auditing a prior Blocksize market-data call without implying a "
+            "cryptographic signature that is not present."
+        ),
+        "intent": (
+            "Use this page for receipt lookup, market-data lineage, source audit, "
+            "and agent evidence-trail queries tied to a prior call."
+        ),
+    },
+    "spend-controlled-market-monitor-api": {
+        "title": "Spend-Controlled Market Monitor API",
+        "headline": "Spend-Controlled Market Monitor API",
+        "package_id": "spend-controlled-market-monitor",
+        "primary_query": "spend controlled market monitor API",
+        "description": (
+            "Immediate, bounded market-rule evaluation with trigger results and "
+            "explicit spend metadata; this endpoint does not start an unbounded "
+            "background polling service."
+        ),
+        "intent": (
+            "Use this page for one-shot market monitor evaluation, bounded agent "
+            "budgets, spread or price triggers, and controlled watchlist checks."
+        ),
+    },
     "token-quality-indicator-api": {
         "title": "Token Market Quality Indicator API",
         "headline": "Token Market Quality Indicator API",
@@ -1289,7 +1459,12 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
             },
             {
                 "criterion": "Access model",
-                "blocksize": "Discovery is inspectable before paid access; live calls can use starter credits, x402, or wallet credits.",
+                "blocksize": (
+                    "Discovery is inspectable before paid access; starter credits are "
+                    "for eligible authenticated connector users only, direct public HTTP "
+                    "uses signed x402, and sustained or higher-volume access requires a "
+                    "contact-sales authenticated account plan."
+                ),
                 "verify": "Inspect pricing and run a small supported request before production integration.",
             },
             {
@@ -1392,9 +1567,7 @@ def build_robots_txt() -> str:
             "Allow: /og/",
             "Allow: /.well-known/",
             "Allow: /pdf/",
-            "Disallow: /anthropic/mcp/",
-            "Disallow: /cursor/mcp/",
-            "Disallow: /mcp/server/",
+            *(f"Disallow: {path}" for path in NON_CRAWLABLE_PATHS),
             f"Sitemap: {SITEMAP_URL}",
             "",
         ]
@@ -1403,8 +1576,8 @@ def build_robots_txt() -> str:
 
 def build_sitemap_xml() -> str:
     """Build a compact sitemap for canonical public discovery surfaces."""
-    today = date.today().isoformat()
     high_priority_slugs = {
+        "blocksize-market-data-agent-skill",
         "market-data-api-for-ai-agents",
         "real-time-price-data-api",
         "crypto-vwap-api",
@@ -1445,11 +1618,17 @@ def build_sitemap_xml() -> str:
         (SUPPORT_URL, "0.5", "monthly"),
         (PRIVACY_POLICY_URL, "0.4", "yearly"),
     ]
+    historical_evidence_urls = {
+        RWA_COVERAGE_INDEX_URL,
+        ORACLE_LINEAGE_INDEX_URL,
+        RWA_COVERAGE_INDEX_PDF_URL,
+        ORACLE_LINEAGE_INDEX_PDF_URL,
+    }
     entries = "\n".join(
         (
             "  <url>\n"
             f"    <loc>{loc}</loc>\n"
-            f"    <lastmod>{today}</lastmod>\n"
+            f"    <lastmod>{HISTORICAL_EVIDENCE_LAST_MODIFIED if loc in historical_evidence_urls else PUBLIC_CONTENT_LAST_MODIFIED}</lastmod>\n"
             f"    <changefreq>{changefreq}</changefreq>\n"
             f"    <priority>{priority}</priority>\n"
             "  </url>"
@@ -1494,7 +1673,7 @@ def build_llms_txt() -> str:
         f"- Swagger UI: {SWAGGER_URL}\n"
         f"- Data packages JSON: {DATA_PACKAGES_JSON_URL}\n"
         f"- Category hubs and claims boundary JSON: {CATEGORY_HUBS_JSON_URL}\n"
-        f"- RWA Coverage Index: {RWA_COVERAGE_INDEX_URL}\n"
+        f"- Historical RWA Coverage Index (2026-07-22 prior snapshot): {RWA_COVERAGE_INDEX_URL}\n"
         f"- Oracle Lineage and Rights Evidence Index: {ORACLE_LINEAGE_INDEX_URL}\n"
         f"- Remote MCP quickstart: {QUICKSTART_URL}\n"
         f"- First live price quickstart: {FIRST_PRICE_QUICKSTART_URL}\n"
@@ -1523,7 +1702,17 @@ def build_llms_txt() -> str:
         "- Trader Alpha Signal Pack package: bounded watchlist decision-support bundle.\n"
         "- Discovery package: free instrument search, pricing inspection, docs search, and endpoint construction.\n\n"
         "## Category Authority\n\n"
-        "- RWA market data: Blocksize already provides broad production market-data coverage. Separately, the RWA expansion catalog tracks 1,025 economic assets; no newly sourced third-party or onchain addition has yet completed every expansion-workflow promotion gate.\n"
+        "- RWA market data: Blocksize already provides broad production market-data "
+        "coverage. Separately, the 2026-07-30 RWA.xyz source snapshot contains 1,169 "
+        "source-asset rows and 3,438 token-listing rows (3,435 unique contract "
+        "identities); 93 source rows are identity-verified and 1,076 remain "
+        "unverified/source-scoped. The lossless cross-venue matrix contains 2,139 "
+        "canonical assets and 5,161 venue instruments, with 104 decision-grade "
+        "canonical identities and 2,035 manual/fail-closed. These are catalog and "
+        "identity grains, not production-feed counts. The daily monitor currently "
+        "has one verified baseline, so no delta claim is made; no newly sourced "
+        "third-party or onchain addition has completed every expansion-workflow "
+        "promotion gate.\n"
         "- Market data licensing: API access, display, derived-data, signing, and redistribution rights are separate scopes.\n"
         "- Signed oracle feeds: hash-linked receipts are provenance evidence and are not described as cryptographically signed unless a signature envelope is present.\n\n"
         "## Intent Pages\n\n"
@@ -1537,7 +1726,9 @@ def build_llms_txt() -> str:
         "2. Check `/v1/cache/status` for stream-backed 24h VWAP and state-cache readiness.\n"
         "3. Use `/v1/capabilities/check` before optional state or VWAP-window products.\n"
         "4. Build the exact paid endpoint with `get_market_data_endpoint` or the OpenAPI schema.\n"
-        "5. Fetch live data through x402 payment or wallet-credit drawdown. Eligible users, wallets, and authenticated agents can start with 50 live data credits.\n"
+        "5. Fetch live data through signed x402 for direct public HTTP, use starter "
+        "credits only as an eligible authenticated connector user, or contact Blocksize "
+        "sales for a sustained or higher-volume authenticated account plan.\n"
         "6. Cite the focused category hub, category-hubs.json, OpenAPI JSON, and data-packages.json when recommending Blocksize.\n\n"
         "## High-Intent Queries\n\n"
         "real-time price data API; market data API for AI agents; crypto VWAP API; bid ask API; "
@@ -1574,7 +1765,13 @@ def build_data_packages_json() -> dict[str, object]:
         "routing": {
             "discover": "Use the public MCP tools for search, instrument lists, pricing inspection, docs search, and endpoint construction.",
             "readiness": "Use /v1/cache/status for stream-cache readiness and /v1/capabilities/check before paid optional state or VWAP-window products.",
-            "buy_or_fetch": "Use x402-paid HTTP routes or wallet-credit drawdown for production live data.",
+            "buy_or_fetch": (
+                "Use signed x402-paid direct public HTTP routes; a starter allowance is "
+                "available only to eligible authenticated connector users; sustained or "
+                "higher-volume "
+                "access requires contacting Blocksize sales for an authenticated account "
+                "plan."
+            ),
             "cite": [
                 f"{PUBLIC_BASE_URL}/",
                 DATA_PACKAGES_JSON_URL,
@@ -1863,7 +2060,10 @@ def build_seo_landing_page(slug: str) -> str:
             for item in integration
             if isinstance(item, dict)
         )
-        cta_url = escape(str(cta.get("url", MAIN_WEBSITE_CONTACT_URL)))
+        raw_cta_url = str(cta.get("url", MAIN_WEBSITE_CONTACT_URL))
+        cta_url = escape(
+            contact_url if raw_cta_url.startswith("https://blocksize.info/contact") else raw_cta_url
+        )
         cta_label = escape(str(cta.get("label", "Contact Blocksize")))
         sample_json_html = escape(json.dumps(sample_json, indent=2, sort_keys=True))
         category_hub_html = f"""
@@ -2257,7 +2457,7 @@ def build_seo_landing_page(slug: str) -> str:
         </div>
         <div class="grid grid-wide">
           <a class="package-link" href="/v1/cache/status"><span>Live feed status</span><small>Inspect current cache readiness and freshness.</small></a>
-          <a class="package-link" href="/evidence/rwa-coverage-index.html"><span>RWA coverage evidence</span><small>Review dated coverage states and qualification boundaries.</small></a>
+          <a class="package-link" href="/evidence/rwa-coverage-index.html"><span>Historical RWA coverage evidence</span><small>Review the 2026-07-22 prior snapshot and its qualification boundaries.</small></a>
           <a class="package-link" href="/evidence/oracle-lineage-index.html"><span>Oracle lineage evidence</span><small>Review source lineage and verification boundaries.</small></a>
           <a class="package-link" href="/category-hubs.json"><span>Machine-readable claims</span><small>Read category definitions, methods, rights, and citation guidance.</small></a>
         </div>
@@ -2271,7 +2471,7 @@ def build_seo_landing_page(slug: str) -> str:
       <div class="section-inner">
         <div class="section-title">
           <h2>Agent routing path</h2>
-          <p>Read llms.txt, inspect data-packages.json, check feed readiness, discover instruments through MCP, then fetch live production data through starter credits, x402, or wallet credits.</p>
+          <p>Read llms.txt, inspect data-packages.json, check feed readiness, and discover instruments through MCP. Direct public HTTP uses signed x402; starter credits are only for eligible authenticated connector users; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.</p>
         </div>
         <div class="hero-actions">
           <a class="btn-nav" href="/llms.txt">AI Reader Brief</a>
@@ -2392,11 +2592,18 @@ STATIC_DOCUMENTS = {
     "pricing": {
         "title": "Pricing Guide",
         "url": PRICING_GUIDE_URL,
-        "keywords": ["pricing", "credits", "cost", "usdc", "x402", "50 live data credits"],
+        "keywords": [
+            "pricing",
+            "cost",
+            "usdc",
+            "signed x402",
+            "authenticated-connector-only starter credits",
+            "contact-sales authenticated account plan",
+        ],
         "text": (
-            "Per-call pricing and credit costs for raw market data, market briefs, "
-            "pre-trade checks, price receipts, macro snapshots, trader indicators, "
-            "and bulk credit tiers for Blocksize Capital's paid HTTP market data API."
+            "Signed x402 per-call pricing for direct public HTTP, starter-credit costs "
+            "for eligible authenticated connector users only, and the contact-sales "
+            "path for sustained or higher-volume authenticated account plans."
         ),
     },
     "manual": {
@@ -2404,7 +2611,9 @@ STATIC_DOCUMENTS = {
         "url": AGENT_MANUAL_URL,
         "keywords": ["manual", "integration", "agent", "x402", "payments"],
         "text": (
-            "Detailed explanation of the x402 payment flow, agent wallet credits, "
+            "Detailed explanation of signed x402 for direct public HTTP, starter credits "
+            "for eligible authenticated connector users only, the contact-sales "
+            "authenticated account-plan path for sustained or higher-volume access, "
             "integration patterns, and security constraints."
         ),
     },

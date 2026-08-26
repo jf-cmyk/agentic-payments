@@ -4,17 +4,24 @@ Tests for the FastAPI resource server with x402 middleware.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
+import subprocess
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 import pytest
 import httpx
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from src import public_metadata, resource_server
+from src.blocksize_client import BlocksizeAPIError
 from src.rwa_adapters import (
     HyperliquidPAXGAdapter,
     HyperliquidSpotRWAAdapter,
@@ -45,11 +52,51 @@ from src.credit_manager import CreditManager
 from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 from src.rwa_store import RWAObservationStore
 
+RWA_TEST_OPERATOR_TOKEN = "rwa-test-operator-token-0123456789abcdef"
+OBSERVABILITY_TEST_TOKEN = "obs-7f428cdb969e14017176b82d6b67b4d1"
+
+
+def _assert_oauth_unavailable(metadata: dict[str, object]) -> None:
+    assert metadata["oauth_available"] is False
+    assert metadata.get("authorization_servers", []) == []
+    assert "authorization_endpoint" not in metadata
+    assert "token_endpoint" not in metadata
+    assert "registration_endpoint" not in metadata
+
 
 @pytest.fixture
-def test_client():
+def test_client(monkeypatch, tmp_path):
     """Create a FastAPI test client."""
-    with TestClient(app) as client:
+    monkeypatch.setenv("RWA_MUTATIONS_ENABLED", "true")
+    monkeypatch.setenv("RWA_OPERATOR_TOKEN", RWA_TEST_OPERATOR_TOKEN)
+    monkeypatch.setenv("RWA_OBSERVATION_DB_PATH", str(tmp_path / "rwa_observations.db"))
+    monkeypatch.setenv("CREDIT_DB_PATH", str(tmp_path / "credits.db"))
+    monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", True)
+    monkeypatch.setattr(
+        settings.x402,
+        "solana_wallet_address",
+        "11111111111111111111111111111111",
+    )
+    monkeypatch.setattr(
+        settings.x402,
+        "solana_fee_payer",
+        "SysvarRent111111111111111111111111111111111",
+    )
+    monkeypatch.setattr(
+        settings.x402,
+        "evm_wallet_address",
+        "0x1111111111111111111111111111111111111111",
+    )
+    monkeypatch.setattr(
+        settings.server,
+        "observability_dashboard_token",
+        OBSERVABILITY_TEST_TOKEN,
+    )
+    with TestClient(
+        app,
+        base_url="https://testserver",
+        headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+    ) as client:
         yield client
 
 
@@ -78,6 +125,36 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert "pricing" in data
         assert "networks" in data
+        assert data["payments"]["operational"] is True
+        assert data["networks"]["primary"]["operational"] is True
+        assert data["networks"]["fallback"]["operational"] is True
+
+    def test_health_distinguishes_liveness_from_payment_readiness(self, test_client):
+        previous_support = app.state.facilitator_support
+        app.state.facilitator_support = {
+            "checked": True,
+            "available": True,
+            "required": True,
+            "reason": None,
+            "kinds": [
+                {
+                    "x402Version": 2,
+                    "scheme": "exact",
+                    "network": "eip155:84532",
+                    "extra": {},
+                }
+            ],
+        }
+        try:
+            response = test_client.get("/health")
+        finally:
+            app.state.facilitator_support = previous_support
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["status"] == "healthy"
+        assert data["payments"]["operational"] is False
+        assert data["payments"]["advertised_networks"] == []
 
     def test_cache_status_is_free(self, test_client):
         response = test_client.get("/v1/cache/status")
@@ -105,13 +182,10 @@ class TestHealthEndpoint:
         assert data["mcp_url"].endswith("/anthropic/mcp")
         assert data["auth_provider"] == "clerk"
         assert data["beta_tokens_enabled"] is False
-        assert data["oauth_callback_url"].endswith("/anthropic/mcp/auth/callback")
-        assert data["oauth_protected_resource_metadata"].endswith(
-            "/.well-known/oauth-protected-resource/anthropic/mcp/"
-        )
-        assert data["oauth_authorization_server_metadata"].endswith(
-            "/.well-known/oauth-authorization-server/anthropic/mcp"
-        )
+        assert data["oauth_available"] is False
+        assert "oauth_callback_url" not in data
+        assert "oauth_protected_resource_metadata" not in data
+        assert "oauth_authorization_server_metadata" not in data
         assert "pricing" not in data
         assert "bulk_pricing" not in data
 
@@ -182,14 +256,16 @@ class TestPublicListingSurfaces:
         assert support_response.status_code == 200
         assert prompt_examples_response.status_code == 200
         assert first_price_response.status_code == 200
+        assert "Get a live Blocksize price" in first_price_response.text
         assert "Get my first live price" in first_price_response.text
-        assert "blocksize_first_price_agent_id" in first_price_response.text
-        assert 'fetch("/v1/vwap/btc-usd"' in first_price_response.text
+        assert "blocksize_first_price_agent_id" not in first_price_response.text
+        assert "PAYMENT-SIGNATURE" in first_price_response.text
+        assert 'fetch("/v1/vwap/btc-usd"' not in first_price_response.text
         assert integrations_response.status_code == 200
         assert "Six supported agent frameworks" in integrations_response.text
         assert integrations_response.text.count("raw.githubusercontent.com/jf-cmyk/agentic-payments") == 6
         assert integrations_response.text.count(">Download</a>") == 6
-        assert "X-BLOCKSIZE-ACTIVATION-SOURCE" in first_price_response.text
+        assert "X-BLOCKSIZE-ACTIVATION-SOURCE" not in first_price_response.text
 
     def test_manifest_exposes_remote_mcp_url(self, test_client):
         response = test_client.get("/mcp/manifest.json")
@@ -197,7 +273,9 @@ class TestPublicListingSurfaces:
         data = response.json()
         assert data["transport"]["type"] == "streamable-http"
         assert data["transport"]["url"].endswith("/mcp/server/")
-        assert "repository" not in data["links"]
+        assert data["links"]["repository"] == (
+            "https://github.com/jf-cmyk/agentic-payments"
+        )
 
     def test_public_remote_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/mcp/server")
@@ -227,6 +305,7 @@ class TestPublicListingSurfaces:
             "/mcp/server",
             "/anthropic/mcp",
             "/cursor/mcp",
+            "/openai/mcp",
         ],
     )
     def test_mcp_mount_roots_do_not_redirect_without_trailing_slash(
@@ -259,7 +338,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["resource"].endswith("/anthropic/mcp/")
-        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+        _assert_oauth_unavailable(data)
         assert data["scopes_supported"] == ["openid", "email", "profile"]
         assert data["bearer_methods_supported"] == ["header"]
 
@@ -281,7 +360,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["issuer"].endswith("/anthropic/mcp")
-        assert data["registration_endpoint"].endswith("/anthropic/mcp/register")
+        _assert_oauth_unavailable(data)
         assert data["scopes_supported"] == ["openid", "email", "profile"]
 
     def test_root_oauth_authorization_server_metadata_defaults_to_anthropic(
@@ -297,7 +376,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["issuer"].endswith("/anthropic/mcp")
-        assert data["authorization_endpoint"].endswith("/anthropic/mcp/authorize")
+        _assert_oauth_unavailable(data)
 
     def test_root_oauth_protected_resource_metadata_defaults_to_anthropic(
         self,
@@ -315,7 +394,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["resource"].endswith("/anthropic/mcp/")
-        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+        _assert_oauth_unavailable(data)
 
     def test_root_oauth_protected_resource_metadata_survives_anthropic_only_mode(
         self,
@@ -333,13 +412,84 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["resource"].endswith("/anthropic/mcp/")
-        assert data["authorization_servers"][0].endswith("/anthropic/mcp")
+        _assert_oauth_unavailable(data)
 
     def test_cursor_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/cursor/mcp", follow_redirects=False)
         assert response.status_code != 404
         assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
+
+    def test_openai_mcp_endpoint_exists(self, test_client):
+        response = test_client.get("/openai/mcp", follow_redirects=False)
+        assert response.status_code != 404
+        assert response.status_code not in {307, 308}
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-protected-resource/openai/mcp",
+            "/.well-known/oauth-protected-resource/openai/mcp/",
+        ],
+    )
+    def test_openai_oauth_protected_resource_metadata(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path, follow_redirects=False)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["resource"].endswith("/openai/mcp/")
+        _assert_oauth_unavailable(data)
+        assert data["scopes_supported"] == [
+            "openid",
+            "email",
+            "profile",
+            "offline_access",
+        ]
+        assert data["bearer_methods_supported"] == ["header"]
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/oauth-authorization-server/openai/mcp",
+            "/.well-known/openid-configuration/openai/mcp",
+            "/openai/mcp/.well-known/openid-configuration",
+        ],
+    )
+    def test_openai_oauth_authorization_server_metadata_aliases(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        response = test_client.get(metadata_path)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["issuer"].endswith("/openai/mcp")
+        _assert_oauth_unavailable(data)
+        assert "offline_access" in data["scopes_supported"]
+
+    def test_root_oauth_metadata_can_be_openai_for_openai_hosts(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("ROOT_OAUTH_CONNECTOR", "openai")
+
+        auth_server = test_client.get("/.well-known/oauth-authorization-server")
+        protected = test_client.get("/.well-known/oauth-protected-resource")
+
+        assert auth_server.status_code == 200
+        assert auth_server.json()["issuer"].endswith("/openai/mcp")
+        assert "offline_access" in auth_server.json()["scopes_supported"]
+        _assert_oauth_unavailable(auth_server.json())
+        assert protected.status_code == 200
+        assert protected.json()["resource"].endswith("/openai/mcp/")
+        _assert_oauth_unavailable(protected.json())
 
     @pytest.mark.parametrize(
         "metadata_path",
@@ -358,7 +508,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["resource"].endswith("/cursor/mcp/")
-        assert data["authorization_servers"][0].endswith("/cursor/mcp")
+        _assert_oauth_unavailable(data)
         assert data["scopes_supported"] == ["email", "profile"]
         assert data["bearer_methods_supported"] == ["header"]
 
@@ -374,11 +524,8 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["issuer"].endswith("/cursor/mcp")
-        assert data["authorization_endpoint"].endswith("/cursor/mcp/authorize")
-        assert data["token_endpoint"].endswith("/cursor/mcp/token")
-        assert data["registration_endpoint"].endswith("/cursor/mcp/register")
+        _assert_oauth_unavailable(data)
         assert data["scopes_supported"] == ["email", "profile"]
-        assert data["code_challenge_methods_supported"] == ["S256"]
 
     def test_root_oauth_protected_resource_metadata_can_be_cursor_for_cursor_hosts(
         self,
@@ -395,7 +542,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["resource"].endswith("/cursor/mcp/")
-        assert data["authorization_servers"][0].endswith("/cursor/mcp")
+        _assert_oauth_unavailable(data)
         assert data["scopes_supported"] == ["email", "profile"]
 
     @pytest.mark.parametrize(
@@ -416,7 +563,7 @@ class TestPublicListingSurfaces:
         data = response.json()
 
         assert data["issuer"].endswith("/cursor/mcp")
-        assert data["registration_endpoint"].endswith("/cursor/mcp/register")
+        _assert_oauth_unavailable(data)
 
     def test_health_exposes_cursor_connector_metadata(self, test_client):
         response = test_client.get("/health")
@@ -472,7 +619,10 @@ class TestPublicListingSurfaces:
         data = response.json()
         assert data["name"] == "info.blocksize.mcp/agentic-payments"
         assert data["title"] == "Blocksize Agentic Market Intelligence"
-        assert "repository" not in data
+        assert data["repository"] == {
+            "url": "https://github.com/jf-cmyk/agentic-payments",
+            "source": "github",
+        }
         assert data["remotes"][0]["url"].endswith("/mcp/server/")
 
     def test_manifest_exposes_market_data_display_name_and_endpoint_builder(self, test_client):
@@ -493,6 +643,31 @@ class TestPublicListingSurfaces:
         assert data["capabilities"]["category_hubs"].endswith("/category-hubs.json")
         assert "asset_class=equity" in data["capabilities"]["equities"]
         assert any(tool["name"] == "get_market_data_endpoint" for tool in data["tools"])
+
+    def test_manifest_tool_contract_is_generated_from_public_mcp(self, test_client):
+        response = test_client.get("/mcp/manifest.json")
+        assert response.status_code == 200
+        manifest_tools = response.json()["tools"]
+        live_tools = asyncio.run(resource_server.public_mcp.list_tools())
+
+        assert [tool["name"] for tool in manifest_tools] == [
+            tool.name for tool in live_tools
+        ]
+        for manifest_tool, live_tool in zip(manifest_tools, live_tools, strict=True):
+            assert manifest_tool["description"] == (live_tool.description or "")
+            assert manifest_tool["parameters"] == live_tool.parameters
+            assert manifest_tool["annotations"] == live_tool.annotations.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+            )
+            assert manifest_tool["payment"] == {"required": False}
+
+    def test_manifest_supports_head_without_a_response_body(self, test_client):
+        response = test_client.head("/mcp/manifest.json")
+
+        assert response.status_code == 200
+        assert response.content == b""
 
     def test_crawler_and_ai_reader_files_are_served(self, test_client):
         portal_head = test_client.head("/")
@@ -515,6 +690,7 @@ class TestPublicListingSurfaces:
         assert "<loc>https://mcp.blocksize.info/data-packages.json</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/category-hubs.json</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/market-data-api-for-ai-agents</loc>" in sitemap.text
+        assert "<loc>https://mcp.blocksize.info/blocksize-market-data-agent-skill</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/crypto-vwap-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/equities-bidask-api</loc>" in sitemap.text
         assert "<loc>https://mcp.blocksize.info/real-time-price-data-api</loc>" in sitemap.text
@@ -543,6 +719,45 @@ class TestPublicListingSurfaces:
         assert "Blocksize already provides broad production market-data coverage" in llms.text
         assert "no newly sourced third-party or onchain addition" in llms.text
         assert "signed market data API" in llms.text
+
+    def test_every_sitemapped_url_has_canonical_and_index_headers(self, test_client):
+        sitemap = test_client.get("/sitemap.xml")
+        root = ElementTree.fromstring(sitemap.content)
+        namespace = {"sitemap": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+        locations = [
+            element.text
+            for element in root.findall("sitemap:url/sitemap:loc", namespace)
+        ]
+
+        assert locations
+        assert len(locations) == len(set(locations))
+        for location in locations:
+            assert location is not None
+            path = urlsplit(location).path or "/"
+            response = test_client.get(path)
+            assert response.status_code == 200, path
+            assert response.headers["x-robots-tag"] == "index, follow", path
+            assert f'<{location}>; rel="canonical"' in response.headers["link"], path
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/health",
+            "/readyz",
+            "/v1/products",
+            "/internal/observability/stats",
+            "/.well-known/glama.json",
+            "/openai/mcp",
+        ],
+    )
+    def test_operational_auth_and_api_surfaces_are_not_indexable(
+        self,
+        test_client,
+        path,
+    ):
+        response = test_client.get(path, follow_redirects=False)
+        assert response.status_code != 404
+        assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
 
     def test_data_package_catalog_and_intent_pages_are_served(self, test_client):
         catalog = test_client.get("/data-packages.json")
@@ -580,7 +795,10 @@ class TestPublicListingSurfaces:
 
         rwa_page = test_client.get("/rwa-market-data")
         assert rwa_page.status_code == 200
-        assert "1,025" in rwa_page.text
+        assert "1,169 / 3,438" in rwa_page.text
+        assert "2,139 / 5,161" in rwa_page.text
+        assert "93 / 1,169" in rwa_page.text
+        assert "first baseline" in rwa_page.text
         assert "existing Blocksize market-data coverage" in rwa_page.text
         assert "zero newly sourced third-party or onchain additions" in rwa_page.text
         assert "does not describe or reduce existing Blocksize production coverage" in rwa_page.text
@@ -601,6 +819,12 @@ class TestPublicListingSurfaces:
         assert "application/ld+json" in agent_page.text
         assert "/go/free-trial?utm_source=mcp.blocksize.info" in agent_page.text
         assert "Verify the claim before production use" in agent_page.text
+
+        skill_page = test_client.get("/blocksize-market-data-agent-skill")
+        assert skill_page.status_code == 200
+        assert "Blocksize Market Data Agent Skill" in skill_page.text
+        assert "OpenAI market data skill" in skill_page.text
+        assert "/go/free-trial?utm_source=mcp.blocksize.info" in skill_page.text
 
         comparison_page = test_client.get("/market-data-api-comparison")
         assert comparison_page.status_code == 200
@@ -663,12 +887,13 @@ class TestPublicListingSurfaces:
     def test_well_known_claim_files_exist(self, test_client):
         glama = test_client.get("/.well-known/glama.json")
         assert glama.status_code == 200
+        assert glama.json()["$schema"] == "https://glama.ai/mcp/schemas/connector.json"
         maintainer = glama.json()["maintainers"][0]
         assert maintainer["email"] == GLAMA_MAINTAINER_EMAIL
 
         registry_auth = test_client.get("/.well-known/mcp-registry-auth")
         assert registry_auth.status_code == 200
-        assert registry_auth.text.startswith("v=MCPv1; k=ed25519; p=")
+        assert registry_auth.text == public_metadata.MCP_REGISTRY_AUTH_CONTENT
 
         x402 = test_client.get("/.well-known/x402")
         assert x402.status_code == 200
@@ -676,6 +901,44 @@ class TestPublicListingSurfaces:
         assert x402_data["version"] == 1
         assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
         assert any(resource.endswith("/v1/bidask/AAPL") for resource in x402_data["resources"])
+
+    @pytest.mark.parametrize(
+        "metadata_path",
+        [
+            "/.well-known/glama.json",
+            "/.well-known/mcp-registry-auth",
+            "/.well-known/x402",
+            "/.well-known/oauth-protected-resource",
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/oauth-protected-resource/anthropic/mcp",
+            "/.well-known/oauth-authorization-server/anthropic/mcp",
+            "/.well-known/oauth-protected-resource/cursor/mcp",
+            "/.well-known/oauth-authorization-server/cursor/mcp",
+            "/.well-known/oauth-protected-resource/openai/mcp",
+            "/.well-known/oauth-authorization-server/openai/mcp",
+        ],
+    )
+    def test_well_known_metadata_supports_head_and_conditional_cache(
+        self,
+        test_client,
+        metadata_path,
+    ):
+        get_response = test_client.get(metadata_path)
+        head_response = test_client.head(metadata_path)
+
+        assert get_response.status_code == 200
+        assert head_response.status_code == 200
+        assert head_response.content == b""
+        assert get_response.headers["cache-control"] == "public, max-age=300"
+        assert head_response.headers["cache-control"] == "public, max-age=300"
+        assert get_response.headers["etag"] == head_response.headers["etag"]
+
+        conditional = test_client.get(
+            metadata_path,
+            headers={"If-None-Match": get_response.headers["etag"]},
+        )
+        assert conditional.status_code == 304
+        assert conditional.content == b""
 
     def test_openapi_marks_paid_routes_for_x402_discovery(self, test_client):
         response = test_client.get("/openapi.json")
@@ -854,9 +1117,155 @@ class TestPaymentGate:
         assert "amount" in req_json["accepts"][0]
         assert req_json["accepts"][0]["asset"] == settings.x402.solana_usdc_address
         assert req_json["accepts"][0]["scheme"] == "exact"
-        assert req_json["accepts"][0]["resource"] == resource_url
+        assert "resource" not in req_json["accepts"][0]
         assert req_json["accepts"][0]["extra"]["resource"] == resource_url
+        assert req_json["accepts"][0]["extra"]["feePayer"] == (
+            settings.x402.solana_fee_payer
+        )
+        base_requirement = next(
+            item
+            for item in req_json["accepts"]
+            if item["network"] == settings.x402.base_network
+        )
+        assert base_requirement["extra"]["name"] == "USD Coin"
+        assert base_requirement["extra"]["version"] == "2"
         assert "bazaar" in req_json["extensions"]
+        bazaar = req_json["extensions"]["bazaar"]
+        assert bazaar["info"]["input"]["type"] == "http"
+        assert bazaar["info"]["input"]["method"] == "GET"
+        assert bazaar["info"]["output"]["type"] == "json"
+        assert bazaar["schema"]["properties"]["input"]["required"] == [
+            "type",
+            "method",
+        ]
+
+    def test_unusable_solana_rail_is_not_advertised(self, test_client, monkeypatch):
+        monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
+
+        response = test_client.get("/v1/vwap/btc-usd")
+        data = response.json()
+
+        assert response.status_code == 402
+        assert [item["network"] for item in data["accepts"]] == [
+            settings.x402.base_network
+        ]
+        assert data["networks"] == [
+            {"name": "Base L2", "caip2": settings.x402.base_network}
+        ]
+        assert "Solana" not in data["message"]
+
+    def test_challenge_intersects_configured_rails_with_facilitator_support(
+        self,
+        test_client,
+    ):
+        previous_support = app.state.facilitator_support
+        app.state.facilitator_support = {
+            "checked": True,
+            "available": True,
+            "required": True,
+            "reason": None,
+            "kinds": [
+                {
+                    "x402Version": 2,
+                    "scheme": "exact",
+                    "network": settings.x402.base_network,
+                    "extra": {},
+                }
+            ],
+        }
+        try:
+            response = test_client.get("/v1/vwap/btc-usd")
+        finally:
+            app.state.facilitator_support = previous_support
+
+        assert response.status_code == 402
+        assert [item["network"] for item in response.json()["accepts"]] == [
+            settings.x402.base_network
+        ]
+
+    def test_unsupported_facilitator_networks_fail_closed(self, test_client):
+        previous_support = app.state.facilitator_support
+        app.state.facilitator_support = {
+            "checked": True,
+            "available": True,
+            "required": True,
+            "reason": None,
+            "kinds": [
+                {
+                    "x402Version": 2,
+                    "scheme": "exact",
+                    "network": "eip155:84532",
+                    "extra": {},
+                }
+            ],
+        }
+        try:
+            response = test_client.get("/v1/vwap/btc-usd")
+        finally:
+            app.state.facilitator_support = previous_support
+
+        assert response.status_code == 503
+        assert response.json()["error"] == "Payment Configuration Unavailable"
+
+    def test_no_operational_payment_rail_fails_closed(self, test_client, monkeypatch):
+        monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
+        monkeypatch.setattr(settings.x402, "evm_wallet_address", "")
+
+        response = test_client.get("/v1/vwap/btc-usd")
+
+        assert response.status_code == 503
+        assert response.json()["error"] == "Payment Configuration Unavailable"
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    def test_readiness_reports_configured_but_unusable_payment_rail(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("READINESS_REQUIRE_PAYMENT_WALLET", "true")
+        monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
+        monkeypatch.setattr(settings.x402, "evm_wallet_address", "")
+
+        response = test_client.get("/readyz")
+        payment_wallet = response.json()["checks"]["payment_wallet"]
+
+        assert response.status_code == 503
+        assert payment_wallet["ready"] is False
+        assert payment_wallet["configured_rails"] == 1
+        assert payment_wallet["operational_rails"] == 0
+        assert "fee_payer_missing" in payment_wallet["rails"]["solana"]["blockers"]
+
+    def test_readiness_requires_exact_facilitator_network_intersection(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("RAILWAY_SERVICE_ID", "test-service")
+        previous_support = app.state.facilitator_support
+        app.state.facilitator_support = {
+            "checked": True,
+            "available": True,
+            "required": True,
+            "reason": None,
+            "kinds": [
+                {
+                    "x402Version": 2,
+                    "scheme": "exact",
+                    "network": "eip155:84532",
+                    "extra": {},
+                }
+            ],
+        }
+        try:
+            response = test_client.get("/readyz")
+        finally:
+            app.state.facilitator_support = previous_support
+
+        support = response.json()["checks"]["facilitator_support"]
+        assert response.status_code == 503
+        assert support["ready"] is False
+        assert support["supported_networks"] == ["eip155:84532"]
+        assert support["advertised_networks"] == []
 
     def test_402_exposes_payment_challenge_to_allowed_browser_origin(self, test_client):
         response = test_client.get(
@@ -873,6 +1282,117 @@ class TestPaymentGate:
         assert "payment-response" in exposed
         assert "x-payment-response" in exposed
 
+    def test_post_402_uses_canonical_bazaar_body_metadata(self, test_client):
+        response = test_client.post("/v1/briefs/market", json={"symbols": ["BTCUSD"]})
+        bazaar = response.json()["extensions"]["bazaar"]
+
+        assert response.status_code == 402
+        assert bazaar["info"]["input"] == {
+            "type": "http",
+            "method": "POST",
+            "bodyType": "json",
+            "body": {},
+        }
+        assert bazaar["schema"]["properties"]["input"]["required"] == [
+            "type",
+            "method",
+            "bodyType",
+            "body",
+        ]
+
+    def test_official_x402_evm_client_constructs_payload_from_challenge(self, test_client):
+        from eth_account import Account
+        from x402.client import x402ClientSync
+        from x402.mechanisms.evm.exact.client import ExactEvmScheme
+        from x402.schemas import PaymentRequired
+
+        challenge = test_client.get("/v1/vwap/btc-usd").json()
+        base_requirement = next(
+            item
+            for item in challenge["accepts"]
+            if item["network"] == settings.x402.base_network
+        )
+        payment_required = PaymentRequired.model_validate(
+            {
+                "x402Version": 2,
+                "resource": challenge["resource"],
+                "accepts": [base_requirement],
+                "extensions": challenge["extensions"],
+            }
+        )
+        client = x402ClientSync().register(
+            settings.x402.base_network,
+            ExactEvmScheme(Account.create()),
+        )
+
+        payload = client.create_payment_payload(payment_required)
+        encoded = payload.model_dump(by_alias=True, exclude_none=True)
+
+        assert encoded["accepted"] == base_requirement
+        assert encoded["payload"]["authorization"]["to"] == base_requirement["payTo"]
+        assert encoded["payload"]["authorization"]["value"] == base_requirement["amount"]
+        assert encoded["payload"]["signature"].startswith("0x")
+
+    def test_official_x402_solana_client_constructs_payload_from_challenge(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        from types import SimpleNamespace
+
+        from solders.hash import Hash
+        from solders.keypair import Keypair
+        from x402.client import x402ClientSync
+        from x402.mechanisms.svm.constants import TOKEN_PROGRAM_ADDRESS
+        from x402.mechanisms.svm.exact.client import ExactSvmScheme
+        from x402.mechanisms.svm.signers import KeypairSigner
+        from x402.schemas import PaymentRequired
+
+        recipient = Keypair()
+        fee_payer = Keypair()
+        payer = Keypair()
+        monkeypatch.setattr(settings.x402, "solana_wallet_address", str(recipient.pubkey()))
+        monkeypatch.setattr(settings.x402, "solana_fee_payer", str(fee_payer.pubkey()))
+        challenge = test_client.get("/v1/vwap/btc-usd").json()
+        solana_requirement = next(
+            item
+            for item in challenge["accepts"]
+            if item["network"] == settings.x402.solana_network
+        )
+        payment_required = PaymentRequired.model_validate(
+            {
+                "x402Version": 2,
+                "resource": challenge["resource"],
+                "accepts": [solana_requirement],
+                "extensions": challenge["extensions"],
+            }
+        )
+
+        mint_data = bytearray(82)
+        mint_data[44] = 6
+
+        class FakeSolanaClient:
+            def get_account_info(self, _mint):
+                return SimpleNamespace(
+                    value=SimpleNamespace(
+                        owner=TOKEN_PROGRAM_ADDRESS,
+                        data=bytes(mint_data),
+                    )
+                )
+
+            def get_latest_blockhash(self):
+                return SimpleNamespace(value=SimpleNamespace(blockhash=Hash.default()))
+
+        scheme = ExactSvmScheme(KeypairSigner(payer))
+        monkeypatch.setattr(scheme, "_get_client", lambda _network: FakeSolanaClient())
+        client = x402ClientSync().register(settings.x402.solana_network, scheme)
+
+        payload = client.create_payment_payload(payment_required)
+        encoded = payload.model_dump(by_alias=True, exclude_none=True)
+
+        assert encoded["accepted"] == solana_requirement
+        assert encoded["payload"]["transaction"]
+
     def test_402_does_not_open_cors_for_unconfigured_origin(self, test_client):
         response = test_client.get(
             "/v1/vwap/btc-usd",
@@ -888,11 +1408,13 @@ class TestPaymentGate:
         data = response.json()
         assert data["x402Version"] == 2
         assert "price_usdc" in data
-        assert data["starter_credits"]["positioning"] == "Start with 50 live data credits"
+        assert data["starter_credits"]["eligibility"] == "authenticated_connector_only"
+        assert data["starter_credits"]["available_on_this_surface"] is False
+        assert "signed x402" in data["starter_credits"]["direct_public_http"]
         assert data["starter_credits"]["allowance_credits"] == 50.0
         assert "networks" in data
         assert "accepts" in data
-        assert data["accepts"][0]["resource"] == data["resource"]["url"]
+        assert "resource" not in data["accepts"][0]
         assert data["accepts"][0]["extra"]["resource"] == data["resource"]["url"]
         assert "legacy_requirements" in data
 
@@ -919,11 +1441,34 @@ class TestPaymentGate:
     def test_instruments_is_free(self, test_client):
         """Instruments endpoint should NOT require payment."""
         mock_client = AsyncMock()
-        mock_client.list_vwap_instruments = AsyncMock(return_value=["btc-usd"])
+        instruments = [f"pair-{index:04d}" for index in reversed(range(605))]
+        mock_client.list_vwap_instruments = AsyncMock(return_value=instruments)
         app.state.blocksize = mock_client
 
         response = test_client.get("/v1/instruments/vwap")
         assert response.status_code == 200
+        data = response.json()
+        assert data["total_instruments"] == 605
+        assert data["returned_instruments"] == 100
+        assert data["offset"] == 0
+        assert data["limit"] == 100
+        assert data["has_more"] is True
+        assert data["next_offset"] == 100
+        assert data["instruments"] == sorted(instruments)[:100]
+        assert len(data["meta"]["snapshot_sha256"]) == 64
+        assert data["meta"]["source_observed_at"] is None
+        assert data["meta"]["freshness_status"] == "upstream_timestamp_unavailable"
+
+        next_page = test_client.get("/v1/instruments/vwap?limit=100&offset=100")
+        assert next_page.status_code == 200
+        next_data = next_page.json()
+        assert next_data["instruments"] == sorted(instruments)[100:200]
+        assert next_data["meta"]["snapshot_sha256"] == data["meta"]["snapshot_sha256"]
+
+    def test_instrument_pagination_bounds_are_enforced(self, test_client):
+        assert test_client.get("/v1/instruments/vwap?limit=0").status_code == 422
+        assert test_client.get("/v1/instruments/vwap?limit=501").status_code == 422
+        assert test_client.get("/v1/instruments/vwap?offset=-1").status_code == 422
 
     def test_rwa_build_plan_is_free_and_quality_aligned(self, test_client):
         response = test_client.get("/v1/rwa/build-plan")
@@ -948,10 +1493,86 @@ class TestPaymentGate:
         data = response.json()
         assert data["product"] == "rwa_market_data_coverage"
         assert data["coverage_summary"]["rows"] == 9
+        assert data["coverage_summary"]["coverage_row_count"] == 9
+        assert data["coverage_summary"]["canonical_asset_count"] == 5
         assert data["coverage_summary"]["by_asset_class"] == {"fx": 5}
         assert data["coverage_summary"]["by_venue"] == {"ostium": 5}
+        assert data["coverage_summary"]["metric_grains"] == {
+            "coverage_row_count": "venue_instrument",
+            "canonical_asset_count": "canonical_asset",
+            "canonical_asset_count_by_asset_class": "asset_class_canonical_asset",
+            "canonical_asset_count_by_venue": "venue_canonical_asset",
+            "coverage_row_count_by_source_type": "source_type_venue_instrument",
+            "identity_quality": "canonical_asset_identity_acceptance",
+        }
         assert all(row["asset_class"] == "fx" for row in data["symbols"])
         assert all(row["venue"] == "ostium" for row in data["symbols"])
+
+    def test_rwa_collection_defaults_are_compact_bounded_and_grain_named(
+        self,
+        test_client,
+    ):
+        coverage_response = test_client.get("/v1/rwa/coverage")
+        assets_response = test_client.get("/v1/rwa/assets")
+
+        assert coverage_response.status_code == 200
+        assert assets_response.status_code == 200
+        coverage = coverage_response.json()
+        assets = assets_response.json()
+        assert len(coverage["symbols"]) == 50
+        assert coverage["pagination"] == {
+            "limit": 50,
+            "offset": 0,
+            "returned": 50,
+            "total": coverage["coverage_summary"]["coverage_row_count"],
+            "has_more": True,
+            "next_offset": 50,
+        }
+        assert len(assets["assets"]) == 10
+        assert assets["pagination"] == {
+            "limit": 10,
+            "offset": 0,
+            "returned": 10,
+            "total": assets["summary"]["canonical_asset_count"],
+            "has_more": True,
+            "next_offset": 10,
+        }
+        assert assets["summary"]["metric_grains"]["coverage_row_count"] == (
+            "venue_instrument"
+        )
+        assert len(coverage_response.content) < 250_000
+        assert len(assets_response.content) < 1_000_000
+
+    def test_rwa_collection_pagination_is_stable_and_non_overlapping(self, test_client):
+        first = test_client.get("/v1/rwa/coverage?limit=7&offset=0").json()
+        second = test_client.get("/v1/rwa/coverage?limit=7&offset=7").json()
+        repeated = test_client.get("/v1/rwa/coverage?limit=7&offset=0").json()
+
+        assert first["symbols"] == repeated["symbols"]
+        first_rows = {json.dumps(row, sort_keys=True) for row in first["symbols"]}
+        second_rows = {json.dumps(row, sort_keys=True) for row in second["symbols"]}
+        assert first_rows.isdisjoint(second_rows)
+        assert second["pagination"]["offset"] == 7
+        assert second["pagination"]["next_offset"] == 14
+
+        first_assets = test_client.get("/v1/rwa/assets?limit=7&offset=0").json()
+        second_assets = test_client.get("/v1/rwa/assets?limit=7&offset=7").json()
+        assert {
+            row["asset_id"] for row in first_assets["assets"]
+        }.isdisjoint({row["asset_id"] for row in second_assets["assets"]})
+        assert first_assets["assets"] == test_client.get(
+            "/v1/rwa/assets?limit=7&offset=0"
+        ).json()["assets"]
+
+    @pytest.mark.parametrize("path", ["/v1/rwa/coverage", "/v1/rwa/assets"])
+    def test_rwa_collection_pagination_rejects_out_of_bounds(self, test_client, path):
+        maximum = test_client.get(f"{path}?limit=100")
+        assert maximum.status_code == 200
+        assert maximum.json()["pagination"]["limit"] == 100
+        assert maximum.json()["pagination"]["returned"] == 100
+        assert test_client.get(f"{path}?limit=101").status_code == 422
+        assert test_client.get(f"{path}?limit=0").status_code == 422
+        assert test_client.get(f"{path}?offset=-1").status_code == 422
 
     def test_rwa_coverage_can_hide_symbol_rows(self, test_client):
         response = test_client.get("/v1/rwa/coverage?include_symbols=false")
@@ -962,7 +1583,7 @@ class TestPaymentGate:
         assert data["coverage_summary"]["unique_assets"] > 0
 
     def test_rwa_assets_returns_cross_venue_sourcing_matrix(self, test_client):
-        response = test_client.get("/v1/rwa/assets")
+        response = test_client.get("/v1/rwa/assets?limit=100")
 
         assert response.status_code == 200
         data = response.json()
@@ -995,7 +1616,9 @@ class TestPaymentGate:
         assert "polygon_tradfi_reference" in dynamic_venues
 
     def test_rwa_assets_include_hyperliquid_spot_symbol_inventory(self, test_client):
-        response = test_client.get("/v1/rwa/assets?venue=hyperliquid_rwa_spot")
+        response = test_client.get(
+            "/v1/rwa/assets?venue=hyperliquid_rwa_spot&limit=100"
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -1014,7 +1637,9 @@ class TestPaymentGate:
         )
 
     def test_rwa_assets_split_treasury_fund_from_tokenized_fund(self, test_client):
-        response = test_client.get("/v1/rwa/assets?asset_class=treasury_fund")
+        response = test_client.get(
+            "/v1/rwa/assets?asset_class=treasury_fund&limit=100"
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -1023,8 +1648,28 @@ class TestPaymentGate:
         assert "USCC" not in assets
         assert all("treasury_fund" in asset["asset_classes"] for asset in assets.values())
 
+    def test_rwa_collections_accept_sovereign_debt_filter(self, test_client):
+        coverage_response = test_client.get(
+            "/v1/rwa/coverage?asset_class=sovereign_debt"
+        )
+        assets_response = test_client.get(
+            "/v1/rwa/assets?asset_class=sovereign_debt&limit=100"
+        )
+
+        assert coverage_response.status_code == 200
+        assert assets_response.status_code == 200
+        coverage = coverage_response.json()
+        assets = assets_response.json()
+        assert coverage["coverage_summary"]["coverage_row_count"] > 0
+        assert all(row["asset_class"] == "sovereign_debt" for row in coverage["symbols"])
+        assert all(
+            "sovereign_debt" in row["asset_classes"] for row in assets["assets"]
+        )
+
     def test_rwa_identity_audit_answers_buidl_and_uscc(self, test_client):
-        response = test_client.get("/v1/rwa/identity-audit")
+        response = test_client.get(
+            "/v1/rwa/identity-audit?asset_id=BUIDL,USCC,SGOV"
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -1106,7 +1751,10 @@ class TestPaymentGate:
         assert all(feed["venue"] != "kraken_xstocks" for feed in data["vwap_feeds"])
 
     def test_rwa_non_crypto_feeds_can_include_tokenized_stock_rows_deliberately(self, test_client):
-        response = test_client.get("/v1/rwa/non-crypto-feeds?exclude_tokenized_stocks=false")
+        response = test_client.get(
+            "/v1/rwa/non-crypto-feeds"
+            "?exclude_tokenized_stocks=false&venue=jupiter_router&limit=100"
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -1120,9 +1768,9 @@ class TestPaymentGate:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["summary"]["feed_count"] == 10
+        assert data["summary"]["feed_count"] == 18
         assert data["summary"]["by_blocksize_benchmark_status"] == {
-            "ready_for_blocksize_benchmark": 8,
+            "ready_for_blocksize_benchmark": 16,
             "requires_blocksize_instrument_check": 2,
         }
         ready_feeds = [
@@ -1169,6 +1817,75 @@ class TestPaymentGate:
         assert tbill["gates"]["state_instrument_confirmation"]["status"] != "passed"
         assert tbill["gates"]["liquidity_depth_volume"]["status"] == "blocked"
         assert "issuer_nav_alignment" in tbill["missing_or_blocked_gates"]
+
+    def test_public_rwa_endpoints_use_file_specific_report_overrides(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        from src import rwa_feed_discovery
+
+        route_override = tmp_path / "jupiter-override.json"
+        route_override.write_text(
+            json.dumps(
+                {
+                    "routes": [
+                        {
+                            "allowlist_id": "dex:jupiter_router:AAPLX:USD",
+                            "symbol": "AAPLx/USD",
+                            "venue": "jupiter_router",
+                            "status": "error",
+                            "error": "override-consistency-sentinel",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        evm_override = tmp_path / "evm-override.json"
+        evm_override.write_text(
+            json.dumps(
+                {
+                    "summary": {
+                        "pool_count": 73,
+                        "missing_pair_count": 72,
+                        "block_state_captured": 1,
+                    },
+                    "pools": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            "RWA_JUPITER_ROUTE_ALLOWLIST_PATH",
+            str(route_override),
+        )
+        monkeypatch.setenv("RWA_EVM_POOL_ALLOWLIST_PATH", str(evm_override))
+        monkeypatch.setattr(
+            rwa_feed_discovery,
+            "_load_replay_inventory_evidence",
+            lambda _reports_dir: {},
+        )
+
+        discovery = test_client.get(
+            "/v1/rwa/discovery?venue=jupiter_router&limit=100"
+        )
+        blocker = test_client.get("/v1/rwa/blocker-resolution")
+
+        assert discovery.status_code == 200
+        aapl = next(
+            row for row in discovery.json()["feeds"] if row["symbol"] == "AAPLx/USD"
+        )
+        route_gate = aapl["gates"]["route_or_pool_discovery"]
+        assert route_gate["status"] == "blocked"
+        assert route_gate["evidence"]["error"] == "override-consistency-sentinel"
+
+        assert blocker.status_code == 200
+        issues = {row["issue_id"]: row for row in blocker.json()["rows"]}
+        evm_evidence = issues["evm_pool_allowlist_and_rpc_state"]["evidence"]
+        assert evm_evidence["public_pair_search_pool_count"] == 73
+        assert evm_evidence["public_pair_search_missing_pair_count"] == 72
 
     def test_rwa_discovery_mitigation_plan_maps_blockers_to_solutions(self, test_client):
         response = test_client.get("/v1/rwa/discovery/mitigation-plan")
@@ -1538,6 +2255,66 @@ class TestPaymentGate:
         assert all(row["category"] == "oracle_reference" for row in filtered_data["dependencies"])
         assert all(row["status"] == "blocked_by_license_or_contract" for row in filtered_data["dependencies"])
 
+    def test_rwa_source_readiness_never_exposes_effective_override_paths(
+        self,
+        test_client,
+        monkeypatch,
+        tmp_path,
+    ):
+        sentinel = "operator-secret-path-sentinel-7d33d09b"
+        override_path = tmp_path / sentinel / f"{sentinel}.json"
+        logical_path = "reports/rwa_solana_token_mints.json"
+        monkeypatch.setenv("RWA_SOLANA_TOKEN_MINTS_PATH", str(override_path))
+
+        missing_response = test_client.get("/v1/rwa/source-readiness")
+
+        assert missing_response.status_code == 200
+        missing_data = missing_response.json()
+        missing_dependency = {
+            row["dependency_id"]: row for row in missing_data["dependencies"]
+        }["solana_token_mint_registry"]
+        assert missing_dependency["status"] == "missing_identifier_mapping"
+        assert missing_dependency["configured"] is False
+        assert missing_dependency["artifact_paths"] == [logical_path]
+        assert missing_dependency["configured_artifact_paths"] == []
+        assert missing_dependency["missing_artifact_paths"] == [logical_path]
+        assert sentinel not in json.dumps(missing_data)
+        assert str(override_path) not in json.dumps(missing_data)
+
+        override_path.parent.mkdir()
+        override_path.write_text("{}\n", encoding="utf-8")
+        configured_response = test_client.get("/v1/rwa/source-readiness")
+
+        assert configured_response.status_code == 200
+        configured_data = configured_response.json()
+        configured_dependency = {
+            row["dependency_id"]: row for row in configured_data["dependencies"]
+        }["solana_token_mint_registry"]
+        assert configured_dependency["status"] == "configured"
+        assert configured_dependency["configured"] is True
+        assert configured_dependency["artifact_paths"] == [logical_path]
+        assert configured_dependency["configured_artifact_paths"] == [logical_path]
+        assert configured_dependency["missing_artifact_paths"] == []
+        assert sentinel not in json.dumps(configured_data)
+        assert str(override_path) not in json.dumps(configured_data)
+        for response_data in (missing_data, configured_data):
+            for dependency in response_data["dependencies"]:
+                for field in (
+                    "artifact_paths",
+                    "configured_artifact_paths",
+                    "missing_artifact_paths",
+                ):
+                    assert all(
+                        not Path(public_path).is_absolute()
+                        for public_path in dependency[field]
+                    )
+        legacy_dependency = {
+            row["dependency_id"]: row for row in configured_data["dependencies"]
+        }["rwa_xyz_monitor_catalog"]
+        assert legacy_dependency["artifact_paths"] == [
+            "reports/rwa_xyz_new_asset_monitor.json"
+        ]
+
     def test_rwa_solana_discovery_targets_cover_jupiter_and_pool_symbols(self):
         from src.rwa_solana_discovery import build_solana_token_targets
 
@@ -1674,15 +2451,24 @@ class TestPaymentGate:
         assert data["summary"]["job_count"] > 0
         assert data["summary"]["ready_to_probe"] > 0
         assert data["summary"]["blocked_by_auth_or_license"] > 0
-        jobs = data["jobs"]
-        kraken_jobs = [job for job in jobs if job["venue"] == "kraken_xstocks"]
+        assert data["pagination"]["returned"] <= 50
+        assert data["pagination"]["total"] == data["summary"]["matching_job_count"]
+        assert data["summary"]["by_venue"]["pyth_oracle_reference"] > 0
+        assert data["summary"]["by_venue"]["chainlink_oracle_reference"] > 0
+        assert data["summary"]["by_venue"]["jupiter_router"] > 0
+        assert data["summary"]["by_venue"]["meteora_dlmm"] > 0
+
+        kraken_response = test_client.get(
+            "/v1/rwa/sourcing/jobs?venue=kraken_xstocks&limit=100"
+        )
+        kraken_jobs = kraken_response.json()["jobs"]
         assert any(job["status"] == "ready_to_probe" for job in kraken_jobs)
-        assert any(job["venue"] == "pyth_oracle_reference" for job in jobs)
-        assert any(job["venue"] == "chainlink_oracle_reference" for job in jobs)
-        assert any(job["venue"] == "jupiter_router" for job in jobs)
-        assert any(job["venue"] == "meteora_dlmm" for job in jobs)
         assert any("Kraken public REST/WS" in job["endpoint_hint"] for job in kraken_jobs)
-        hyperliquid_spot_jobs = [job for job in jobs if job["venue"] == "hyperliquid_rwa_spot"]
+
+        hyperliquid_spot_response = test_client.get(
+            "/v1/rwa/sourcing/jobs?venue=hyperliquid_rwa_spot&limit=100"
+        )
+        hyperliquid_spot_jobs = hyperliquid_spot_response.json()["jobs"]
         assert len(hyperliquid_spot_jobs) == 31
         assert any(
             job["symbol"] == "AAPL/USDC"
@@ -1695,22 +2481,33 @@ class TestPaymentGate:
             and job["target_status"] == "unverified_identity_hold"
             for job in hyperliquid_spot_jobs
         )
-        rwa_xyz_jobs = [job for job in jobs if job["venue"] == "rwa_xyz_new_asset_monitor"]
-        assert len(rwa_xyz_jobs) >= 3000
+        rwa_xyz_response = test_client.get(
+            "/v1/rwa/sourcing/jobs?venue=rwa_xyz_new_asset_monitor&limit=100"
+        )
+        rwa_xyz_data = rwa_xyz_response.json()
+        rwa_xyz_jobs = rwa_xyz_data["jobs"]
+        assert rwa_xyz_data["summary"]["matching_job_count"] >= 3000
         assert any(
             job["metadata"]["address"]
             and "pool_or_route_liquidity" in job["missing_source_types"]
             for job in rwa_xyz_jobs
         )
 
-        covered_response = test_client.get("/v1/rwa/sourcing/jobs?include_completed_targets=true")
+        covered_response = test_client.get(
+            "/v1/rwa/sourcing/jobs"
+            "?include_completed_targets=true&venue=jupiter_router&limit=100"
+        )
         covered_jobs = covered_response.json()["jobs"]
-        jupiter_jobs = [job for job in covered_jobs if job["venue"] == "jupiter_router"]
         assert any(
             job["asset_id"] == "AAPL" and job["symbol"] == "AAPLx/USD"
-            for job in jupiter_jobs
+            for job in covered_jobs
         )
-        hyperliquid_jobs = [job for job in covered_jobs if job["venue"] == "hyperliquid_paxg"]
+
+        hyperliquid_response = test_client.get(
+            "/v1/rwa/sourcing/jobs"
+            "?include_completed_targets=true&venue=hyperliquid_paxg&limit=100"
+        )
+        hyperliquid_jobs = hyperliquid_response.json()["jobs"]
         assert any(
             job["symbol"] == "PAXG/USD" and job["status"] == "ready_to_probe"
             for job in hyperliquid_jobs
@@ -2028,13 +2825,11 @@ class TestPaymentGate:
         )
         app.state.blocksize = mock_client
         app.state.credits = CreditManager(str(tmp_path / "credits.db"))
-        app.state.rwa_store = RWAObservationStore(str(tmp_path / "rwa_observations.db"))
 
         response = test_client.post(
             "/v1/rwa/benchmark/blocksize",
             headers={"X-AGENT-ID": "agent-rwa-benchmark-12345678"},
             json={
-                "persist": True,
                 "observations": [
                     {
                         "symbol": "AAPL/USD",
@@ -2055,8 +2850,7 @@ class TestPaymentGate:
         benchmark = data["benchmarks"][0]
         assert benchmark["resolved_benchmark"] == {"service": "bidask", "symbol": "AAPL"}
         assert benchmark["basis_bps"] == pytest.approx(20.0)
-        assert data["stored_observations"][0]["observation_id"].startswith("rwaobs_")
-        assert data["stored_observations"][0]["raw_payload_hash"].startswith("sha256:")
+        assert "stored_observations" not in data
         assert data["meta"]["credits"]["credits_remaining"] == 40.0
         mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")
 
@@ -2292,17 +3086,25 @@ class TestPaymentGate:
         assert "reference_mode_not_tick_by_tick" in row["quality"]["flags"]
 
     def test_rwa_observation_store_persists_hashes_and_filters(self, test_client, tmp_path):
+        now = datetime.now(timezone.utc).isoformat()
         app.state.rwa_store = RWAObservationStore(str(tmp_path / "rwa_observations.db"))
         response = test_client.post(
             "/v1/rwa/observations/store",
+            headers={"Authorization": f"Bearer {RWA_TEST_OPERATOR_TOKEN}"},
             json={
-                "raw_payload": {"symbol": "EUR/USD", "venue": "gains", "value": 1.14},
+                "raw_payload": {
+                    "symbol": "EUR/USD",
+                    "venue": "gains",
+                    "value": 1.14,
+                    "timestamp": now,
+                },
                 "normalized_observation": {
                     "symbol": "EUR/USD",
                     "venue": "gains",
                     "asset_class": "fx",
                     "source_type": "price_stream_no_book",
                     "value": 1.14,
+                    "timestamp": now,
                 },
                 "realtime_quality": {"aggregate_status": "live"},
                 "blocksize_benchmark": {"decision": "pass", "basis_bps": 2.1},
@@ -2317,7 +3119,11 @@ class TestPaymentGate:
         assert record["symbol"] == "EUR/USD"
         assert record["raw_payload_hash"].startswith("sha256:")
 
-        ledger = test_client.get("/v1/rwa/observations", params={"symbol": "EUR/USD"}).json()
+        ledger = test_client.get(
+            "/v1/rwa/observations",
+            params={"symbol": "EUR/USD"},
+            headers={"X-RWA-Operator-Token": RWA_TEST_OPERATOR_TOKEN},
+        ).json()
         assert ledger["observations"][0]["venue"] == "gains"
         assert ledger["observations"][0]["blocksize_benchmark"]["decision"] == "pass"
 
@@ -2359,6 +3165,7 @@ class TestPaymentGate:
 
         response = test_client.post(
             "/v1/rwa/sourcing/probe",
+            headers={"Authorization": f"Bearer {RWA_TEST_OPERATOR_TOKEN}"},
             json={
                 "symbols": ["AMZN/USD"],
                 "limit": 1,
@@ -2414,6 +3221,7 @@ class TestPaymentGate:
 
         response = test_client.post(
             "/v1/rwa/sourcing/probe",
+            headers={"Authorization": f"Bearer {RWA_TEST_OPERATOR_TOKEN}"},
             json={
                 "venues": ["hyperliquid_paxg"],
                 "symbols": ["PAXG/USD"],
@@ -2470,6 +3278,7 @@ class TestPaymentGate:
 
         response = test_client.post(
             "/v1/rwa/sourcing/probe",
+            headers={"Authorization": f"Bearer {RWA_TEST_OPERATOR_TOKEN}"},
             json={
                 "venues": ["hyperliquid_rwa_spot"],
                 "symbols": ["AAPL/USD"],
@@ -2799,7 +3608,9 @@ class TestPaymentGate:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["starter_allowance"]["positioning"] == "Start with 50 live data credits"
+        assert data["starter_allowance"]["eligibility"] == "authenticated_connector_only"
+        assert "Signed x402" in data["starter_allowance"]["direct_public_http"]
+        assert "Contact sales" in data["starter_allowance"]["upgrade_path"]
         assert data["credit_costs"]["market_brief"] == 10.0
 
 
@@ -2837,6 +3648,192 @@ class TestDiscoveryRateLimit:
         assert first.status_code == 402
         assert second.status_code == 402
 
+    def test_untrusted_forwarded_for_cannot_rotate_rate_limit_identity(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_enabled", True)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_minute", 1)
+        monkeypatch.setattr(settings.server, "discovery_rate_limit_per_day", 100)
+
+        mock_client = AsyncMock()
+        mock_client.search_pairs = AsyncMock(return_value=[])
+        app.state.blocksize = mock_client
+
+        first = test_client.get(
+            "/v1/search?q=btc",
+            headers={"X-Forwarded-For": "203.0.113.10"},
+        )
+        rotated = test_client.get(
+            "/v1/search?q=eth",
+            headers={"X-Forwarded-For": "203.0.113.99"},
+        )
+
+        assert first.status_code == 200
+        assert rotated.status_code == 429
+
+
+class TestTrustedCreditIdentityBoundary:
+    def test_production_connector_without_oauth_is_not_ready(self, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "prod")
+        monkeypatch.setenv("ANTHROPIC_AUTH_PROVIDER", "none")
+        entitlement = {
+            "ready": True,
+            "blockers": [],
+            "path": "/data/anthropic_entitlements.db",
+        }
+
+        status = resource_server._connector_readiness(
+            "ANTHROPIC",
+            type("Connector", (), {"auth": None})(),
+            entitlement,
+        )
+
+        assert status["ready"] is False
+        assert status["production_auth_required"] is True
+
+    def test_production_connector_rejects_relative_entitlement_ledger(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("APP_ENV", "prod")
+        monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", "relative.db")
+
+        status = resource_server._connector_entitlement_readiness(
+            "ANTHROPIC",
+            hosted=False,
+            production=True,
+            initialize=False,
+        )
+
+        assert status["ready"] is False
+        assert "entitlement_db_not_durable" in status["blockers"]
+
+    def test_connector_ledger_collision_with_credit_store_fails_readiness(self, tmp_path):
+        shared = str((tmp_path / "shared.db").resolve())
+        statuses = {
+            "ANTHROPIC": {
+                "ready": True,
+                "path": shared,
+                "blockers": [],
+            }
+        }
+
+        resource_server._mark_connector_entitlement_collisions(
+            statuses,
+            {
+                "credit_ledger": shared,
+                "observability_store": str(tmp_path / "usage.db"),
+                "rwa_store": str(tmp_path / "rwa.db"),
+            },
+        )
+
+        assert statuses["ANTHROPIC"]["ready"] is False
+        assert statuses["ANTHROPIC"]["database_collisions"] == ["credit_ledger"]
+        assert "entitlement_db_shared_with_credit_ledger" in statuses["ANTHROPIC"][
+            "blockers"
+        ]
+
+    def test_unverified_identity_headers_cannot_spend_when_disabled(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", False)
+
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"X-AGENT-ID": "attacker-selected-agent-12345678"},
+        )
+
+        assert response.status_code == 402
+        challenge = response.json()
+        assert challenge["starter_credits"]["identity_headers"] == []
+        assert challenge["starter_credits"]["unverified_http_identity_enabled"] is False
+
+    def test_wallet_credit_endpoints_are_hidden_when_unverified_mode_disabled(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", False)
+
+        balance = test_client.get("/v1/credits/balance/public-wallet-123456789")
+        purchase = test_client.post("/v1/credits/purchase?tier=starter")
+        claim = test_client.post("/v1/credits/claim", json={})
+
+        assert balance.status_code == 404
+        assert purchase.status_code == 404
+        assert claim.status_code == 404
+
+        openapi_paths = test_client.get("/openapi.json").json()["paths"]
+        assert "/v1/credits/balance/{wallet}" not in openapi_paths
+        assert "/v1/credits/purchase" not in openapi_paths
+        assert "/v1/credits/claim" not in openapi_paths
+        assert "bulk_discounts" not in test_client.get("/mcp/manifest.json").json()[
+            "capabilities"
+        ]
+        assert "bulk_pricing" not in test_client.get("/health").json()
+
+    @pytest.mark.parametrize("environment", ["prod", "production"])
+    def test_legacy_wallet_credit_endpoints_stay_hidden_in_production(
+        self,
+        test_client,
+        monkeypatch,
+        environment,
+    ):
+        monkeypatch.setenv("APP_ENV", environment)
+        monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", True)
+
+        assert test_client.get("/v1/credits/balance/public-wallet-123456789").status_code == 404
+        assert test_client.post("/v1/credits/purchase?tier=starter").status_code == 404
+        assert test_client.post("/v1/credits/claim", json={}).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_cancelled_starter_credit_request_is_refunded_and_reraised(
+        self,
+        tmp_path,
+        monkeypatch,
+        observability_store,
+    ):
+        monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+        monkeypatch.setattr(settings.server, "unverified_http_credits_enabled", True)
+        manager = CreditManager(str(tmp_path / "cancelled_http_credits.db"))
+        previous_manager = getattr(app.state, "credits", None)
+        app.state.credits = manager
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": "/v1/vwap/btc-usd",
+            "raw_path": b"/v1/vwap/btc-usd",
+            "query_string": b"",
+            "headers": [(b"x-agent-id", b"cancelled-agent-12345678")],
+            "client": ("203.0.113.50", 1234),
+            "server": ("testserver", 443),
+            "app": app,
+        }
+        request = Request(scope)
+
+        async def cancelled(_request):
+            raise asyncio.CancelledError
+
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await resource_server.x402_payment_middleware(request, cancelled)
+        finally:
+            app.state.credits = previous_manager
+
+        assert manager.get_balance("cancelled-agent-12345678") == 50
+        events = observability_store.recent_events(limit=20)
+        failure = next(event for event in events if event["event"] == "charged_delivery_failed")
+        drawdown = next(event for event in events if event["event"] == "credit_drawdown_success")
+        assert failure["reason"] == "request_cancelled"
+        assert failure["metadata"]["charge_id"] == drawdown["metadata"]["charge_id"]
+
 
 class TestObservabilityDashboard:
     def test_campaign_attribution_and_outbound_clicks_are_summarized(
@@ -2854,14 +3851,9 @@ class TestObservabilityDashboard:
             "&utm_campaign=market-data-api-comparison",
             follow_redirects=False,
         )
-        rejected = test_client.get(
-            "/go/not-allowlisted?utm_campaign=ignored",
-            follow_redirects=False,
-        )
 
         assert landing.status_code == 200
         assert redirect.status_code == 307
-        assert rejected.status_code == 404
         assert redirect.headers["location"].startswith("https://matrix.blocksize.capital/")
         assert "utm_campaign=market-data-api-comparison" in redirect.headers["location"]
 
@@ -2891,11 +3883,44 @@ class TestObservabilityDashboard:
                 method="GET",
                 status_code=status_code,
             )
-        observability_store.record("data_delivered", status_code=200)
-        observability_store.record("charged_delivery_failed", status_code=500)
-        observability_store.record("mcp_credit_drawdown_success")
-        observability_store.record("mcp_credit_drawdown_success")
-        observability_store.record("mcp_tool_error")
+        observability_store.record(
+            "credit_drawdown_success",
+            metadata={"charge_id": "http-success"},
+        )
+        observability_store.record(
+            "data_delivered",
+            status_code=200,
+            metadata={
+                "attempt_id": "http-success",
+                "charge_id": "http-success",
+                "payment_mode": "starter_credit",
+            },
+        )
+        observability_store.record(
+            "credit_drawdown_success",
+            metadata={"charge_id": "http-failure"},
+        )
+        observability_store.record(
+            "charged_delivery_failed",
+            status_code=500,
+            metadata={"attempt_id": "http-failure", "charge_id": "http-failure"},
+        )
+        observability_store.record(
+            "mcp_credit_drawdown_success",
+            metadata={"attempt_id": "mcp-success", "charge_id": "mcp-success"},
+        )
+        observability_store.record(
+            "mcp_data_delivered",
+            metadata={"attempt_id": "mcp-success", "charge_id": "mcp-success"},
+        )
+        observability_store.record(
+            "mcp_credit_drawdown_success",
+            metadata={"attempt_id": "mcp-failure", "charge_id": "mcp-failure"},
+        )
+        observability_store.record(
+            "mcp_tool_error",
+            metadata={"attempt_id": "mcp-failure", "charge_id": "mcp-failure"},
+        )
 
         stats = observability_store.summarize(days=1)
         reliability = stats["reliability"]
@@ -2918,9 +3943,18 @@ class TestObservabilityDashboard:
         reliability = UsageEventStore._reliability_summary(
             [
                 {
+                    "event": "credit_drawdown_success",
+                    "timestamp": old_timestamp,
+                    "metadata": {"charge_id": "historical-charge"},
+                },
+                {
                     "event": "charged_delivery_failed",
                     "timestamp": old_timestamp,
                     "status_code": 502,
+                    "metadata": {
+                        "attempt_id": "historical-attempt",
+                        "charge_id": "historical-charge",
+                    },
                 }
             ]
         )
@@ -3042,6 +4076,28 @@ class TestObservabilityDashboard:
         platforms = response.json()["external_sources"]["platforms"]
         assert any(platform["id"] == "pay_sh" for platform in platforms)
         assert any(platform["id"] == "x402scan" for platform in platforms)
+        github = next(
+            platform for platform in platforms if platform["id"] == "github_package"
+        )
+        assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
+        assert github["release_status"] == "version_behind_candidate"
+        assert github["observed_version"] == "0.6.4"
+        gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
+        assert gitlab["release_status"] == "stale_mirror_not_install_source"
+        assert "not a release or package-install source" in gitlab["note"]
+        awesome = next(platform for platform in platforms if platform["id"] == "awesome_mcp")
+        assert awesome["release_status"] == "merged_listing_stale_wrapper"
+
+        dashboard = test_client.get("/internal/observability/command-center")
+        assert dashboard.status_code == 200
+        assert "Release Truth" in dashboard.text
+        assert "platform.release_status" in dashboard.text
+
+    def test_all_mcp_mounts_use_normalized_observability_labels(self):
+        assert resource_server._endpoint_label("/mcp/server/") == "/mcp/server"
+        assert resource_server._endpoint_label("/anthropic/mcp/") == "/anthropic/mcp"
+        assert resource_server._endpoint_label("/cursor/mcp/") == "/cursor/mcp"
+        assert resource_server._endpoint_label("/openai/mcp/") == "/openai/mcp"
 
     def test_marketplace_metrics_ingestion_configures_platform_coverage(
         self,
@@ -3049,11 +4105,9 @@ class TestObservabilityDashboard:
         test_client,
         monkeypatch,
     ):
-        monkeypatch.setattr(settings.server, "observability_dashboard_token", "secret")
-
         ingest = test_client.post(
             "/internal/observability/marketplace-metrics",
-            headers={"Authorization": "Bearer secret"},
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
             json={
                 "platform_id": "pay_sh",
                 "source_url": "https://pay.sh/services/blocksize/market-data",
@@ -3069,7 +4123,7 @@ class TestObservabilityDashboard:
 
         response = test_client.get(
             "/internal/observability/stats?days=1",
-            headers={"Authorization": "Bearer secret"},
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
         )
 
         assert response.status_code == 200
@@ -3105,12 +4159,24 @@ class TestObservabilityDashboard:
         with patch(
             "src.resource_server._verify_payment",
             new_callable=AsyncMock,
-            return_value={"valid": True, "network": "solana"},
+            return_value={
+                "valid": True,
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                "payment_id": "observability-payment",
+                "reservation_id": "observability-reservation",
+                "payer": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            },
         ), patch(
             "src.resource_server._settle_payment",
             new_callable=AsyncMock,
-            return_value={"success": True},
-        ):
+            return_value={
+                "success": True,
+                "transaction": "2" * 88,
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            },
+        ), patch.object(
+            CreditManager, "checkpoint_settled_payment", return_value=True
+        ), patch.object(CreditManager, "finalize_payment_proof", return_value=True):
             response = test_client.get(
                 "/v1/vwap/btc-usd",
                 headers={"X-PAYMENT": "mock_sig"},
@@ -3119,7 +4185,8 @@ class TestObservabilityDashboard:
         assert response.status_code == 200
         stats = observability_store.summarize(days=1)
         assert stats["event_counts"]["payment_proof_submitted"] == 1
-        assert stats["event_counts"]["payment_verified"] == 1
+        assert stats["event_counts"]["payment_authorization_verified"] == 1
+        assert stats["event_counts"]["payment_settled"] == 1
         assert stats["event_counts"]["data_delivered"] == 1
         assert stats["overview"]["paid_calls"] == 1
         assert stats["overview"]["estimated_revenue_usdc"] == float(settings.pricing.core_crypto)
@@ -3129,7 +4196,7 @@ class TestObservabilityDashboard:
         assert stats["data_called"][0]["revenue_usdc"] == float(settings.pricing.core_crypto)
         assert stats["data_called"][0]["latest_outcome"] == "Data returned after payment or credits"
 
-    def test_first_live_price_activation_is_recorded_once_per_explicit_identity(
+    def test_unverified_identity_headers_do_not_create_activation_identity(
         self,
         observability_store,
         test_client,
@@ -3152,7 +4219,6 @@ class TestObservabilityDashboard:
                 "X-AGENT-ID": "activation-agent-12345678",
                 "X-DEVICE-ID": "activation-device-12345678",
                 "X-SESSION-ID": "activation-session-12345678",
-                "X-BLOCKSIZE-ACTIVATION-SOURCE": "framework-quickstart",
             }
             first = test_client.get("/v1/vwap/btc-usd", headers=headers)
             second = test_client.get("/v1/vwap/btc-usd", headers=headers)
@@ -3161,26 +4227,16 @@ class TestObservabilityDashboard:
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert first.headers["X-Blocksize-Activation"] == "first-live-price"
+        assert "X-Blocksize-Activation" not in first.headers
         assert "X-Blocksize-Activation" not in second.headers
         stats = observability_store.summarize(days=1)
         assert stats["event_counts"]["data_delivered"] == 2
-        assert stats["event_counts"]["first_live_price_delivered"] == 1
-        assert stats["overview"]["first_live_price_deliveries"] == 1
-        activation = next(
-            event
-            for event in stats["recent_events"]
-            if event["event"] == "first_live_price_delivered"
-        )
-        assert activation["metadata"]["identity_type"] == "agent"
-        assert activation["metadata"]["payment_mode"] == "starter_credit"
-        assert activation["metadata"]["activation_source"] == "framework-quickstart"
-        assert activation["metadata"]["identity_hash"]
+        assert stats["event_counts"].get("first_live_price_delivered", 0) == 0
+        assert stats["overview"]["first_live_price_deliveries"] == 0
         funnel = stats["growth_funnel"]
-        assert funnel["summary"]["eligible_identities"] == 1
-        assert funnel["summary"]["activated_identities"] == 1
-        assert funnel["summary"]["activation_rate"] == 1.0
-        assert funnel["summary"]["first_live_price_within_3m_rate"] == 1.0
+        assert funnel["summary"]["eligible_identities"] == 0
+        assert funnel["summary"]["activated_identities"] == 0
+        assert funnel["summary"]["activation_rate"] is None
         assert funnel["summary"]["unattributed_activation_events"] == 0
 
     def test_growth_funnel_tracks_mature_repeat_and_starter_conversion(self):
@@ -3193,21 +4249,62 @@ class TestObservabilityDashboard:
                 "event": name,
                 "timestamp": timestamp.isoformat(),
                 "wallet_hash": None,
-                "metadata": {"identity_hash": identity_hash, **values.pop("metadata", {})},
+                "metadata": {
+                    "identity_hash": identity_hash,
+                    "identity_type": "user",
+                    "identity_trust": "verified_oauth",
+                    **values.pop("metadata", {}),
+                },
                 **values,
             }
 
         growth = UsageEventStore._growth_funnel(
             [
-                event("free_discovery_call", started_at),
-                event("data_delivered", activated_at),
+                event("mcp_tool_call", started_at),
+                event(
+                    "mcp_credit_drawdown_success",
+                    activated_at,
+                    metadata={"attempt_id": "starter-1", "charge_id": "charge-1"},
+                ),
+                event(
+                    "mcp_data_delivered",
+                    activated_at,
+                    metadata={"attempt_id": "starter-1", "charge_id": "charge-1"},
+                ),
                 event(
                     "first_live_price_delivered",
                     activated_at,
                     metadata={"payment_mode": "starter_credit"},
                 ),
-                event("data_delivered", activated_at + timedelta(days=1)),
-                event("payment_verified", activated_at + timedelta(days=2)),
+                event(
+                    "mcp_credit_drawdown_success",
+                    activated_at + timedelta(days=1),
+                    metadata={"attempt_id": "starter-2", "charge_id": "charge-2"},
+                ),
+                event(
+                    "mcp_data_delivered",
+                    activated_at + timedelta(days=1),
+                    metadata={"attempt_id": "starter-2", "charge_id": "charge-2"},
+                ),
+                event(
+                    "payment_proof_submitted",
+                    activated_at + timedelta(days=2),
+                    metadata={"attempt_id": "paid-1"},
+                ),
+                event(
+                    "payment_authorization_verified",
+                    activated_at + timedelta(days=2),
+                    metadata={"attempt_id": "paid-1", "payment_id": "payment-1"},
+                ),
+                event(
+                    "payment_settled",
+                    activated_at + timedelta(days=2),
+                    metadata={
+                        "attempt_id": "paid-1",
+                        "payment_id": "payment-1",
+                        "payment_state": "finalized",
+                    },
+                ),
                 event(
                     "credit_drawdown_failed",
                     activated_at + timedelta(days=3),
@@ -3228,7 +4325,7 @@ class TestObservabilityDashboard:
         assert summary["starter_to_paid_rate"] == 1.0
         assert summary["credits_exhausted_identities"] == 1
 
-    def test_full_growth_journey_reaches_verified_payment_after_starter_exhaustion(
+    def test_unverified_starter_journey_is_excluded_from_verified_growth_funnel(
         self,
         observability_store,
         test_client,
@@ -3259,12 +4356,24 @@ class TestObservabilityDashboard:
             with patch(
                 "src.resource_server._verify_payment",
                 new_callable=AsyncMock,
-                return_value={"valid": True, "network": "solana"},
+                return_value={
+                    "valid": True,
+                    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                    "payment_id": "growth-payment",
+                    "reservation_id": "growth-reservation",
+                    "payer": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                },
             ), patch(
                 "src.resource_server._settle_payment",
                 new_callable=AsyncMock,
-                return_value={"success": True},
-            ):
+                return_value={
+                    "success": True,
+                    "transaction": "2" * 88,
+                    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                },
+            ), patch.object(
+                CreditManager, "checkpoint_settled_payment", return_value=True
+            ), patch.object(CreditManager, "finalize_payment_proof", return_value=True):
                 paid = test_client.get(
                     "/v1/vwap/btc-usd",
                     headers={**headers, "X-PAYMENT": "growth_journey_proof"},
@@ -3281,11 +4390,11 @@ class TestObservabilityDashboard:
         stats = observability_store.summarize(days=1)
         funnel = stats["growth_funnel"]["summary"]
         assert funnel["activated_identities"] == 1
-        assert funnel["starter_activated_identities"] == 1
-        assert funnel["credits_exhausted_identities"] == 1
-        assert funnel["starter_to_paid_identities"] == 1
-        assert funnel["starter_to_paid_rate"] == 1.0
-        assert stats["event_counts"]["payment_verified"] == 1
+        assert funnel["starter_activated_identities"] == 0
+        assert funnel["credits_exhausted_identities"] == 0
+        assert funnel["starter_to_paid_identities"] == 0
+        assert funnel["starter_to_paid_rate"] is None
+        assert stats["event_counts"]["payment_settled"] == 1
         assert stats["event_counts"]["data_delivered"] == 51
 
     def test_zero_result_symbol_search_is_ranked_as_coverage_opportunity(
@@ -3421,26 +4530,211 @@ class TestObservabilityDashboard:
         test_client,
         monkeypatch,
     ):
-        monkeypatch.setattr(settings.server, "observability_dashboard_token", "secret")
-
-        login_response = test_client.get("/internal/observability")
+        login_response = test_client.get(
+            "/internal/observability",
+            headers={"Authorization": ""},
+        )
         assert login_response.status_code == 401
         assert "Internal Observability" in login_response.text
         assert "Open Dashboard" in login_response.text
+        assert 'method="post"' in login_response.text
+        assert 'action="/internal/observability/login"' in login_response.text
 
-        dashboard_response = test_client.get("/internal/observability?token=secret")
-        assert dashboard_response.status_code == 200
-        assert "Product Usage Command Center" in dashboard_response.text
-        assert "observability_token" in dashboard_response.headers["set-cookie"]
+        query_response = test_client.get(
+            f"/internal/observability?token={OBSERVABILITY_TEST_TOKEN}",
+            headers={"Authorization": ""},
+        )
+        assert query_response.status_code == 401
+        assert "set-cookie" not in query_response.headers
+
+        wrong_response = test_client.post(
+            "/internal/observability/login",
+            headers={"Authorization": ""},
+            data={"password": "not-the-password"},
+            follow_redirects=False,
+        )
+        assert wrong_response.status_code == 401
+        assert "set-cookie" not in wrong_response.headers
+
+        dashboard_response = test_client.post(
+            "/internal/observability/login",
+            headers={"Authorization": ""},
+            data={"password": OBSERVABILITY_TEST_TOKEN},
+            follow_redirects=False,
+        )
+        assert dashboard_response.status_code == 303
+        assert dashboard_response.headers["location"] == "/internal/observability/command-center"
+        set_cookie = dashboard_response.headers["set-cookie"]
+        assert "observability_token" in set_cookie
+        assert "HttpOnly" in set_cookie
+        assert "Secure" in set_cookie
+        assert "SameSite=strict" in set_cookie
+        assert "Path=/internal/observability" in set_cookie
+        assert "Max-Age=43200" in set_cookie
 
         stats_response = test_client.get(
             "/internal/observability/stats",
-            headers={"Authorization": "Bearer secret"},
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
         )
         assert stats_response.status_code == 200
 
-        cookie_stats_response = test_client.get("/internal/observability/stats")
+        cookie_stats_response = test_client.get(
+            "/internal/observability/stats",
+            headers={"Authorization": ""},
+        )
         assert cookie_stats_response.status_code == 200
+
+        legacy_response = test_client.get(
+            f"/internal/observability/legacy?token={OBSERVABILITY_TEST_TOKEN}"
+        )
+        assert legacy_response.status_code == 200
+        assert f"token={OBSERVABILITY_TEST_TOKEN}" not in legacy_response.text
+        assert "/internal/observability/stats?token=" not in legacy_response.text
+
+    def test_observability_auth_fails_closed_without_strong_token(
+        self,
+        test_client,
+        monkeypatch,
+    ):
+        monkeypatch.delenv("OBSERVABILITY_DASHBOARD_TOKEN", raising=False)
+        monkeypatch.setattr(settings.server, "observability_dashboard_token", "secret")
+
+        response = test_client.get(
+            "/internal/observability/stats",
+            headers={"Authorization": ""},
+        )
+
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert "authentication unavailable" in response.json()["error"].lower()
+
+    def test_legacy_observability_escapes_stored_telemetry_before_inner_html(
+        self,
+        observability_store,
+        test_client,
+    ):
+        attack = (
+            '\"><img src=x onerror="globalThis.__xss=1">'
+            '<svg onload="globalThis.__xss=2"></svg>'
+        )
+        observability_store.record(
+            "mcp_tool_call",
+            surface=attack,
+            endpoint=attack,
+            user_agent=attack,
+            referrer=attack,
+            subject=attack,
+            asset_class=attack,
+            reason=attack,
+            tool_name=attack,
+        )
+        stats_response = test_client.get("/internal/observability/stats?days=1")
+        assert stats_response.status_code == 200
+        stats = stats_response.json()
+        assert any(row.get("surface") == attack for row in stats["recent_events"])
+
+        dashboard = test_client.get("/internal/observability/legacy")
+        assert dashboard.status_code == 200
+        script = dashboard.text.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+        probe = """
+globalThis.__xss = 0;
+const elements = new Map();
+const elementFor = id => {
+  if (!elements.has(id)) {
+    elements.set(id, {
+      id,
+      value: id === "window" ? "1" : "",
+      innerHTML: "",
+      textContent: "",
+      addEventListener() {},
+      setAttribute() {},
+    });
+  }
+  return elements.get(id);
+};
+globalThis.document = { getElementById: elementFor };
+globalThis.setInterval = () => 1;
+globalThis.clearInterval = () => {};
+const telemetryPayload = """ + json.dumps(stats) + ";\n" + """
+globalThis.fetch = async () => ({
+  ok: true,
+  json: async () => telemetryPayload,
+});
+""" + script + """
+await new Promise(resolve => setTimeout(resolve, 25));
+const rendered = [
+  "kpis", "timeline", "services", "origins", "mcp", "subjects",
+  "clients", "agents", "data-called", "recent",
+].map(id => elementFor(id).innerHTML).join("\\n");
+process.stdout.write(JSON.stringify({
+  marker: globalThis.__xss,
+  rendered,
+  freshness: elementFor("freshness").textContent,
+}));
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "--eval", probe],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        rendered = json.loads(result.stdout)
+        assert rendered["marker"] == 0
+        assert "Unable to load stats" not in rendered["freshness"]
+        assert attack not in rendered["rendered"]
+        assert "<img" not in rendered["rendered"]
+        assert "<svg" not in rendered["rendered"]
+        assert "&lt;img" in rendered["rendered"]
+        assert "&lt;svg" in rendered["rendered"]
+        assert 'title="&quot;&gt;&lt;img' in rendered["rendered"]
+
+    def test_observability_login_rejects_duplicate_and_oversize_forms(
+        self,
+        test_client,
+    ):
+        duplicate = test_client.post(
+            "/internal/observability/login",
+            headers={
+                "Authorization": "",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            content=(
+                f"password={OBSERVABILITY_TEST_TOKEN}"
+                f"&password={OBSERVABILITY_TEST_TOKEN}"
+            ),
+        )
+        oversized = test_client.post(
+            "/internal/observability/login",
+            headers={
+                "Authorization": "",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            content="password=" + ("x" * 5000),
+        )
+
+        assert duplicate.status_code == 400
+        assert oversized.status_code == 413
+        assert "set-cookie" not in duplicate.headers
+        assert "set-cookie" not in oversized.headers
+
+    def test_observability_logout_expires_the_scoped_secure_cookie(
+        self,
+        test_client,
+    ):
+        response = test_client.get(
+            "/internal/observability/logout",
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        set_cookie = response.headers["set-cookie"]
+        assert "Path=/internal/observability" in set_cookie
+        assert "HttpOnly" in set_cookie
+        assert "Secure" in set_cookie
+        assert "SameSite=strict" in set_cookie
 
     def test_command_center_subpage_serves_improved_dashboard(
         self,
@@ -3463,6 +4757,8 @@ class TestObservabilityDashboard:
         assert "Pay.sh" in response.text
         assert "MCP Registry" in response.text
         assert "Smithery" in response.text
+        assert 'id="campaigns"' in response.text
+        assert 'id="outbound-destinations"' in response.text
         assert "x402scan" in response.text
         assert "Awesome MCP" in response.text
         assert "Pay.sh Marketplace" in response.text
@@ -3483,10 +4779,19 @@ class TestObservabilityDashboard:
         assert "renderSmitherySource" in response.text
         assert "renderPlatformCoverage" in response.text
         assert "registrySourceWatchlist" in response.text
+        assert 'id="telemetry-scope"' in response.text
+        assert 'id="decision-confidence"' in response.text
+        assert "Operational only" in response.text or "Checking evidence" in response.text
+        assert 'statsUrl.searchParams.set("include_synthetic", includeSynthetic)' in response.text
         assert 'id="timeline-dates"' in response.text
         assert "timelineTip" in response.text
         assert "data-tip" in response.text
-        assert "Token not configured" in response.text
+        assert "Password protected" in response.text
+        assert 'href="/internal/observability/logout"' in response.text
+        assert 'document.addEventListener("visibilitychange"' in response.text
+        assert "live && !document.hidden ? setInterval(load, 10000) : null" in response.text
+        assert '${escapeAttr(text(row.subject || row.reason))}' in response.text
+        assert "Token not configured" not in response.text
 
     def test_popularity_rollup_separates_requested_delivered_and_blocked(
         self,
@@ -3511,14 +4816,33 @@ class TestObservabilityDashboard:
             surface="claude_mcp",
             tool_name="get_vwap",
             subject="BTCUSD",
-            metadata={"credits_spent": 1},
+            metadata={
+                "attempt_id": "attempt-good",
+                "charge_id": "charge-good",
+                "credits_spent": 1,
+            },
+        )
+        observability_store.record(
+            "mcp_data_delivered",
+            surface="claude_mcp",
+            tool_name="get_vwap",
+            subject="BTCUSD",
+            metadata={
+                "attempt_id": "attempt-good",
+                "charge_id": "charge-good",
+                "credits_spent": 1,
+            },
         )
         observability_store.record(
             "mcp_credit_drawdown_success",
             surface="claude_mcp",
             tool_name="get_vwap",
             subject="BADPAIR",
-            metadata={"credits_spent": 1},
+            metadata={
+                "attempt_id": "attempt-bad",
+                "charge_id": "charge-bad",
+                "credits_spent": 1,
+            },
         )
         observability_store.record(
             "mcp_tool_error",
@@ -3526,15 +4850,16 @@ class TestObservabilityDashboard:
             tool_name="get_vwap",
             subject="BADPAIR",
             reason="blocksize_api_error",
+            metadata={"attempt_id": "attempt-bad", "charge_id": "charge-bad"},
         )
 
         popularity = observability_store.summarize(days=1)["popularity"]
 
-        assert popularity["total_requested"] == 4
+        assert popularity["total_requested"] == 3
         assert popularity["total_delivered"] == 1
         assert popularity["total_blocked"] == 1
         assert popularity["total_failed_after_credit"] == 1
-        assert popularity["total_credits_spent"] == 2.0
+        assert popularity["total_credits_spent"] == 1.0
         rows = {
             (row["surface"], row["service"], row["subject"]): row
             for row in popularity["rows"]
@@ -3543,6 +4868,17 @@ class TestObservabilityDashboard:
         assert rows[("claude_mcp", "vwap", "BTCUSD")]["delivered"] == 1
         assert rows[("claude_mcp", "vwap", "BADPAIR")]["failed_after_credit"] == 1
         assert rows[("claude_mcp", "vwap", "BADPAIR")]["delivered"] == 0
+
+        stats = observability_store.summarize(days=1)
+        assert stats["overview"]["paid_calls"] == 1
+        called_rows = {
+            (row["surface"], row["service"], row["subject"]): row
+            for row in stats["data_called"]
+        }
+        assert called_rows[("claude_mcp", "vwap", "BADPAIR")]["paid_successes"] == 0
+        assert called_rows[("claude_mcp", "vwap", "BADPAIR")]["latest_outcome"] == (
+            "Credit used then refunded after data retrieval failed"
+        )
 
     def test_internal_stats_include_daily_interpretation(
         self,
@@ -3560,7 +4896,10 @@ class TestObservabilityDashboard:
         response = test_client.get("/internal/observability/stats?days=1")
 
         assert response.status_code == 200
-        interpretation = response.json()["daily_interpretation"]
+        payload = response.json()
+        interpretation = payload["daily_interpretation"]
+        assert payload["decision_confidence"]["level"] == "limited"
+        assert "Reliability debugging" in payload["decision_confidence"]["safe_uses"]
         assert interpretation["title"] == "Daily Executive Brief"
         assert interpretation["status"] == "needs_attention"
         assert any(
@@ -3575,6 +4914,43 @@ class TestObservabilityDashboard:
             "Raw evidence",
         }.issubset({check["name"] for check in interpretation["checks"]})
         assert any("Raw evidence review" in line for line in interpretation["executive_summary"])
+
+    def test_unreconciled_settlement_is_a_p0_command_center_alert(
+        self,
+        observability_store,
+        test_client,
+    ):
+        observability_store.record(
+            "payment_settlement_unreconciled",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            price_usdc=0.002,
+            network="eip155:8453",
+            reason="settlement_checkpoint_failed_after_remote_settlement",
+            metadata={
+                "attempt_id": "unreconciled-attempt",
+                "payment_id": "unreconciled-payment",
+                "payment_state": "settlement_unreconciled",
+                "transaction_hash": "hashed-transaction",
+            },
+        )
+
+        payload = test_client.get("/internal/observability/stats?days=1").json()
+
+        assert payload["economic_correlation"]["unreconciled_settlements"] == 1
+        assert payload["decision_confidence"]["level"] == "limited"
+        assert payload["daily_interpretation"]["status"] == "needs_attention"
+        checks = {
+            check["name"]: check
+            for check in payload["daily_interpretation"]["checks"]
+        }
+        assert checks["Settlement reconciliation"]["status"] == "fail"
+        assert any(
+            item["title"]
+            == "Payment settlement outcomes require immediate reconciliation"
+            for item in payload["daily_interpretation"]["what_does_not"]
+        )
 
     def test_internal_stats_include_wallet_inflows(
         self,
@@ -3622,6 +4998,50 @@ class TestObservabilityDashboard:
             "credit-observed-tx",
         }
 
+    def test_internal_stats_do_not_treat_rejected_proof_as_paid_success(
+        self,
+        observability_store,
+        test_client,
+    ):
+        observability_store.record(
+            "payment_required",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+        )
+        observability_store.record(
+            "payment_proof_submitted",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            metadata={"proof_hash": "rejected-proof", "attempt_id": "rejected-attempt"},
+        )
+        observability_store.record(
+            "payment_failed",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            reason="invalid_payment",
+            metadata={"attempt_id": "rejected-attempt"},
+        )
+
+        response = test_client.get("/internal/observability/stats?days=1")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert any(
+            "none are settled" in reason
+            for reason in payload["decision_confidence"]["reasons"]
+        )
+        interpretation = payload["daily_interpretation"]
+        assert any(
+            item["title"] == "Submitted payment proofs are not settling"
+            for item in interpretation["what_does_not"]
+        )
+        checks = {check["name"]: check for check in interpretation["checks"]}
+        assert checks["Payment proof submission"]["status"] == "fail"
+        assert checks["Raw evidence"]["status"] == "watch"
+
 
 class TestNativePaymentValidation:
     @pytest.mark.asyncio
@@ -3634,6 +5054,130 @@ class TestNativePaymentValidation:
         }
         result = await _verify_payment("not-base64", [requirement])
         assert result["valid"] is False
+
+    def test_requirement_selection_requires_exact_caip2_network(self):
+        requirements = [
+            {"network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"},
+            {"network": "eip155:8453"},
+        ]
+
+        assert resource_server._select_requirement("eip155:8453", requirements) == requirements[1]
+        assert resource_server._select_requirement("eip155:1", requirements) is None
+        assert resource_server._select_requirement("solana:devnet", requirements) is None
+        assert resource_server._select_requirement("base64", requirements) is None
+
+    def test_payment_freshness_rejects_missing_stale_and_future_time(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_payment_max_age_seconds", 100)
+        monkeypatch.setattr(settings.server, "x402_payment_future_skew_seconds", 10)
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1000.0)
+
+        assert resource_server._transaction_is_recent(None) is False
+        assert resource_server._transaction_is_recent(899) is False
+        assert resource_server._transaction_is_recent(900) is True
+        assert resource_server._transaction_is_recent(1010) is True
+        assert resource_server._transaction_is_recent(1011) is False
+
+    @pytest.mark.asyncio
+    async def test_legacy_solana_verifier_requires_genesis_finality_signature_and_time(
+        self,
+        monkeypatch,
+    ):
+        tx_hash = "1" * 88
+        recipient = "So11111111111111111111111111111111111111112"
+        mint = settings.x402.solana_usdc_address
+        requirement = {
+            "network": settings.x402.solana_network,
+            "payTo": recipient,
+            "maxAmountRequired": "100",
+            "asset": f"{settings.x402.solana_network}/{mint}",
+        }
+        transaction = {
+            "transaction": {"signatures": [tx_hash]},
+            "blockTime": 995,
+            "meta": {
+                "err": None,
+                "preTokenBalances": [
+                    {
+                        "accountIndex": 1,
+                        "mint": mint,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "0", "decimals": 6},
+                    }
+                ],
+                "postTokenBalances": [
+                    {
+                        "accountIndex": 1,
+                        "mint": mint,
+                        "owner": recipient,
+                        "uiTokenAmount": {"amount": "100", "decimals": 6},
+                    }
+                ],
+            },
+        }
+        rpc = AsyncMock(
+            side_effect=[settings.x402.solana_network.partition(":")[2], transaction]
+        )
+        monkeypatch.setattr(resource_server, "_rpc_result", rpc)
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1000.0)
+
+        valid, reason = await resource_server._verify_legacy_solana_payment(
+            tx_hash,
+            settings.x402.solana_network,
+            requirement,
+        )
+
+        assert (valid, reason) == (True, "ok")
+        transaction_params = rpc.await_args_list[1].args[3]
+        assert transaction_params[0] == tx_hash
+        assert transaction_params[1]["commitment"] == "finalized"
+
+    @pytest.mark.asyncio
+    async def test_legacy_evm_verifier_requires_chain_time_confirmations_and_decimals(
+        self,
+        monkeypatch,
+    ):
+        tx_hash = "0x" + "12" * 32
+        block_hash = "0x" + "34" * 32
+        recipient = "0x1111111111111111111111111111111111111111"
+        token = settings.x402.base_usdc_address
+        recipient_topic = "0x" + recipient.removeprefix("0x").rjust(64, "0")
+        requirement = {
+            "network": settings.x402.base_network,
+            "payTo": recipient,
+            "maxAmountRequired": "5000",
+            "asset": f"{settings.x402.base_network}/{token}",
+        }
+        receipt = {
+            "transactionHash": tx_hash.upper().replace("0X", "0x"),
+            "status": "0x1",
+            "blockHash": block_hash,
+            "blockNumber": "0x64",
+            "logs": [
+                {
+                    "address": token,
+                    "topics": [EVM_TRANSFER_TOPIC, "0x" + "0" * 64, recipient_topic],
+                    "data": hex(5000),
+                }
+            ],
+        }
+        block = {"hash": block_hash, "number": "0x64", "timestamp": "0x3e3"}
+        rpc = AsyncMock(
+            side_effect=["0x2105", receipt, "0x66", block, "0x6"]
+        )
+        monkeypatch.setattr(resource_server, "_rpc_result", rpc)
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1000.0)
+        monkeypatch.setattr(settings.server, "x402_payment_min_confirmations", 3)
+
+        valid, reason = await resource_server._verify_legacy_evm_payment(
+            tx_hash,
+            settings.x402.base_network,
+            requirement,
+        )
+
+        assert (valid, reason) == (True, "ok")
 
     def test_solana_transfer_must_match_recipient_and_amount(self):
         recipient = "So11111111111111111111111111111111111111112"
@@ -3650,7 +5194,7 @@ class TestNativePaymentValidation:
                         "accountIndex": 4,
                         "mint": mint,
                         "owner": recipient,
-                        "uiTokenAmount": {"amount": "50"},
+                        "uiTokenAmount": {"amount": "50", "decimals": 6},
                     }
                 ],
                 "postTokenBalances": [
@@ -3658,7 +5202,7 @@ class TestNativePaymentValidation:
                         "accountIndex": 4,
                         "mint": mint,
                         "owner": recipient,
-                        "uiTokenAmount": {"amount": "175"},
+                        "uiTokenAmount": {"amount": "175", "decimals": 6},
                     }
                 ],
             }
@@ -3696,6 +5240,486 @@ class TestNativePaymentValidation:
         assert _evm_transfer_satisfies_requirement(receipt, too_expensive)[0] is False
 
 
+class TestPaymentDeliveryLifecycle:
+    @staticmethod
+    def _mock_payment_header(proof: str) -> str:
+        return base64.b64encode(
+            json.dumps(
+                {
+                    "proof": proof,
+                    "network": settings.x402.solana_network,
+                }
+            ).encode()
+        ).decode()
+
+    def test_successful_delivery_finalizes_reserved_payment(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        monkeypatch.setattr(settings.server, "x402_allow_legacy_payments", False)
+        manager = CreditManager(str(tmp_path / "lifecycle-success.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95_000,
+                timestamp=datetime.now(timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        payment_header = self._mock_payment_header("mock_lifecycle_ok")
+
+        try:
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": payment_header},
+            )
+            replay = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": payment_header},
+            )
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 200
+        assert response.headers["PAYMENT-RESPONSE"]
+        assert replay.status_code == 200
+        assert replay.content == response.content
+        assert replay.headers["X-Payment-Replayed"] == "true"
+        assert replay.headers["PAYMENT-RESPONSE"] == response.headers["PAYMENT-RESPONSE"]
+        assert mock_client.get_vwap_latest.await_count == 1
+        assert manager.payment_proof_state("mock_lifecycle_ok")["state"] == "finalized"
+        assert manager.payment_proof_state("mock_lifecycle_ok")["has_cached_response"] == 1
+
+    def test_official_v2_signature_runs_through_facilitator_and_finalizes(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", False)
+        monkeypatch.setattr(settings.server, "x402_allow_legacy_payments", False)
+        monkeypatch.setattr(settings.x402, "facilitator_url", "https://facilitator.example")
+        manager = CreditManager(str(tmp_path / "official-lifecycle.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            side_effect=[
+                BlocksizeAPIError(503, "temporary upstream failure"),
+                VWAPData(
+                    pair="btc-usd",
+                    vwap=95_000,
+                    timestamp=datetime.now(timezone.utc),
+                    currency="USD",
+                ),
+            ]
+        )
+        app.state.blocksize = mock_client
+        calls: list[str] = []
+
+        class FakeFacilitator:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            async def verify(self, _payment, _requirement):
+                calls.append("verify")
+                return {
+                    "isValid": True,
+                    "payer": "0x2222222222222222222222222222222222222222",
+                }
+
+            async def settle(self, _payment, requirement):
+                calls.append("settle")
+                return {
+                    "success": True,
+                    "transaction": "0x" + "34" * 32,
+                    "network": requirement["network"],
+                    "amount": requirement["amount"],
+                }
+
+        try:
+            challenge = test_client.get("/v1/vwap/btc-usd").json()
+            accepted = next(
+                item for item in challenge["accepts"] if item["network"] == "eip155:8453"
+            )
+            payment = {
+                "x402Version": 2,
+                "payload": {
+                    "signature": "0x" + "ab" * 65,
+                    "authorization": {
+                        "from": "0x2222222222222222222222222222222222222222",
+                        "to": accepted["payTo"],
+                        "value": accepted["amount"],
+                        "validAfter": "0",
+                        "validBefore": "9999999999",
+                        "nonce": "0x" + "12" * 32,
+                    },
+                },
+                "accepted": accepted,
+                "resource": challenge["resource"],
+            }
+            header = base64.b64encode(json.dumps(payment).encode()).decode()
+            with patch("src.resource_server.FacilitatorAdapter", FakeFacilitator):
+                failed = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={"PAYMENT-SIGNATURE": header},
+                )
+                response = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={"PAYMENT-SIGNATURE": header},
+                )
+                replay = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={"PAYMENT-SIGNATURE": header},
+                )
+        finally:
+            app.state.credits = previous_manager
+
+        assert failed.status_code == 502
+        assert response.status_code == 200
+        assert replay.status_code == 200
+        assert replay.content == response.content
+        assert replay.headers["X-Payment-Replayed"] == "true"
+        assert calls == ["verify", "settle"]
+        assert mock_client.get_vwap_latest.await_count == 2
+        settled = json.loads(base64.b64decode(response.headers["PAYMENT-RESPONSE"]))
+        assert settled["transaction"] == "0x" + "34" * 32
+
+    def test_failed_handler_releases_payment_for_exact_retry(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        monkeypatch.setattr(settings.server, "x402_allow_legacy_payments", False)
+        manager = CreditManager(str(tmp_path / "lifecycle-retry.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            side_effect=[
+                BlocksizeAPIError(503, "temporary upstream failure"),
+                VWAPData(
+                    pair="btc-usd",
+                    vwap=95_000,
+                    timestamp=datetime.now(timezone.utc),
+                    currency="USD",
+                ),
+            ]
+        )
+        app.state.blocksize = mock_client
+        headers = {
+            "PAYMENT-SIGNATURE": self._mock_payment_header("mock_lifecycle_retry")
+        }
+
+        try:
+            failed = test_client.get("/v1/vwap/btc-usd", headers=headers)
+            released = manager.payment_proof_state("mock_lifecycle_retry")
+            retried = test_client.get("/v1/vwap/btc-usd", headers=headers)
+        finally:
+            app.state.credits = previous_manager
+
+        assert failed.status_code == 502
+        assert released["state"] == "released"
+        assert retried.status_code == 200
+        assert manager.payment_proof_state("mock_lifecycle_retry")["state"] == "finalized"
+
+    def test_explicit_settlement_failure_keeps_payment_pending_and_withholds_data(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        manager = CreditManager(str(tmp_path / "lifecycle-pending.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95_000,
+                timestamp=datetime.now(timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+
+        try:
+            with patch(
+                "src.resource_server._settle_payment",
+                new_callable=AsyncMock,
+                return_value={"success": False, "errorReason": "settlement_failed"},
+            ):
+                response = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={
+                        "PAYMENT-SIGNATURE": self._mock_payment_header(
+                            "mock_lifecycle_pending"
+                        )
+                    },
+                )
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 502
+        assert "data" not in response.json()
+        assert manager.payment_proof_state("mock_lifecycle_pending")["state"] == "pending"
+
+    def test_ambiguous_transport_settlement_quarantines_and_never_resettles(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        manager = CreditManager(str(tmp_path / "lifecycle-timeout.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95_000,
+                timestamp=datetime.now(timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        settle = AsyncMock(
+            return_value={
+                "success": False,
+                "errorReason": "facilitator_unavailable",
+                "outcomeUnknown": True,
+            }
+        )
+        headers = {
+            "PAYMENT-SIGNATURE": self._mock_payment_header("mock_lifecycle_timeout")
+        }
+
+        try:
+            with patch("src.resource_server._settle_payment", settle):
+                response = test_client.get("/v1/vwap/btc-usd", headers=headers)
+                retry = test_client.get("/v1/vwap/btc-usd", headers=headers)
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 503
+        assert response.json()["error"] == "Payment Settlement Outcome Unknown"
+        assert retry.status_code == 402
+        assert settle.await_count == 1
+        assert mock_client.get_vwap_latest.await_count == 1
+        state = manager.payment_proof_state("mock_lifecycle_timeout")
+        assert state["state"] == "settlement_unknown"
+        alerts = [
+            event
+            for event in observability_store.recent_events(limit=30)
+            if event["event"] == "payment_settlement_unreconciled"
+        ]
+        assert len(alerts) == 1
+        assert alerts[0]["reason"] == "facilitator_unavailable"
+        assert alerts[0]["metadata"]["payment_state"] == "settlement_unknown"
+
+    def test_finalize_failure_recovers_checkpoint_without_resettling(
+        self,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        manager = CreditManager(str(tmp_path / "lifecycle-recovery.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95_000,
+                timestamp=datetime.now(timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+        settle = AsyncMock(
+            return_value={
+                "success": True,
+                "transaction": "recovery-settlement",
+                "network": settings.x402.solana_network,
+            }
+        )
+        headers = {
+            "PAYMENT-SIGNATURE": self._mock_payment_header("mock_lifecycle_recovery")
+        }
+
+        try:
+            with patch("src.resource_server._settle_payment", settle), patch.object(
+                manager,
+                "finalize_payment_proof",
+                return_value=False,
+            ):
+                response = test_client.get("/v1/vwap/btc-usd", headers=headers)
+            replay = test_client.get("/v1/vwap/btc-usd", headers=headers)
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 200
+        assert replay.status_code == 200
+        assert replay.content == response.content
+        assert replay.headers["X-Payment-Replayed"] == "true"
+        assert settle.await_count == 1
+        assert mock_client.get_vwap_latest.await_count == 1
+        assert manager.payment_proof_state("mock_lifecycle_recovery")["state"] == "finalized"
+
+    def test_checkpoint_failure_withholds_data_and_records_reconciliation_alert(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", True)
+        manager = CreditManager(str(tmp_path / "lifecycle-unreconciled.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        mock_client = AsyncMock()
+        mock_client.get_vwap_latest = AsyncMock(
+            return_value=VWAPData(
+                pair="btc-usd",
+                vwap=95_000,
+                timestamp=datetime.now(timezone.utc),
+                currency="USD",
+            )
+        )
+        app.state.blocksize = mock_client
+
+        try:
+            with patch.object(
+                manager,
+                "checkpoint_settled_payment",
+                return_value=False,
+            ):
+                response = test_client.get(
+                    "/v1/vwap/btc-usd",
+                    headers={
+                        "PAYMENT-SIGNATURE": self._mock_payment_header(
+                            "mock_lifecycle_unreconciled"
+                        )
+                    },
+                )
+        finally:
+            app.state.credits = previous_manager
+
+        assert response.status_code == 503
+        assert response.json()["error"] == "Payment Reconciliation Required"
+        assert "data" not in response.json()
+        assert manager.payment_proof_state("mock_lifecycle_unreconciled")["state"] == "pending"
+        alerts = [
+            event
+            for event in observability_store.recent_events(limit=20)
+            if event["event"] == "payment_settlement_unreconciled"
+        ]
+        assert len(alerts) == 1
+        assert alerts[0]["metadata"]["payment_state"] == "settlement_unreconciled"
+        assert alerts[0]["metadata"]["transaction_hash"]
+
+    @pytest.mark.asyncio
+    async def test_settlement_cancellation_quarantines_proof_and_blocks_resettle(
+        self,
+        test_client,
+        observability_store,
+        tmp_path,
+    ):
+        manager = CreditManager(str(tmp_path / "settlement-cancelled.db"))
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        reservation = manager.reserve_payment_proof(
+            payment_id="settlement-cancelled-proof",
+            network=settings.x402.base_network,
+            amount_atomic=2000,
+            recipient=settings.x402.evm_wallet_address,
+            purpose="GET /v1/vwap/btc-usd",
+            request_binding="settlement-cancelled-binding",
+            attempt_id="reservation-attempt",
+            lease_seconds=30,
+            now=1000.0,
+        )
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": "/v1/vwap/btc-usd",
+            "raw_path": b"/v1/vwap/btc-usd",
+            "query_string": b"",
+            "headers": [(b"payment-signature", b"signed-payment")],
+            "client": ("203.0.113.51", 1234),
+            "server": ("testserver", 443),
+            "app": app,
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def successful(_request):
+            return resource_server.JSONResponse({"data": {"price": 95_000}})
+
+        verification = {
+            "valid": True,
+            "network": settings.x402.base_network,
+            "payment_id": reservation.payment_id,
+            "reservation_id": reservation.reservation_id,
+            "request_binding": "settlement-cancelled-binding",
+        }
+        settle = AsyncMock(side_effect=asyncio.CancelledError())
+        request = Request(scope, receive=receive)
+
+        try:
+            with patch(
+                "src.resource_server._verify_payment",
+                new_callable=AsyncMock,
+                return_value=verification,
+            ), patch("src.resource_server._settle_payment", settle):
+                with pytest.raises(asyncio.CancelledError):
+                    await resource_server.x402_payment_middleware(request, successful)
+        finally:
+            app.state.credits = previous_manager
+
+        state = manager.payment_proof_state(reservation.payment_id)
+        assert state["state"] == "settlement_unknown"
+        assert state["settlement_unknown_at"]
+        retry = manager.reserve_payment_proof(
+            payment_id=reservation.payment_id,
+            network=settings.x402.base_network,
+            amount_atomic=2000,
+            recipient=settings.x402.evm_wallet_address,
+            purpose="GET /v1/vwap/btc-usd",
+            request_binding="settlement-cancelled-binding",
+            attempt_id="retry-attempt",
+            lease_seconds=30,
+            now=9999.0,
+        )
+        assert retry.acquired is False
+        assert retry.reason == "payment_settlement_reconciliation_required"
+        settle.assert_awaited_once()
+        alerts = [
+            event
+            for event in observability_store.recent_events(limit=20)
+            if event["event"] == "payment_settlement_unreconciled"
+        ]
+        assert len(alerts) == 1
+        assert alerts[0]["reason"] == "settlement_cancelled_with_unknown_remote_outcome"
+        assert alerts[0]["metadata"]["payment_state"] == "settlement_unknown"
+
+
 # ---------------------------------------------------------------------------
 # Data Endpoints (with mocked payment)
 # ---------------------------------------------------------------------------
@@ -3703,8 +5727,27 @@ class TestNativePaymentValidation:
 class TestDataEndpoints:
     @pytest.fixture(autouse=True)
     def _mock_payment(self):
-        with patch("src.resource_server._verify_payment", new_callable=AsyncMock, return_value={"valid": True}), \
-             patch("src.resource_server._settle_payment", new_callable=AsyncMock, return_value={"success": True}):
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={
+                "valid": True,
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                "payment_id": "test-payment-id",
+                "reservation_id": "test-reservation-id",
+                "payer": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            },
+        ), patch(
+            "src.resource_server._settle_payment",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "transaction": "2" * 88,
+                "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            },
+        ), patch.object(
+            CreditManager, "checkpoint_settled_payment", return_value=True
+        ), patch.object(CreditManager, "finalize_payment_proof", return_value=True):
             yield
 
     def test_vwap_endpoint(self, test_client):
