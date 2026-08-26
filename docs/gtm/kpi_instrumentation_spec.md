@@ -12,7 +12,9 @@ Why: it combines activation, payment success, and repeatable product value. Reve
 
 | Event | Trigger | Required fields |
 | --- | --- | --- |
-| `free_discovery_call` | `/v1/search`, `/v1/instruments`, pricing info, manifest | timestamp, endpoint, query/service, IP hash, user agent, referrer |
+| `free_discovery_call` | `/v1/coverage`, `/v1/search`, `/v1/instruments`, RWA discovery | timestamp, endpoint, normalized query/service, IP hash, user agent, referrer |
+| `catalog_search_completed` | A paginated search completes | timestamp, normalized query, asset class, total matches, returned matches, limit, offset, has_more |
+| `coverage_catalog_view` | Unified coverage is requested | timestamp, available namespace count, RWA canonical count, decision-grade count, economic-write lock state |
 | `payment_required` | Paid endpoint returns 402 | timestamp, endpoint, asset, price_usdc, networks_offered, IP hash |
 | `payment_proof_submitted` | `PAYMENT-SIGNATURE` received | timestamp, endpoint, attempt_id, proof hash |
 | `payment_authorization_verified` | Facilitator accepts authorization, before settlement | timestamp, endpoint, attempt_id, payment_id, network, price_usdc |
@@ -37,6 +39,14 @@ Why: it combines activation, payment success, and repeatable product value. Reve
 | Endpoint mix | Paid calls by endpoint and asset class | Weekly |
 | Gross margin per call | Revenue less RPC/payment/data costs | Weekly |
 | Demo completion | Demo starts to known-good paid-call success | Weekly |
+| Discovery-to-402 rate | Trusted identities that receive a 402 after search or coverage discovery / trusted discovery identities | Weekly |
+| Coverage-to-delivery rate | Trusted identities with a delivered live result after viewing unified coverage / trusted coverage viewers | Weekly |
+
+Search-result pagination and starter credits are separate concepts. Search is
+free and `total_matches` measures catalog matches; the default 50 search rows
+is only a page size. Starter credits are consumed by live-data products at the
+rates published by `/v1/products` and `/v1/coverage`, regardless of how many
+symbols search can discover.
 
 ## First implementation path
 

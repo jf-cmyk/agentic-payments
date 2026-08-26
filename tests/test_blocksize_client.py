@@ -372,6 +372,35 @@ class TestPairSearch:
         assert len(results) == 50
 
     @pytest.mark.asyncio
+    async def test_search_pairs_page_preserves_total_beyond_legacy_cap(self, client):
+        instruments = [f"test-{i:03d}" for i in range(100)]
+        with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=instruments), \
+             patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \
+             patch.object(client, "list_metal_instruments", new_callable=AsyncMock, return_value=[]):
+            page, total = await client.search_pairs_page(
+                "test", asset_class="crypto", limit=20, offset=40
+            )
+
+        assert total == 100
+        assert len(page) == 20
+        assert page[0].pair == "test-040"
+        assert page[-1].pair == "test-059"
+
+    @pytest.mark.asyncio
+    async def test_search_pairs_page_does_not_claim_complete_total_on_catalog_failure(
+        self,
+        client,
+    ):
+        with patch.object(
+            client,
+            "list_vwap_instruments",
+            new_callable=AsyncMock,
+            side_effect=BlocksizeAPIError(503, "upstream unavailable"),
+        ):
+            with pytest.raises(BlocksizeAPIError):
+                await client.search_pairs_page("btc", asset_class="crypto")
+
+    @pytest.mark.asyncio
     async def test_search_assigns_tier(self, client):
         with patch.object(client, "list_vwap_instruments", new_callable=AsyncMock, return_value=["BTCUSD", "NICHETOKEN123"]), \
              patch.object(client, "_list_bidask_entries", new_callable=AsyncMock, return_value=[]), \

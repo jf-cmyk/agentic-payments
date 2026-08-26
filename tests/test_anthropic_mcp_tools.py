@@ -317,18 +317,17 @@ async def test_next_connector_call_recovers_stale_process_crash(monkeypatch):
 @pytest.mark.asyncio
 async def test_search_pairs_does_not_require_identity():
     mock_client = AsyncMock()
-    mock_client.search_pairs = AsyncMock(
-        return_value=[
-            PairInfo(
-                pair="btc-usd",
-                base_currency="BTC",
-                quote_currency="USD",
-                asset_class="crypto",
-                services=["vwap"],
-                tier="core",
-            )
-        ]
-    )
+    pairs = [
+        PairInfo(
+            pair="btc-usd",
+            base_currency="BTC",
+            quote_currency="USD",
+            asset_class="crypto",
+            services=["vwap"],
+            tier="core",
+        )
+    ]
+    mock_client.search_pairs_page = AsyncMock(return_value=(pairs, len(pairs)))
     server._client = mock_client
 
     result = await server.anthropic_search_pairs("btc")

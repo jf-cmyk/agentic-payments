@@ -19,6 +19,7 @@ from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
 from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
+    DISCOVERY_SEARCH_DEFAULT_LIMIT,
     InstrumentPageLimit,
     InstrumentPageOffset,
     READ_ONLY_TOOL_ANNOTATIONS,
@@ -451,6 +452,8 @@ def create_authenticated_market_data_mcp(
     async def search_pairs(
         query: InstrumentSearchQuery,
         asset_class: AssetClassFilter = "all",
+        limit: InstrumentPageLimit = DISCOVERY_SEARCH_DEFAULT_LIMIT,
+        offset: InstrumentPageOffset = 0,
     ) -> str:
         record_usage_event(
             "mcp_tool_call",
@@ -461,19 +464,38 @@ def create_authenticated_market_data_mcp(
         )
         try:
             client = await get_client()
-            pairs = await client.search_pairs(query, asset_class)
+            pairs, total = await client.search_pairs_page(
+                query,
+                asset_class,
+                limit=limit,
+                offset=offset,
+            )
+            next_offset = offset + len(pairs)
+            has_more = next_offset < total
             response = PairSearchResponse(
                 query=query,
-                total_matches=len(pairs),
+                total_matches=total,
+                returned_matches=len(pairs),
+                offset=offset,
+                limit=limit,
+                has_more=has_more,
+                next_offset=next_offset if has_more else None,
                 pairs=pairs,
                 meta={
                     **build_catalog_snapshot_metadata(
                         source="Blocksize instrument search result set",
                         records=list(pairs),
                         grain="instrument_search_match",
-                        snapshot_scope="returned_result_set_max_50",
+                        snapshot_scope="returned_search_page",
                     ),
-                    "result_limit": 50,
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "returned": len(pairs),
+                        "total": total,
+                        "has_more": has_more,
+                        "next_offset": next_offset if has_more else None,
+                    },
                     "total_coverage": (
                         "Enabled symbols across crypto, equities, FX, and metals"
                     ),
@@ -496,8 +518,8 @@ def create_authenticated_market_data_mcp(
                     "\n</details>"
                 )
             pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
-            summary = f"Found {len(pairs)} instruments matching '{query}': {pair_list}" + (
-                f" ... and {len(pairs) - 10} more" if len(pairs) > 10 else ""
+            summary = f"Found {total} instruments matching '{query}'; returned {len(pairs)} from offset {offset}: {pair_list}" + (
+                f" ... and {len(pairs) - 10} more on this page" if len(pairs) > 10 else ""
             )
             return (
                 f"{summary}\n\n<details>\n"

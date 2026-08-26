@@ -659,6 +659,33 @@ class BlocksizeClient:
         Returns:
             List of matching PairInfo objects (max 50).
         """
+        matches = await self._search_pair_candidates(query, asset_class, strict=False)
+        return matches[:50]
+
+    async def search_pairs_page(
+        self,
+        query: str,
+        asset_class: str = "all",
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[PairInfo], int]:
+        """Return one search page and the honest total across searched catalogs."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        matches = await self._search_pair_candidates(query, asset_class, strict=True)
+        return matches[offset : offset + limit], len(matches)
+
+    async def _search_pair_candidates(
+        self,
+        query: str,
+        asset_class: str = "all",
+        *,
+        strict: bool,
+    ) -> list[PairInfo]:
+        """Collect every matching instrument before response pagination."""
         asset_filter = asset_class.lower().strip()
         if asset_filter == "equities":
             asset_filter = "equity"
@@ -687,7 +714,7 @@ class BlocksizeClient:
                 all_crypto = vwap_instruments | bidask_instruments
 
                 for instrument in sorted(all_crypto):
-                    if query_lower in instrument.lower() and len(matches) < 50:
+                    if query_lower in instrument.lower():
                         services = []
                         if instrument in vwap_instruments:
                             services.append("vwap")
@@ -705,10 +732,12 @@ class BlocksizeClient:
                             tier=tier,
                         ))
             except BlocksizeAPIError:
+                if strict:
+                    raise
                 logger.warning("Could not search crypto instruments")
 
         # Search equities in the shared bid/ask namespace.
-        if asset_filter in ("all", "equity") and len(matches) < 50:
+        if asset_filter in ("all", "equity"):
             try:
                 equity_entries = [
                     entry
@@ -719,7 +748,7 @@ class BlocksizeClient:
                     ticker = entry["ticker"]
                     base = entry["base_currency"]
                     searchable = f"{ticker} {base} {base.removesuffix('X')}".lower()
-                    if query_lower in searchable and len(matches) < 50:
+                    if query_lower in searchable:
                         matches.append(PairInfo(
                             pair=ticker,
                             base_currency=base.removesuffix("X"),
@@ -729,10 +758,12 @@ class BlocksizeClient:
                             tier="equities",
                         ))
             except BlocksizeAPIError:
+                if strict:
+                    raise
                 logger.warning("Could not search equity instruments")
 
         # Search FX
-        if asset_filter in ("all", "fx") and len(matches) < 50:
+        if asset_filter in ("all", "fx"):
             try:
                 fx_instruments = sorted(
                     entry["ticker"]
@@ -740,7 +771,7 @@ class BlocksizeClient:
                     if self._is_fx_entry(entry)
                 )
                 for inst in fx_instruments:
-                    if query_lower in inst.lower() and len(matches) < 50:
+                    if query_lower in inst.lower():
                         base, quote = _split_pair(inst)
                         matches.append(PairInfo(
                             pair=inst,
@@ -751,12 +782,14 @@ class BlocksizeClient:
                             tier="tradfi",
                         ))
             except BlocksizeAPIError:
+                if strict:
+                    raise
                 logger.warning("Could not search FX instruments")
 
         # Search metals
-        if asset_filter in ("all", "metal") and len(matches) < 50:
+        if asset_filter in ("all", "metal"):
             for inst in await self.list_metal_instruments():
-                if query_lower in inst.lower() and len(matches) < 50:
+                if query_lower in inst.lower():
                     base, quote = _split_pair(inst)
                     matches.append(PairInfo(
                         pair=inst,

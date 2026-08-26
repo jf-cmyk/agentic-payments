@@ -103,6 +103,7 @@ READ_ONLY_TOOL_ANNOTATIONS = {
 }
 DISCOVERY_INSTRUMENT_DEFAULT_LIMIT = 100
 DISCOVERY_INSTRUMENT_MAX_LIMIT = 500
+DISCOVERY_SEARCH_DEFAULT_LIMIT = 50
 InstrumentPageLimit = Annotated[
     int,
     Field(
@@ -430,7 +431,12 @@ async def get_metal_price(ticker: str) -> str:
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
-async def search_pairs(query: str, asset_class: str = "all") -> str:
+async def search_pairs(
+    query: str,
+    asset_class: str = "all",
+    limit: InstrumentPageLimit = DISCOVERY_SEARCH_DEFAULT_LIMIT,
+    offset: InstrumentPageOffset = 0,
+) -> str:
     """
     Search through the currently enabled upstream symbols. FREE.
 
@@ -446,20 +452,39 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
     """
     try:
         client = await _get_client()
-        pairs = await client.search_pairs(query, asset_class)
+        pairs, total = await client.search_pairs_page(
+            query,
+            asset_class,
+            limit=limit,
+            offset=offset,
+        )
+        next_offset = offset + len(pairs)
+        has_more = next_offset < total
 
         response = PairSearchResponse(
             query=query,
-            total_matches=len(pairs),
+            total_matches=total,
+            returned_matches=len(pairs),
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            next_offset=next_offset if has_more else None,
             pairs=pairs,
             meta={
                 **build_catalog_snapshot_metadata(
                     source="Blocksize instrument search result set",
                     records=list(pairs),
                     grain="instrument_search_match",
-                    snapshot_scope="returned_result_set_max_50",
+                    snapshot_scope="returned_search_page",
                 ),
-                "result_limit": 50,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "returned": len(pairs),
+                    "total": total,
+                    "has_more": has_more,
+                    "next_offset": next_offset if has_more else None,
+                },
                 "total_coverage": (
                     "Enabled symbols across crypto, equities, FX, and metals"
                 ),
@@ -484,8 +509,9 @@ async def search_pairs(query: str, asset_class: str = "all") -> str:
 
         pair_list = ", ".join(f"{p.pair} ({p.tier})" for p in pairs[:10])
         summary = (
-            f"Found {len(pairs)} instruments matching '{query}': {pair_list}"
-            + (f" ... and {len(pairs) - 10} more" if len(pairs) > 10 else "")
+            f"Found {total} instruments matching '{query}'; returned {len(pairs)} "
+            f"from offset {offset}: {pair_list}"
+            + (f" ... and {len(pairs) - 10} more on this page" if len(pairs) > 10 else "")
         )
 
         details = json.dumps(response.model_dump(), default=str, indent=2)

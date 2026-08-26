@@ -7,9 +7,9 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.6"
+APP_VERSION = "0.6.7"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
-    "0.6.6": "2026-08-25",
+    "0.6.7": "2026-08-26",
 }
 PUBLIC_CONTENT_LAST_MODIFIED = PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION[APP_VERSION]
 HISTORICAL_EVIDENCE_LAST_MODIFIED = "2026-07-22"
@@ -1671,6 +1671,7 @@ def build_llms_txt() -> str:
         f"- MCP Registry server metadata: {SERVER_JSON_URL}\n"
         f"- OpenAPI JSON: {OPENAPI_URL}\n"
         f"- Swagger UI: {SWAGGER_URL}\n"
+        f"- Unified live and research coverage: {PUBLIC_BASE_URL}/v1/coverage\n"
         f"- Data packages JSON: {DATA_PACKAGES_JSON_URL}\n"
         f"- Category hubs and claims boundary JSON: {CATEGORY_HUBS_JSON_URL}\n"
         f"- Historical RWA Coverage Index (2026-07-22 prior snapshot): {RWA_COVERAGE_INDEX_URL}\n"
@@ -1722,7 +1723,7 @@ def build_llms_txt() -> str:
         )
         + "\n"
         "## Agent Routing\n\n"
-        "1. Discover instruments and pricing with the public remote MCP server.\n"
+        "1. Read `/v1/coverage` for current namespace counts and qualification boundaries, then discover instruments and pricing with the public remote MCP server.\n"
         "2. Check `/v1/cache/status` for stream-backed 24h VWAP and state-cache readiness.\n"
         "3. Use `/v1/capabilities/check` before optional state or VWAP-window products.\n"
         "4. Build the exact paid endpoint with `get_market_data_endpoint` or the OpenAPI schema.\n"
@@ -1761,9 +1762,10 @@ def build_data_packages_json() -> dict[str, object]:
         "openapi": OPENAPI_URL,
         "llms_txt": LLMS_TXT_URL,
         "category_hubs": CATEGORY_HUBS_JSON_URL,
+        "unified_coverage": f"{PUBLIC_BASE_URL}/v1/coverage",
         "data_catalog_pdf": DATA_CATALOG_URL,
         "routing": {
-            "discover": "Use the public MCP tools for search, instrument lists, pricing inspection, docs search, and endpoint construction.",
+            "discover": "Read /v1/coverage for current counts and qualification boundaries, then use public MCP tools for paginated search, instrument lists, pricing inspection, docs search, and endpoint construction.",
             "readiness": "Use /v1/cache/status for stream-cache readiness and /v1/capabilities/check before paid optional state or VWAP-window products.",
             "buy_or_fetch": (
                 "Use signed x402-paid direct public HTTP routes; a starter allowance is "

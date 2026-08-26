@@ -109,9 +109,14 @@ The paid HTTP API is the production data path for live access:
 
 Free discovery endpoints:
 
+- `GET /v1/coverage`
 - `GET /v1/search`
 - `GET /v1/instruments/{service}`
 - `GET /health`
+
+`/v1/search` is paginated with `limit` and `offset`. Its `total_matches`
+field is the full match count for the searched catalogs; the default 50 is
+only the response page size and is unrelated to starter credits.
 
 Payment modes:
 
@@ -160,10 +165,11 @@ That mode is intended for direct builder integrations and requires local credent
 
 ## Coverage
 
-- 6,362 enabled crypto VWAP pairs
-- 2,365 enabled shared bid/ask instruments
-- 3 enabled FX pairs
-- 5 metal tickers
+Use `GET /v1/coverage` for current source-backed counts and qualification
+boundaries. The response separates enabled live discovery namespaces,
+decision-grade canonical RWA identities, and research/manual-verification
+coverage. Namespace and venue-row counts overlap and must not be summed as a
+unique-instrument total.
 
 ## Local Development
 
