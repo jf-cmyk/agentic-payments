@@ -126,6 +126,11 @@ async def main():
 
     url = sys.argv[1]
     mock_mode = "--mock" in sys.argv[2:]
+    if not mock_mode:
+        print("This legacy transaction-hash flow is disabled for real payments.")
+        print("A standalone USDC transfer plus transaction hash is not an x402 v2 PAYMENT-SIGNATURE.")
+        print("Use scripts/run_funded_x402_canary.py, which constructs the official signed authorization.")
+        raise SystemExit(2)
     print("🤖 Agent starting. Target: fetch data 3 times.")
 
     async with httpx.AsyncClient() as client:

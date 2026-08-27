@@ -27,6 +27,50 @@ REGISTRY_ENDPOINTS = {
 
 SYMBOL_OPPORTUNITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,31}$")
 TRUSTED_IDENTITY_LEVELS = frozenset({"verified_oauth", "verified_beta", "verified_x402"})
+LIVE_DATA_MCP_TOOLS = frozenset(
+    {
+        "get_vwap",
+        "get_vwap_30min",
+        "get_vwap_24h",
+        "get_bid_ask",
+        "get_state_price",
+        "get_fx_rate",
+        "get_metal_price",
+        "resolve_and_get_market_data",
+    }
+)
+PUBLIC_MCP_ENDPOINTS = frozenset({"/mcp/server"})
+AUTHENTICATED_MCP_ENDPOINTS = frozenset(
+    {"/anthropic/mcp", "/cursor/mcp", "/openai/mcp"}
+)
+KNOWN_MONITOR_USER_AGENT_MARKERS = frozenset(
+    {
+        "healthcheck",
+        "health-check",
+        "heartbeat",
+        "monitor",
+        "probe",
+        "prober",
+        "scanner",
+        "synthetic",
+        "uptime",
+        "statuscake",
+        "pingdom",
+    }
+)
+PRODUCT_ROUTE_IDS = {
+    "/v1/briefs/market": "agent_market_brief",
+    "/v1/checks/pre-trade": "pre_trade_check",
+    "/v1/receipts/price": "audit_price_receipt",
+    "/v1/snapshots/macro": "macro_snapshot",
+    "/v1/monitors/evaluate": "market_monitor",
+    "/v1/indicators/token-quality": "token_quality_indicator",
+    "/v1/indicators/state-divergence": "state_divergence_indicator",
+    "/v1/signals/solana-token-brief": "solana_token_brief",
+    "/v1/signals/trader-alpha-pack": "trader_alpha_pack",
+    "/v1/rwa/benchmark/blocksize": "rwa_blocksize_benchmark",
+}
+MARKET_INTELLIGENCE_PRODUCT_IDS = frozenset(PRODUCT_ROUTE_IDS.values())
 
 
 def utc_now_iso() -> str:
@@ -485,6 +529,7 @@ class UsageEventStore:
             "active_wallets": active_wallets,
             "active_principals": active_principals,
             "submitted_attempts": submissions,
+            "authorization_attempts": authorization_attempts,
             "settled_attempts": {attempt for attempt, _ in settled_pairs},
             "unresolved_drawdowns": unresolved_drawdowns,
             "uncorrelated_legacy_events": uncorrelated,
@@ -598,12 +643,12 @@ class UsageEventStore:
             event.get("subject") or "unknown"
             for event in events
             if event.get("subject")
-            and event["event"] in {"free_discovery_call", "mcp_tool_call", "payment_required"}
+            and self._is_live_data_request_event(event)
         )
         service_mix = Counter(
             self._service_for_event(event)
             for event in events
-            if event["event"] in called_data_events
+            if self._is_live_data_related_event(event, called_data_events)
         )
         origin_mix = Counter(
             self._origin_for_event(event)
@@ -633,6 +678,53 @@ class UsageEventStore:
             and isinstance(event.get("metadata"), dict)
             and event["metadata"].get("utm_source")
         )
+        selection_source_mix = Counter(
+            str(
+                event["metadata"].get("selection_source") or "unattributed"
+                if isinstance(event.get("metadata"), dict)
+                else "unattributed"
+            )
+            for event in events
+            if self._is_live_data_related_event(event, called_data_events)
+        )
+        delivered_selection_source_mix = Counter(
+            str(
+                event["metadata"].get("selection_source") or "unattributed"
+                if isinstance(event.get("metadata"), dict)
+                else "unattributed"
+            )
+            for event in events
+            if id(event) in correlation["valid_delivery_event_ids"]
+        )
+        recognized_revenue_by_selection_source_usdc: Counter[str] = Counter()
+        for event in events:
+            if id(event) not in correlation["valid_delivery_event_ids"]:
+                continue
+            metadata = event.get("metadata")
+            source = (
+                str(metadata.get("selection_source") or "unattributed")
+                if isinstance(metadata, dict)
+                else "unattributed"
+            )
+            recognized_revenue_by_selection_source_usdc[source] += float(
+                event.get("price_usdc") or 0.0
+            )
+        resolved_events = [event for event in events if event["event"] == "instrument_resolved"]
+        resolved_symbols = {
+            str(event.get("subject")) for event in resolved_events if event.get("subject")
+        }
+        resolver_deliveries = sum(
+            count
+            for source, count in delivered_selection_source_mix.items()
+            if source in {"authenticated_resolver", "public_mcp_resolver"}
+        )
+        published_example_payment_prompts = sum(
+            1
+            for event in events
+            if event["event"] == "payment_required"
+            and isinstance(event.get("metadata"), dict)
+            and event["metadata"].get("selection_source") == "published_example_path"
+        )
         outbound_destination_mix = Counter(
             str(event["metadata"].get("destination") or event.get("subject"))
             for event in events
@@ -652,6 +744,65 @@ class UsageEventStore:
         )
         data_called = self._data_called(events, called_data_events, correlation)
         popularity = self._popularity(events, correlation)
+        transport_requests = self._transport_request_summary(events)
+        request_quality = self._request_quality_summary(events)
+        product_performance = self._product_performance_summary(events, correlation)
+        resolver_funnel = self._resolver_funnel_summary(events, correlation)
+        settled_attempts = len(correlation["settled_attempts"])
+        correlated_proof_attempts = len(correlation["submitted_attempts"])
+        verified_authorizations = len(correlation["authorization_attempts"])
+        raw_proof_events = int(event_counts["payment_proof_submitted"])
+        failed_proof_events = int(event_counts["payment_failed"])
+        payment_prompts = int(event_counts["payment_required"])
+        live_data_requests = int(request_quality["gross_live_data_requests"])
+        x402_deliveries = sum(
+            1
+            for event in events
+            if id(event) in correlation["valid_delivery_event_ids"]
+            and event.get("event") == "data_delivered"
+            and self._metadata(event).get("payment_mode") == "x402"
+        )
+        payment_funnel = {
+            "live_data_requests": live_data_requests,
+            "non_monitor_live_data_requests": int(request_quality["non_monitor_requests"]),
+            "known_monitor_live_data_requests": int(
+                request_quality["known_monitor_requests"]
+            ),
+            "x402_prompts": payment_prompts,
+            "proof_submissions": raw_proof_events,
+            "raw_proof_submission_events": raw_proof_events,
+            "correlated_proof_attempts": correlated_proof_attempts,
+            "verified_authorizations": verified_authorizations,
+            "failed_or_rejected_proof_events": failed_proof_events,
+            "proof_failure_reasons": dict(
+                Counter(
+                    str(event.get("reason") or "unknown")
+                    for event in events
+                    if event.get("event") == "payment_failed"
+                ).most_common()
+            ),
+            "settled_attempts": settled_attempts,
+            "successful_deliveries": paid_calls,
+            "x402_deliveries": x402_deliveries,
+            "credit_backed_deliveries": max(paid_calls - x402_deliveries, 0),
+            "prompt_to_proof_rate": (
+                raw_proof_events / payment_prompts if payment_prompts else None
+            ),
+            "proof_event_to_correlated_attempt_rate": (
+                correlated_proof_attempts / raw_proof_events if raw_proof_events else None
+            ),
+            "proof_to_settlement_rate": (
+                settled_attempts / correlated_proof_attempts
+                if correlated_proof_attempts
+                else None
+            ),
+            "prompt_to_delivery_rate": (
+                x402_deliveries / payment_prompts if payment_prompts else None
+            ),
+            "live_request_to_delivery_rate": (
+                paid_calls / live_data_requests if live_data_requests else None
+            ),
+        }
         growth_funnel = self._growth_funnel(events, correlation)
         reliability = self._reliability_summary(events, correlation)
         evidence = self._source_evidence(events)
@@ -690,6 +841,15 @@ class UsageEventStore:
         if correlation["correlation_conflicts"]:
             confidence_reasons.append(
                 f"{correlation['correlation_conflicts']} payment attempts have conflicting terminal outcomes and are excluded."
+            )
+        if raw_proof_events > correlated_proof_attempts:
+            confidence_reasons.append(
+                f"{raw_proof_events - correlated_proof_attempts} payment proof events lack a complete correlated lifecycle and are excluded from settlement conversion."
+            )
+        known_monitor_share = request_quality.get("known_monitor_share")
+        if known_monitor_share is not None and float(known_monitor_share) >= 0.5:
+            confidence_reasons.append(
+                f"Known ecosystem monitors account for {round(float(known_monitor_share) * 100, 1)}% of gross live-data attempts."
             )
         decision_confidence = {
             "level": "limited" if confidence_reasons else "decision_ready",
@@ -735,6 +895,10 @@ class UsageEventStore:
                 "free_discovery_calls": event_counts["free_discovery_call"],
                 "first_live_price_deliveries": event_counts["first_live_price_delivered"],
                 "unsupported_symbol_requests": event_counts["unsupported_symbol_request"],
+                "instrument_resolutions": len(resolved_events),
+                "distinct_resolved_symbols": len(resolved_symbols),
+                "resolver_deliveries": resolver_deliveries,
+                "published_example_payment_prompts": published_example_payment_prompts,
                 "http_error_rate": self._error_rate(events),
                 "http_error_rate_excluding_payment_required": self._error_rate(
                     events,
@@ -745,6 +909,16 @@ class UsageEventStore:
                 "avg_latency_ms": round(mean(latencies), 2) if latencies else None,
                 "p95_latency_ms": self._percentile(latencies, 95),
                 "most_used_service": most_used_service,
+                "live_data_requests": live_data_requests,
+                "non_monitor_live_data_requests": int(
+                    request_quality["non_monitor_requests"]
+                ),
+                "known_monitor_live_data_requests": int(
+                    request_quality["known_monitor_requests"]
+                ),
+                "live_data_delivery_rate": payment_funnel[
+                    "live_request_to_delivery_rate"
+                ],
             },
             "event_counts": dict(event_counts.most_common()),
             "surface_mix": dict(surface_counts.most_common()),
@@ -755,11 +929,24 @@ class UsageEventStore:
             "registry_mix": dict(registry_mix.most_common()),
             "registry_source_mix": dict(registry_source_mix.most_common(20)),
             "mcp_tool_mix": dict(mcp_tool_mix.most_common(20)),
+            "transport_requests": transport_requests,
+            "request_quality": request_quality,
+            "payment_funnel": payment_funnel,
+            "product_performance": product_performance,
+            "resolver_funnel": resolver_funnel,
             "service_mix": dict(service_mix.most_common(20)),
             "origin_mix": dict(origin_mix.most_common(20)),
             "referrer_mix": dict(referrer_mix.most_common(20)),
             "campaign_mix": dict(campaign_mix.most_common(20)),
             "campaign_source_mix": dict(campaign_source_mix.most_common(20)),
+            "selection_source_mix": dict(selection_source_mix.most_common(20)),
+            "delivered_selection_source_mix": dict(
+                delivered_selection_source_mix.most_common(20)
+            ),
+            "recognized_revenue_by_selection_source_usdc": {
+                source: round(value, 6)
+                for source, value in recognized_revenue_by_selection_source_usdc.most_common(20)
+            },
             "outbound_destination_mix": dict(outbound_destination_mix.most_common(20)),
             "user_agent_mix": dict(user_agent_mix.most_common(20)),
             "client_fingerprint_mix": dict(client_fingerprint_mix.most_common(20)),
@@ -1111,13 +1298,388 @@ class UsageEventStore:
         return data
 
     @staticmethod
+    def _is_live_data_request_event(event: dict[str, Any]) -> bool:
+        """Count commercial data intent without treating MCP transport as demand."""
+        event_name = str(event.get("event") or "")
+        if event_name == "payment_required":
+            return True
+        return (
+            event_name == "mcp_tool_call"
+            and str(event.get("tool_name") or "") in LIVE_DATA_MCP_TOOLS
+        )
+
+    @classmethod
+    def _is_live_data_related_event(
+        cls,
+        event: dict[str, Any],
+        related_event_names: set[str],
+    ) -> bool:
+        event_name = str(event.get("event") or "")
+        if event_name in {"free_discovery_call", "registry_request"}:
+            return False
+        if event_name == "mcp_tool_call":
+            return cls._is_live_data_request_event(event)
+        return event_name in related_event_names
+
+    @staticmethod
+    def _transport_request_summary(events: list[dict[str, Any]]) -> dict[str, int]:
+        summary = {
+            "public_mcp_transport_requests": 0,
+            "authenticated_mcp_transport_requests": 0,
+            "registry_transport_requests": 0,
+            "live_data_http_requests": 0,
+            "other_http_requests": 0,
+        }
+        live_prefixes = (
+            "/v1/vwap/",
+            "/v1/bidask/",
+            "/v1/state/",
+            "/v1/vwap30m/",
+            "/v1/vwap24h/",
+            "/v1/fx/",
+            "/v1/metal/",
+            "/v1/batch",
+            "/v1/briefs/market",
+            "/v1/checks/pre-trade",
+            "/v1/receipts/price",
+            "/v1/snapshots/macro",
+            "/v1/monitors/evaluate",
+            "/v1/indicators/",
+            "/v1/signals/",
+            "/v1/rwa/benchmark/blocksize",
+        )
+        for event in events:
+            if event.get("event") != "http_request":
+                continue
+            endpoint = str(event.get("endpoint") or "")
+            surface = str(event.get("surface") or "")
+            if any(
+                endpoint == path or endpoint.startswith(f"{path}/")
+                for path in PUBLIC_MCP_ENDPOINTS
+            ):
+                summary["public_mcp_transport_requests"] += 1
+            elif any(
+                endpoint == path or endpoint.startswith(f"{path}/")
+                for path in AUTHENTICATED_MCP_ENDPOINTS
+            ):
+                summary["authenticated_mcp_transport_requests"] += 1
+            elif surface == "registry" or registry_name_for_path(endpoint):
+                summary["registry_transport_requests"] += 1
+            elif endpoint.startswith(live_prefixes):
+                summary["live_data_http_requests"] += 1
+            else:
+                summary["other_http_requests"] += 1
+        summary["total_transport_requests"] = sum(summary.values())
+        return summary
+
+    @classmethod
+    def _request_actor_class(cls, event: dict[str, Any]) -> str:
+        """Classify intent conservatively without pretending every agent is a user."""
+        metadata = cls._metadata(event)
+        user_agent = str(event.get("user_agent") or "").lower()
+        if cls._is_synthetic_event(event):
+            return "internal_test"
+        if any(marker in user_agent for marker in KNOWN_MONITOR_USER_AGENT_MARKERS):
+            return "ecosystem_monitor"
+        selection_source = str(metadata.get("selection_source") or "")
+        if selection_source == "published_example_path":
+            return "published_example"
+        if metadata.get("identity_trust") in TRUSTED_IDENTITY_LEVELS:
+            return "verified_agent_or_payer"
+        if selection_source in {"authenticated_resolver", "public_mcp_resolver"}:
+            return "resolver_selected"
+        if any(
+            client in user_agent
+            for client in ("claude", "anthropic", "chatgpt", "openai", "cursor")
+        ):
+            return "named_agent_client"
+        if user_agent:
+            return "unverified_client"
+        return "unknown"
+
+    @classmethod
+    def _request_quality_summary(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        actor_mix: Counter[str] = Counter()
+        prompt_actor_mix: Counter[str] = Counter()
+        selection_mix: Counter[str] = Counter()
+        gross_requests = 0
+        known_monitor_requests = 0
+        internal_test_requests = 0
+        for event in events:
+            if not cls._is_live_data_request_event(event):
+                continue
+            gross_requests += 1
+            actor_class = cls._request_actor_class(event)
+            actor_mix[actor_class] += 1
+            if actor_class == "ecosystem_monitor":
+                known_monitor_requests += 1
+            elif actor_class == "internal_test":
+                internal_test_requests += 1
+            if event.get("event") == "payment_required":
+                prompt_actor_mix[actor_class] += 1
+            selection_mix[
+                str(cls._metadata(event).get("selection_source") or "unattributed")
+            ] += 1
+        non_monitor_requests = max(
+            gross_requests - known_monitor_requests - internal_test_requests,
+            0,
+        )
+        return {
+            "gross_live_data_requests": gross_requests,
+            "known_monitor_requests": known_monitor_requests,
+            "internal_test_requests": internal_test_requests,
+            "non_monitor_requests": non_monitor_requests,
+            "known_monitor_share": (
+                known_monitor_requests / gross_requests if gross_requests else None
+            ),
+            "actor_mix": dict(actor_mix.most_common()),
+            "prompt_actor_mix": dict(prompt_actor_mix.most_common()),
+            "selection_source_mix": dict(selection_mix.most_common()),
+            "status": "measured" if gross_requests else "no_live_data_requests",
+            "definitions": {
+                "gross_live_data_requests": "Payment-required HTTP attempts plus authenticated live-data MCP tool calls; transport and discovery tools are excluded.",
+                "known_monitor_requests": "Gross attempts whose user agent explicitly identifies a probe, monitor, scanner, health check, uptime check, or synthetic runner.",
+                "non_monitor_requests": "Gross attempts excluding known monitors and tagged internal tests. This is a demand candidate, not proof of a unique paying user.",
+                "published_example": "A live-data path matching a published example; kept visible because a real user may copy it, but not treated as independent instrument preference.",
+            },
+        }
+
+    @classmethod
+    def _product_performance_summary(
+        cls,
+        events: list[dict[str, Any]],
+        correlation: dict[str, Any],
+    ) -> dict[str, Any]:
+        grouped: dict[str, dict[str, Any]] = {}
+        lifecycle_events = {
+            "payment_proof_submitted",
+            "payment_authorization_verified",
+            "payment_settled",
+            "payment_failed",
+            "payment_settlement_unreconciled",
+            "data_delivered",
+            "charged_delivery_failed",
+            "refunded_delivery_failed",
+            "mcp_credit_drawdown_success",
+            "mcp_credit_drawdown_failed",
+            "mcp_data_delivered",
+            "mcp_tool_error",
+        }
+        for event in events:
+            event_name = str(event.get("event") or "")
+            is_live_request = cls._is_live_data_request_event(event)
+            if not is_live_request and event_name not in lifecycle_events:
+                continue
+            product_id = cls._service_for_event(event)
+            if product_id in {
+                "instrument_search",
+                "instrument_list",
+                "endpoint_builder",
+                "pricing_info",
+                "catalog_search",
+                "catalog_fetch",
+                "unknown",
+            }:
+                continue
+            family = (
+                "market_intelligence_package"
+                if product_id in MARKET_INTELLIGENCE_PRODUCT_IDS
+                else "raw_market_data"
+            )
+            row = grouped.setdefault(
+                product_id,
+                {
+                    "product_id": product_id,
+                    "product_family": family,
+                    "gross_attempts": 0,
+                    "known_monitor_attempts": 0,
+                    "non_monitor_attempts": 0,
+                    "payment_prompts": 0,
+                    "raw_proof_events": 0,
+                    "verified_authorizations": 0,
+                    "settled_attempts": 0,
+                    "validated_deliveries": 0,
+                    "legacy_delivery_events": 0,
+                    "payment_failures": 0,
+                    "post_charge_failures": 0,
+                    "credits_spent": 0.0,
+                    "recognized_revenue_usdc": 0.0,
+                },
+            )
+            actor_class = cls._request_actor_class(event)
+            metadata = cls._metadata(event)
+            if is_live_request:
+                row["gross_attempts"] += 1
+                if actor_class == "ecosystem_monitor":
+                    row["known_monitor_attempts"] += 1
+                elif actor_class != "internal_test":
+                    row["non_monitor_attempts"] += 1
+            if event_name == "payment_required":
+                row["payment_prompts"] += 1
+            elif event_name == "payment_proof_submitted":
+                row["raw_proof_events"] += 1
+            elif event_name == "payment_authorization_verified":
+                row["verified_authorizations"] += 1
+            elif id(event) in correlation["settled_event_ids"]:
+                row["settled_attempts"] += 1
+                row["recognized_revenue_usdc"] += float(event.get("price_usdc") or 0.0)
+            elif event_name == "payment_failed":
+                row["payment_failures"] += 1
+            if id(event) in correlation["valid_delivery_event_ids"]:
+                row["validated_deliveries"] += 1
+                row["credits_spent"] += float(metadata.get("credits_spent") or 0.0)
+            elif event_name in {"data_delivered", "mcp_data_delivered"}:
+                row["legacy_delivery_events"] += 1
+            if (
+                id(event) in correlation["valid_failure_event_ids"]
+                or event_name == "refunded_delivery_failed"
+            ):
+                row["post_charge_failures"] += 1
+
+        rows = list(grouped.values())
+        for row in rows:
+            row["credits_spent"] = round(float(row["credits_spent"]), 3)
+            row["recognized_revenue_usdc"] = round(
+                float(row["recognized_revenue_usdc"]), 6
+            )
+            row["prompt_to_delivery_rate"] = (
+                row["validated_deliveries"] / row["payment_prompts"]
+                if row["payment_prompts"]
+                else None
+            )
+        rows.sort(
+            key=lambda row: (
+                -int(row["gross_attempts"]),
+                str(row["product_family"]),
+                str(row["product_id"]),
+            )
+        )
+
+        family_rows: list[dict[str, Any]] = []
+        for family in ("raw_market_data", "market_intelligence_package"):
+            members = [row for row in rows if row["product_family"] == family]
+            family_rows.append(
+                {
+                    "product_family": family,
+                    "products_observed": len(members),
+                    "gross_attempts": sum(int(row["gross_attempts"]) for row in members),
+                    "known_monitor_attempts": sum(
+                        int(row["known_monitor_attempts"]) for row in members
+                    ),
+                    "non_monitor_attempts": sum(
+                        int(row["non_monitor_attempts"]) for row in members
+                    ),
+                    "payment_prompts": sum(
+                        int(row["payment_prompts"]) for row in members
+                    ),
+                    "settled_attempts": sum(
+                        int(row["settled_attempts"]) for row in members
+                    ),
+                    "validated_deliveries": sum(
+                        int(row["validated_deliveries"]) for row in members
+                    ),
+                    "recognized_revenue_usdc": round(
+                        sum(float(row["recognized_revenue_usdc"]) for row in members),
+                        6,
+                    ),
+                }
+            )
+        return {
+            "rows": rows[:50],
+            "family_rows": family_rows,
+            "market_intelligence_rows": [
+                row
+                for row in rows
+                if row["product_family"] == "market_intelligence_package"
+            ],
+            "status": "measured" if rows else "no_product_activity",
+            "definitions": {
+                "attempt": "One gross commercial live-data request signal; known monitoring is shown separately.",
+                "validated_delivery": "A delivery joined to a finalized x402 settlement or a correlated successful credit drawdown.",
+                "legacy_delivery": "A historical delivery event without the lifecycle identifiers required for decision-grade attribution.",
+                "recognized_revenue": "Finalized, deduplicated x402 settlements only.",
+            },
+        }
+
+    @classmethod
+    def _resolver_funnel_summary(
+        cls,
+        events: list[dict[str, Any]],
+        correlation: dict[str, Any],
+    ) -> dict[str, Any]:
+        search_events = 0
+        resolved_events = 0
+        zero_or_unsupported = 0
+        resolver_live_attempts = 0
+        resolver_deliveries = 0
+        resolved_symbols: set[str] = set()
+        for event in events:
+            event_name = str(event.get("event") or "")
+            endpoint = str(event.get("endpoint") or "")
+            tool_name = str(event.get("tool_name") or "")
+            selection_source = str(cls._metadata(event).get("selection_source") or "")
+            if (
+                event_name == "mcp_tool_call" and tool_name == "search_pairs"
+            ) or (
+                event_name == "free_discovery_call" and endpoint == "/v1/search"
+            ):
+                search_events += 1
+            if event_name == "instrument_resolved":
+                resolved_events += 1
+                if event.get("subject"):
+                    resolved_symbols.add(str(event["subject"]))
+            if event_name == "unsupported_symbol_request":
+                zero_or_unsupported += 1
+            if (
+                cls._is_live_data_request_event(event)
+                and selection_source in {"authenticated_resolver", "public_mcp_resolver"}
+            ):
+                resolver_live_attempts += 1
+            if (
+                id(event) in correlation["valid_delivery_event_ids"]
+                and selection_source in {"authenticated_resolver", "public_mcp_resolver"}
+            ):
+                resolver_deliveries += 1
+        return {
+            "search_events": search_events,
+            "resolved_events": resolved_events,
+            "distinct_resolved_symbols": len(resolved_symbols),
+            "zero_or_unsupported_events": zero_or_unsupported,
+            "resolver_live_attempts": resolver_live_attempts,
+            "resolver_deliveries": resolver_deliveries,
+            "search_to_resolution_rate": (
+                resolved_events / search_events if search_events else None
+            ),
+            "resolver_to_delivery_rate": (
+                resolver_deliveries / resolver_live_attempts
+                if resolver_live_attempts
+                else None
+            ),
+            "status": (
+                "measured"
+                if resolved_events or resolver_live_attempts
+                else "collecting_after_instrumentation"
+            ),
+            "definitions": {
+                "search": "Explicit HTTP or MCP instrument-search action; HTTP transport duplicates are excluded.",
+                "resolution": "A query mapped to a canonical supported instrument.",
+                "resolver_live_attempt": "A paid endpoint or live tool selected from the public or authenticated resolver.",
+                "resolver_delivery": "A resolver-selected attempt that reached validated paid or credit-backed delivery.",
+            },
+        }
+
+    @staticmethod
     def _service_for_event(event: dict[str, Any]) -> str:
         endpoint = str(event.get("endpoint") or "")
         tool_name = str(event.get("tool_name") or "")
+        if endpoint in PRODUCT_ROUTE_IDS:
+            return PRODUCT_ROUTE_IDS[endpoint]
         if endpoint.startswith("/v1/vwap"):
             return "vwap"
         if endpoint.startswith("/v1/bidask"):
             return "bidask"
+        if endpoint.startswith("/v1/state"):
+            return "state"
         if endpoint.startswith("/v1/fx"):
             return "fx"
         if endpoint.startswith("/v1/metal"):
@@ -1278,7 +1840,14 @@ class UsageEventStore:
         for event in events:
             if not event.get("subject"):
                 continue
-            if event["event"] not in called_data_events and event["event"] != "http_request":
+            if (
+                event.get("event") == "mcp_tool_call"
+                and not cls._is_live_data_request_event(event)
+            ):
+                continue
+            if event.get("event") == "free_discovery_call":
+                continue
+            if event["event"] not in called_data_events:
                 continue
             service = cls._service_for_event(event)
             subject = str(event.get("subject") or "unknown")
@@ -1327,11 +1896,7 @@ class UsageEventStore:
                 row["latest_event"] = event.get("event")
                 row["latest_status_code"] = event.get("status_code")
                 row["latest_outcome"] = cls._outcome_for_event(event)
-            if event["event"] in {
-                "free_discovery_call",
-                "mcp_tool_call",
-                "payment_required",
-            }:
+            if cls._is_live_data_request_event(event):
                 row["_request_signals"] += 1
             if (
                 id(event) in correlation["valid_delivery_event_ids"]
@@ -1396,6 +1961,11 @@ class UsageEventStore:
 
         for event in events:
             event_name = str(event.get("event") or "")
+            is_live_request = cls._is_live_data_request_event(event)
+            if event_name == "mcp_tool_call" and not is_live_request:
+                continue
+            if event_name == "free_discovery_call":
+                continue
             if event_name not in (
                 request_events
                 | delivered_events
@@ -1442,7 +2012,7 @@ class UsageEventStore:
                 row["latest_outcome"] = cls._outcome_for_event(event)
 
             metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
-            if event_name in request_events:
+            if is_live_request:
                 row["requested"] += 1
             if event_name == "payment_required":
                 row["payment_prompts"] += 1

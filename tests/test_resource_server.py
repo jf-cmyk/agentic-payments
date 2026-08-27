@@ -5129,6 +5129,116 @@ process.stdout.write(JSON.stringify({
         assert checks["Payment proof submission"]["status"] == "fail"
         assert checks["Raw evidence"]["status"] == "watch"
 
+    def test_transport_and_known_monitors_are_not_product_demand(
+        self,
+        observability_store,
+    ):
+        for _ in range(5):
+            observability_store.record(
+                "http_request",
+                surface="public_mcp",
+                endpoint="/mcp/server/",
+                status_code=200,
+                user_agent="registry-health-check",
+            )
+        observability_store.record(
+            "payment_required",
+            surface="http_api",
+            endpoint="/v1/vwap/{pair}",
+            subject="BTC-USD",
+            user_agent="CarbonMonitor/1.0",
+        )
+        observability_store.record(
+            "payment_required",
+            surface="http_api",
+            endpoint="/v1/briefs/market",
+            subject="ETH-USD",
+            user_agent="customer-agent/1.0",
+        )
+
+        stats = observability_store.summarize(days=1)
+
+        assert stats["transport_requests"]["total_transport_requests"] == 5
+        assert stats["popularity"]["total_requested"] == 2
+        assert stats["request_quality"]["gross_live_data_requests"] == 2
+        assert stats["request_quality"]["known_monitor_requests"] == 1
+        assert stats["request_quality"]["non_monitor_requests"] == 1
+        packages = stats["product_performance"]["market_intelligence_rows"]
+        assert any(row["product_id"] == "agent_market_brief" for row in packages)
+
+    def test_stats_reconcile_legacy_inflow_and_expose_alert_feed(
+        self,
+        observability_store,
+        test_client,
+        tmp_path,
+    ):
+        common = {
+            "surface": "http_api",
+            "endpoint": "/v1/vwap/{pair}",
+            "subject": "BTC-USD",
+            "price_usdc": 0.002,
+        }
+        observability_store.record(
+            "payment_required",
+            **common,
+            user_agent="customer-agent/1.0",
+        )
+        observability_store.record(
+            "payment_proof_submitted",
+            **common,
+            metadata={"attempt_id": "attempt-1"},
+        )
+        verified = {
+            "attempt_id": "attempt-1",
+            "payment_id": "payment-1",
+            "payment_state": "finalized",
+            "identity_hash": "verified-payer",
+            "identity_type": "wallet",
+            "identity_trust": "verified_x402",
+        }
+        observability_store.record("payment_authorization_verified", **common, metadata=verified)
+        observability_store.record("payment_settled", **common, metadata=verified)
+        observability_store.record(
+            "data_delivered",
+            **common,
+            metadata={**verified, "payment_mode": "x402"},
+        )
+        manager = CreditManager(str(tmp_path / "reconciliation-credits.db"))
+        manager.record_payment_proof(
+            "recognized-tx",
+            "solana",
+            2000,
+            "merchant-recipient",
+            "GET /v1/vwap/BTC-USD",
+        )
+        manager.record_payment_proof(
+            "legacy-tx",
+            "solana",
+            3000,
+            "merchant-recipient",
+            "GET /v1/vwap/ETH-USD",
+        )
+        previous_manager = app.state.credits
+        app.state.credits = manager
+        try:
+            payload = test_client.get("/internal/observability/stats?days=1").json()
+            alert_payload = test_client.get(
+                "/internal/observability/alerts?days=1"
+            ).json()
+        finally:
+            app.state.credits = previous_manager
+
+        reconciliation = payload["revenue_reconciliation"]
+        assert reconciliation["decision_grade_recognized_revenue_usdc"] == 0.002
+        assert reconciliation["legacy_transaction_backed_x402_usdc"] == 0.003
+        assert reconciliation["status"] == "classified_pending_lifecycle_backfill"
+        assert alert_payload["revenue_reconciliation"]["status"] == reconciliation["status"]
+        assert alert_payload["alerts"]["active_count"] >= 1
+        assert payload["conversion_experiment"]["status"] in {
+            "collecting_clean_baseline",
+            "ready_to_run",
+        }
+
 
 class TestNativePaymentValidation:
     @pytest.mark.asyncio

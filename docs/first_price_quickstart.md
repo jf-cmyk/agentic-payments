@@ -49,6 +49,13 @@ it, and retry with the resulting `PAYMENT-SIGNATURE` header. Caller-selected
 identity headers do not grant or spend production credits. Included starter
 credits are available through authenticated connector identities.
 
+The maintained end-to-end Solana reference is
+`scripts/run_funded_x402_canary.py`. It uses the official x402 v2 client,
+validates the exact network, USDC mint, amount, recipient, product payload, and
+idempotent replay. Legacy examples that submitted a standalone transfer hash
+are disabled because that hash is not an x402 authorization and could transfer
+funds without unlocking data.
+
 ## Verify the result
 
 A successful response should include the instrument, price/VWAP, currency, source timestamp, provider context, and citation or methodology metadata. Do not treat discovery output as a live price.
