@@ -8924,11 +8924,28 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
         metrics_env = MARKETPLACE_METRICS_FEEDS.get(platform_id, metrics_env)
         latest_metrics = latest_external_metrics.get(platform_id)
         external_metrics_configured = bool(metrics_env or latest_metrics)
+        external_metrics_state = (
+            "ingested"
+            if external_metrics_configured
+            else "unavailable_no_reviewed_feed_or_export"
+        )
+        external_metrics_reason = (
+            "A reviewed feed or imported marketplace snapshot is available."
+            if external_metrics_configured
+            else (
+                "No reviewed marketplace API, export, or hosted-call log is configured; "
+                "local server traffic cannot prove upstream views, installs, or hosted calls."
+            )
+        )
         platforms.append(
             {
                 **platform,
                 "local_recorded_calls": local_calls,
                 "external_metrics_configured": external_metrics_configured,
+                "external_metrics_state": external_metrics_state,
+                "external_metrics_reason": external_metrics_reason,
+                "metrics_owner": "Growth engineering",
+                "last_metrics_review_date": summary.get("generated_at"),
                 "metrics_api_url": metrics_env or None,
                 "latest_external_metrics": latest_metrics,
                 "status": (
@@ -9014,9 +9031,276 @@ def _top_popularity_row(rows: list[dict[str, Any]], field: str) -> dict[str, Any
     return max(ranked, key=lambda row: (int(row.get(field) or 0), str(row.get("service") or "")))
 
 
+def _build_revenue_reconciliation(summary: dict[str, Any]) -> dict[str, Any]:
+    """Classify wallet movement without promoting legacy evidence to revenue."""
+    wallet_inflows = summary.get("wallet_inflows")
+    wallet_inflows = wallet_inflows if isinstance(wallet_inflows, dict) else {}
+    overview = summary.get("overview")
+    overview = overview if isinstance(overview, dict) else {}
+    payment_funnel = summary.get("payment_funnel")
+    payment_funnel = payment_funnel if isinstance(payment_funnel, dict) else {}
+    event_counts = summary.get("event_counts")
+    event_counts = event_counts if isinstance(event_counts, dict) else {}
+    rows = wallet_inflows.get("rows")
+    rows = rows if isinstance(rows, list) else []
+
+    direct_rows = [row for row in rows if row.get("kind") == "direct_x402"]
+    topup_rows = [row for row in rows if row.get("kind") == "credit_topup"]
+    direct_total = round(
+        sum(float(row.get("amount_usdc") or 0.0) for row in direct_rows), 6
+    )
+    topup_total = round(
+        sum(float(row.get("amount_usdc") or 0.0) for row in topup_rows), 6
+    )
+    recognized_revenue = round(
+        float(overview.get("estimated_revenue_usdc") or 0.0), 6
+    )
+    settled_attempts = int(payment_funnel.get("settled_attempts") or 0)
+    correlated_x402_deliveries = int(payment_funnel.get("x402_deliveries") or 0)
+    legacy_delivery_events = max(
+        int(event_counts.get("data_delivered") or 0) - correlated_x402_deliveries,
+        0,
+    )
+    recognized_direct_count = min(
+        len(direct_rows), max(settled_attempts, correlated_x402_deliveries)
+    )
+    legacy_direct_count = max(len(direct_rows) - recognized_direct_count, 0)
+    legacy_direct_amount = round(max(direct_total - recognized_revenue, 0.0), 6)
+    rows_with_transaction_evidence = sum(
+        1 for row in rows if str(row.get("tx_hash") or "").strip()
+    )
+    transaction_evidence_complete = rows_with_transaction_evidence == len(rows)
+    status = "reconciled"
+    if legacy_direct_count or legacy_direct_amount:
+        status = "classified_pending_lifecycle_backfill"
+    if not transaction_evidence_complete:
+        status = "unclassified_inflows_present"
+    return {
+        "status": status,
+        "window_days": summary.get("window_days"),
+        "total_wallet_inflow_usdc": round(direct_total + topup_total, 6),
+        "decision_grade_recognized_revenue_usdc": recognized_revenue,
+        "legacy_transaction_backed_x402_usdc": legacy_direct_amount,
+        "legacy_transaction_backed_x402_count": legacy_direct_count,
+        "legacy_delivery_events": legacy_delivery_events,
+        "local_qa_topup_usdc": topup_total,
+        "local_qa_topup_count": len(topup_rows),
+        "rows_with_transaction_evidence": rows_with_transaction_evidence,
+        "total_inflow_rows": len(rows),
+        "transaction_evidence_complete": transaction_evidence_complete,
+        "classification_rows": [
+            {
+                "classification": "decision_grade_recognized_x402",
+                "count": recognized_direct_count,
+                "amount_usdc": recognized_revenue,
+                "revenue_status": "recognized",
+                "next_action": "Continue lifecycle correlation and deduplication.",
+            },
+            {
+                "classification": "legacy_transaction_backed_x402",
+                "count": legacy_direct_count,
+                "amount_usdc": legacy_direct_amount,
+                "revenue_status": "excluded_pending_lifecycle_backfill",
+                "next_action": "Retain as historical evidence; backfill only after reviewed settlement-to-delivery joins.",
+            },
+            {
+                "classification": "local_qa_credit_topup",
+                "count": len(topup_rows),
+                "amount_usdc": topup_total,
+                "revenue_status": "not_revenue",
+                "next_action": "Keep excluded from production revenue.",
+            },
+        ],
+        "definitions": {
+            "decision_grade_recognized_revenue": "Finalized, deduplicated x402 settlements joined to durable delivery lifecycle evidence.",
+            "legacy_transaction_backed_x402": "Direct x402 inflows with transaction evidence that predate or lack complete lifecycle correlation.",
+            "reconciliation_boundary": "Classification explains wallet movement; it does not rewrite historical payment or delivery records.",
+        },
+    }
+
+
+def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
+    performance = summary.get("product_performance")
+    performance = performance if isinstance(performance, dict) else {}
+    rows = performance.get("rows")
+    rows = rows if isinstance(rows, list) else []
+    quality = summary.get("request_quality")
+    quality = quality if isinstance(quality, dict) else {}
+    candidates = [row for row in rows if int(row.get("non_monitor_attempts") or 0) > 0]
+    candidates.sort(
+        key=lambda row: (
+            -int(row.get("non_monitor_attempts") or 0),
+            -int(row.get("payment_prompts") or 0),
+            str(row.get("product_id") or ""),
+        )
+    )
+    package_candidates = [
+        row
+        for row in candidates
+        if row.get("product_family") == "market_intelligence_package"
+    ]
+    selected = candidates[0] if candidates else None
+    selected_package = package_candidates[0] if package_candidates else None
+    gross = int(quality.get("gross_live_data_requests") or 0)
+    selection_mix = quality.get("selection_source_mix")
+    selection_mix = selection_mix if isinstance(selection_mix, dict) else {}
+    attributed = sum(
+        int(value or 0)
+        for source, value in selection_mix.items()
+        if source != "unattributed"
+    )
+    attribution_rate = min(attributed / gross, 1.0) if gross else None
+    monitor_share = quality.get("known_monitor_share")
+    monitor_share = float(monitor_share) if monitor_share is not None else None
+    blockers: list[str] = []
+    if selected:
+        if attribution_rate is None or attribution_rate < 0.8:
+            blockers.append("selection_attribution_below_80_percent")
+        if monitor_share is not None and monitor_share >= 0.5:
+            blockers.append("known_monitor_share_at_or_above_50_percent")
+        if int(selected.get("non_monitor_attempts") or 0) < 30:
+            blockers.append("fewer_than_30_non_monitor_candidate_attempts")
+    status = (
+        "no_candidate_demand"
+        if selected is None
+        else "collecting_clean_baseline"
+        if blockers
+        else "ready_to_run"
+    )
+    return {
+        "experiment_id": "official_x402_handoff_for_top_non_monitor_product",
+        "status": status,
+        "selected_product_id": selected.get("product_id") if selected else None,
+        "selected_product_family": selected.get("product_family") if selected else None,
+        "selected_non_monitor_attempts": int(selected.get("non_monitor_attempts") or 0)
+        if selected
+        else 0,
+        "selected_payment_prompts": int(selected.get("payment_prompts") or 0)
+        if selected
+        else 0,
+        "selected_validated_deliveries": int(selected.get("validated_deliveries") or 0)
+        if selected
+        else 0,
+        "market_intelligence_candidate_product_id": (
+            selected_package.get("product_id") if selected_package else None
+        ),
+        "selection_attribution_rate": attribution_rate,
+        "known_monitor_share": monitor_share,
+        "blockers": blockers,
+        "hypothesis": "An explicit resolver-selected handoff using the official x402 v2 client will convert more non-monitor prompts to verified authorization and delivery than the generic path.",
+        "control": "Current resolver or direct endpoint handoff and purchase instructions.",
+        "treatment": "Resolver-selected endpoint plus official x402 v2 preflight, client example, and failure-specific recovery guidance.",
+        "primary_metric": "correlated_proof_attempts / non-monitor payment prompts",
+        "secondary_metrics": [
+            "verified_authorizations / correlated_proof_attempts",
+            "validated_deliveries / non-monitor payment prompts",
+            "recognized_revenue_usdc per non-monitor attempt",
+            "repeat_7d_rate for trusted identities",
+        ],
+        "guardrails": [
+            "0 payment_settlement_unreconciled events",
+            "0 charged delivery failures",
+            "exclude known monitors, tagged tests, and published examples from the primary result",
+        ],
+        "launch_gate": "At least 80% selection attribution, known-monitor share below 50%, and 30 non-monitor candidate attempts.",
+        "decision_rule": "Run a seven-day controlled cohort and ship only if conversion improves without a payment-integrity guardrail failure.",
+    }
+
+
+def _build_operational_alerts(summary: dict[str, Any]) -> dict[str, Any]:
+    funnel = summary.get("payment_funnel")
+    funnel = funnel if isinstance(funnel, dict) else {}
+    quality = summary.get("request_quality")
+    quality = quality if isinstance(quality, dict) else {}
+    reliability = summary.get("reliability")
+    reliability = reliability if isinstance(reliability, dict) else {}
+    marketplace = summary.get("marketplace_metrics")
+    marketplace = marketplace if isinstance(marketplace, dict) else {}
+    economic = summary.get("economic_correlation")
+    economic = economic if isinstance(economic, dict) else {}
+    reconciliation = summary.get("revenue_reconciliation")
+    reconciliation = reconciliation if isinstance(reconciliation, dict) else {}
+    resolver = summary.get("resolver_funnel")
+    resolver = resolver if isinstance(resolver, dict) else {}
+    alerts: list[dict[str, str]] = []
+
+    def add(
+        alert_id: str,
+        severity: str,
+        title: str,
+        detail: str,
+        owner: str,
+        metric: str,
+        value: str,
+        threshold: str,
+        runbook: str,
+    ) -> None:
+        alerts.append(
+            {
+                "id": alert_id,
+                "severity": severity,
+                "status": "active",
+                "title": title,
+                "detail": detail,
+                "owner": owner,
+                "metric": metric,
+                "value": value,
+                "threshold": threshold,
+                "runbook": runbook,
+            }
+        )
+
+    unreconciled = int(economic.get("unreconciled_settlements") or 0)
+    post_charge = int(reliability.get("charged_delivery_failures") or 0)
+    correlated = int(funnel.get("correlated_proof_attempts") or 0)
+    settled = int(funnel.get("settled_attempts") or 0)
+    settlement_rate = funnel.get("proof_to_settlement_rate")
+    raw_proofs = int(funnel.get("raw_proof_submission_events") or 0)
+    failed_proofs = int(funnel.get("failed_or_rejected_proof_events") or 0)
+    failed_rate = failed_proofs / raw_proofs if raw_proofs else None
+    monitor_share = quality.get("known_monitor_share")
+    if unreconciled:
+        add("unreconciled-remote-settlement", "P0", "Remote settlement lacks a delivery or refund checkpoint", f"{unreconciled} outcome(s) require reconciliation.", "Payments engineering", "unreconciled_settlements", str(unreconciled), "0", "Join every transaction hash to one delivery or refund checkpoint.")
+    if post_charge:
+        add("post-charge-delivery-failure", "P0", "A charged request failed before value delivery", f"{post_charge} post-charge failure(s) are active.", "API engineering", "charged_delivery_failures", str(post_charge), "0", "Confirm replay delivery or refund with the durable lifecycle IDs.")
+    if correlated and (settlement_rate is None or float(settlement_rate) < 0.9):
+        add("proof-to-settlement-rate", "P0", "Correlated payment attempts are not settling reliably", f"{settled} of {correlated} correlated attempts settled.", "Payments engineering", "proof_to_settlement_rate", _brief_pct(float(settlement_rate) if settlement_rate is not None else None), ">= 90%", "Break failures down by parser, network, facilitator, finality, replay checkpoint, and delivery.")
+    if failed_rate is not None and failed_rate >= 0.25:
+        add("proof-payload-rejection-noise", "P1", "Most proof events are malformed or rejected", f"{failed_proofs} of {raw_proofs} raw proof events failed.", "Payments + growth engineering", "failed_proof_event_rate", _brief_pct(failed_rate), "< 25%", "Separate probes from genuine attempts and publish official x402 v2 examples.")
+    if monitor_share is not None and float(monitor_share) >= 0.5:
+        add("monitor-dominated-demand", "P1", "Known monitors dominate gross attempts", "Gross requests are not a safe demand denominator.", "Product analytics", "known_monitor_share", _brief_pct(float(monitor_share)), "< 50% or separate", "Use non-monitor attempts for demand decisions.")
+    if not marketplace.get("platforms_configured"):
+        add("marketplace-metrics-unavailable", "P1", "Marketplace-side metrics are unavailable", "Upstream views, installs, hosted calls, and conversion are not ingested.", "Growth engineering", "marketplace_platforms_configured", "0", "all ingested or explicitly unsupported", "Load reviewed APIs/exports and retain an unavailable reason where none exists.")
+    if reconciliation.get("status") == "classified_pending_lifecycle_backfill":
+        amount = float(reconciliation.get("legacy_transaction_backed_x402_usdc") or 0.0)
+        add("legacy-x402-lifecycle-backfill", "P1", "Historical x402 inflows lack decision-grade joins", f"${amount:.4f} remains excluded from recognized revenue.", "Payments + finance", "legacy_transaction_backed_x402_usdc", f"${amount:.4f}", "$0 unresolved", "Backfill only reviewed settlement-to-delivery joins.")
+    if resolver.get("status") == "collecting_after_instrumentation":
+        add("resolver-funnel-collecting", "P2", "Resolver conversion is collecting its baseline", "Search and resolution are visible, but paid delivery has not matured.", "Agent experience", "resolver_to_delivery_rate", "collecting", "measured", "Run the fixed long-tail resolver QA suite.")
+    severity_rank = {"P0": 0, "P1": 1, "P2": 2}
+    alerts.sort(key=lambda alert: (severity_rank.get(alert["severity"], 9), alert["id"]))
+    return {
+        "status": "needs_attention" if alerts else "clear",
+        "active_count": len(alerts),
+        "p0_count": sum(alert["severity"] == "P0" for alert in alerts),
+        "p1_count": sum(alert["severity"] == "P1" for alert in alerts),
+        "p2_count": sum(alert["severity"] == "P2" for alert in alerts),
+        "alerts": alerts,
+        "delivery": {
+            "mode": "dashboard_and_authenticated_json",
+            "external_webhook_configured": False,
+            "note": "No external webhook is configured; incident tools can poll the authenticated alert feed.",
+        },
+    }
+
+
 def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[str, Any]:
     overview = summary.get("overview") if isinstance(summary.get("overview"), dict) else {}
     event_counts = summary.get("event_counts") if isinstance(summary.get("event_counts"), dict) else {}
+    payment_funnel = summary.get("payment_funnel") if isinstance(summary.get("payment_funnel"), dict) else {}
+    transport_requests = summary.get("transport_requests") if isinstance(summary.get("transport_requests"), dict) else {}
+    reconciliation = summary.get("revenue_reconciliation") if isinstance(summary.get("revenue_reconciliation"), dict) else {}
+    growth_funnel = summary.get("growth_funnel") if isinstance(summary.get("growth_funnel"), dict) else {}
+    growth_summary = growth_funnel.get("summary") if isinstance(growth_funnel.get("summary"), dict) else {}
     popularity = summary.get("popularity") if isinstance(summary.get("popularity"), dict) else {}
     wallet_inflows = summary.get("wallet_inflows") if isinstance(summary.get("wallet_inflows"), dict) else {}
     external_sources = summary.get("external_sources") if isinstance(summary.get("external_sources"), dict) else {}
@@ -9026,13 +9310,18 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     timeline = summary.get("timeline") if isinstance(summary.get("timeline"), list) else []
 
     rows = popularity.get("rows") if isinstance(popularity.get("rows"), list) else []
-    requested = int(popularity.get("total_requested") or 0)
+    requested = int(payment_funnel.get("live_data_requests") or 0)
+    non_monitor_requested = int(payment_funnel.get("non_monitor_live_data_requests") or 0)
+    known_monitor_requested = int(payment_funnel.get("known_monitor_live_data_requests") or 0)
+    transport_count = int(transport_requests.get("total_transport_requests") or 0)
     delivered = int(popularity.get("total_delivered") or 0)
     blocked = int(popularity.get("total_blocked") or 0)
     failed_after_credit = int(popularity.get("total_failed_after_credit") or 0)
     prompts = int(event_counts.get("payment_required") or 0)
-    proof_submissions = int(event_counts.get("payment_proof_submitted") or 0)
-    settled_payments = int(event_counts.get("payment_settled") or 0)
+    proof_submissions = int(payment_funnel.get("raw_proof_submission_events") or 0)
+    correlated_proofs = int(payment_funnel.get("correlated_proof_attempts") or 0)
+    verified_authorizations = int(payment_funnel.get("verified_authorizations") or 0)
+    settled_payments = int(payment_funnel.get("settled_attempts") or 0)
     unreconciled_settlements = int(
         event_counts.get("payment_settlement_unreconciled") or 0
     )
@@ -9041,6 +9330,8 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     revenue_usdc = float(overview.get("estimated_revenue_usdc") or 0.0)
     inflow_count = int(wallet_inflows.get("total_inflows") or 0)
     inflow_usdc = float(wallet_inflows.get("total_usdc") or 0.0)
+    legacy_x402_usdc = float(reconciliation.get("legacy_transaction_backed_x402_usdc") or 0.0)
+    repeat_7d_eligible = int(growth_summary.get("repeat_7d_eligible_identities") or 0)
     error_rate = reliability.get("server_error_rate")
     if error_rate is None:
         error_rate = overview.get("server_error_rate")
@@ -9107,16 +9398,26 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
                 f"with {int(top_requested.get('requested') or 0)} requests."
             )
         executive_summary.append(
-            f"{requested} data requests were observed; {delivered} delivered data and {blocked} were blocked or prompted. "
+            f"{requested} commercial live-data attempts were observed: {non_monitor_requested} non-monitor demand candidates and "
+            f"{known_monitor_requested} known-monitor attempts. {delivered} reached validated delivery and {blocked} were blocked or prompted. "
             f"Delivery rate is {_brief_pct(delivery_rate)} and block rate is {_brief_pct(block_rate)}.{leader}"
         )
     else:
         executive_summary.append("No paid-data demand was recorded in this window, so product usage is not yet proven by telemetry.")
 
     executive_summary.append(
-        f"The payment funnel shows {prompts} x402 prompts, {proof_submissions} proof submissions, "
-        f"{paid_calls} paid/credit-backed calls, ${revenue_usdc:.4f} recognized revenue, and ${inflow_usdc:.4f} wallet inflows."
+        f"The payment funnel shows {prompts} x402 prompts, {proof_submissions} raw proof events, "
+        f"{correlated_proofs} correlated attempts, {verified_authorizations} verified authorizations, "
+        f"{settled_payments} settlements, and {paid_calls} paid/credit-backed deliveries."
     )
+    executive_summary.append(
+        f"Decision-grade recognized revenue is ${revenue_usdc:.4f}; ${legacy_x402_usdc:.4f} of transaction-backed legacy x402 inflows remains excluded pending reviewed lifecycle backfill. "
+        f"Total wallet inflows are ${inflow_usdc:.4f}."
+    )
+    if transport_count:
+        executive_summary.append(
+            f"{transport_count} MCP transport requests were recorded separately and are not counted as ticker or package demand."
+        )
     if unreconciled_settlements:
         executive_summary.append(
             f"P0: {unreconciled_settlements} remote settlement outcome(s) lack a conclusive local recovery checkpoint."
@@ -9129,6 +9430,10 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         f"Raw evidence review found {evidence_events} evidence-bearing events, "
         f"{evidence_scope_note}, and {proof_hash_events} transaction/proof-hash event(s)."
     )
+    if repeat_7d_eligible == 0:
+        executive_summary.append(
+            "No activation cohort has matured for seven days, so consistent repeat demand cannot yet be claimed."
+        )
 
     what_works: list[dict[str, str]] = []
     if delivered:
@@ -9199,6 +9504,14 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
             {
                 "title": "Submitted payment proofs are not settling",
                 "detail": f"{proof_submissions} proof submission(s) are recorded, but none reached durable payment_settled finalization.",
+                "tone": "bad",
+            }
+        )
+    if proof_submissions > correlated_proofs:
+        what_does_not.append(
+            {
+                "title": "Raw proof traffic overstates genuine purchase attempts",
+                "detail": f"Only {correlated_proofs} of {proof_submissions} raw proof events correlate to a challenge lifecycle; malformed and probe traffic must not be counted as users.",
                 "tone": "bad",
             }
         )
@@ -9347,8 +9660,20 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         {
             "name": "Payment proof submission",
             "status": "pass" if settled_payments else "fail" if proof_submissions or prompts else "watch",
-            "value": f"{settled_payments} settled / {proof_submissions} submitted / {prompts} prompted",
-            "detail": "A proof submission is only successful when settlement and durable finalization complete.",
+            "value": f"{settled_payments} settled / {verified_authorizations} verified / {correlated_proofs} correlated / {proof_submissions} raw / {prompts} prompted",
+            "detail": "Settlement conversion uses correlated purchase attempts; malformed raw proof events are diagnostic noise, not customers.",
+        },
+        {
+            "name": "Revenue reconciliation",
+            "status": "pass" if legacy_x402_usdc == 0 else "watch",
+            "value": f"${revenue_usdc:.4f} recognized / ${legacy_x402_usdc:.4f} legacy excluded",
+            "detail": "Legacy transaction-backed inflows remain outside recognized revenue until settlement-to-delivery joins are reviewed.",
+        },
+        {
+            "name": "Seven-day repeat demand",
+            "status": "watch" if repeat_7d_eligible == 0 else "pass" if growth_summary.get("repeat_7d_rate") else "fail",
+            "value": f"{repeat_7d_eligible} matured cohort identity(ies)",
+            "detail": "Consistent demand is only measured after trusted activation cohorts have had a complete seven-day observation window.",
         },
         {
             "name": "Wallet inflows",
@@ -9484,11 +9809,42 @@ async def observability_stats(
             "latest_timestamp": None,
             "rows": [],
         }
+    content["revenue_reconciliation"] = _build_revenue_reconciliation(content)
+    content["conversion_experiment"] = _build_conversion_experiment(content)
+    content["operational_alerts"] = _build_operational_alerts(content)
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
     content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
+    )
+
+
+@app.get("/internal/observability/alerts", include_in_schema=False)
+async def observability_alerts(
+    request: Request,
+    days: int = Query(30, ge=1, le=180),
+) -> JSONResponse:
+    """Return the authenticated operator-alert feed without synthetic traffic."""
+    response = await observability_stats(
+        request=request,
+        days=days,
+        include_synthetic=False,
+    )
+    if response.status_code != 200:
+        return response
+    payload = json.loads(response.body)
+    return JSONResponse(
+        headers={"Cache-Control": "no-store"},
+        content={
+            "generated_at": payload.get("generated_at"),
+            "window_days": payload.get("window_days"),
+            "alerts": payload.get("operational_alerts"),
+            "revenue_reconciliation": payload.get("revenue_reconciliation"),
+            "conversion_experiment": payload.get("conversion_experiment"),
+            "payment_funnel": payload.get("payment_funnel"),
+            "request_quality": payload.get("request_quality"),
+        },
     )
 
 
@@ -10080,6 +10436,8 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         <a class="active" href="#overview">Overview</a>
         <a href="#growth-funnel">Growth Funnel</a>
         <a href="#daily-brief">Daily Brief</a>
+        <a href="#operator-alerts">Operator Alerts</a>
+        <a href="#product-performance">Products</a>
         <a href="#popularity">Popularity</a>
         <a href="#acquisition">Acquisition</a>
         <a href="#platforms">Platforms</a>
@@ -10191,6 +10549,44 @@ def _observability_command_center_html(*, stats_path: str) -> str:
           <h3>Daily Checks</h3>
           <div class="check-grid" id="brief-checks"></div>
         </div>
+      </section>
+
+      <section class="card section" id="operator-alerts">
+        <div class="headline">
+          <div>
+            <h2>Operator Alerts</h2>
+            <div class="sub">Actionable integrity, conversion, demand-quality, marketplace, and resolver conditions with owners and runbooks.</div>
+          </div>
+          <div class="summary-strip" id="alert-kpis"></div>
+        </div>
+        <div class="scroll"><table id="alert-table"></table></div>
+      </section>
+
+      <section class="grid two section">
+        <div class="card" id="revenue-reconciliation">
+          <h2>Revenue Reconciliation</h2>
+          <div class="sub">Recognized revenue is separated from legacy transaction-backed inflows and QA top-ups.</div>
+          <div class="summary-strip" id="reconciliation-kpis"></div>
+          <div class="scroll"><table id="reconciliation-table"></table></div>
+        </div>
+        <div class="card" id="resolver-funnel">
+          <h2>Instrument Resolver Funnel</h2>
+          <div class="sub">Search, canonical resolution, resolver-selected live attempts, and paid delivery for long-tail instruments.</div>
+          <div class="summary-strip" id="resolver-kpis"></div>
+          <div id="resolver-note" class="metric-note"></div>
+        </div>
+      </section>
+
+      <section class="card section" id="product-performance">
+        <div class="headline">
+          <div>
+            <h2>Product &amp; Package Performance</h2>
+            <div class="sub">Raw market data and market-intelligence packages, with monitor traffic separated from non-monitor demand candidates.</div>
+          </div>
+          <div class="summary-strip" id="experiment-kpis"></div>
+        </div>
+        <div id="experiment-note" class="metric-note"></div>
+        <div class="scroll"><table id="product-table"></table></div>
       </section>
 
       <section class="grid two section">
@@ -10384,6 +10780,89 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         .join("") || `<div class="empty">No checks generated.</div>`;
     }
 
+    function renderOperatorAlerts(data) {
+      const feed = data.operational_alerts || {};
+      const alerts = feed.alerts || [];
+      document.getElementById("alert-kpis").innerHTML = [
+        summaryItem("Active", fmt.format(feed.active_count || 0)),
+        summaryItem("P0", fmt.format(feed.p0_count || 0)),
+        summaryItem("P1", fmt.format(feed.p1_count || 0)),
+        summaryItem("P2", fmt.format(feed.p2_count || 0)),
+      ].join("");
+      document.getElementById("alert-table").innerHTML =
+        `<thead><tr><th>Priority</th><th>Condition</th><th>Metric</th><th>Owner</th><th>Runbook</th></tr></thead><tbody>` +
+        (alerts.length ? alerts.map(alert => `<tr>
+          <td>${rowBadge(alert.severity)}</td>
+          <td><strong>${escapeAttr(alert.title || "")}</strong><div class="metric-note">${escapeAttr(alert.detail || "")}</div></td>
+          <td><code>${escapeAttr(alert.metric || "")}</code><div>${escapeAttr(alert.value || "")} · threshold ${escapeAttr(alert.threshold || "")}</div></td>
+          <td>${escapeAttr(alert.owner || "")}</td>
+          <td>${escapeAttr(alert.runbook || "")}</td>
+        </tr>`).join("") : `<tr><td colspan="5" class="empty">No active operator alerts.</td></tr>`) + `</tbody>`;
+    }
+
+    function renderRevenueReconciliation(data) {
+      const reconciliation = data.revenue_reconciliation || {};
+      const rows = reconciliation.classification_rows || [];
+      document.getElementById("reconciliation-kpis").innerHTML = [
+        summaryItem("Recognized", money.format(reconciliation.decision_grade_recognized_revenue_usdc || 0)),
+        summaryItem("Legacy excluded", money.format(reconciliation.legacy_transaction_backed_x402_usdc || 0)),
+        summaryItem("QA / not revenue", money.format(reconciliation.local_qa_topup_usdc || 0)),
+        summaryItem("Evidence", reconciliation.transaction_evidence_complete ? "complete" : "incomplete"),
+      ].join("");
+      document.getElementById("reconciliation-table").innerHTML =
+        `<thead><tr><th>Class</th><th>Count</th><th>Amount</th><th>Revenue status</th></tr></thead><tbody>` +
+        (rows.length ? rows.map(row => `<tr>
+          <td><code>${escapeAttr(row.classification || "")}</code></td>
+          <td>${fmt.format(row.count || 0)}</td>
+          <td>${money.format(row.amount_usdc || 0)}</td>
+          <td>${rowBadge(String(row.revenue_status || "").replaceAll("_", " "))}</td>
+        </tr>`).join("") : `<tr><td colspan="4" class="empty">No wallet classifications in this window.</td></tr>`) + `</tbody>`;
+    }
+
+    function renderResolverFunnel(data) {
+      const resolver = data.resolver_funnel || {};
+      document.getElementById("resolver-kpis").innerHTML = [
+        summaryItem("Searches", fmt.format(resolver.search_events || 0)),
+        summaryItem("Resolved", fmt.format(resolver.resolved_events || 0)),
+        summaryItem("Distinct symbols", fmt.format(resolver.distinct_resolved_symbols || 0)),
+        summaryItem("Resolver attempts", fmt.format(resolver.resolver_live_attempts || 0)),
+        summaryItem("Deliveries", fmt.format(resolver.resolver_deliveries || 0)),
+        summaryItem("Resolve rate", pct(resolver.search_to_resolution_rate)),
+      ].join("");
+      document.getElementById("resolver-note").textContent =
+        `${fmt.format(resolver.zero_or_unsupported_events || 0)} zero/unsupported results. Resolver-to-delivery: ${pct(resolver.resolver_to_delivery_rate)}. Status: ${text(resolver.status).replaceAll("_", " ")}.`;
+    }
+
+    function renderProductPerformance(data) {
+      const performance = data.product_performance || {};
+      const experiment = data.conversion_experiment || {};
+      const rows = performance.rows || [];
+      document.getElementById("experiment-kpis").innerHTML = [
+        summaryItem("Experiment", text(experiment.status).replaceAll("_", " ")),
+        summaryItem("Candidate", text(experiment.selected_product_id)),
+        summaryItem("Package candidate", text(experiment.market_intelligence_candidate_product_id)),
+        summaryItem("Attribution", pct(experiment.selection_attribution_rate)),
+      ].join("");
+      const blockers = experiment.blockers || [];
+      document.getElementById("experiment-note").textContent = blockers.length
+        ? `Launch gates still open: ${blockers.map(value => String(value).replaceAll("_", " ")).join(", ")}.`
+        : text(experiment.hypothesis);
+      document.getElementById("product-table").innerHTML =
+        `<thead><tr><th>Product</th><th>Family</th><th>Gross</th><th>Known monitors</th><th>Non-monitor</th><th>Prompts</th><th>Verified</th><th>Settled</th><th>Delivered</th><th>Revenue</th></tr></thead><tbody>` +
+        (rows.length ? rows.map(row => `<tr>
+          <td><code>${escapeAttr(row.product_id || "")}</code></td>
+          <td>${escapeAttr(String(row.product_family || "").replaceAll("_", " "))}</td>
+          <td>${fmt.format(row.gross_attempts || 0)}</td>
+          <td>${fmt.format(row.known_monitor_attempts || 0)}</td>
+          <td>${fmt.format(row.non_monitor_attempts || 0)}</td>
+          <td>${fmt.format(row.payment_prompts || 0)}</td>
+          <td>${fmt.format(row.verified_authorizations || 0)}</td>
+          <td>${fmt.format(row.settled_attempts || 0)}</td>
+          <td>${fmt.format(row.validated_deliveries || 0)}</td>
+          <td>${money.format(row.recognized_revenue_usdc || 0)}</td>
+        </tr>`).join("") : `<tr><td colspan="10" class="empty">No commercial product activity in this window.</td></tr>`) + `</tbody>`;
+    }
+
     function renderGrowthFunnel(data) {
       const funnel = data.growth_funnel || {};
       const summary = funnel.summary || {};
@@ -10544,9 +11023,9 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     function renderPlatformCoverage(data) {
       const platforms = data.external_sources?.platforms || [];
       const table = document.getElementById("platform-coverage");
-      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Release Truth</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
+      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Owner / Reason</th><th>Release Truth</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
         (platforms.length ? platforms.map(platform => {
-          const status = platform.external_metrics_configured ? "Configured" : "Not ingested";
+          const status = platform.external_metrics_configured ? "Ingested" : "Unavailable";
           const badgeClass = platform.external_metrics_configured ? "neutral" : "warn";
           const releaseStatus = text(platform.release_status || "not audited").replaceAll("_", " ");
           const releaseClass = platform.release_status === "verified_live_baseline" ? "neutral" : "warn";
@@ -10554,11 +11033,12 @@ def _observability_command_center_html(*, stats_path: str) -> str:
             <td><strong>${escapeAttr(platform.name)}</strong></td>
             <td>${fmt.format(platform.local_recorded_calls || 0)}</td>
             <td><span class="badge ${badgeClass}">${status}</span></td>
+            <td><strong>${escapeAttr(platform.metrics_owner || "Unassigned")}</strong><div class="metric-note">${escapeAttr(platform.external_metrics_reason || "No reason recorded")}</div></td>
             <td><span class="badge ${releaseClass}">${escapeAttr(releaseStatus)}</span><div class="metric-note">${escapeAttr(platform.observed_version || "Version not exposed")} · audited ${escapeAttr(platform.audited_at || "unknown")}</div></td>
             <td><a href="${escapeAttr(platform.listing_url || "")}" title="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">Open listing ↗</a></td>
             <td>${escapeAttr(platform.note || "")}</td>
           </tr>`;
-        }).join("") : `<tr><td colspan="6" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
+        }).join("") : `<tr><td colspan="7" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
     }
 
     function summaryItem(label, value) {
@@ -10839,14 +11319,20 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       renderGrowthFunnel(data);
       renderRwaPilot(data);
       renderDailyInterpretation(data);
+      renderOperatorAlerts(data);
+      renderRevenueReconciliation(data);
+      renderResolverFunnel(data);
+      renderProductPerformance(data);
       timeline(data.timeline || []);
+      const payment = data.payment_funnel || {};
       bars("funnel", {
-        "payment prompts": prompts,
-        "proof submissions": data.event_counts?.payment_proof_submitted || 0,
-        "authorization verified": data.event_counts?.payment_authorization_verified || 0,
-        "settled payments": data.event_counts?.payment_settled || 0,
+        "x402 prompts": payment.x402_prompts || prompts,
+        "raw proof events": payment.raw_proof_submission_events || 0,
+        "correlated attempts": payment.correlated_proof_attempts || 0,
+        "authorization verified": payment.verified_authorizations || 0,
+        "settled payments": payment.settled_attempts || 0,
         "credit drawdowns": data.event_counts?.credit_drawdown_success || 0,
-        "successful deliveries": paid,
+        "validated deliveries": payment.successful_deliveries || paid,
       }, "amber");
       renderPopularity(data);
       renderWalletInflows(data);

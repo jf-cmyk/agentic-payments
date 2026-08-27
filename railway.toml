@@ -2,7 +2,7 @@
 builder = "RAILPACK"
 # Railway's config-as-code field uses the bare semantic version even though the
 # corresponding GitHub release tag has a leading `v`.
-railpackVersion = "0.36.2"
+railpackVersion = "0.38.0"
 
 [deploy]
 healthcheckPath = "/readyz"

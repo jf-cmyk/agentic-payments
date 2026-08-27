@@ -45,6 +45,9 @@ def normalise_payment_requirements(decoded):
 
 
 async def get_data_autonomously(endpoint: str):
+    print("This abbreviated transfer boilerplate is disabled because it does not construct an x402 v2 authorization.")
+    print("Use scripts/run_funded_x402_canary.py for the maintained official-client implementation.")
+    return
     # 1. Load Identity
     try:
         pk_bytes = base64.b64decode(os.getenv("AGENT_PRIVATE_KEY", ""))

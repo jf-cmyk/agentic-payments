@@ -48,6 +48,9 @@ def _normalise_payment_requirements(decoded):
 
 
 async def run_agent():
+    print("This mock proof-submission demo is disabled against production.")
+    print("Use scripts/run_funded_x402_canary.py for an official x402 v2 signed purchase.")
+    return
     print("🤖 [Agent]: Waking up. I need the latest BTC-USD VWAP data.")
     
     async with httpx.AsyncClient() as client:

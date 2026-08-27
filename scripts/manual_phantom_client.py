@@ -54,7 +54,10 @@ async def main():
         sys.exit(1)
 
     url = sys.argv[1]
-    
+    print("Manual Phantom transfer + transaction-hash proof is disabled.")
+    print("It is not a standards-compliant x402 v2 authorization and can spend funds without unlocking data.")
+    print("Use scripts/run_funded_x402_canary.py with an official x402 signer instead.")
+    raise SystemExit(2)
     print(f"[*] Requesting data from {url}...")
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
