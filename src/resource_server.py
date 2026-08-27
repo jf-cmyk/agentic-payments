@@ -6916,7 +6916,8 @@ async def search_pairs(
                 ),
                 "ranking": (
                     "exact symbol, exact base asset, symbol prefix, base prefix, "
-                    "exact quote asset, then deterministic lexical order"
+                    "exact quote asset, common quote currency, then deterministic "
+                    "lexical order"
                 ),
                 "canonical_symbol_format": "compact uppercase without separators",
                 "accepted_search_formats": ["BTCUSD", "BTC-USD", "BTC/USD", "BTC_USD"],

@@ -358,7 +358,15 @@ class TestPairSearch:
             client,
             "list_vwap_instruments",
             new_callable=AsyncMock,
-            return_value=["AAVESOL", "SOLBTC", "SOLUSD", "SOLUSDC", "XSOLUSD"],
+            return_value=[
+                "AAVESOL",
+                "SOLBTC",
+                "SOLETH",
+                "SOLUSD",
+                "SOLUSDC",
+                "SOLUSDT",
+                "XSOLUSD",
+            ],
         ), patch.object(
             client,
             "_list_bidask_entries",
@@ -378,9 +386,20 @@ class TestPairSearch:
             )
 
         assert exact[0].pair == "SOLUSD"
-        assert {item.pair for item in exact} == {"SOLUSD", "SOLUSDC", "XSOLUSD"}
-        assert [item.pair for item in base[:3]] == ["SOLBTC", "SOLUSD", "SOLUSDC"]
-        assert [item.pair for item in base].index("AAVESOL") >= 3
+        assert {item.pair for item in exact} == {
+            "SOLUSD",
+            "SOLUSDC",
+            "SOLUSDT",
+            "XSOLUSD",
+        }
+        assert [item.pair for item in base[:5]] == [
+            "SOLUSD",
+            "SOLUSDC",
+            "SOLUSDT",
+            "SOLBTC",
+            "SOLETH",
+        ]
+        assert [item.pair for item in base].index("AAVESOL") >= 5
 
     @pytest.mark.asyncio
     async def test_fx_search_reports_customer_facing_fx_service(self, client):

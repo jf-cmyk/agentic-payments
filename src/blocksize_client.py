@@ -719,7 +719,7 @@ class BlocksizeClient:
                 and any(query_symbol in value for value in normalized_values if value)
             ) or query_lower in searchable.lower()
 
-        def relevance(pair_info: PairInfo) -> tuple[int, str, str, str]:
+        def relevance(pair_info: PairInfo) -> tuple[int, int, str, str, str]:
             pair = _normalize_ticker(pair_info.pair).lower()
             base = _normalize_ticker(pair_info.base_currency).lower()
             quote = _normalize_ticker(pair_info.quote_currency).lower()
@@ -735,7 +735,15 @@ class BlocksizeClient:
                 score = 4
             else:
                 score = 5
-            return score, pair, base, quote
+            quote_priority = {
+                "usd": 0,
+                "usdc": 1,
+                "usdt": 2,
+                "eur": 3,
+                "btc": 4,
+                "eth": 5,
+            }.get(quote, 6)
+            return score, quote_priority, pair, base, quote
 
         # Search crypto instruments
         if asset_filter in ("all", "crypto"):
