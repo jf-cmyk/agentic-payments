@@ -9313,9 +9313,11 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
     requested = int(payment_funnel.get("live_data_requests") or 0)
     non_monitor_requested = int(payment_funnel.get("non_monitor_live_data_requests") or 0)
     known_monitor_requested = int(payment_funnel.get("known_monitor_live_data_requests") or 0)
-    transport_count = int(transport_requests.get("total_transport_requests") or 0)
+    transport_count = int(
+        transport_requests.get("public_mcp_transport_requests") or 0
+    ) + int(transport_requests.get("authenticated_mcp_transport_requests") or 0)
     delivered = int(popularity.get("total_delivered") or 0)
-    blocked = int(popularity.get("total_blocked") or 0)
+    blocked = int(payment_funnel.get("x402_prompts") or 0)
     failed_after_credit = int(popularity.get("total_failed_after_credit") or 0)
     prompts = int(event_counts.get("payment_required") or 0)
     proof_submissions = int(payment_funnel.get("raw_proof_submission_events") or 0)
