@@ -5001,6 +5001,10 @@ process.stdout.write(JSON.stringify({
             "Raw evidence",
         }.issubset({check["name"] for check in interpretation["checks"]})
         assert any("Raw evidence review" in line for line in interpretation["executive_summary"])
+        assert any(
+            "block rate is 100.0%" in line
+            for line in interpretation["executive_summary"]
+        )
 
     def test_unreconciled_settlement_is_a_p0_command_center_alert(
         self,
