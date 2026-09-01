@@ -141,6 +141,65 @@ def test_growth_pilot_persists_successful_captures_to_observation_ledger(tmp_pat
     }
 
 
+def test_growth_pilot_bounds_replay_payload_in_observation_ledger(tmp_path):
+    checked_at = datetime.now(UTC).isoformat()
+    store = RWAObservationStore(str(tmp_path / "rwa.db"))
+    capture = {
+        **PILOT_FEEDS[1],
+        "checked_at": checked_at,
+        "status": "ok",
+        "checks": {"freshness_pass": True, "bidask_sanity_pass": True},
+        "raw_observation": {
+            "symbol": "PAXG/USDC",
+            "venue": "uniswap_v3_v4",
+            "asset_class": "commodity",
+            "source_type": "ethereum_rpc_pool_state",
+            "bid": 3_500.0,
+            "ask": 3_500.5,
+            "timestamp": checked_at,
+        },
+    }
+    swap_logs = [{"blockNumber": hex(index)} for index in range(250)]
+
+    report = persist_capture(
+        store,
+        [capture],
+        observation_store=store,
+        depth_report={
+            "rows": [
+                {
+                    "pilot_id": PILOT_FEEDS[1]["pilot_id"],
+                    "replay_evidence": {
+                        "raw_pool_state_payload_hash": "sha256:pool",
+                        "raw_pool_state_payload": {"state": "raw"},
+                        "tick_and_swap_payload_hash": "sha256:replay",
+                        "tick_and_swap_payload": {
+                            "bitmap_words": [{"word": 1}],
+                            "initialized_ticks": [{"tick": 2}],
+                            "swap_logs": swap_logs,
+                        },
+                    },
+                }
+            ]
+        },
+    )
+
+    assert report["current_capture"]["ledger_persisted"] == 1
+    evidence = store.list_observations()[0]["realtime_quality"][
+        "liquidity_depth_evidence"
+    ]["replay_evidence"]
+    assert evidence["payload_storage"] == "rwa_depth_report"
+    assert evidence["payloads_omitted_from_observation_ledger"] is True
+    assert evidence["raw_pool_state_payload_present"] is True
+    assert evidence["tick_and_swap_payload_summary"] == {
+        "bitmap_word_count": 1,
+        "initialized_tick_count": 1,
+        "swap_log_count": 250,
+    }
+    assert "raw_pool_state_payload" not in evidence
+    assert "tick_and_swap_payload" not in evidence
+
+
 def test_growth_pilot_rejects_burst_backfill_without_slot_coverage():
     now = datetime.now(UTC)
     rows = []

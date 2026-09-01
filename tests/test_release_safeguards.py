@@ -3560,7 +3560,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         "/v1/receipts/price": {"symbol": "BTCUSD"},
         "/v1/snapshots/macro": {"universe": ["BTCUSD"]},
         "/v1/indicators/token-quality": {"symbol": "BTCUSD"},
-        "/v1/indicators/state-divergence": {"symbol": "BTCUSD"},
+        "/v1/indicators/state-divergence": {"symbol": "MSOLUSD"},
         "/v1/signals/solana-token-brief": {"symbols": ["SOLUSD"]},
         "/v1/signals/trader-alpha-pack": {"symbols": ["BTCUSD"]},
     }

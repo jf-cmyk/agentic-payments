@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import math
 import os
@@ -406,6 +407,32 @@ async def capture_pilot(registry: Any, *, timeout_seconds: float = 20.0) -> list
     ]
 
 
+def _ledger_depth_evidence(depth_evidence: dict[str, Any]) -> dict[str, Any]:
+    """Keep the observation ledger bounded while preserving replay provenance."""
+    bounded = copy.deepcopy(depth_evidence)
+    replay = bounded.get("replay_evidence")
+    if not isinstance(replay, dict):
+        return bounded
+
+    raw_pool_state = replay.pop("raw_pool_state_payload", None)
+    tick_and_swap = replay.pop("tick_and_swap_payload", None)
+    if raw_pool_state is None and tick_and_swap is None:
+        return bounded
+
+    replay["payloads_omitted_from_observation_ledger"] = True
+    replay["payload_storage"] = "rwa_depth_report"
+    replay["raw_pool_state_payload_present"] = raw_pool_state is not None
+    if isinstance(tick_and_swap, dict):
+        replay["tick_and_swap_payload_summary"] = {
+            "bitmap_word_count": len(tick_and_swap.get("bitmap_words") or []),
+            "initialized_tick_count": len(tick_and_swap.get("initialized_ticks") or []),
+            "swap_log_count": len(tick_and_swap.get("swap_logs") or []),
+        }
+    else:
+        replay["tick_and_swap_payload_summary"] = None
+    return bounded
+
+
 def persist_capture(
     store: RWAObservationStore,
     captures: list[dict[str, Any]],
@@ -478,7 +505,9 @@ def persist_capture(
                         "normalized_observation": observation,
                         "realtime_quality": {
                             **capture.get("checks", {}),
-                            "liquidity_depth_evidence": depth_evidence,
+                            "liquidity_depth_evidence": _ledger_depth_evidence(
+                                depth_evidence
+                            ),
                         },
                         "blocksize_benchmark": benchmark_evidence,
                         "promotion": {
