@@ -114,7 +114,7 @@ const x402PostBodies = {
   "/v1/receipts/price": { symbol: "BTCUSD" },
   "/v1/snapshots/macro": { universe: ["BTCUSD"] },
   "/v1/indicators/token-quality": { symbol: "BTCUSD" },
-  "/v1/indicators/state-divergence": { symbol: "BTCUSD" },
+  "/v1/indicators/state-divergence": { symbol: "MSOLUSD" },
   "/v1/signals/solana-token-brief": { symbols: ["SOLUSD"] },
   "/v1/signals/trader-alpha-pack": { symbols: ["BTCUSD"] },
 };
@@ -124,7 +124,7 @@ const x402GetPaths = new Set([
   "/v1/state/MSOLUSD",
   "/v1/vwap30m/SOLUSD",
   "/v1/vwap24h/BTCUSD",
-  "/v1/bidask/AAPL",
+  "/v1/bidask/AAPLXUSD",
   "/v1/fx/EURUSD",
   "/v1/metal/XAUUSD",
 ]);

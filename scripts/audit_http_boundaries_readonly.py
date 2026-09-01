@@ -13,7 +13,7 @@ import httpx
 
 PAID_ENDPOINTS = (
     "/v1/vwap/BTC-USD",
-    "/v1/bidask/AAPL",
+    "/v1/bidask/AAPLXUSD",
     "/v1/fx/EURUSD",
     "/v1/metal/XAUUSD",
     "/v1/batch?reqs=vwap:BTCUSD",
