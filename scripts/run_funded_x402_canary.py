@@ -161,27 +161,43 @@ def _write_lock_is_open(readiness: dict[str, Any]) -> bool:
         return False
 
 
-def _validate_vwap_payload(payload: Any) -> dict[str, Any]:
-    """Validate the paid product body, not only its HTTP and settlement status."""
+def _validate_paid_payload(
+    payload: Any,
+    *,
+    expected_symbol: str,
+    service: str,
+) -> dict[str, Any]:
+    """Validate a paid product body, not only HTTP and settlement status."""
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         raise CanaryError("paid response is not a successful JSON product payload")
     data = payload.get("data")
     if not isinstance(data, dict):
         raise CanaryError("paid response is missing its data object")
 
-    pair = str(data.get("pair") or "")
+    pair = str(data.get("pair") or data.get("ticker") or data.get("symbol") or "")
     canonical_pair = pair.replace("-", "").replace("/", "").replace("_", "").upper()
-    if canonical_pair != "BTCUSD":
-        raise CanaryError("paid response pair does not match BTCUSD")
+    if canonical_pair != expected_symbol:
+        raise CanaryError(f"paid response pair or symbol does not match {expected_symbol}")
 
-    vwap = data.get("vwap")
-    if (
-        not isinstance(vwap, (int, float))
-        or isinstance(vwap, bool)
-        or not math.isfinite(float(vwap))
-        or float(vwap) <= 0
+    value_fields = {
+        "vwap": ("vwap",),
+        "bidask": ("mid", "bid", "ask"),
+        "fx": ("mid", "rate", "bid", "ask"),
+        "metal": ("price",),
+        "state": ("price",),
+        "vwap30m": ("vwap", "close"),
+        "vwap24h": ("vwap",),
+    }.get(service, ("value", "price", "vwap", "mid"))
+    values = [data.get(field) for field in value_fields]
+    if not any(
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) > 0
+        for value in values
     ):
-        raise CanaryError("paid response VWAP must be a positive finite number")
+        label = "VWAP" if service == "vwap" else service
+        raise CanaryError(f"paid response {label} must contain a positive finite market value")
 
     timestamp = data.get("timestamp")
     if not isinstance(timestamp, str):
@@ -193,8 +209,6 @@ def _validate_vwap_payload(payload: Any) -> dict[str, Any]:
     if parsed_timestamp.tzinfo is None:
         raise CanaryError("paid response timestamp must include a timezone")
 
-    if str(data.get("currency") or "").upper() != "USD":
-        raise CanaryError("paid response quote currency does not match USD")
     if not str(data.get("source") or "").strip():
         raise CanaryError("paid response source is missing")
     meta = payload.get("meta")
@@ -203,11 +217,38 @@ def _validate_vwap_payload(payload: Any) -> dict[str, Any]:
     return payload
 
 
+def _validate_vwap_payload(payload: Any) -> dict[str, Any]:
+    """Backward-compatible validator for the default BTCUSD canary."""
+    validated = _validate_paid_payload(
+        payload,
+        expected_symbol="BTCUSD",
+        service="vwap",
+    )
+    if str(validated["data"].get("currency") or "").upper() != "USD":
+        raise CanaryError("paid response quote currency does not match USD")
+    return validated
+
+
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
-    max_atomic = _atomic_usdc(MAX_USDC)
-    parsed_url = httpx.URL(DEFAULT_URL)
+    max_atomic = _atomic_usdc(args.max_usdc)
+    parsed_url = httpx.URL(args.url)
     if parsed_url.scheme != "https" or parsed_url.host != "mcp.blocksize.info":
         raise CanaryError("canary URL must use https://mcp.blocksize.info")
+    path_parts = [part for part in parsed_url.path.split("/") if part]
+    if len(path_parts) != 3 or path_parts[0] != "v1" or path_parts[1] not in {
+        "vwap",
+        "bidask",
+        "fx",
+        "metal",
+        "state",
+        "vwap30m",
+        "vwap24h",
+    }:
+        raise CanaryError("--url must target one supported single-instrument /v1 endpoint")
+    service = path_parts[1]
+    expected_symbol = (
+        path_parts[2].replace("-", "").replace("/", "").replace("_", "").upper()
+    )
 
     base_url = f"{parsed_url.scheme}://{parsed_url.host}"
     timeout = httpx.Timeout(args.timeout)
@@ -222,7 +263,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "production economic writes are locked; key was not read and no payment was signed"
             )
 
-        challenge = await http.get(DEFAULT_URL)
+        challenge = await http.get(str(parsed_url))
         if challenge.status_code != 402:
             raise CanaryError(f"unsigned request returned {challenge.status_code}, expected 402")
 
@@ -267,7 +308,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             raise CanaryError("official client selected an unexpected payment requirement")
         payment_headers = payment_http.encode_payment_signature_header(payload)
 
-        paid = await http.get(DEFAULT_URL, headers=payment_headers)
+        paid = await http.get(str(parsed_url), headers=payment_headers)
         if paid.status_code != 200:
             detail = ""
             try:
@@ -278,7 +319,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 pass
             raise CanaryError(f"paid request returned {paid.status_code}{detail}")
         try:
-            paid_payload = _validate_vwap_payload(paid.json())
+            paid_payload = _validate_paid_payload(
+                paid.json(), expected_symbol=expected_symbol, service=service
+            )
         except json.JSONDecodeError as exc:
             raise CanaryError("paid response is not JSON") from exc
         settlement = payment_http.get_payment_settle_response(
@@ -291,11 +334,13 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         if settlement.amount is not None and int(settlement.amount) != int(selected.amount):
             raise CanaryError("settled amount does not match the invoice")
 
-        replay = await http.get(DEFAULT_URL, headers=payment_headers)
+        replay = await http.get(str(parsed_url), headers=payment_headers)
         if replay.status_code != 200:
             raise CanaryError(f"idempotent replay returned {replay.status_code}, expected 200")
         try:
-            replay_payload = _validate_vwap_payload(replay.json())
+            replay_payload = _validate_paid_payload(
+                replay.json(), expected_symbol=expected_symbol, service=service
+            )
         except json.JSONDecodeError as exc:
             raise CanaryError("idempotent replay response is not JSON") from exc
         if replay_payload != paid_payload:
@@ -311,7 +356,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
     return {
         "passed": True,
-        "url": DEFAULT_URL,
+        "url": str(parsed_url),
         "payer": payer,
         "pay_to": selected.pay_to,
         "network": str(selected.network),
@@ -329,10 +374,20 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one $0.002 x402 v2 Solana payment using a key file on removable media."
+            "Run one bounded x402 v2 Solana payment using a key file on removable media."
         )
     )
     parser.add_argument("key_file", help="Absolute key file path on the removable volume")
+    parser.add_argument(
+        "--url",
+        default=DEFAULT_URL,
+        help="Exact https://mcp.blocksize.info single-instrument URL",
+    )
+    parser.add_argument(
+        "--max-usdc",
+        default=MAX_USDC,
+        help="Maximum authorized USDC for this one request (default: 0.002)",
+    )
     parser.add_argument(
         "--allow-local-key-file",
         action="store_true",

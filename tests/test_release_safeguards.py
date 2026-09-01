@@ -1735,13 +1735,16 @@ def test_locked_http_bridge_preserves_discovery_and_blocks_new_economic_writes(
 
     # Some test security profiles have no operational payment rail; unsigned
     # discovery must remain non-economic and never reach the upstream either way.
-    assert discovery.status_code in {402, 503}
+    assert discovery.status_code in {402, 404, 503}
     if discovery.status_code == 402:
         assert signed.status_code == 503
         assert signed.json()["error_code"] == "ECONOMIC_WRITES_LOCKED"
         assert signed.headers["cache-control"] == "no-store"
     else:
-        assert signed.status_code == 503
+        # Catalog/readiness preflight happens before proof handling. An
+        # unsupported or unconfirmable instrument remains a free 404/503
+        # even when a caller attaches a proof-shaped header.
+        assert signed.status_code == discovery.status_code
     assert claim.status_code == 503
     assert claim.headers["cache-control"] == "no-store"
     assert manager.payment_proof_state("new-bridge-proof") is None

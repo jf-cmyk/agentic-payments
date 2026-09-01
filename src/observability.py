@@ -711,12 +711,15 @@ class UsageEventStore:
             )
         resolved_events = [event for event in events if event["event"] == "instrument_resolved"]
         resolved_symbols = {
-            str(event.get("subject")) for event in resolved_events if event.get("subject")
+            str(self._metadata(event).get("canonical_symbol") or event.get("subject"))
+            for event in resolved_events
+            if self._metadata(event).get("canonical_symbol") or event.get("subject")
         }
         resolver_deliveries = sum(
             count
             for source, count in delivered_selection_source_mix.items()
-            if source in {"authenticated_resolver", "public_mcp_resolver"}
+            if source
+            in {"authenticated_resolver", "public_mcp_resolver", "public_http_resolver"}
         )
         published_example_payment_prompts = sum(
             1
@@ -1613,31 +1616,44 @@ class UsageEventStore:
         resolver_live_attempts = 0
         resolver_deliveries = 0
         resolved_symbols: set[str] = set()
+        resolver_sources = {
+            "authenticated_resolver",
+            "public_mcp_resolver",
+            "public_http_resolver",
+        }
+        has_catalog_search_events = any(
+            event.get("event") == "catalog_search_completed" for event in events
+        )
         for event in events:
             event_name = str(event.get("event") or "")
             endpoint = str(event.get("endpoint") or "")
             tool_name = str(event.get("tool_name") or "")
             selection_source = str(cls._metadata(event).get("selection_source") or "")
-            if (
+            if event_name == "catalog_search_completed" or (
                 event_name == "mcp_tool_call" and tool_name == "search_pairs"
             ) or (
-                event_name == "free_discovery_call" and endpoint == "/v1/search"
+                not has_catalog_search_events
+                and event_name == "free_discovery_call"
+                and endpoint == "/v1/search"
             ):
                 search_events += 1
             if event_name == "instrument_resolved":
                 resolved_events += 1
-                if event.get("subject"):
-                    resolved_symbols.add(str(event["subject"]))
+                canonical = cls._metadata(event).get("canonical_symbol") or event.get(
+                    "subject"
+                )
+                if canonical:
+                    resolved_symbols.add(str(canonical))
             if event_name == "unsupported_symbol_request":
                 zero_or_unsupported += 1
             if (
                 cls._is_live_data_request_event(event)
-                and selection_source in {"authenticated_resolver", "public_mcp_resolver"}
+                and selection_source in resolver_sources
             ):
                 resolver_live_attempts += 1
             if (
                 id(event) in correlation["valid_delivery_event_ids"]
-                and selection_source in {"authenticated_resolver", "public_mcp_resolver"}
+                and selection_source in resolver_sources
             ):
                 resolver_deliveries += 1
         return {

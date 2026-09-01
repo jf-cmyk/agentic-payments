@@ -40,6 +40,7 @@ from src.models import (
     VWAP30MinData,
     VWAPData,
 )
+from src.instrument_discovery import commercialize_pair, rank_pair_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -690,9 +691,7 @@ class BlocksizeClient:
         if asset_filter == "equities":
             asset_filter = "equity"
 
-        query_lower = query.strip().lower()
-        query_symbol = _normalize_ticker(query).strip().lower()
-        matches: list[PairInfo] = []
+        candidates: list[PairInfo] = []
         bidask_entries: list[dict[str, str]] | None = None
 
         async def _bidask_entries() -> list[dict[str, str]]:
@@ -700,50 +699,6 @@ class BlocksizeClient:
             if bidask_entries is None:
                 bidask_entries = await self._list_bidask_entries()
             return bidask_entries
-
-        def matches_query(
-            pair: str,
-            base: str = "",
-            quote: str = "",
-            searchable: str = "",
-        ) -> bool:
-            if not query_lower:
-                return True
-            normalized_values = (
-                _normalize_ticker(pair).lower(),
-                _normalize_ticker(base).lower(),
-                _normalize_ticker(quote).lower(),
-            )
-            return (
-                bool(query_symbol)
-                and any(query_symbol in value for value in normalized_values if value)
-            ) or query_lower in searchable.lower()
-
-        def relevance(pair_info: PairInfo) -> tuple[int, int, str, str, str]:
-            pair = _normalize_ticker(pair_info.pair).lower()
-            base = _normalize_ticker(pair_info.base_currency).lower()
-            quote = _normalize_ticker(pair_info.quote_currency).lower()
-            if query_symbol and pair == query_symbol:
-                score = 0
-            elif query_symbol and base == query_symbol:
-                score = 1
-            elif query_symbol and pair.startswith(query_symbol):
-                score = 2
-            elif query_symbol and base.startswith(query_symbol):
-                score = 3
-            elif query_symbol and quote == query_symbol:
-                score = 4
-            else:
-                score = 5
-            quote_priority = {
-                "usd": 0,
-                "usdc": 1,
-                "usdt": 2,
-                "eur": 3,
-                "btc": 4,
-                "eth": 5,
-            }.get(quote, 6)
-            return score, quote_priority, pair, base, quote
 
         # Search crypto instruments
         if asset_filter in ("all", "crypto"):
@@ -760,22 +715,24 @@ class BlocksizeClient:
 
                 for instrument in sorted(all_crypto):
                     base, quote = _split_pair(instrument)
-                    if matches_query(instrument, base, quote):
-                        services = []
-                        if instrument in vwap_instruments:
-                            services.append("vwap")
-                        if instrument in bidask_instruments:
-                            services.append("bidask")
+                    services = []
+                    if instrument in vwap_instruments:
+                        services.append("vwap")
+                    if instrument in bidask_instruments:
+                        services.append("bidask")
 
-                        tier = "core" if base in TOP_250_CRYPTO else "extended"
-                        matches.append(PairInfo(
-                            pair=instrument,
-                            base_currency=base,
-                            quote_currency=quote,
-                            asset_class="crypto",
-                            services=services,
-                            tier=tier,
-                        ))
+                    tier = "core" if base in TOP_250_CRYPTO else "extended"
+                    candidates.append(PairInfo(
+                        pair=instrument,
+                        base_currency=base,
+                        quote_currency=quote,
+                        asset_class="crypto",
+                        services=services,
+                        capability_check_services=(
+                            ["vwap30m", "vwap24h"] if "vwap" in services else []
+                        ),
+                        tier=tier,
+                    ))
             except BlocksizeAPIError:
                 if strict:
                     raise
@@ -792,16 +749,14 @@ class BlocksizeClient:
                 for entry in sorted(equity_entries, key=lambda item: item["ticker"]):
                     ticker = entry["ticker"]
                     base = entry["base_currency"]
-                    searchable = f"{ticker} {base} {base.removesuffix('X')}".lower()
-                    if matches_query(ticker, base, entry["quote_currency"], searchable):
-                        matches.append(PairInfo(
-                            pair=ticker,
-                            base_currency=base.removesuffix("X"),
-                            quote_currency=entry["quote_currency"],
-                            asset_class="equity",
-                            services=["bidask"],
-                            tier="equities",
-                        ))
+                    candidates.append(PairInfo(
+                        pair=ticker,
+                        base_currency=base.removesuffix("X"),
+                        quote_currency=entry["quote_currency"],
+                        asset_class="equity",
+                        services=["bidask"],
+                        tier="equities",
+                    ))
             except BlocksizeAPIError:
                 if strict:
                     raise
@@ -817,15 +772,14 @@ class BlocksizeClient:
                 )
                 for inst in fx_instruments:
                     base, quote = _split_pair(inst)
-                    if matches_query(inst, base, quote):
-                        matches.append(PairInfo(
-                            pair=inst,
-                            base_currency=base,
-                            quote_currency=quote,
-                            asset_class="fx",
-                            services=["fx"],
-                            tier="tradfi",
-                        ))
+                    candidates.append(PairInfo(
+                        pair=inst,
+                        base_currency=base,
+                        quote_currency=quote,
+                        asset_class="fx",
+                        services=["fx"],
+                        tier="tradfi",
+                    ))
             except BlocksizeAPIError:
                 if strict:
                     raise
@@ -835,17 +789,21 @@ class BlocksizeClient:
         if asset_filter in ("all", "metal"):
             for inst in await self.list_metal_instruments():
                 base, quote = _split_pair(inst)
-                if matches_query(inst, base, quote):
-                    matches.append(PairInfo(
-                        pair=inst,
-                        base_currency=base,
-                        quote_currency=quote,
-                        asset_class="metal",
-                        services=["metal"],
-                        tier="tradfi",
-                    ))
+                candidates.append(PairInfo(
+                    pair=inst,
+                    base_currency=base,
+                    quote_currency=quote,
+                    asset_class="metal",
+                    services=["metal"],
+                    tier="tradfi",
+                ))
 
-        return sorted(matches, key=relevance)
+        ranked = rank_pair_candidates(
+            query,
+            candidates,
+            diversify_asset_classes=asset_filter == "all",
+        )
+        return [commercialize_pair(pair, settings.pricing) for pair in ranked]
 
     async def _list_bidask_entries(self) -> list[dict[str, str]]:
         """Return normalized bid/ask instrument entries from the shared catalog."""
@@ -1007,7 +965,7 @@ def _extract_quote(pair: str) -> str:
 
 
 def _split_pair(pair: str) -> tuple[str, str]:
-    """Split a pair into base and quote currencies."""
+    """Split a pair only when separators or an authoritative quote suffix exist."""
     for sep in ["-", "/", "_"]:
         if sep in pair:
             parts = pair.split(sep, 1)
@@ -1016,10 +974,7 @@ def _split_pair(pair: str) -> tuple[str, str]:
     quote = _extract_quote(clean)
     if quote:
         return clean[: -len(quote)], quote
-    if clean.isalpha() and 1 <= len(clean) <= 5 and clean not in TOP_250_CRYPTO:
-        return clean, ""
-    mid = len(pair) // 2
-    return clean[:mid], clean[mid:]
+    return clean, ""
 
 
 def _normalize_ticker(ticker: str) -> str:

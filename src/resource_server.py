@@ -86,6 +86,7 @@ from src.models import (
     BidAskResponse,
     ErrorResponse,
     InstrumentListResponse,
+    PairInfo,
     PairSearchResponse,
     VWAPResponse,
 )
@@ -110,6 +111,7 @@ from src.public_metadata import (
     FIRST_PRICE_QUICKSTART_URL,
     GLAMA_MAINTAINER_EMAIL,
     GLAMA_WELL_KNOWN_URL,
+    INSTRUMENT_EXPLORER_URL,
     LLMS_TXT_URL,
     MAIN_WEBSITE_CONTACT_URL,
     MAIN_WEBSITE_PRICING_URL,
@@ -141,6 +143,7 @@ from src.public_metadata import (
     build_data_packages_json,
     build_category_hubs_json,
     build_llms_txt,
+    build_instrument_explorer_html,
     build_open_graph_svg,
     build_robots_txt,
     build_server_json,
@@ -362,8 +365,16 @@ ATTRIBUTION_QUERY_KEYS = (
     "utm_campaign",
     "utm_content",
     "utm_term",
+    "selection_source",
 )
 ATTRIBUTION_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:/+ -]{0,95}$")
+SELECTION_SOURCE_VALUES = {
+    "public_http_resolver",
+    "public_mcp_resolver",
+    "authenticated_resolver",
+    "published_example_path",
+    "direct_http",
+}
 
 
 def _env_enabled(name: str, default: str = "false") -> bool:
@@ -691,9 +702,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "version_behind_candidate",
-        "observed_version": "0.6.4",
-        "audited_at": "2026-07-30",
+        "release_status": "release_source_v0_6_9",
+        "observed_version": "0.6.9 candidate",
+        "audited_at": "2026-08-31",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
@@ -1131,6 +1142,8 @@ async def lifespan(app: FastAPI):
     ):
         logger.error("Payment facilitator capabilities are unavailable")
     app.state.blocksize = BlocksizeClient()
+    app.state.instrument_catalog_cache = {}
+    app.state.instrument_catalog_cache_lock = asyncio.Lock()
     app.state.blocksize_dependency = await _probe_blocksize_dependency(app.state.blocksize)
     app.state.blocksize_dependency_task = None
     if (
@@ -1315,6 +1328,11 @@ _INDEXABLE_PUBLIC_PATHS = {
     "/llms.txt",
     "/data-packages.json",
     "/category-hubs.json",
+    "/instruments",
+    "/instruments/crypto",
+    "/instruments/equities",
+    "/instruments/fx",
+    "/instruments/metals",
     "/quickstart/remote-mcp",
     "/quickstart/first-price",
     "/prompt-examples",
@@ -1478,8 +1496,14 @@ def _request_attribution_metadata(request: Request) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for key in ATTRIBUTION_QUERY_KEYS:
         value = (request.query_params.get(key) or "").strip()
-        if value and ATTRIBUTION_VALUE_RE.fullmatch(value):
+        if (
+            value
+            and ATTRIBUTION_VALUE_RE.fullmatch(value)
+            and (key != "selection_source" or value in SELECTION_SOURCE_VALUES)
+        ):
             metadata[key] = value
+    if _is_live_price_delivery_path(request.url.path) and "selection_source" not in metadata:
+        metadata["selection_source"] = "direct_http"
     return metadata
 
 
@@ -1818,6 +1842,22 @@ async def get_privacy_policy():
 async def get_support_page():
     """Serve the support and troubleshooting page."""
     return _serve_doc("support.html", "Support page")
+
+
+@app.api_route("/instruments", methods=["GET", "HEAD"], include_in_schema=False)
+async def get_instrument_explorer() -> HTMLResponse:
+    """Serve the canonical human-and-agent instrument search surface."""
+    return HTMLResponse(build_instrument_explorer_html())
+
+
+@app.api_route(
+    "/instruments/{asset_class}", methods=["GET", "HEAD"], include_in_schema=False
+)
+async def get_instrument_explorer_category(asset_class: str) -> HTMLResponse:
+    """Serve one curated instrument category without generating thin symbol pages."""
+    if asset_class not in {"crypto", "equities", "fx", "metals"}:
+        raise HTTPException(status_code=404, detail="Instrument category not found")
+    return HTMLResponse(build_instrument_explorer_html(asset_class))
 
 
 @app.get("/terms", include_in_schema=False)
@@ -3170,9 +3210,240 @@ def _apply_credit_response_headers(response: Response, request: Request) -> Resp
     return response
 
 
+PAID_CATALOG_CACHE_TTL_SECONDS = 60.0
+PAID_PREFLIGHT_SERVICE_PREFIXES = {
+    "/v1/vwap/": "vwap",
+    "/v1/bidask/": "bidask",
+    "/v1/state/": "state",
+    "/v1/vwap30m/": "vwap",
+    "/v1/vwap24h/": "vwap",
+    "/v1/fx/": "fx",
+    "/v1/metal/": "metal",
+}
+PAID_PRODUCT_SYMBOL_MODES = {
+    "/v1/briefs/market": "current",
+    "/v1/checks/pre-trade": "current",
+    "/v1/receipts/price": "current",
+    "/v1/monitors/evaluate": "current",
+    "/v1/indicators/token-quality": "current",
+    "/v1/indicators/state-divergence": "state_and_current",
+    "/v1/signals/solana-token-brief": "current",
+    "/v1/signals/trader-alpha-pack": "current",
+}
+
+
+def _purchase_ready_pair(pair: PairInfo) -> PairInfo:
+    """Attach an attributed purchase URL and a copyable unsigned request."""
+    if not pair.endpoint_path:
+        return pair
+    query = urlencode(
+        {
+            "selection_source": "public_http_resolver",
+            "utm_source": "instrument_search",
+            "utm_medium": "free_discovery",
+            "utm_campaign": "resolver_handoff",
+        }
+    )
+    url = f"{PUBLIC_BASE_URL}{pair.endpoint_path}?{query}"
+    return pair.model_copy(
+        update={
+            "purchase_url": url,
+            "copy_request": f"curl -i '{url}'",
+        }
+    )
+
+
+async def _paid_catalog_symbols(request: Request, service: str) -> set[str]:
+    """Return a short-lived normalized catalog for payment preflight."""
+    cache = getattr(request.app.state, "instrument_catalog_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.instrument_catalog_cache = cache
+    now = time.monotonic()
+    cached = cache.get(service)
+    if isinstance(cached, tuple) and len(cached) == 2 and now - cached[0] < PAID_CATALOG_CACHE_TTL_SECONDS:
+        return set(cached[1])
+    if service == "current":
+        vwap, bidask = await asyncio.gather(
+            _paid_catalog_symbols(request, "vwap"),
+            _paid_catalog_symbols(request, "bidask"),
+        )
+        symbols = vwap | bidask
+        cache[service] = (now, frozenset(symbols))
+        return symbols
+
+    lock = getattr(request.app.state, "instrument_catalog_cache_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        request.app.state.instrument_catalog_cache_lock = lock
+    async with lock:
+        cached = cache.get(service)
+        now = time.monotonic()
+        if isinstance(cached, tuple) and len(cached) == 2 and now - cached[0] < PAID_CATALOG_CACHE_TTL_SECONDS:
+            return set(cached[1])
+
+        client: BlocksizeClient = request.app.state.blocksize
+        if service == "vwap":
+            records: list[Any] = await client.list_vwap_instruments()
+        elif service == "bidask":
+            records = await client.list_bidask_instruments()
+        elif service == "fx":
+            records = await client.list_fx_instruments()
+        elif service == "metal":
+            records = await client.list_metal_instruments()
+        elif service == "state":
+            records = await client.list_state_instruments()
+        else:
+            raise ValueError(f"Unsupported preflight service: {service}")
+
+        symbols: set[str] = set()
+        for record in records:
+            value = record.get("symbol") if isinstance(record, dict) else record
+            if value is None:
+                continue
+            try:
+                symbols.add(_normalise_symbol(str(value), "catalog symbol"))
+            except ValueError:
+                continue
+        cache[service] = (now, frozenset(symbols))
+        return symbols
+
+
+async def _paid_catalog_alternatives(
+    request: Request,
+    symbol: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    client: BlocksizeClient = request.app.state.blocksize
+    search_term = _base_from_symbol(symbol) or symbol
+    try:
+        pairs, _total = await client.search_pairs_page(
+            search_term,
+            "all",
+            limit=limit,
+            offset=0,
+        )
+    except (BlocksizeAPIError, httpx.HTTPError, TypeError, ValueError):
+        return []
+    return [
+        _purchase_ready_pair(pair).model_dump()
+        for pair in pairs[:limit]
+        if pair.endpoint_path
+    ]
+
+
+async def _unsupported_paid_instrument_response(
+    request: Request,
+    *,
+    symbol: str,
+    service: str,
+) -> JSONResponse:
+    alternatives = await _paid_catalog_alternatives(request, symbol)
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "Unsupported Instrument",
+            "error_code": "UNSUPPORTED_INSTRUMENT",
+            "message": (
+                f"{symbol} is not currently catalog-confirmed for {service}; "
+                "no payment challenge was created and no payment was used."
+            ),
+            "symbol": symbol,
+            "service": service,
+            "alternatives": alternatives,
+            "search_url": (
+                f"{PUBLIC_BASE_URL}/v1/search?"
+                + urlencode({"q": _base_from_symbol(symbol) or symbol})
+            ),
+        },
+    )
+
+
+async def _validate_catalog_support(
+    request: Request,
+    *,
+    symbol: str,
+    service: str,
+) -> JSONResponse | None:
+    try:
+        catalog = await _paid_catalog_symbols(request, service)
+    except (BlocksizeAPIError, httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Paid catalog preflight unavailable for %s: %s", service, exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "30", "Cache-Control": "no-store"},
+            content={
+                "error": "Instrument Readiness Unavailable",
+                "error_code": "INSTRUMENT_PREFLIGHT_UNAVAILABLE",
+                "message": (
+                    "Instrument support could not be confirmed, so no payment "
+                    "challenge was created and no payment was used."
+                ),
+                "symbol": symbol,
+                "service": service,
+            },
+        )
+    if symbol in catalog:
+        return None
+    return await _unsupported_paid_instrument_response(
+        request,
+        symbol=symbol,
+        service=service,
+    )
+
+
+def _payload_symbols(payload: dict[str, Any]) -> list[str]:
+    value = payload.get("symbols") or payload.get("watchlist") or payload.get("symbol")
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [item.strip() for item in value.split(",") if item.strip()]
+    if not isinstance(value, list):
+        return []
+    return [_normalise_symbol(str(item), "symbol") for item in value]
+
+
 async def _validate_paid_request_before_charge(request: Request) -> JSONResponse | None:
-    """Reject malformed paid request bodies before credits or payment proofs are used."""
-    if request.method.upper() not in {"POST", "PUT", "PATCH"}:
+    """Reject malformed or unsupported requests before payment is requested."""
+    method = request.method.upper()
+    path = request.url.path
+
+    if method in {"GET", "HEAD"}:
+        if path.startswith("/v1/batch"):
+            try:
+                queries = _parse_batch_reqs(request.query_params.get("reqs", ""))
+            except ValueError as exc:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Bad Request", "message": str(exc)},
+                )
+            for service, symbol, _raw in queries:
+                catalog_service = {
+                    "vwap30m": "vwap",
+                    "vwap24h": "vwap",
+                }.get(service, service)
+                if catalog_service not in {"vwap", "bidask", "state", "fx", "metal"}:
+                    continue
+                unsupported = await _validate_catalog_support(
+                    request,
+                    symbol=symbol,
+                    service=catalog_service,
+                )
+                if unsupported is not None:
+                    return unsupported
+            return None
+        for prefix, service in PAID_PREFLIGHT_SERVICE_PREFIXES.items():
+            if path.startswith(prefix):
+                symbol = _normalise_symbol(path[len(prefix):].split("/", 1)[0], "symbol")
+                return await _validate_catalog_support(
+                    request,
+                    symbol=symbol,
+                    service=service,
+                )
+        return None
+
+    if method not in {"POST", "PUT", "PATCH"}:
         return None
 
     try:
@@ -3200,7 +3471,7 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
         "/v1/indicators/token-quality",
         "/v1/indicators/state-divergence",
     }
-    if request.url.path in required_symbol_paths:
+    if path in required_symbol_paths:
         symbol = str(payload.get("symbol") or "").strip()
         if not symbol:
             return JSONResponse(
@@ -3220,6 +3491,42 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
                     "message": f"{exc}; no credits or payment were used.",
                 },
             )
+    mode = PAID_PRODUCT_SYMBOL_MODES.get(path)
+    if mode:
+        try:
+            symbols = _payload_symbols(payload)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Bad Request",
+                    "message": f"{exc}; no credits or payment were used.",
+                },
+            )
+        for symbol in symbols:
+            if mode == "state_and_current":
+                current = await _validate_catalog_support(
+                    request,
+                    symbol=symbol,
+                    service="current",
+                )
+                if current is not None:
+                    return current
+                state = await _validate_catalog_support(
+                    request,
+                    symbol=symbol,
+                    service="state",
+                )
+                if state is not None:
+                    return state
+            else:
+                unsupported = await _validate_catalog_support(
+                    request,
+                    symbol=symbol,
+                    service="current",
+                )
+                if unsupported is not None:
+                    return unsupported
     return None
 
 
@@ -6127,6 +6434,55 @@ async def agent_market_brief(request: Request, payload: dict[str, Any]) -> dict[
     }
 
 
+@app.get("/v1/samples/pre-trade")
+async def pre_trade_sample() -> dict[str, Any]:
+    """Return a free, clearly labeled example of the paid pre-trade product."""
+    paid_path = "/v1/checks/pre-trade"
+    return {
+        "status": "ok",
+        "sample": True,
+        "live_data": False,
+        "product": "pre_trade_sanity_check",
+        "purpose": (
+            "Show the response contract and buyer outcome before an agent pays. "
+            "Values below are illustrative and must not be used for a trade."
+        ),
+        "paid_endpoint": f"{PUBLIC_BASE_URL}{paid_path}",
+        "price_usdc": str(ROUTE_PRICING[paid_path]),
+        "example_request": {
+            "symbol": "BTCUSD",
+            "side": "buy",
+            "notional_usd": 2500,
+            "reference_price": 65000,
+            "max_spread_bps": 50,
+            "max_age_ms": 60000,
+        },
+        "example_response": {
+            "decision": "pass",
+            "checks": {
+                "instrument_supported": True,
+                "quote_fresh": True,
+                "spread_within_limit": True,
+                "reference_price_within_limit": True,
+                "notional_supplied": True,
+            },
+            "recommendation": {
+                "blocking": False,
+                "message": "Market data passed configured sanity checks.",
+            },
+            "provenance": {
+                "receipt_id": "rcpt_example_not_live",
+                "request_hash": "illustrative",
+                "response_hash": "illustrative",
+            },
+        },
+        "limitations": [
+            "Sample values are synthetic and intentionally not timestamped as live.",
+            "The paid result is a read-only data-quality guardrail and never executes a trade.",
+        ],
+    }
+
+
 @app.post("/v1/checks/pre-trade", responses=X402_RESPONSE)
 async def pre_trade_sanity_check(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Run a read-only pre-trade sanity check. Cost: 5 credits or $0.10 USDC."""
@@ -6878,6 +7234,7 @@ async def search_pairs(
             limit=limit,
             offset=offset,
         )
+        pairs = [_purchase_ready_pair(pair) for pair in pairs]
         next_offset = offset + len(pairs)
         has_more = next_offset < total
         opportunity = normalize_symbol_opportunity(q)
@@ -6898,6 +7255,23 @@ async def search_pairs(
                 "unsupported_symbol_request",
                 request,
                 metadata={"normalized_query": opportunity, "result_count": 0},
+            )
+        elif pairs and offset == 0 and pairs[0].match_type in {
+            "exact_symbol",
+            "exact_base",
+            "alias",
+        }:
+            selected = pairs[0]
+            _record_product_event(
+                "instrument_resolved",
+                request,
+                metadata={
+                    "query": q,
+                    "canonical_symbol": selected.canonical_symbol,
+                    "recommended_service": selected.recommended_service,
+                    "selection_source": "public_http_resolver",
+                    "match_type": selected.match_type,
+                },
             )
         return PairSearchResponse(
             query=q,
@@ -6927,6 +7301,11 @@ async def search_pairs(
                     "fx": "/v1/fx/{pair}",
                     "metal": "/v1/metal/{ticker}",
                 },
+                "purchase_handoff": (
+                    "Each result includes its current price, attributed purchase URL, "
+                    "and a copyable unsigned request. Unsupported symbols are rejected "
+                    "before an x402 challenge is created."
+                ),
             },
         ).model_dump()
     except BlocksizeAPIError as e:
@@ -8784,6 +9163,7 @@ async def mcp_manifest():
             "sitemap": SITEMAP_URL,
             "data_package_catalog": DATA_PACKAGES_JSON_URL,
             "category_hubs": CATEGORY_HUBS_JSON_URL,
+            "instrument_explorer": INSTRUMENT_EXPLORER_URL,
             "starter_allowance": "Authenticated connectors receive up to 50 live data credits; direct public HTTP uses signed x402.",
             "equities": "Supported stock tickers are discoverable with asset_class=equity and fetched through /v1/bidask/{ticker}.",
         },
@@ -8796,6 +9176,7 @@ async def mcp_manifest():
             "llms_txt": LLMS_TXT_URL,
             "data_packages_json": DATA_PACKAGES_JSON_URL,
             "category_hubs_json": CATEGORY_HUBS_JSON_URL,
+            "instrument_explorer": INSTRUMENT_EXPLORER_URL,
             "quickstart": QUICKSTART_URL,
             "prompt_examples": PROMPT_EXAMPLES_URL,
             "privacy_policy": PRIVACY_POLICY_URL,

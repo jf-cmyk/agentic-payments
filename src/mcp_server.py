@@ -43,8 +43,6 @@ from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
     DATA_CATALOG_URL,
-    DISCOVERABLE_SYMBOL_COUNT,
-    INSTRUMENT_COUNTS,
     MAIN_WEBSITE_CONTACT_URL,
     MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
@@ -702,15 +700,16 @@ async def get_pricing_info() -> str:
             },
         },
         "coverage": {
-            "rt_vwap_crypto": "6,362 enabled crypto pairs",
-            "shared_bidask_namespace": "2,365 enabled upstream symbols including supported equity tickers",
-            "fx": "3 enabled FX pairs",
+            "live_counts": f"{PUBLIC_BASE_URL}/v1/coverage",
+            "instrument_search": f"{PUBLIC_BASE_URL}/v1/search?q={{query}}",
+            "counting_rule": "Use live per-service namespace counts; do not add overlapping namespaces or RWA research aliases into one total.",
             "metals": "Gold, Silver, Platinum, Palladium, Copper",
             "dexs": "56 DEXs across 11 chains",
         },
         "competitive_note": (
-            "An agent making 10,000 VWAP calls/month pays ~$20 vs. Pyth Pro $2,000+/month. "
-            "Direct public HTTP uses signed x402 pay-per-call pricing documented at "
+            "At the current $0.002 core-crypto rate, 10,000 successful calls cost $20; "
+            "unsupported requests are rejected before payment. Direct public HTTP uses "
+            "signed x402 pay-per-call pricing documented at "
             f"{MAIN_WEBSITE_PRICING_URL}. For sustained or higher-volume access, contact "
             "Blocksize sales about an authenticated account plan at "
             f"{MAIN_WEBSITE_CONTACT_URL}."
@@ -906,8 +905,11 @@ async def server_info() -> str:
             ),
         },
         "coverage": {
-            "discoverable_symbols": DISCOVERABLE_SYMBOL_COUNT,
-            **INSTRUMENT_COUNTS,
+            "source": f"{PUBLIC_BASE_URL}/v1/coverage",
+            "definition": (
+                "Live service catalog counts are generated at request time; "
+                "historical RWA research aliases are reported separately."
+            ),
         },
         "links": {
             "remote_mcp": REMOTE_MCP_URL,

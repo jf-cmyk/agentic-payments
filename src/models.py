@@ -248,7 +248,42 @@ class PairInfo(BaseModel):
         default_factory=list,
         description="Available services, such as vwap and bidask",
     )
+    capability_check_services: list[str] = Field(
+        default_factory=list,
+        description="Conditional services that require a free readiness check",
+    )
     tier: str = Field("core", description="Pricing tier (core, extended, tradfi, equities)")
+    canonical_symbol: str = Field("", description="Normalized uppercase symbol")
+    recommended_service: Optional[str] = Field(
+        None,
+        description="Best generally available service for the matched instrument",
+    )
+    recommended_tool: Optional[str] = Field(
+        None,
+        description="MCP tool corresponding to the recommended service",
+    )
+    endpoint_path: Optional[str] = Field(
+        None,
+        description="Canonical paid HTTP path for the recommended service",
+    )
+    purchase_url: Optional[str] = Field(
+        None,
+        description="Attributed public URL for continuing from discovery to purchase",
+    )
+    copy_request: Optional[str] = Field(
+        None,
+        description="Copyable unsigned request that returns the x402 challenge",
+    )
+    price_usdc: Optional[str] = Field(
+        None,
+        description="Current per-call USDC price for the recommended service",
+    )
+    readiness: str = Field(
+        "catalog_confirmed",
+        description="Commercial readiness state for this search result",
+    )
+    match_type: Optional[str] = Field(None, description="Why the result matched")
+    relevance_score: int = Field(0, description="Deterministic search relevance score")
 
 
 class PairSearchResponse(BaseModel):

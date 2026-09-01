@@ -601,6 +601,23 @@
       gap: 0.9rem;
       flex-wrap: wrap;
     }
+    .hero-search {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.5rem;
+      margin: 1.5rem 0;
+      max-width: 680px;
+    }
+    .hero-search input {
+      min-width: 0;
+      padding: 0.95rem 1rem;
+      border: 2px solid var(--heading);
+      border-radius: 0;
+      background: #fff;
+      color: var(--heading);
+      font: inherit;
+    }
+    .hero-search button { border: 0; cursor: pointer; }
 
     .hero-card,
     .surface-card,
@@ -967,6 +984,7 @@
         grid-template-columns: 1fr;
         align-items: start;
       }
+      .hero-search { grid-template-columns: 1fr; }
       .dropdown-panel {
         gap: 1.5rem;
       }
@@ -1399,10 +1417,14 @@
             quotes, 24h fixed VWAP, 30m closes, state prices, receipts, checks, and
             signal packages through the paid HTTP API or the advanced local MCP setup.
           </p>
+          <form class="hero-search" action="/instruments" method="get">
+            <input name="q" maxlength="64" aria-label="Search instruments" placeholder="Search bitcoin, AAPL, EUR/USD, gold…" />
+            <button class="btn-nav" type="submit">Find instrument</button>
+          </form>
           <div class="hero-stats">
             <div>
-              <span class="stat-value">213</span>
-              <span class="stat-label">Cached State Symbols</span>
+              <span class="stat-value">Live</span>
+              <span class="stat-label">Coverage API Counts</span>
             </div>
             <div>
               <span class="stat-value">$0.002</span>
@@ -1587,7 +1609,7 @@
       <div class="catalog-grid">
         <div class="catalog-item">
           <h3>Crypto (VWAP & BidAsk)</h3>
-          <p>Institutional crypto snapshots across 6,362 enabled VWAP pairs and a shared bid/ask namespace.</p>
+          <p>Institutional crypto snapshots across live upstream catalogs. Current service-by-service counts are published at <a href="/v1/coverage">/v1/coverage</a>.</p>
           <span class="endpoint">GET /v1/vwap/{pair}<br>GET /v1/bidask/{pair}</span>
         </div>
         <div class="catalog-item">

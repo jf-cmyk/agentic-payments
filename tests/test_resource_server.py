@@ -89,6 +89,92 @@ def test_release_provenance_ignores_invalid_environment_sha(monkeypatch):
     assert provenance["stamped"] is False
 
 
+def test_instrument_explorer_is_indexable_and_search_first(test_client):
+    response = test_client.get("/instruments?q=bitcoin")
+
+    assert response.status_code == 200
+    assert response.headers["x-robots-tag"] == "index, follow"
+    assert "Find the right instrument before you pay" in response.text
+    assert "/v1/search" in response.text
+    assert "price_usdc" in response.text
+    assert "__TITLE__" not in response.text
+    assert 'rel="canonical" href="https://mcp.blocksize.info/instruments"' in response.text
+
+    category = test_client.get("/instruments/equities")
+    assert category.status_code == 200
+    assert 'const assetClass="equities"' in category.text
+
+
+def test_pre_trade_sample_shows_value_without_claiming_live_data(test_client):
+    response = test_client.get("/v1/samples/pre-trade")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sample"] is True
+    assert payload["live_data"] is False
+    assert payload["price_usdc"] == "0.10"
+    assert payload["example_response"]["decision"] == "pass"
+    assert "PAYMENT-REQUIRED" not in response.headers
+
+
+def test_unsupported_paid_symbol_fails_before_payment(test_client):
+    seeded_at = resource_server.time.monotonic()
+    app.state.instrument_catalog_cache["vwap"] = (
+        seeded_at,
+        frozenset({"BTCUSD"}),
+    )
+    mock_client = AsyncMock()
+    mock_client.search_pairs_page = AsyncMock(return_value=([], 0))
+    app.state.blocksize = mock_client
+
+    response = test_client.get("/v1/vwap/NOTREALUSD")
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "UNSUPPORTED_INSTRUMENT"
+    assert "no payment" in response.json()["message"].lower()
+    assert "PAYMENT-REQUIRED" not in response.headers
+
+
+def test_search_returns_a_purchase_ready_canonical_result(test_client):
+    mock_client = AsyncMock()
+    mock_client.search_pairs_page = AsyncMock(
+        return_value=(
+            [
+                PairInfo(
+                    pair="BTCUSD",
+                    base_currency="BTC",
+                    quote_currency="USD",
+                    asset_class="crypto",
+                    services=["vwap", "bidask"],
+                    tier="core",
+                    canonical_symbol="BTCUSD",
+                    recommended_service="vwap",
+                    recommended_tool="get_vwap",
+                    endpoint_path="/v1/vwap/BTCUSD",
+                    price_usdc="0.002",
+                    readiness="catalog_confirmed",
+                    match_type="alias",
+                    relevance_score=940,
+                )
+            ],
+            1,
+        )
+    )
+    app.state.blocksize = mock_client
+
+    response = test_client.get("/v1/search?q=bitcoin")
+
+    assert response.status_code == 200
+    result = response.json()["pairs"][0]
+    assert result["canonical_symbol"] == "BTCUSD"
+    assert result["price_usdc"] == "0.002"
+    assert result["purchase_url"].startswith(
+        "https://mcp.blocksize.info/v1/vwap/BTCUSD?"
+    )
+    assert "selection_source=public_http_resolver" in result["purchase_url"]
+    assert result["copy_request"].startswith("curl -i")
+
+
 @pytest.fixture
 def test_client(monkeypatch, tmp_path):
     """Create a FastAPI test client."""
@@ -122,6 +208,17 @@ def test_client(monkeypatch, tmp_path):
         base_url="https://testserver",
         headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
     ) as client:
+        # Paid middleware now confirms catalog support before issuing a payment
+        # challenge. Seed deterministic catalogs so unit tests never depend on
+        # the public upstream; dedicated preflight tests replace these entries.
+        seeded_at = resource_server.time.monotonic()
+        app.state.instrument_catalog_cache = {
+            "vwap": (seeded_at, frozenset({"BTCUSD", "ETHUSD", "SOLUSD", "PYTHUSD"})),
+            "bidask": (seeded_at, frozenset({"BTCUSD", "ETHUSD", "SOLUSD", "AAPL", "EURUSD"})),
+            "fx": (seeded_at, frozenset({"EURUSD", "GBPUSD", "USDJPY"})),
+            "metal": (seeded_at, frozenset({"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD", "COPPERUSD"})),
+            "state": (seeded_at, frozenset({"MSOLUSD", "SOLUSD", "PYTHUSD"})),
+        }
         yield client
 
 
@@ -133,6 +230,45 @@ def observability_store(tmp_path, monkeypatch):
     configure_global_store(store)
     yield store
     configure_global_store(None)
+
+
+def test_observability_reports_the_canonical_resolver_funnel(observability_store):
+    observability_store.record(
+        "catalog_search_completed",
+        surface="http_api",
+        endpoint="/v1/search",
+        subject="bitcoin",
+    )
+    observability_store.record(
+        "instrument_resolved",
+        surface="http_api",
+        endpoint="/v1/search",
+        subject="bitcoin",
+        metadata={
+            "canonical_symbol": "BTCUSD",
+            "selection_source": "public_http_resolver",
+        },
+    )
+    observability_store.record(
+        "catalog_search_completed",
+        surface="http_api",
+        endpoint="/v1/search",
+        subject="unknown",
+    )
+    observability_store.record(
+        "unsupported_symbol_request",
+        surface="http_api",
+        endpoint="/v1/search",
+        subject="UNKNOWN",
+    )
+
+    funnel = observability_store.summarize(days=1)["resolver_funnel"]
+
+    assert funnel["search_events"] == 2
+    assert funnel["resolved_events"] == 1
+    assert funnel["distinct_resolved_symbols"] == 1
+    assert funnel["zero_or_unsupported_events"] == 1
+    assert funnel["search_to_resolution_rate"] == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -4167,8 +4303,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "version_behind_candidate"
-        assert github["observed_version"] == "0.6.4"
+        assert github["release_status"] == "release_source_v0_6_9"
+        assert github["observed_version"] == "0.6.9 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
@@ -6336,7 +6472,7 @@ class TestDataEndpoints:
         assert data["basis"]["vwap_vs_state_bps"] == pytest.approx(67.114, rel=1e-3)
         assert data["meta"]["credits"]["credits_remaining"] == 35.0
 
-    def test_solana_token_brief_reports_supported_and_unsupported_symbols(self, test_client, tmp_path):
+    def test_solana_token_brief_rejects_unsupported_symbols_before_charge(self, test_client, tmp_path):
         mock_client = AsyncMock()
         mock_client.get_vwap_latest = AsyncMock(
             side_effect=[
@@ -6377,13 +6513,12 @@ class TestDataEndpoints:
             json={"symbols": ["SOLUSD", "UNKNOWNUSD"]},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 404
         data = response.json()
-        assert data["product"] == "solana_token_brief"
-        assert data["credit_cost"] == 25.0
-        assert data["summary"]["coverage_status"] == "partial"
-        assert data["tokens"][1]["status"] == "unsupported_or_unavailable"
-        assert data["meta"]["credits"]["credits_remaining"] == 25.0
+        assert data["error_code"] == "UNSUPPORTED_INSTRUMENT"
+        assert data["symbol"] == "UNKNOWNUSD"
+        assert "no payment" in data["message"].lower()
+        assert app.state.credits.get_balance("agent-solana-brief-12345678") == 0.0
 
     def test_trader_alpha_pack_can_spend_full_starter_allowance(self, test_client, tmp_path):
         mock_client = AsyncMock()
