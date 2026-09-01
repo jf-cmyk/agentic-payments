@@ -402,6 +402,34 @@ class TestPairSearch:
         assert [item.pair for item in base].index("AAVESOL") >= 5
 
     @pytest.mark.asyncio
+    async def test_natural_language_alias_prefers_canonical_market_symbol(self, client):
+        with patch.object(
+            client,
+            "list_vwap_instruments",
+            new_callable=AsyncMock,
+            return_value=["BITCOINUSD", "BTCUSDT", "BTCUSD", "BTCUSDC"],
+        ), patch.object(
+            client,
+            "_list_bidask_entries",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            client,
+            "list_metal_instruments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            results = await client.search_pairs("bitcoin", asset_class="crypto")
+
+        assert [item.pair for item in results[:3]] == [
+            "BTCUSD",
+            "BTCUSDC",
+            "BTCUSDT",
+        ]
+        assert results[0].match_type == "alias"
+        assert results[0].price_usdc == "0.002"
+
+    @pytest.mark.asyncio
     async def test_fx_search_reports_customer_facing_fx_service(self, client):
         with patch.object(
             client,
