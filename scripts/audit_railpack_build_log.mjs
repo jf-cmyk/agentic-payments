@@ -2,9 +2,9 @@
 
 import { readFile } from "node:fs/promises";
 
-const config = await readFile(new URL("../railway.toml", import.meta.url), "utf8");
-const versionMatch = config.match(/^\s*railpackVersion\s*=\s*"([^"]+)"\s*$/m);
-if (!versionMatch) throw new Error("railway.toml does not pin build.railpackVersion");
+const config = await readFile(new URL("../.railway/railway.ts", import.meta.url), "utf8");
+const versionMatch = config.match(/railpackVersion:\s*"([^"]+)"/);
+if (!versionMatch) throw new Error(".railway/railway.ts does not pin build.railpackVersion");
 
 const expectedVersion = versionMatch[1];
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expectedVersion)) {

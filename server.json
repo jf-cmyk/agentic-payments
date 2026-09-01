@@ -5,7 +5,7 @@
   "description": "Signed x402; authenticated-connector-only starter credits; contact-sales authenticated account plan.",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "remotes": [
     {
       "url": "https://mcp.blocksize.info/mcp/server/",

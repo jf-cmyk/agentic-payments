@@ -4303,8 +4303,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_9"
-        assert github["observed_version"] == "0.6.9 candidate"
+        assert github["release_status"] == "release_source_v0_6_10"
+        assert github["observed_version"] == "0.6.10 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
@@ -4363,6 +4363,74 @@ class TestObservabilityDashboard:
         assert pay_platform["external_metrics_configured"] is True
         assert pay_platform["latest_external_metrics"]["metrics"]["health_checks"] == 3
         assert data["marketplace_metrics"]["platforms_configured"] == ["pay_sh"]
+
+    def test_listing_health_does_not_masquerade_as_marketplace_performance(
+        self,
+        observability_store,
+        test_client,
+    ):
+        ingest = test_client.post(
+            "/internal/observability/marketplace-metrics",
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+            json={
+                "platform_id": "smithery",
+                "source_url": "https://smithery.ai/servers/blocksize/agentic-payments",
+                "status": "healthy",
+                "metrics": {
+                    "metric_scope": "listing_health",
+                    "reachable": True,
+                    "healthy": True,
+                    "http_status": 200,
+                },
+            },
+        )
+        assert ingest.status_code == 200
+
+        data = test_client.get(
+            "/internal/observability/stats?days=1",
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+        ).json()
+
+        assert data["marketplace_metrics"]["platforms_configured"] == []
+        assert data["marketplace_metrics"]["listing_health_platforms"] == ["smithery"]
+        smithery = next(
+            platform
+            for platform in data["external_sources"]["platforms"]
+            if platform["id"] == "smithery"
+        )
+        assert smithery["listing_health_observed"] is True
+        assert smithery["external_metrics_configured"] is False
+        assert data["revenue_operating_scorecard"]["marketplace_measurement"] == {
+            "performance_platforms": [],
+            "listing_health_platforms": ["smithery"],
+            "performance_coverage_count": 0,
+            "listing_health_coverage_count": 1,
+            "note": "Listing reachability is kept separate from upstream marketplace demand and conversion.",
+        }
+
+    def test_revenue_operating_scorecard_has_outcomes_drivers_and_guardrails(
+        self,
+        observability_store,
+        test_client,
+    ):
+        data = test_client.get(
+            "/internal/observability/stats?days=1",
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+        ).json()
+        scorecard = data["revenue_operating_scorecard"]
+
+        assert [row["id"] for row in scorecard["primary_kpis"]] == [
+            "recognized_revenue_usdc",
+            "proof_to_settlement_rate",
+            "repeat_7d_rate",
+        ]
+        assert {row["id"] for row in scorecard["drivers"]} == {
+            "search_to_resolution_rate",
+            "resolver_to_delivery_rate",
+            "prompt_to_proof_rate",
+            "starter_to_paid_rate",
+        }
+        assert all(row["status"] == "pass" for row in scorecard["guardrails"][:2])
 
     def test_paid_success_records_revenue_and_paid_call(
         self,

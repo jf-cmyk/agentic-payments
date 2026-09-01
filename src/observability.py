@@ -332,7 +332,9 @@ class UsageEventStore:
             ).fetchall()
 
         snapshots = []
-        latest_by_platform: dict[str, dict[str, Any]] = {}
+        latest_observation_by_platform: dict[str, dict[str, Any]] = {}
+        latest_performance_by_platform: dict[str, dict[str, Any]] = {}
+        latest_listing_health_by_platform: dict[str, dict[str, Any]] = {}
         for row in rows:
             data = dict(row)
             try:
@@ -340,14 +342,31 @@ class UsageEventStore:
             except json.JSONDecodeError:
                 data["metrics"] = {}
             snapshots.append(data)
-            latest_by_platform.setdefault(str(data["platform_id"]), data)
+            platform_id = str(data["platform_id"])
+            latest_observation_by_platform.setdefault(platform_id, data)
+            metric_scope = str(data["metrics"].get("metric_scope") or "performance")
+            if metric_scope == "listing_health":
+                latest_listing_health_by_platform.setdefault(platform_id, data)
+            else:
+                # Legacy snapshots predate metric_scope and represented reviewed
+                # performance feeds or imports, so retain that interpretation.
+                latest_performance_by_platform.setdefault(platform_id, data)
 
         return {
             "window_days": days,
             "total_snapshots": len(snapshots),
-            "platforms_configured": sorted(latest_by_platform),
-            "latest_by_platform": latest_by_platform,
+            "platforms_observed": sorted(latest_observation_by_platform),
+            "platforms_configured": sorted(latest_performance_by_platform),
+            "performance_platforms": sorted(latest_performance_by_platform),
+            "listing_health_platforms": sorted(latest_listing_health_by_platform),
+            "latest_by_platform": latest_performance_by_platform,
+            "latest_observation_by_platform": latest_observation_by_platform,
+            "listing_health_by_platform": latest_listing_health_by_platform,
             "recent_snapshots": snapshots[:50],
+            "definitions": {
+                "platforms_configured": "Platforms with reviewed performance metrics such as views, installs, or hosted calls.",
+                "listing_health_platforms": "Platforms whose public listing URL was checked; reachability does not prove demand, usage, or revenue.",
+            },
         }
 
     def recent_events(self, *, limit: int = 100) -> list[dict[str, Any]]:

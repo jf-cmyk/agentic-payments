@@ -80,6 +80,7 @@ def normalize_metrics_payload(payload: Any) -> dict[str, Any]:
             ]
     if not normalized:
         raise ValueError("Marketplace response contained no safe metric fields")
+    normalized["metric_scope"] = "performance"
     return normalized
 
 

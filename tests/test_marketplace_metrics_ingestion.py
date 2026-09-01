@@ -24,6 +24,7 @@ def test_normalize_marketplace_metrics_removes_secret_like_fields():
 
     assert normalized["views"] == 120
     assert normalized["installs"] == 8
+    assert normalized["metric_scope"] == "performance"
     assert "api_token" not in normalized
     assert normalized["nested"] == {"active_users": 4}
 
@@ -36,7 +37,7 @@ def test_load_input_accepts_offline_platform_export(tmp_path):
     )
 
     assert load_input(str(export)) == {
-        "pay_sh": {"views": 10, "installs": 2}
+        "pay_sh": {"views": 10, "installs": 2, "metric_scope": "performance"}
     }
 
 
