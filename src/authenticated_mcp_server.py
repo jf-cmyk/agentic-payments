@@ -695,7 +695,7 @@ def create_authenticated_market_data_mcp(
         title="Bid Ask Snapshot",
         description=(
             "Get the latest bid, ask, and spread for one crypto pair or supported "
-            "equity/stock ticker such as AAPL. This read-only live data call uses "
+            "catalog-confirmed equity symbol such as AAPLXUSD for Apple/USD. This read-only live data call uses "
             "daily Blocksize credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,

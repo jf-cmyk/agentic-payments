@@ -2589,7 +2589,7 @@ X402_WELL_KNOWN_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/state/MSOLUSD",
     f"{PUBLIC_BASE_URL}/v1/vwap30m/SOLUSD",
     f"{PUBLIC_BASE_URL}/v1/vwap24h/BTCUSD",
-    f"{PUBLIC_BASE_URL}/v1/bidask/AAPL",
+    f"{PUBLIC_BASE_URL}/v1/bidask/AAPLXUSD",
     f"{PUBLIC_BASE_URL}/v1/fx/EURUSD",
     f"{PUBLIC_BASE_URL}/v1/metal/XAUUSD",
     f"{PUBLIC_BASE_URL}/v1/briefs/market",
@@ -13371,7 +13371,7 @@ async def health_check() -> dict[str, Any]:
             "positioning": "Supported equity tickers are first-class Blocksize symbols.",
             "discovery": "/v1/search?q=AAPL&asset_class=equity",
             "live_endpoint_template": "/v1/bidask/{ticker}",
-            "example_endpoint": "/v1/bidask/AAPL",
+            "example_endpoint": "/v1/bidask/AAPLXUSD",
             "credit_cost": 1,
             "price_usdc": str(settings.pricing.equities),
         },
@@ -13431,7 +13431,7 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": ANTHROPIC_TOOL_COSTS,
-            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
+            "equities": "Search with asset_class=equity, then call get_bid_ask with the returned catalog-confirmed symbol, such as AAPLXUSD for Apple/USD.",
             "submission_docs": CLAUDE_CONNECTOR_URL,
         },
         "cursor_connector": {
@@ -13446,7 +13446,7 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": cursor_auth.beta_tokens_enabled(),
             "tool_surface": "read-only",
             "tool_costs": CURSOR_TOOL_COSTS,
-            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
+            "equities": "Search with asset_class=equity, then call get_bid_ask with the returned catalog-confirmed symbol, such as AAPLXUSD for Apple/USD.",
         },
         "openai_connector": {
             "mcp_url": _openai_mcp_url(),
@@ -13461,7 +13461,7 @@ async def health_check() -> dict[str, Any]:
             "beta_tokens_enabled": openai_auth.beta_tokens_enabled(),
             "tool_surface": "read-only-live-data",
             "tool_costs": OPENAI_TOOL_COSTS,
-            "equities": "Search with asset_class=equity, then call get_bid_ask for supported stock tickers such as AAPL.",
+            "equities": "Search with asset_class=equity, then call get_bid_ask with the returned catalog-confirmed symbol, such as AAPLXUSD for Apple/USD.",
         },
     }
 

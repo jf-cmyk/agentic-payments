@@ -56,7 +56,7 @@ LiveMarketDataService = Annotated[
     Field(
         description=(
             "Live HTTP data service to prepare: vwap for crypto VWAP, bidask for "
-            "crypto pairs or supported equity/stock tickers such as AAPL, state for AMM state price, "
+            "crypto pairs or catalog-confirmed equity symbols such as AAPLXUSD, state for AMM state price, "
             "vwap30m for latest completed 30-minute close, vwap24h for fixed "
             "24-hour VWAP from the stream cache, fx for currency pairs, or metal for metals."
         ),
@@ -78,7 +78,7 @@ AssetClassFilter = Annotated[
     Field(
         description=(
             "Optional asset-class filter. Use all for the full catalog, crypto "
-            "for digital assets, equity/equities for supported stock tickers such as AAPL, "
+            "for digital assets, equity/equities for catalog-confirmed stock symbols such as AAPLXUSD, "
             "fx for currency pairs, or metal for metals."
         ),
     ),

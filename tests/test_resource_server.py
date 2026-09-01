@@ -736,7 +736,7 @@ class TestPublicListingSurfaces:
         assert cursor["tool_surface"] == "read-only"
         assert "get_vwap" in cursor["tool_costs"]
         assert "asset_class=equity" in cursor["equities"]
-        assert data["equities"]["example_endpoint"] == "/v1/bidask/AAPL"
+        assert data["equities"]["example_endpoint"] == "/v1/bidask/AAPLXUSD"
         assert data["links"]["cursor_mcp"].endswith("/cursor/mcp/")
 
     def test_health_exposes_anthropic_connector_metadata(self, test_client):
@@ -1061,7 +1061,7 @@ class TestPublicListingSurfaces:
         x402_data = x402.json()
         assert x402_data["version"] == 1
         assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
-        assert any(resource.endswith("/v1/bidask/AAPL") for resource in x402_data["resources"])
+        assert any(resource.endswith("/v1/bidask/AAPLXUSD") for resource in x402_data["resources"])
 
     @pytest.mark.parametrize(
         "metadata_path",

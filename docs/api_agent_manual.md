@@ -126,10 +126,11 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 
 Supported equity tickers are accessed through the same bid/ask route:
 `GET /v1/bidask/{ticker}`
-*Example:* `/v1/bidask/AAPL`
+*Current Apple/USD example:* `/v1/bidask/AAPLXUSD`
 *Price:* **$0.008 USDC** for supported equity tickers.
 *Discovery:* Use `/v1/search?q=AAPL&asset_class=equity` or MCP `search_pairs`
-before spending credits on a live equity bid/ask snapshot.
+before spending credits on a live equity bid/ask snapshot; use the exact symbol
+returned by discovery because upstream catalog symbols can include quote suffixes.
 
 ### 2.3 Traditional Finance ($0.005 USDC)
 

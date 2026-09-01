@@ -101,7 +101,7 @@ the canonical URL first at `/instruments`, then run one explicitly bounded call:
 ```bash
 python scripts/run_funded_x402_canary.py \
   "/Volumes/YOUR_USB/Test.json" \
-  --url "https://mcp.blocksize.info/v1/bidask/AAPL" \
+  --url "https://mcp.blocksize.info/v1/bidask/AAPLXUSD" \
   --max-usdc "0.008"
 ```
 

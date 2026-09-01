@@ -302,7 +302,7 @@ Tools:
 | `list_instruments` | Instrument List | List supported instruments for one service namespace. |
 | `get_credit_balance` | Credit Balance | Show remaining daily data credits for the signed-in user. |
 | `get_vwap` | Crypto VWAP Snapshot | Fetch read-only crypto VWAP for one pair. |
-| `get_bid_ask` | Bid Ask Snapshot | Fetch read-only bid/ask for one crypto pair or supported equity ticker such as AAPL. |
+| `get_bid_ask` | Bid Ask Snapshot | Fetch read-only bid/ask for one crypto pair or catalog-confirmed equity symbol such as AAPLXUSD. |
 | `get_fx_rate` | FX Snapshot | Fetch read-only FX bid, ask, and mid-rate snapshot. |
 | `get_metal_price` | Metal Snapshot | Fetch read-only metal spot-price snapshot. |
 

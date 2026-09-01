@@ -326,7 +326,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "Accountless paid HTTP market-data access with signed x402 settlement."
         ),
         "endpoint_template": "/v1/{service}/{symbol}",
-        "examples": ["vwap/BTCUSD", "bidask/AAPL", "metal/XAUUSD"],
+        "examples": ["vwap/BTCUSD", "bidask/AAPLXUSD", "metal/XAUUSD"],
         "asset_classes": ["crypto", "equities", "fx", "metals"],
         "keywords": [
             "x402 market data",
@@ -629,9 +629,9 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
             "prompt": "Build the live ETHUSD bid/ask endpoint for an autonomous client.",
         },
         {
-            "label": "Get AAPL bid/ask",
-            "path": "/v1/bidask/AAPL",
-            "prompt": "Check whether AAPL is supported and return the exact paid bid/ask URL.",
+            "label": "Get Apple/USD bid/ask",
+            "path": "/v1/bidask/AAPLXUSD",
+            "prompt": "Use the catalog-confirmed AAPLXUSD symbol for an Apple/USD bid/ask snapshot.",
         },
     ),
     "equities-bidask": (
@@ -641,9 +641,9 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
             "prompt": "Search Blocksize for AAPL equity support before using a paid live-data call.",
         },
         {
-            "label": "Get AAPL bid/ask",
-            "path": "/v1/bidask/AAPL",
-            "prompt": "Build the paid Blocksize equity bid/ask route for AAPL and show the credit cost.",
+            "label": "Get Apple/USD bid/ask",
+            "path": "/v1/bidask/AAPLXUSD",
+            "prompt": "Build the paid Blocksize equity bid/ask route for the catalog-confirmed AAPLXUSD symbol and show the credit cost.",
         },
         {
             "label": "Use equities in a receipt",
