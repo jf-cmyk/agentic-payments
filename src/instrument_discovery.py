@@ -107,12 +107,16 @@ def _match_instrument(
 
     if query_key == symbol_key:
         return 1000, "exact_symbol"
-    if query_key == base_key:
-        return 960, "exact_base"
 
     alias_targets = _alias_targets(intent)
     if symbol_key in alias_targets or base_key in alias_targets:
-        return 940, "alias"
+        # A natural-language alias expresses canonical intent. Prefer its
+        # configured market symbol (for example bitcoin -> BTCUSD) over a
+        # literal long-form catalog base such as BITCOINUSD. This keeps the
+        # cheapest, most familiar conversion path at the top of discovery.
+        return 980, "alias"
+    if query_key == base_key:
+        return 960, "exact_base"
     if any(
         symbol_key.startswith(target) or base_key.startswith(target)
         for target in alias_targets
