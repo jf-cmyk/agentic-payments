@@ -1272,19 +1272,19 @@ def test_configured_clerk_connectors_advertise_only_mounted_oauth_routes(
 
 
 def test_railway_promotes_only_dependency_ready_releases() -> None:
-    railway = tomllib.loads((ROOT / "railway.toml").read_text(encoding="utf-8"))
+    railway = (ROOT / ".railway" / "railway.ts").read_text(encoding="utf-8")
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 
-    assert railway["build"] == {
-        "builder": "RAILPACK",
-        "railpackVersion": "0.38.0",
-    }
+    assert 'builder: "RAILPACK"' in railway
+    assert 'railpackVersion: "0.38.0"' in railway
     assert "--no-emit-project" in requirements
     assert "-e ." not in requirements
     assert "--editable ." not in requirements
-    assert railway["deploy"]["healthcheckPath"] == "/readyz"
-    assert railway["deploy"]["healthcheckTimeout"] >= 60
-    assert railway["deploy"]["restartPolicyType"] == "ON_FAILURE"
+    assert 'healthcheck: "/readyz"' in railway
+    assert "healthcheckTimeout: 180" in railway
+    assert 'restartPolicyType: "ON_FAILURE"' in railway
+    assert 'branch: "main"' in railway
+    assert "commitSha:" not in railway
 
 
 def test_railpack_build_log_audit_requires_the_exact_pinned_version() -> None:

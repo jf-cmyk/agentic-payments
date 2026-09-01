@@ -90,6 +90,7 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
+from src.marketplace_health import collect_listing_health
 from src.observability import (
     UsageEventStore,
     configure_global_store,
@@ -702,8 +703,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_9",
-        "observed_version": "0.6.9 candidate",
+        "release_status": "release_source_v0_6_10",
+        "observed_version": "0.6.10 candidate",
         "audited_at": "2026-08-31",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
@@ -730,6 +731,55 @@ DISTRIBUTION_PLATFORMS = [
         "note": "The listing is merged, but its wrapper repository still carries stale product claims. Identifiable referral traffic is tracked locally.",
     },
 ]
+
+
+def _marketplace_listing_checks_enabled() -> bool:
+    default = "true" if (_hosted_environment() or is_production_environment()) else "false"
+    return _env_enabled("MARKETPLACE_LISTING_CHECKS_ENABLED", default)
+
+
+async def _run_marketplace_listing_health_loop() -> None:
+    """Persist daily public listing reachability without claiming marketplace demand."""
+    initial_delay = max(
+        1.0,
+        float(os.environ.get("MARKETPLACE_LISTING_CHECK_INITIAL_DELAY_SECONDS", "60")),
+    )
+    interval = max(
+        3600.0,
+        float(os.environ.get("MARKETPLACE_LISTING_CHECK_INTERVAL_SECONDS", "86400")),
+    )
+    timeout = min(
+        30.0,
+        max(1.0, float(os.environ.get("MARKETPLACE_LISTING_CHECK_TIMEOUT_SECONDS", "10"))),
+    )
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            snapshots = await collect_listing_health(
+                DISTRIBUTION_PLATFORMS,
+                timeout_seconds=timeout,
+            )
+            if OBSERVABILITY is not None:
+                for snapshot in snapshots:
+                    await asyncio.to_thread(
+                        OBSERVABILITY.record_marketplace_metrics,
+                        platform_id=str(snapshot["platform_id"]),
+                        metrics=dict(snapshot["metrics"]),
+                        source_url=str(snapshot["source_url"]),
+                        status=str(snapshot["status"]),
+                    )
+            healthy = sum(
+                bool(snapshot.get("metrics", {}).get("healthy"))
+                for snapshot in snapshots
+            )
+            logger.info(
+                "Marketplace public listing health checked: %s/%s healthy",
+                healthy,
+                len(snapshots),
+            )
+        except (OSError, ValueError, httpx.HTTPError):
+            logger.exception("Marketplace public listing health check failed")
+        await asyncio.sleep(interval)
 
 
 class _SlashlessMountEndpoint:
@@ -1204,6 +1254,7 @@ async def lifespan(app: FastAPI):
         app.state.rwa_store = RWAObservationStore(rwa_db_path)
     app.state.store_readiness_snapshots = {}
     app.state.store_readiness_task = None
+    app.state.marketplace_listing_task = None
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
@@ -1224,6 +1275,11 @@ async def lifespan(app: FastAPI):
         _run_store_readiness_probe_loop(app),
         name="store-readiness-probe",
     )
+    if _marketplace_listing_checks_enabled():
+        app.state.marketplace_listing_task = asyncio.create_task(
+            _run_marketplace_listing_health_loop(),
+            name="marketplace-listing-health",
+        )
     if app.state.kraken_book_stream is not None:
         await app.state.kraken_book_stream.start()
     if app.state.kraken_spot_stream is not None:
@@ -1249,6 +1305,10 @@ async def lifespan(app: FastAPI):
             app.state.store_readiness_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.store_readiness_task
+        if app.state.marketplace_listing_task is not None:
+            app.state.marketplace_listing_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.marketplace_listing_task
         if app.state.rwa_growth_pilot_task is not None:
             app.state.rwa_growth_pilot_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -9284,6 +9344,9 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
     latest_external_metrics = marketplace_metrics.get("latest_by_platform")
     if not isinstance(latest_external_metrics, dict):
         latest_external_metrics = {}
+    listing_health_by_platform = marketplace_metrics.get("listing_health_by_platform")
+    if not isinstance(listing_health_by_platform, dict):
+        listing_health_by_platform = {}
 
     platforms = []
     total_platform_calls = 0
@@ -9304,6 +9367,7 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
         )
         metrics_env = MARKETPLACE_METRICS_FEEDS.get(platform_id, metrics_env)
         latest_metrics = latest_external_metrics.get(platform_id)
+        latest_listing_health = listing_health_by_platform.get(platform_id)
         external_metrics_configured = bool(metrics_env or latest_metrics)
         external_metrics_state = (
             "ingested"
@@ -9329,6 +9393,12 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
                 "last_metrics_review_date": summary.get("generated_at"),
                 "metrics_api_url": metrics_env or None,
                 "latest_external_metrics": latest_metrics,
+                "latest_listing_health": latest_listing_health,
+                "listing_health_observed": latest_listing_health is not None,
+                "listing_health_note": (
+                    "Public listing reachability only; this does not prove views, installs, "
+                    "hosted calls, users, or revenue."
+                ),
                 "status": (
                     "configured"
                     if external_metrics_configured
@@ -9585,6 +9655,102 @@ def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
         ],
         "launch_gate": "At least 80% selection attribution, known-monitor share below 50%, and 30 non-monitor candidate attempts.",
         "decision_rule": "Run a seven-day controlled cohort and ship only if conversion improves without a payment-integrity guardrail failure.",
+    }
+
+
+def _build_revenue_operating_scorecard(summary: dict[str, Any]) -> dict[str, Any]:
+    """Turn existing evidence into a compact, decision-oriented revenue system."""
+    overview = summary.get("overview") if isinstance(summary.get("overview"), dict) else {}
+    funnel = summary.get("payment_funnel") if isinstance(summary.get("payment_funnel"), dict) else {}
+    growth = summary.get("growth_funnel") if isinstance(summary.get("growth_funnel"), dict) else {}
+    growth_summary = growth.get("summary") if isinstance(growth.get("summary"), dict) else {}
+    resolver = summary.get("resolver_funnel") if isinstance(summary.get("resolver_funnel"), dict) else {}
+    reliability = summary.get("reliability") if isinstance(summary.get("reliability"), dict) else {}
+    economic = summary.get("economic_correlation") if isinstance(summary.get("economic_correlation"), dict) else {}
+    quality = summary.get("request_quality") if isinstance(summary.get("request_quality"), dict) else {}
+    marketplace = summary.get("marketplace_metrics") if isinstance(summary.get("marketplace_metrics"), dict) else {}
+
+    def rate_status(value: Any, target: float) -> str:
+        if value is None:
+            return "collecting_baseline"
+        return "on_track" if float(value) >= target else "needs_improvement"
+
+    revenue = round(float(overview.get("estimated_revenue_usdc") or 0.0), 6)
+    proof_to_settlement = funnel.get("proof_to_settlement_rate")
+    repeat_7d = growth_summary.get("repeat_7d_rate")
+    monitor_share = quality.get("known_monitor_share")
+    unreconciled = int(economic.get("unreconciled_settlements") or 0)
+    charged_failures = int(reliability.get("charged_delivery_failures") or 0)
+    performance_platforms = marketplace.get("performance_platforms")
+    performance_platforms = performance_platforms if isinstance(performance_platforms, list) else []
+    listing_health_platforms = marketplace.get("listing_health_platforms")
+    listing_health_platforms = listing_health_platforms if isinstance(listing_health_platforms, list) else []
+    return {
+        "status": (
+            "guardrail_failure"
+            if unreconciled or charged_failures
+            else "operating"
+            if revenue or proof_to_settlement is not None or repeat_7d is not None
+            else "collecting_baseline"
+        ),
+        "primary_kpis": [
+            {
+                "id": "recognized_revenue_usdc",
+                "name": "Decision-grade recognized revenue",
+                "value": revenue,
+                "unit": "USDC",
+                "target": None,
+                "status": "baseline_collecting",
+                "decision": "Set a growth target only after four comparable weekly observations; do not optimize against wallet inflows or test top-ups.",
+            },
+            {
+                "id": "proof_to_settlement_rate",
+                "name": "Verified purchase reliability",
+                "value": proof_to_settlement,
+                "unit": "rate",
+                "target": 0.9,
+                "status": rate_status(proof_to_settlement, 0.9),
+                "decision": "Fix payment parsing, facilitator, network, or finality failures before increasing paid acquisition.",
+            },
+            {
+                "id": "repeat_7d_rate",
+                "name": "Seven-day repeat usage",
+                "value": repeat_7d,
+                "unit": "rate",
+                "target": 0.25,
+                "status": rate_status(repeat_7d, 0.25),
+                "decision": "Improve recurring workflows and package value when mature users do not return.",
+            },
+        ],
+        "drivers": [
+            {"id": "search_to_resolution_rate", "value": resolver.get("search_to_resolution_rate")},
+            {"id": "resolver_to_delivery_rate", "value": resolver.get("resolver_to_delivery_rate")},
+            {"id": "prompt_to_proof_rate", "value": funnel.get("prompt_to_proof_rate")},
+            {"id": "starter_to_paid_rate", "value": growth_summary.get("starter_to_paid_rate")},
+        ],
+        "guardrails": [
+            {"id": "unreconciled_settlements", "value": unreconciled, "target": 0, "status": "pass" if unreconciled == 0 else "fail"},
+            {"id": "charged_delivery_failures", "value": charged_failures, "target": 0, "status": "pass" if charged_failures == 0 else "fail"},
+            {
+                "id": "known_monitor_share",
+                "value": monitor_share,
+                "target": 0.5,
+                "comparison": "below",
+                "status": "collecting_baseline" if monitor_share is None else "pass" if float(monitor_share) < 0.5 else "fail",
+            },
+        ],
+        "marketplace_measurement": {
+            "performance_platforms": performance_platforms,
+            "listing_health_platforms": listing_health_platforms,
+            "performance_coverage_count": len(performance_platforms),
+            "listing_health_coverage_count": len(listing_health_platforms),
+            "note": "Listing reachability is kept separate from upstream marketplace demand and conversion.",
+        },
+        "definitions": {
+            "primary_kpis": "The three outcomes used to judge monetization, payment reliability, and retained value.",
+            "drivers": "Earlier funnel rates that explain why the primary KPIs move.",
+            "guardrails": "Conditions that must remain safe while conversion and revenue are improved.",
+        },
     }
 
 
@@ -10193,6 +10359,7 @@ async def observability_stats(
             "rows": [],
         }
     content["revenue_reconciliation"] = _build_revenue_reconciliation(content)
+    content["revenue_operating_scorecard"] = _build_revenue_operating_scorecard(content)
     content["conversion_experiment"] = _build_conversion_experiment(content)
     content["operational_alerts"] = _build_operational_alerts(content)
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
@@ -10224,6 +10391,7 @@ async def observability_alerts(
             "window_days": payload.get("window_days"),
             "alerts": payload.get("operational_alerts"),
             "revenue_reconciliation": payload.get("revenue_reconciliation"),
+            "revenue_operating_scorecard": payload.get("revenue_operating_scorecard"),
             "conversion_experiment": payload.get("conversion_experiment"),
             "payment_funnel": payload.get("payment_funnel"),
             "request_quality": payload.get("request_quality"),
@@ -10945,6 +11113,18 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         <div class="scroll"><table id="alert-table"></table></div>
       </section>
 
+      <section class="card section" id="revenue-scorecard">
+        <div class="headline">
+          <div>
+            <h2>Revenue Operating Scorecard</h2>
+            <div class="sub">Three outcomes, their leading drivers, and the payment-integrity guardrails that must stay safe.</div>
+          </div>
+          <div class="summary-strip" id="revenue-guardrails"></div>
+        </div>
+        <div class="scroll"><table id="revenue-scorecard-table"></table></div>
+        <div class="summary-strip" id="revenue-drivers"></div>
+      </section>
+
       <section class="grid two section">
         <div class="card" id="revenue-reconciliation">
           <h2>Revenue Reconciliation</h2>
@@ -11202,6 +11382,28 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         </tr>`).join("") : `<tr><td colspan="4" class="empty">No wallet classifications in this window.</td></tr>`) + `</tbody>`;
     }
 
+    function renderRevenueOperatingScorecard(data) {
+      const scorecard = data.revenue_operating_scorecard || {};
+      const primary = scorecard.primary_kpis || [];
+      const valueFor = row => row.unit === "rate" ? pct(row.value) : row.unit === "USDC" ? money.format(row.value || 0) : text(row.value);
+      const targetFor = row => row.target == null ? "baseline first" : row.unit === "rate" ? pct(row.target) : text(row.target);
+      document.getElementById("revenue-scorecard-table").innerHTML =
+        `<thead><tr><th>Outcome</th><th>Actual</th><th>Target</th><th>Status</th><th>Operating decision</th></tr></thead><tbody>` +
+        (primary.length ? primary.map(row => `<tr>
+          <td><strong>${escapeAttr(row.name || row.id)}</strong></td>
+          <td>${escapeAttr(valueFor(row))}</td>
+          <td>${escapeAttr(targetFor(row))}</td>
+          <td>${rowBadge(String(row.status || "").replaceAll("_", " "))}</td>
+          <td>${escapeAttr(row.decision || "")}</td>
+        </tr>`).join("") : `<tr><td colspan="5" class="empty">Revenue baseline is not available.</td></tr>`) + `</tbody>`;
+      document.getElementById("revenue-drivers").innerHTML = (scorecard.drivers || [])
+        .map(row => summaryItem(String(row.id || "").replaceAll("_", " "), pct(row.value)))
+        .join("");
+      document.getElementById("revenue-guardrails").innerHTML = (scorecard.guardrails || [])
+        .map(row => summaryItem(String(row.id || "").replaceAll("_", " "), `${text(row.value)} · ${text(row.status)}`))
+        .join("");
+    }
+
     function renderResolverFunnel(data) {
       const resolver = data.resolver_funnel || {};
       document.getElementById("resolver-kpis").innerHTML = [
@@ -11406,22 +11608,25 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     function renderPlatformCoverage(data) {
       const platforms = data.external_sources?.platforms || [];
       const table = document.getElementById("platform-coverage");
-      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Owner / Reason</th><th>Release Truth</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
+      table.innerHTML = `<thead><tr><th>Platform</th><th>Local Calls</th><th>External Metrics</th><th>Listing Health</th><th>Owner / Reason</th><th>Release Truth</th><th>Listing</th><th>Notes</th></tr></thead><tbody>` +
         (platforms.length ? platforms.map(platform => {
           const status = platform.external_metrics_configured ? "Ingested" : "Unavailable";
           const badgeClass = platform.external_metrics_configured ? "neutral" : "warn";
           const releaseStatus = text(platform.release_status || "not audited").replaceAll("_", " ");
           const releaseClass = platform.release_status === "verified_live_baseline" ? "neutral" : "warn";
+          const listingHealth = platform.latest_listing_health?.metrics?.healthy;
+          const listingLabel = listingHealth == null ? "Not checked" : listingHealth ? "Healthy" : "Degraded";
           return `<tr>
             <td><strong>${escapeAttr(platform.name)}</strong></td>
             <td>${fmt.format(platform.local_recorded_calls || 0)}</td>
             <td><span class="badge ${badgeClass}">${status}</span></td>
+            <td>${rowBadge(listingLabel)}<div class="metric-note">Reachability only</div></td>
             <td><strong>${escapeAttr(platform.metrics_owner || "Unassigned")}</strong><div class="metric-note">${escapeAttr(platform.external_metrics_reason || "No reason recorded")}</div></td>
             <td><span class="badge ${releaseClass}">${escapeAttr(releaseStatus)}</span><div class="metric-note">${escapeAttr(platform.observed_version || "Version not exposed")} · audited ${escapeAttr(platform.audited_at || "unknown")}</div></td>
             <td><a href="${escapeAttr(platform.listing_url || "")}" title="${escapeAttr(platform.listing_url || "")}" target="_blank" rel="noreferrer">Open listing ↗</a></td>
             <td>${escapeAttr(platform.note || "")}</td>
           </tr>`;
-        }).join("") : `<tr><td colspan="7" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
+        }).join("") : `<tr><td colspan="8" class="empty">No platform inventory configured.</td></tr>`) + `</tbody>`;
     }
 
     function summaryItem(label, value) {
@@ -11703,6 +11908,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       renderRwaPilot(data);
       renderDailyInterpretation(data);
       renderOperatorAlerts(data);
+      renderRevenueOperatingScorecard(data);
       renderRevenueReconciliation(data);
       renderResolverFunnel(data);
       renderProductPerformance(data);

@@ -326,7 +326,7 @@ wheels = [
 
 [[package]]
 name = "blocksize-mcp-x402"
-version = "0.6.9"
+version = "0.6.10"
 source = { editable = "." }
 dependencies = [
     { name = "cachetools" },

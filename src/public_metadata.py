@@ -7,8 +7,9 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.9"
+APP_VERSION = "0.6.10"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.10": "2026-09-01",
     "0.6.9": "2026-08-31",
     "0.6.8": "2026-08-26",
     "0.6.7": "2026-08-26",
