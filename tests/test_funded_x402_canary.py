@@ -15,6 +15,7 @@ from scripts.run_funded_x402_canary import (
     _parse_keypair,
     _read_key_once,
     _select_solana_requirement,
+    _validate_paid_payload,
     _validate_vwap_payload,
     _write_lock_is_open,
 )
@@ -139,3 +140,23 @@ def test_validate_vwap_payload_requires_real_typed_data() -> None:
         _validate_vwap_payload({**payload, "data": {**payload["data"], "vwap": 0}})
     with pytest.raises(CanaryError, match="pair"):
         _validate_vwap_payload({**payload, "data": {**payload["data"], "pair": "ETHUSD"}})
+
+
+def test_validate_paid_payload_supports_other_catalog_services() -> None:
+    payload = {
+        "status": "ok",
+        "data": {
+            "pair": "AAPL",
+            "bid": 226.1,
+            "ask": 226.2,
+            "mid": 226.15,
+            "timestamp": "2026-08-31T12:00:00+00:00",
+            "source": "blocksize",
+        },
+        "meta": {"provider": "Blocksize Capital"},
+    }
+
+    assert (
+        _validate_paid_payload(payload, expected_symbol="AAPL", service="bidask")
+        is payload
+    )

@@ -83,9 +83,30 @@ Feed mapping from the upstream Blocksize documentation:
 
 Free discovery endpoints:
 
+- `GET /instruments` - human-searchable catalog with canonical symbols, readiness,
+  per-call price, and copyable purchase requests
 - `GET /v1/search`, including `GET /v1/search?q=AAPL&asset_class=equity`
 - `GET /v1/instruments/{service}`; use `bidask` for the shared bid/ask namespace
+- `GET /v1/samples/pre-trade` - illustrative pre-trade product output with no
+  payment and no live-data claim
 - `GET /health`
+
+## Official Python x402 buyer
+
+The funded canary uses the official x402 Python client, reads a Solana key file
+once, verifies the exact production host and USDC invoice, enforces a caller-set
+maximum, validates returned market data, and confirms idempotent replay. Discover
+the canonical URL first at `/instruments`, then run one explicitly bounded call:
+
+```bash
+python scripts/run_funded_x402_canary.py \
+  "/Volumes/YOUR_USB/Test.json" \
+  --url "https://mcp.blocksize.info/v1/bidask/AAPL" \
+  --max-usdc "0.008"
+```
+
+On macOS, local key files are rejected unless the caller explicitly supplies
+`--allow-local-key-file`. The command never prints or copies private-key material.
 
 ## Pricing
 

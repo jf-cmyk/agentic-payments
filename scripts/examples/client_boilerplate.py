@@ -1,110 +1,66 @@
-"""
-🪙 Blocksize x402 Client Boilerplate
-A minimal, copy-pasteable example of how to pay for and retrieve data.
+#!/usr/bin/env python3
+"""Discover a canonical Blocksize purchase URL without handling a private key.
 
-Usage:
-    export AGENT_PRIVATE_KEY="your_solana_private_key_base64"
-    python client_boilerplate.py
+Use ``scripts/run_funded_x402_canary.py`` for the bounded official x402 payment
+flow. Keeping discovery separate ensures a key is not read until the exact
+instrument, service, destination, and maximum price are known.
 """
 
-import os
-import json
-import base64
+from __future__ import annotations
+
+import argparse
 import asyncio
+import json
+
 import httpx
-from solders.keypair import Keypair # type: ignore
-from solana.rpc.async_api import AsyncClient # type: ignore
 
-# CONFIG
+
 BASE_URL = "https://mcp.blocksize.info"
-SOLANA_RPC = "https://api.mainnet-beta.solana.com" # Use Helius for production
 
-def normalise_payment_requirements(decoded):
-    if isinstance(decoded, list):
-        return decoded
-    if not isinstance(decoded, dict) or not isinstance(decoded.get("accepts"), list):
-        return []
-    resource = decoded.get("resource") if isinstance(decoded.get("resource"), dict) else {}
-    requirements = []
-    for accept in decoded["accepts"]:
-        if not isinstance(accept, dict):
-            continue
-        requirements.append({
-            "scheme": accept.get("scheme", "exact"),
-            "network": accept.get("network", ""),
-            "maxAmountRequired": str(accept.get("maxAmountRequired") or accept.get("amount") or "0"),
-            "resource": accept.get("payTo", ""),
-            "description": resource.get("description", "Blocksize Capital institutional market data"),
-            "mimeType": resource.get("mimeType", "application/json"),
-            "payTo": accept.get("payTo", ""),
-            "maxTimeoutSeconds": accept.get("maxTimeoutSeconds", 60),
-            "asset": accept.get("asset", ""),
-            "extra": accept.get("extra") if isinstance(accept.get("extra"), dict) else {},
-        })
-    return requirements
+async def discover(query: str, asset_class: str) -> dict[str, object]:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+        response = await client.get(
+            f"{BASE_URL}/v1/search",
+            params={"q": query, "asset_class": asset_class, "limit": 10},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return {
+        "query": query,
+        "total": payload.get("total", payload.get("total_matches", 0)),
+        "results": [
+            {
+                key: row.get(key)
+                for key in (
+                    "canonical_symbol",
+                    "asset_class",
+                    "recommended_service",
+                    "readiness",
+                    "price_usdc",
+                    "purchase_url",
+                    "copy_request",
+                )
+            }
+            for row in payload.get("pairs", [])
+        ],
+        "next_step": (
+            "After reviewing the exact result, run scripts/run_funded_x402_canary.py "
+            "with --url, --max-usdc, and an absolute removable-volume key path."
+        ),
+    }
 
 
-async def get_data_autonomously(endpoint: str):
-    print("This abbreviated transfer boilerplate is disabled because it does not construct an x402 v2 authorization.")
-    print("Use scripts/run_funded_x402_canary.py for the maintained official-client implementation.")
-    return
-    # 1. Load Identity
-    try:
-        pk_bytes = base64.b64decode(os.getenv("AGENT_PRIVATE_KEY", ""))
-        Keypair.from_bytes(pk_bytes)
-    except Exception:
-        print("❌ Error: Please set AGENT_PRIVATE_KEY environment variable.")
-        return
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Resolve a Blocksize instrument for free")
+    parser.add_argument("query", help="Ticker or natural-language instrument name")
+    parser.add_argument(
+        "--asset-class",
+        default="all",
+        choices=("all", "crypto", "equity", "equities", "fx", "metal"),
+    )
+    args = parser.parse_args()
+    print(json.dumps(asyncio.run(discover(args.query, args.asset_class)), indent=2))
 
-    async with httpx.AsyncClient() as client:
-        # 2. Initial Request
-        url = f"{BASE_URL}{endpoint}"
-        print(f"[*] Requesting: {url}")
-        res = await client.get(url)
-
-        if res.status_code == 200:
-            print("✅ Data retrieved for free!")
-            print(json.dumps(res.json(), indent=2))
-            return
-
-        if res.status_code == 402:
-            print("💰 Payment Required Intercepted.")
-            
-            # 3. Parse Payment Requirements
-            req_header = res.headers.get("PAYMENT-REQUIRED")
-            if not req_header:
-                print("❌ No payment instructions found.")
-                return
-            
-            reqs = normalise_payment_requirements(json.loads(base64.b64decode(req_header)))
-            # Find Solana requirement
-            sol_req = next((r for r in reqs if "solana" in str(r.get("network")).lower()), None)
-            
-            if not sol_req:
-                print("❌ This server doesn't accept Solana payments.")
-                return
-
-            pay_to = sol_req["payTo"]
-            amount_usdc = int(sol_req["maxAmountRequired"]) / 1_000_000
-            print(f"💸 Paying {amount_usdc} USDC to {pay_to}...")
-
-            # 4. Execute Native Transfer (Note: Simplified for SOL native here)
-            # In production, use spl-token transfer for USDC.
-            AsyncClient(SOLANA_RPC)
-            # (Payment logic abbreviated for boilerplate clarity)
-            # tx_hash = "PAYMENT_TX_HASH_GOES_HERE"
-            
-            print("⚠️ Boilerplate Note: Implement your standard Solana transfer here.")
-            print("⚠️ Once confirmed, re-submit with 'PAYMENT-SIGNATURE' header.")
-            
-            # 5. Proof Transmission
-            # proof_header = base64.b64encode(json.dumps({
-            #     "proof": tx_hash,
-            #     "network": sol_req["network"],
-            # }).encode()).decode()
-            # final_res = await client.get(url, headers={"PAYMENT-SIGNATURE": proof_header})
-            # print(final_res.json())
 
 if __name__ == "__main__":
-    # Example: Fetch BTC VWAP
-    asyncio.run(get_data_autonomously("/v1/vwap/BTCUSD"))
+    main()
