@@ -2991,14 +2991,15 @@ class EVMPoolStateAdapter:
                     self._rpc_last_call = loop.time()
                     try:
                         return await self._json_rpc(url, method, params), source
-                    except ValueError as exc:
+                    except (ValueError, httpx.HTTPError) as exc:
                         message = str(exc)
+                        transport_error = isinstance(exc, httpx.HTTPError)
                 transient = any(
                     marker in message.lower()
                     for marker in ("429", "rate limit", "too many requests", "timeout")
                 )
                 errors.append(f"{source}: {message}")
-                if not transient or attempt + 1 >= retry_attempts:
+                if transport_error or not transient or attempt + 1 >= retry_attempts:
                     break
                 await asyncio.sleep(min(4.0, 0.5 * 2**attempt))
         raise RWAAdapterBlockedError(

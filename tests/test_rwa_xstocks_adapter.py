@@ -77,6 +77,32 @@ def test_evm_pool_adapter_uses_configured_rpc_fallbacks_before_public(monkeypatc
     ]
 
 
+@pytest.mark.asyncio
+async def test_evm_pool_adapter_falls_back_after_transport_error(monkeypatch) -> None:
+    adapter = EVMPoolStateAdapter(venue_id="uniswap_v3_v4")
+    candidates = [
+        ("env:EVM_RPC_ETHEREUM_URL", "https://unavailable.example"),
+        ("public_fallback:https://working.example", "https://working.example"),
+    ]
+    monkeypatch.setattr(adapter, "_rpc_candidates", lambda chain: candidates)
+    calls: list[str] = []
+
+    async def json_rpc(rpc_url: str, method: str, params: list[object]) -> str:
+        calls.append(rpc_url)
+        if rpc_url == "https://unavailable.example":
+            request = httpx.Request("POST", rpc_url)
+            raise httpx.ConnectError("connection failed", request=request)
+        return "0x123"
+
+    monkeypatch.setattr(adapter, "_json_rpc", json_rpc)
+
+    result, source = await adapter._call_first_rpc("ethereum", "eth_blockNumber", [])
+
+    assert result == "0x123"
+    assert source == "public_fallback:https://working.example"
+    assert calls == ["https://unavailable.example", "https://working.example"]
+
+
 def _swap_log(block_number: int, log_index: int = 0) -> dict[str, str | list[str]]:
     return {
         "blockNumber": hex(block_number),

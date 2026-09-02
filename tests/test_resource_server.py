@@ -4329,8 +4329,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_11"
-        assert github["observed_version"] == "0.6.11 candidate"
+        assert github["release_status"] == "release_source_v0_6_12"
+        assert github["observed_version"] == "0.6.12 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
