@@ -89,19 +89,23 @@ Free discovery endpoints:
 - `GET /v1/instruments/{service}`; use `bidask` for the shared bid/ask namespace
 - `GET /v1/samples/pre-trade` - illustrative pre-trade product output with no
   payment and no live-data claim
+- `GET /v1/samples/macro-snapshot` - illustrative multi-asset macro package
+  output with an attributed purchase handoff and no live-data claim
 - `GET /health`
 
 ## Official Python x402 buyer
 
-The funded canary uses the official x402 Python client, reads a Solana key file
-once, verifies the exact production host and USDC invoice, enforces a caller-set
-maximum, validates returned market data, and confirms idempotent replay. Discover
-the canonical URL first at `/instruments`, then run one explicitly bounded call:
+Base and Solana buyer examples are maintained in `examples/x402/`. The Base
+Python and TypeScript clients filter to Base mainnet USDC and enforce an explicit
+spend cap. The Solana canary reads its key file once and validates the network,
+mint, recipient, amount, returned market-data payload, and idempotent replay.
+Discover the canonical URL first at `/instruments`, then run one explicitly
+bounded Solana call:
 
 ```bash
 python scripts/run_funded_x402_canary.py \
   "/Volumes/YOUR_USB/Test.json" \
-  --url "https://mcp.blocksize.info/v1/bidask/AAPLXUSD" \
+  --url "https://mcp.blocksize.info/v1/bidask/AAPL" \
   --max-usdc "0.008"
 ```
 

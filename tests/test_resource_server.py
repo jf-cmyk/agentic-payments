@@ -117,6 +117,32 @@ def test_pre_trade_sample_shows_value_without_claiming_live_data(test_client):
     assert "PAYMENT-REQUIRED" not in response.headers
 
 
+def test_macro_snapshot_sample_previews_value_and_attributed_purchase(test_client):
+    response = test_client.get("/v1/samples/macro-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sample"] is True
+    assert payload["live_data"] is False
+    assert payload["product"] == "multi_asset_macro_snapshot"
+    assert payload["price_usdc"] == "1.00"
+    assert len(payload["example_response"]["assets"]) == 3
+    assert "selection_source=package_preview" in payload["paid_endpoint"]
+    assert "PAYMENT-REQUIRED" not in response.headers
+
+
+def test_macro_package_catalog_links_to_free_sample(test_client):
+    response = test_client.get("/data-packages.json")
+
+    assert response.status_code == 200
+    package = next(
+        item
+        for item in response.json()["packages"]
+        if item["id"] == "multi-asset-macro-snapshot"
+    )
+    assert package["sample_url"].endswith("/v1/samples/macro-snapshot")
+
+
 def test_unsupported_paid_symbol_fails_before_payment(test_client):
     seeded_at = resource_server.time.monotonic()
     app.state.instrument_catalog_cache["vwap"] = (
@@ -1325,6 +1351,59 @@ class TestPaymentGate:
         assert handoff["retry_method"] == "GET"
         assert handoff["retry_url"] == resource_url
         assert handoff["quickstart"].endswith("/quickstart/first-price")
+
+    def test_invalid_payment_returns_fresh_machine_recoverable_challenge(
+        self,
+        test_client,
+    ):
+        reason = "PAYMENT-SIGNATURE payload is not base64 JSON"
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={"valid": False, "reason": reason},
+        ):
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": "malformed"},
+            )
+
+        assert response.status_code == 402
+        payload = response.json()
+        challenge = json.loads(base64.b64decode(response.headers["PAYMENT-REQUIRED"]))
+        assert payload["error"] == "Payment Invalid"
+        assert payload["error_code"] == "PAYMENT_SIGNATURE_NOT_BASE64"
+        assert payload["x402Version"] == 2
+        assert payload["resource"] == challenge["resource"]
+        assert payload["accepts"] == challenge["accepts"]
+        assert payload["purchase_handoff"]["retry_url"] == payload["resource"]["url"]
+        assert "fresh challenge" in payload["message"]
+
+    def test_paid_packages_have_complete_selection_attribution(
+        self,
+        test_client,
+        observability_store,
+    ):
+        direct = test_client.post(
+            "/v1/snapshots/macro",
+            json={"universe": ["BTCUSD", "EURUSD", "XAUUSD"]},
+        )
+        preview = test_client.post(
+            "/v1/snapshots/macro?selection_source=package_preview",
+            json={"universe": ["BTCUSD", "EURUSD", "XAUUSD"]},
+        )
+
+        assert direct.status_code == 402
+        assert preview.status_code == 402
+        events = [
+            event
+            for event in observability_store.recent_events(limit=20)
+            if event["event"] == "payment_required"
+            and event["endpoint"] == "/v1/snapshots/macro"
+        ]
+        assert {event["metadata"]["selection_source"] for event in events} == {
+            "direct_http",
+            "package_preview",
+        }
 
     def test_unusable_solana_rail_is_not_advertised(self, test_client, monkeypatch):
         monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
@@ -4329,8 +4408,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_12"
-        assert github["observed_version"] == "0.6.12 candidate"
+        assert github["release_status"] == "release_source_v0_6_13"
+        assert github["observed_version"] == "0.6.13 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]

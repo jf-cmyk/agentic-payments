@@ -96,6 +96,7 @@ from src.marketplace_performance import (
     performance_collection_configured,
 )
 from src.observability import (
+    PRODUCT_ROUTE_IDS,
     UsageEventStore,
     configure_global_store,
     fingerprint,
@@ -379,6 +380,7 @@ SELECTION_SOURCE_VALUES = {
     "authenticated_resolver",
     "published_example_path",
     "direct_http",
+    "package_preview",
 }
 
 
@@ -725,8 +727,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_12",
-        "observed_version": "0.6.12 candidate",
+        "release_status": "release_source_v0_6_13",
+        "observed_version": "0.6.13 candidate",
         "audited_at": "2026-09-02",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
@@ -1652,7 +1654,7 @@ def _request_attribution_metadata(request: Request) -> dict[str, str]:
             and (key != "selection_source" or value in SELECTION_SOURCE_VALUES)
         ):
             metadata[key] = value
-    if _is_live_price_delivery_path(request.url.path) and "selection_source" not in metadata:
+    if _is_commercial_data_path(request.url.path) and "selection_source" not in metadata:
         metadata["selection_source"] = "direct_http"
     return metadata
 
@@ -1710,6 +1712,15 @@ def _is_live_price_delivery_path(path: str) -> bool:
             "/v1/vwap30m/",
             "/v1/vwap24h/",
         )
+    )
+
+
+def _is_commercial_data_path(path: str) -> bool:
+    """Identify every public route whose demand belongs in the revenue funnel."""
+    return (
+        _is_live_price_delivery_path(path)
+        or path.startswith("/v1/batch")
+        or path in PRODUCT_ROUTE_IDS
     )
 
 
@@ -2947,6 +2958,53 @@ def _x402_payment_required(
 
 def _encode_payment_required(payment_required: dict[str, Any]) -> str:
     return base64.b64encode(json.dumps(payment_required).encode()).decode()
+
+
+def _x402_purchase_handoff(
+    request: Request,
+    payment_required: dict[str, Any],
+) -> dict[str, Any]:
+    """Return one machine-readable retry contract for initial and failed payments."""
+    return {
+        "protocol": "x402 v2",
+        "challenge_header": "PAYMENT-REQUIRED",
+        "payment_header": "PAYMENT-SIGNATURE",
+        "retry_method": request.method.upper(),
+        "retry_url": payment_required["resource"]["url"],
+        "steps": [
+            "Decode or read this x402 v2 challenge.",
+            "Select exactly one requirement from accepts for a supported wallet network.",
+            "Use an official x402 client to sign that exact requirement.",
+            "Retry the same method and URL with the resulting PAYMENT-SIGNATURE header.",
+        ],
+        "recovery": {
+            "invalid_or_expired_signature": (
+                "Fetch a fresh challenge and rebuild the payment; do not edit or reuse "
+                "a bound signature."
+            ),
+            "unsupported_network": "Select another advertised requirement from accepts.",
+            "safe_retry": (
+                "Retry only the same method, URL, and request body represented by the "
+                "signed challenge."
+            ),
+        },
+        "quickstart": FIRST_PRICE_QUICKSTART_URL,
+        "agent_manual": AGENT_MANUAL_URL,
+    }
+
+
+def _payment_failure_code(reason: str) -> str:
+    """Map facilitator/parser prose to a stable client recovery code."""
+    normalized = reason.lower()
+    if "base64" in normalized:
+        return "PAYMENT_SIGNATURE_NOT_BASE64"
+    if "json" in normalized:
+        return "PAYMENT_SIGNATURE_NOT_JSON"
+    if "network" in normalized or "requirement" in normalized:
+        return "PAYMENT_REQUIREMENT_MISMATCH"
+    if "signature" in normalized or "bound x402" in normalized:
+        return "PAYMENT_SIGNATURE_INVALID"
+    return "PAYMENT_VERIFICATION_FAILED"
 
 
 def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
@@ -5380,26 +5438,10 @@ async def x402_payment_middleware(request: Request, call_next):
                         "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
                     },
                     "networks": accepted_networks,
-                    "purchase_handoff": {
-                        "protocol": "x402 v2",
-                        "challenge_header": "PAYMENT-REQUIRED",
-                        "payment_header": "PAYMENT-SIGNATURE",
-                        "retry_method": request.method.upper(),
-                        "retry_url": payment_required["resource"]["url"],
-                        "steps": [
-                            "Decode or read this x402 v2 challenge.",
-                            "Select exactly one requirement from accepts for a supported wallet network.",
-                            "Use an official x402 client to sign that exact requirement.",
-                            "Retry the same method and URL with the resulting PAYMENT-SIGNATURE header.",
-                        ],
-                        "recovery": {
-                            "invalid_or_expired_signature": "Fetch a fresh challenge and rebuild the payment; do not edit or reuse a bound signature.",
-                            "unsupported_network": "Select another advertised requirement from accepts.",
-                            "safe_retry": "Retry only the same method, URL, and request body represented by the signed challenge.",
-                        },
-                        "quickstart": FIRST_PRICE_QUICKSTART_URL,
-                        "agent_manual": AGENT_MANUAL_URL,
-                    },
+                    "purchase_handoff": _x402_purchase_handoff(
+                        request,
+                        payment_required,
+                    ),
                     "legacy_requirements": payment_reqs,
                 },
                 headers={
@@ -5474,22 +5516,45 @@ async def x402_payment_middleware(request: Request, call_next):
                 "Payment facilitator is not configured safely",
                 "Payment ledger is unavailable",
             }
+            if unavailable:
+                return _apply_x402_cors_headers(
+                    request,
+                    JSONResponse(
+                        status_code=502,
+                        content={
+                            "error": "Payment Verification Unavailable",
+                            "message": "Payment verification is temporarily unavailable.",
+                            "details": reason,
+                        },
+                    ),
+                )
+
+            # A malformed, mismatched, or expired signature is recoverable. Return
+            # a freshly bound challenge so an agent can rebuild the authorization
+            # without guessing, resubmitting a transaction hash, or changing inputs.
+            retry_required = _x402_payment_required(request, payment_reqs)
             return _apply_x402_cors_headers(
                 request,
                 JSONResponse(
-                    status_code=502 if unavailable else 402,
+                    status_code=402,
+                    headers={
+                        "PAYMENT-REQUIRED": _encode_payment_required(retry_required),
+                    },
                     content={
-                        "error": (
-                            "Payment Verification Unavailable"
-                            if unavailable
-                            else "Payment Invalid"
-                        ),
+                        **retry_required,
+                        "error": "Payment Invalid",
+                        "error_code": _payment_failure_code(reason),
                         "message": (
-                            "Payment verification is temporarily unavailable."
-                            if unavailable
-                            else "Payment verification failed."
+                            "Payment verification failed. Fetch and sign this fresh "
+                            "challenge, then retry the identical request."
                         ),
                         "details": reason,
+                        "price_usdc": str(price),
+                        "purchase_handoff": _x402_purchase_handoff(
+                            request,
+                            retry_required,
+                        ),
+                        "legacy_requirements": payment_reqs,
                     },
                 ),
             )
@@ -6700,6 +6765,69 @@ async def pre_trade_sample() -> dict[str, Any]:
         "limitations": [
             "Sample values are synthetic and intentionally not timestamped as live.",
             "The paid result is a read-only data-quality guardrail and never executes a trade.",
+        ],
+    }
+
+
+@app.get("/v1/samples/macro-snapshot")
+async def macro_snapshot_sample() -> dict[str, Any]:
+    """Return a free, clearly labeled preview of the paid macro package."""
+    paid_path = "/v1/snapshots/macro"
+    paid_url = (
+        f"{PUBLIC_BASE_URL}{paid_path}"
+        "?selection_source=package_preview"
+        "&utm_source=blocksize&utm_medium=product_sample"
+        "&utm_campaign=macro_snapshot"
+    )
+    return {
+        "status": "ok",
+        "sample": True,
+        "live_data": False,
+        "product": "multi_asset_macro_snapshot",
+        "purpose": (
+            "Preview the response contract and cross-asset context before an agent "
+            "pays. Values below are illustrative and must not be used for a trade."
+        ),
+        "paid_endpoint": paid_url,
+        "price_usdc": str(ROUTE_PRICING[paid_path]),
+        "example_request": {
+            "universe": ["BTCUSD", "EURUSD", "XAUUSD"],
+        },
+        "example_response": {
+            "assets": [
+                {
+                    "symbol": "BTCUSD",
+                    "asset_class": "crypto",
+                    "service": "vwap",
+                    "value": 65000.0,
+                },
+                {
+                    "symbol": "EURUSD",
+                    "asset_class": "fx",
+                    "service": "fx",
+                    "value": 1.08,
+                },
+                {
+                    "symbol": "XAUUSD",
+                    "asset_class": "metals",
+                    "service": "metal",
+                    "value": 2350.0,
+                },
+            ],
+            "market_regime": "mixed",
+            "brief": (
+                "Illustrative cross-asset context combines crypto, FX, and metals "
+                "in one provenance-aware response."
+            ),
+            "provenance": {
+                "receipt_id": "rcpt_example_not_live",
+                "request_hash": "illustrative",
+                "response_hash": "illustrative",
+            },
+        },
+        "limitations": [
+            "Sample values are synthetic and intentionally not timestamped as live.",
+            "The paid result returns read-only market context and never executes a trade.",
         ],
     }
 
