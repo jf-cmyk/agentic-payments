@@ -56,6 +56,17 @@ idempotent replay. Legacy examples that submitted a standalone transfer hash
 are disabled because that hash is not an x402 authorization and could transfer
 funds without unlocking data.
 
+Runnable, spend-capped buyer examples are published in `examples/x402/`:
+
+- `buy_with_base.py` uses the official Python client for Base mainnet USDC.
+- `typescript/buy-with-base.ts` uses the official TypeScript fetch client for Base.
+- `scripts/run_funded_x402_canary.py` remains the hardened Solana reference.
+
+Each example filters the challenge to the expected network and USDC asset and
+refuses an advertised amount above its configured cap. A rejected or expired
+signature should be rebuilt from the fresh `PAYMENT-REQUIRED` challenge returned
+by Blocksize.
+
 ## Verify the result
 
 A successful response should include the instrument, price/VWAP, currency, source timestamp, provider context, and citation or methodology metadata. Do not treat discovery output as a live price.

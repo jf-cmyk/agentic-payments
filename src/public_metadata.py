@@ -7,10 +7,11 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.12"
+APP_VERSION = "0.6.13"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
-    "0.6.11": "2026-09-02",
+    "0.6.13": "2026-09-02",
     "0.6.12": "2026-09-02",
+    "0.6.11": "2026-09-02",
     "0.6.10": "2026-09-01",
     "0.6.9": "2026-08-31",
     "0.6.8": "2026-08-26",
@@ -428,6 +429,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
         "credit_cost": "25",
         "price_usdc_min": "1.00",
         "price_usdc_max": "2.50",
+        "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/macro-snapshot",
     },
     {
         "id": "agent-data-provenance",
