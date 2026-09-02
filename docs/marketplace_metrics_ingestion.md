@@ -30,6 +30,11 @@ Set `SMITHERY_QUALIFIED_NAME` and store the Smithery API credential as
 aggregate invocation, success, failure, and tool counts. It does not store prompts,
 arguments, responses, credentials, or invocation payloads.
 
+When those two values are present in the service environment, production performs
+this collection automatically once per day. The credential is sent only to
+`https://api.smithery.ai`; the runtime-log page size is capped at Smithery's
+documented maximum of 100 invocations.
+
 ```sh
 SMITHERY_QUALIFIED_NAME='owner/server-name' \
 python3 scripts/ingest_marketplace_metrics.py \
@@ -41,10 +46,12 @@ Remove `--dry-run` after validating the shape. The production ingest also needs
 
 ## Generic feeds and Pay.sh exports
 
-`MARKETPLACE_METRICS_FEEDS_JSON` maps a platform id to an authorized JSON endpoint.
+`MARKETPLACE_METRICS_FEEDS_JSON` maps a platform id to a reviewed HTTPS JSON endpoint.
 `MARKETPLACE_METRICS_TOKEN_ENVS_JSON` maps that id to the name of the environment
-variable holding its bearer token. No public Pay.sh marketplace analytics API is
-assumed; use an authorized JSON feed or offline export when one is available.
+variable holding its bearer token for the explicit operator-run collector. The
+production background collector never sends credentials to generic feed URLs. No
+public Pay.sh marketplace analytics API is assumed; use a credential-free reviewed
+JSON feed or an offline export when one is available.
 
 ```sh
 MARKETPLACE_METRICS_FEEDS_JSON='{"pay_sh":"https://example.invalid/metrics"}'
@@ -57,10 +64,16 @@ must map platform ids to metric objects, optionally below a `platforms` key.
 
 ## Operating checks
 
-Run authorized performance-feed ingestion daily. A non-zero exit means a configured source or ingest failed. The command
-prints platform ids, safe metric keys, and error classes only. After ingestion,
+Configured safe feeds are ingested daily by the production process. Use the CLI for
+offline exports or explicit authenticated custom feeds. A non-zero exit means a
+configured source or ingest failed. The command prints platform ids, safe metric
+keys, and error classes only. After ingestion,
 confirm the marketplace row in `/internal/observability` has a recent snapshot while
 first-party calls remain separately attributed.
+
+Collection failures are stored as `metric_scope=performance_status`. They stay
+visible to operators but do not count toward `performance_platforms`, so an outage
+or missing credential cannot masquerade as marketplace demand coverage.
 
 Until platform API credentials or reviewed exports are configured, the service will
 honestly report public listing health and first-party referral activity while leaving

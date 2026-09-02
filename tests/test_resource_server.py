@@ -1161,9 +1161,29 @@ class TestPaymentGate:
         assert response.json()["price_usdc"] == str(settings.pricing.equities)
 
     def test_unsupported_methods_are_not_payment_challenged(self, test_client):
-        response = test_client.post("/v1/vwap/btc-usd")
+        response = test_client.put("/v1/vwap/btc-usd")
         assert response.status_code == 405
         assert "PAYMENT-REQUIRED" not in response.headers
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/vwap/BTCUSD",
+            "/v1/bidask/AAPL",
+            "/v1/state/MSOLUSD",
+            "/v1/vwap30m/BTCUSD",
+            "/v1/vwap24h/BTCUSD",
+            "/v1/fx/EURUSD",
+            "/v1/metal/XAUUSD",
+        ],
+    )
+    def test_read_only_post_compatibility_reaches_payment_offer(self, test_client, path):
+        response = test_client.post(path)
+
+        assert response.status_code == 402
+        assert response.json()["purchase_handoff"]["retry_method"] == "POST"
+        challenge = json.loads(base64.b64decode(response.headers["PAYMENT-REQUIRED"]))
+        assert challenge["extensions"]["bazaar"]["info"]["input"]["method"] == "POST"
 
     @pytest.mark.parametrize(
         "path",
@@ -1299,6 +1319,12 @@ class TestPaymentGate:
             "type",
             "method",
         ]
+        handoff = response.json()["purchase_handoff"]
+        assert handoff["protocol"] == "x402 v2"
+        assert handoff["payment_header"] == "PAYMENT-SIGNATURE"
+        assert handoff["retry_method"] == "GET"
+        assert handoff["retry_url"] == resource_url
+        assert handoff["quickstart"].endswith("/quickstart/first-price")
 
     def test_unusable_solana_rail_is_not_advertised(self, test_client, monkeypatch):
         monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
@@ -4303,8 +4329,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_10"
-        assert github["observed_version"] == "0.6.10 candidate"
+        assert github["release_status"] == "release_source_v0_6_11"
+        assert github["observed_version"] == "0.6.11 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
@@ -4407,6 +4433,43 @@ class TestObservabilityDashboard:
             "listing_health_coverage_count": 1,
             "note": "Listing reachability is kept separate from upstream marketplace demand and conversion.",
         }
+
+    def test_failed_performance_collection_is_visible_but_not_counted_as_metrics(
+        self,
+        observability_store,
+        test_client,
+    ):
+        ingest = test_client.post(
+            "/internal/observability/marketplace-metrics",
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+            json={
+                "platform_id": "smithery",
+                "status": "unavailable",
+                "metrics": {
+                    "metric_scope": "performance_status",
+                    "configured": True,
+                    "available": False,
+                    "error_type": "HTTPStatusError",
+                },
+            },
+        )
+        assert ingest.status_code == 200
+
+        data = test_client.get(
+            "/internal/observability/stats?days=1",
+            headers={"Authorization": f"Bearer {OBSERVABILITY_TEST_TOKEN}"},
+        ).json()
+
+        assert data["marketplace_metrics"]["platforms_configured"] == []
+        assert data["marketplace_metrics"]["performance_status_by_platform"]["smithery"]["status"] == "unavailable"
+        smithery = next(
+            platform
+            for platform in data["external_sources"]["platforms"]
+            if platform["id"] == "smithery"
+        )
+        assert smithery["external_metrics_configured"] is False
+        assert smithery["performance_collection_configured"] is True
+        assert smithery["external_metrics_state"] == "configured_unavailable"
 
     def test_revenue_operating_scorecard_has_outcomes_drivers_and_guardrails(
         self,
@@ -6790,4 +6853,27 @@ class TestDataEndpoints:
         assert data["meta"]["asset_class"] == "equity"
         assert data["meta"]["equity_ticker"] == "AAPL"
         assert data["meta"]["route_family"] == "shared_bidask"
+        mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")
+
+    def test_bidask_equity_post_compatibility_delivers_after_payment(self, test_client):
+        mock_bidask = BidAskData(
+            pair="AAPL",
+            bid=181.4,
+            ask=181.6,
+            spread=0.2,
+            spread_pct=0.1103,
+            timestamp=datetime(2026, 4, 19, 12, 0, tzinfo=timezone.utc),
+        )
+        mock_client = AsyncMock()
+        mock_client.get_bidask_snapshot = AsyncMock(return_value=mock_bidask)
+        app.state.blocksize = mock_client
+
+        response = test_client.post(
+            "/v1/bidask/AAPL",
+            headers={"PAYMENT-SIGNATURE": "mock_sig"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["meta"]["asset_class"] == "equity"
+        assert "PAYMENT-RESPONSE" in response.headers
         mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")

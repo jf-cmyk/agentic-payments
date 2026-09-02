@@ -91,7 +91,8 @@ def audit(base_url: str) -> dict[str, Any]:
                 ),
             },
         )
-        invalid_method = client.post(f"{base}/v1/vwap/BTC-USD", json={})
+        post_compatibility = client.post(f"{base}/v1/vwap/BTC-USD")
+        invalid_method = client.put(f"{base}/v1/vwap/BTC-USD", json={})
         private_probes = {
             path: client.get(f"{base}{path}").status_code
             for path in ("/.env", "/.git/config")
@@ -131,6 +132,11 @@ def audit(base_url: str) -> dict[str, Any]:
         },
         "invalid_method_status": invalid_method.status_code,
         "invalid_method_rejected_before_payment": invalid_method.status_code == 405,
+        "read_only_post_compatibility": {
+            "http_status": post_compatibility.status_code,
+            "payment_prompted": post_compatibility.status_code == 402
+            and bool(post_compatibility.headers.get("payment-required")),
+        },
         "private_file_probes": private_probes,
         "private_files_not_exposed": all(status == 404 for status in private_probes.values()),
     }
@@ -147,6 +153,7 @@ def main() -> None:
         and result["preflight"]["allows_origin"]
         and result["preflight"]["allows_required_headers"]
         and result["invalid_method_rejected_before_payment"]
+        and result["read_only_post_compatibility"]["payment_prompted"]
         and result["private_files_not_exposed"]
     )
     print(json.dumps(result, indent=2, sort_keys=True))

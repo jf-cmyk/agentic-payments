@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
@@ -340,13 +340,21 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
     }
     item = catalog[product]
+    attribution = urlencode(
+        {
+            "selection_source": "public_mcp_resolver",
+            "utm_source": "public_mcp",
+            "utm_medium": "agent_discovery",
+            "utm_campaign": "workflow_handoff",
+        }
+    )
     return json.dumps(
         {
             "status": "ok",
             "product": product,
             "request": {
                 "method": "POST",
-                "url": f"{PUBLIC_BASE_URL}{item['path']}",
+                "url": f"{PUBLIC_BASE_URL}{item['path']}?{attribution}",
                 "example_body": item["example_body"],
             },
             "readiness_check": {
@@ -386,6 +394,13 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
                     "challenge. Starter credits are available only through an "
                     "authenticated connector, not caller-selected HTTP identity headers."
                 ),
+            },
+            "repeat_usage": {
+                "preflight_each_run": True,
+                "preflight_url": f"{PUBLIC_BASE_URL}/v1/capabilities/check",
+                "reuse_exact_request_only_after_approval": True,
+                "spend_control": "Set an explicit per-call or workflow budget before recurring execution.",
+                "measurement": "The attributed URL preserves discovery-to-purchase and repeat-usage measurement.",
             },
             "links": {
                 "openapi": OPENAPI_URL,
@@ -437,12 +452,20 @@ async def public_get_market_data_endpoint(
         "fx": "FX spot endpoint for supported currency pairs.",
         "metal": "Metals endpoint for supported precious/base metal tickers.",
     }
+    attribution = urlencode(
+        {
+            "selection_source": "public_mcp_resolver",
+            "utm_source": "public_mcp",
+            "utm_medium": "agent_discovery",
+            "utm_campaign": "resolver_handoff",
+        }
+    )
     return json.dumps(
         {
             "status": "ok",
             "request": {
                 "method": "GET",
-                "url": f"{PUBLIC_BASE_URL}{path}",
+                "url": f"{PUBLIC_BASE_URL}{path}?{attribution}",
                 "service": service,
                 "symbol": clean_symbol,
             },

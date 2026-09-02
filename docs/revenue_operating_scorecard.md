@@ -44,3 +44,9 @@ wallet top-ups, marketplace reachability, or raw proof noise as revenue.
 
 Marketplace performance feeds remain a separate acquisition input. Public listing
 health proves availability only and never counts as demand or commercial success.
+
+The v0.6.11 conversion release also preserves `public_mcp_resolver` attribution in
+every endpoint-builder URL, provides a machine-readable x402 purchase and recovery
+handoff, and accepts read-only POST compatibility calls on single-data endpoints.
+These changes convert previously lost agent requests into measurable payment offers
+without weakening payment verification or adding a write operation.
