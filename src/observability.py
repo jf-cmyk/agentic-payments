@@ -335,6 +335,7 @@ class UsageEventStore:
         latest_observation_by_platform: dict[str, dict[str, Any]] = {}
         latest_performance_by_platform: dict[str, dict[str, Any]] = {}
         latest_listing_health_by_platform: dict[str, dict[str, Any]] = {}
+        latest_performance_status_by_platform: dict[str, dict[str, Any]] = {}
         for row in rows:
             data = dict(row)
             try:
@@ -347,6 +348,8 @@ class UsageEventStore:
             metric_scope = str(data["metrics"].get("metric_scope") or "performance")
             if metric_scope == "listing_health":
                 latest_listing_health_by_platform.setdefault(platform_id, data)
+            elif metric_scope == "performance_status":
+                latest_performance_status_by_platform.setdefault(platform_id, data)
             else:
                 # Legacy snapshots predate metric_scope and represented reviewed
                 # performance feeds or imports, so retain that interpretation.
@@ -362,6 +365,7 @@ class UsageEventStore:
             "latest_by_platform": latest_performance_by_platform,
             "latest_observation_by_platform": latest_observation_by_platform,
             "listing_health_by_platform": latest_listing_health_by_platform,
+            "performance_status_by_platform": latest_performance_status_by_platform,
             "recent_snapshots": snapshots[:50],
             "definitions": {
                 "platforms_configured": "Platforms with reviewed performance metrics such as views, installs, or hosted calls.",

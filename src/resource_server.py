@@ -91,6 +91,10 @@ from src.models import (
     VWAPResponse,
 )
 from src.marketplace_health import collect_listing_health
+from src.marketplace_performance import (
+    collect_marketplace_performance,
+    performance_collection_configured,
+)
 from src.observability import (
     UsageEventStore,
     configure_global_store,
@@ -540,6 +544,24 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
         try:
             registry = getattr(app.state, "rwa_adapter_registry", RWA_ADAPTER_REGISTRY)
             captures = await capture_pilot(registry, timeout_seconds=timeout)
+            logger.info(
+                "RWA growth pilot feed outcomes: %s",
+                json.dumps(
+                    [
+                        {
+                            "pilot_id": str(capture.get("pilot_id") or "unknown")[:64],
+                            "status": str(capture.get("status") or "unknown")[:24],
+                            "error_type": (
+                                str(capture.get("error_type"))[:128]
+                                if capture.get("error_type")
+                                else None
+                            ),
+                        }
+                        for capture in captures
+                    ],
+                    separators=(",", ":"),
+                ),
+            )
             store = getattr(app.state, "rwa_store", None)
             if not isinstance(store, RWAObservationStore):
                 raise RuntimeError("RWA growth pilot ledger is unavailable")
@@ -703,9 +725,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_10",
-        "observed_version": "0.6.10 candidate",
-        "audited_at": "2026-08-31",
+        "release_status": "release_source_v0_6_11",
+        "observed_version": "0.6.11 candidate",
+        "audited_at": "2026-09-02",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
@@ -779,6 +801,64 @@ async def _run_marketplace_listing_health_loop() -> None:
             )
         except (OSError, ValueError, httpx.HTTPError):
             logger.exception("Marketplace public listing health check failed")
+        await asyncio.sleep(interval)
+
+
+async def _run_marketplace_performance_loop() -> None:
+    """Persist reviewed marketplace demand metrics when safe inputs exist."""
+    initial_delay = max(
+        1.0,
+        float(os.environ.get("MARKETPLACE_PERFORMANCE_INITIAL_DELAY_SECONDS", "90")),
+    )
+    interval = max(
+        3600.0,
+        float(os.environ.get("MARKETPLACE_PERFORMANCE_INTERVAL_SECONDS", "86400")),
+    )
+    timeout = min(
+        60.0,
+        max(1.0, float(os.environ.get("MARKETPLACE_PERFORMANCE_TIMEOUT_SECONDS", "20"))),
+    )
+    window_hours = max(
+        1,
+        min(168, int(os.environ.get("MARKETPLACE_PERFORMANCE_WINDOW_HOURS", "24"))),
+    )
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            snapshots, failures = await collect_marketplace_performance(
+                timeout_seconds=timeout,
+                window_hours=window_hours,
+            )
+            if OBSERVABILITY is not None:
+                for snapshot in snapshots:
+                    await asyncio.to_thread(
+                        OBSERVABILITY.record_marketplace_metrics,
+                        platform_id=str(snapshot["platform_id"]),
+                        metrics=dict(snapshot["metrics"]),
+                        source_url=str(snapshot["source_url"]),
+                        status=str(snapshot["status"]),
+                    )
+                for failure in failures:
+                    await asyncio.to_thread(
+                        OBSERVABILITY.record_marketplace_metrics,
+                        platform_id=str(failure["platform_id"]),
+                        metrics={
+                            "metric_scope": "performance_status",
+                            "checked_at": datetime.now(UTC).isoformat(),
+                            "configured": True,
+                            "available": False,
+                            "error_type": str(failure["error"])[:128],
+                            "measurement_note": "No marketplace performance claim was recorded for this failed collection.",
+                        },
+                        status="unavailable",
+                    )
+            logger.info(
+                "Marketplace performance collection completed: %s succeeded; %s failed",
+                len(snapshots),
+                len(failures),
+            )
+        except (OSError, ValueError, httpx.HTTPError):
+            logger.exception("Marketplace performance collection failed")
         await asyncio.sleep(interval)
 
 
@@ -1255,6 +1335,7 @@ async def lifespan(app: FastAPI):
     app.state.store_readiness_snapshots = {}
     app.state.store_readiness_task = None
     app.state.marketplace_listing_task = None
+    app.state.marketplace_performance_task = None
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
@@ -1279,6 +1360,11 @@ async def lifespan(app: FastAPI):
         app.state.marketplace_listing_task = asyncio.create_task(
             _run_marketplace_listing_health_loop(),
             name="marketplace-listing-health",
+        )
+    if performance_collection_configured():
+        app.state.marketplace_performance_task = asyncio.create_task(
+            _run_marketplace_performance_loop(),
+            name="marketplace-performance",
         )
     if app.state.kraken_book_stream is not None:
         await app.state.kraken_book_stream.start()
@@ -1309,6 +1395,10 @@ async def lifespan(app: FastAPI):
             app.state.marketplace_listing_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.marketplace_listing_task
+        if app.state.marketplace_performance_task is not None:
+            app.state.marketplace_performance_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.marketplace_performance_task
         if app.state.rwa_growth_pilot_task is not None:
             app.state.rwa_growth_pilot_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -3073,8 +3163,7 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
 def _get_price_for_request(request: Request) -> Decimal | None:
     """Determine the price for a given request."""
     path = request.url.path
-    paid_get_prefixes = (
-        "/v1/batch",
+    paid_read_alias_prefixes = (
         "/v1/vwap/",
         "/v1/bidask/",
         "/v1/state/",
@@ -3096,7 +3185,9 @@ def _get_price_for_request(request: Request) -> Decimal | None:
         "/v1/rwa/benchmark/blocksize",
     }
     method = request.method.upper()
-    if path.startswith(paid_get_prefixes) and method not in {"GET", "HEAD"}:
+    if path.startswith("/v1/batch") and method not in {"GET", "HEAD"}:
+        return None
+    if path.startswith(paid_read_alias_prefixes) and method not in {"GET", "HEAD", "POST"}:
         return None
     if path in paid_post_paths and method != "POST":
         return None
@@ -3469,7 +3560,10 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
     method = request.method.upper()
     path = request.url.path
 
-    if method in {"GET", "HEAD"}:
+    compatible_read_post = method == "POST" and any(
+        path.startswith(prefix) for prefix in PAID_PREFLIGHT_SERVICE_PREFIXES
+    )
+    if method in {"GET", "HEAD"} or compatible_read_post:
         if path.startswith("/v1/batch"):
             try:
                 queries = _parse_batch_reqs(request.query_params.get("reqs", ""))
@@ -5286,6 +5380,26 @@ async def x402_payment_middleware(request: Request, call_next):
                         "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
                     },
                     "networks": accepted_networks,
+                    "purchase_handoff": {
+                        "protocol": "x402 v2",
+                        "challenge_header": "PAYMENT-REQUIRED",
+                        "payment_header": "PAYMENT-SIGNATURE",
+                        "retry_method": request.method.upper(),
+                        "retry_url": payment_required["resource"]["url"],
+                        "steps": [
+                            "Decode or read this x402 v2 challenge.",
+                            "Select exactly one requirement from accepts for a supported wallet network.",
+                            "Use an official x402 client to sign that exact requirement.",
+                            "Retry the same method and URL with the resulting PAYMENT-SIGNATURE header.",
+                        ],
+                        "recovery": {
+                            "invalid_or_expired_signature": "Fetch a fresh challenge and rebuild the payment; do not edit or reuse a bound signature.",
+                            "unsupported_network": "Select another advertised requirement from accepts.",
+                            "safe_retry": "Retry only the same method, URL, and request body represented by the signed challenge.",
+                        },
+                        "quickstart": FIRST_PRICE_QUICKSTART_URL,
+                        "agent_manual": AGENT_MANUAL_URL,
+                    },
                     "legacy_requirements": payment_reqs,
                 },
                 headers={
@@ -5822,6 +5936,12 @@ async def get_vwap(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
+@app.post("/v1/vwap/{pair}", include_in_schema=False)
+async def post_vwap_compatibility(pair: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_vwap(pair, request)
+
+
 @app.get("/v1/bidask/{pair}", responses=X402_RESPONSE, openapi_extra=X402_BIDASK_PAYMENT_INFO)
 async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
     """Get bid/ask snapshot for a shared symbol. Cost: $0.002–$0.008 USDC."""
@@ -5853,6 +5973,12 @@ async def get_bidask(pair: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve bid/ask for {pair}", details=str(e),
         ).model_dump())
+
+
+@app.post("/v1/bidask/{pair}", include_in_schema=False)
+async def post_bidask_compatibility(pair: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_bidask(pair, request)
 
 
 @app.get("/v1/state/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
@@ -5921,6 +6047,12 @@ async def get_state_price_endpoint(pair: str, request: Request) -> dict[str, Any
         ).model_dump())
 
 
+@app.post("/v1/state/{pair}", include_in_schema=False)
+async def post_state_price_compatibility(pair: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_state_price_endpoint(pair, request)
+
+
 @app.get("/v1/vwap30m/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
 async def get_vwap_30m_endpoint(
     pair: str,
@@ -5975,6 +6107,16 @@ async def get_vwap_30m_endpoint(
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve 30-minute VWAP for {pair}", details=str(e),
         ).model_dump())
+
+
+@app.post("/v1/vwap30m/{pair}", include_in_schema=False)
+async def post_vwap_30m_compatibility(
+    pair: str,
+    request: Request,
+    include_trades: bool = Query(False),
+) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_vwap_30m_endpoint(pair, request, include_trades)
 
 
 @app.get("/v1/vwap24h/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
@@ -6033,6 +6175,12 @@ async def get_vwap_24h_endpoint(pair: str, request: Request) -> dict[str, Any]:
         ).model_dump())
 
 
+@app.post("/v1/vwap24h/{pair}", include_in_schema=False)
+async def post_vwap_24h_compatibility(pair: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_vwap_24h_endpoint(pair, request)
+
+
 @app.get("/v1/fx/{pair}", responses=X402_RESPONSE, openapi_extra=X402_TRADFI_PAYMENT_INFO)
 async def get_fx(pair: str, request: Request) -> dict[str, Any]:
     """Get FX rate. Cost: $0.005 USDC."""
@@ -6064,6 +6212,13 @@ async def get_fx(pair: str, request: Request) -> dict[str, Any]:
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve FX for {pair}", details=str(e),
         ).model_dump())
 
+
+@app.post("/v1/fx/{pair}", include_in_schema=False)
+async def post_fx_compatibility(pair: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_fx(pair, request)
+
+
 @app.get("/v1/metal/{ticker}", responses=X402_RESPONSE, openapi_extra=X402_TRADFI_PAYMENT_INFO)
 async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
     """Get metal spot price. Cost: $0.005 USDC."""
@@ -6094,6 +6249,12 @@ async def get_metal(ticker: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=ErrorResponse(
             error_code="BLOCKSIZE_ERROR", message=f"Failed to retrieve metal for {ticker}", details=str(e),
         ).model_dump())
+
+
+@app.post("/v1/metal/{ticker}", include_in_schema=False)
+async def post_metal_compatibility(ticker: str, request: Request) -> dict[str, Any]:
+    """Read-only compatibility alias for agent clients that issue POST reads."""
+    return await get_metal(ticker, request)
 
 
 @app.get("/v1/batch", responses=X402_RESPONSE, openapi_extra=X402_BATCH_PAYMENT_INFO)
@@ -9347,6 +9508,9 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
     listing_health_by_platform = marketplace_metrics.get("listing_health_by_platform")
     if not isinstance(listing_health_by_platform, dict):
         listing_health_by_platform = {}
+    performance_status_by_platform = marketplace_metrics.get("performance_status_by_platform")
+    if not isinstance(performance_status_by_platform, dict):
+        performance_status_by_platform = {}
 
     platforms = []
     total_platform_calls = 0
@@ -9368,15 +9532,33 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
         metrics_env = MARKETPLACE_METRICS_FEEDS.get(platform_id, metrics_env)
         latest_metrics = latest_external_metrics.get(platform_id)
         latest_listing_health = listing_health_by_platform.get(platform_id)
-        external_metrics_configured = bool(metrics_env or latest_metrics)
+        latest_performance_status = performance_status_by_platform.get(platform_id)
+        collection_configured = bool(
+            metrics_env
+            or latest_metrics
+            or latest_performance_status
+            or (
+                platform_id == "smithery"
+                and os.getenv("SMITHERY_QUALIFIED_NAME", "").strip()
+            )
+        )
+        external_metrics_configured = bool(latest_metrics)
         external_metrics_state = (
             "ingested"
-            if external_metrics_configured
+            if latest_metrics
+            else "configured_unavailable"
+            if latest_performance_status
+            else "configured_awaiting_ingestion"
+            if collection_configured
             else "unavailable_no_reviewed_feed_or_export"
         )
         external_metrics_reason = (
             "A reviewed feed or imported marketplace snapshot is available."
-            if external_metrics_configured
+            if latest_metrics
+            else "The configured marketplace collector has not produced a usable performance snapshot."
+            if latest_performance_status
+            else "A reviewed feed is configured and awaiting its first successful snapshot."
+            if collection_configured
             else (
                 "No reviewed marketplace API, export, or hosted-call log is configured; "
                 "local server traffic cannot prove upstream views, installs, or hosted calls."
@@ -9387,12 +9569,14 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
                 **platform,
                 "local_recorded_calls": local_calls,
                 "external_metrics_configured": external_metrics_configured,
+                "performance_collection_configured": collection_configured,
                 "external_metrics_state": external_metrics_state,
                 "external_metrics_reason": external_metrics_reason,
                 "metrics_owner": "Growth engineering",
                 "last_metrics_review_date": summary.get("generated_at"),
                 "metrics_api_url": metrics_env or None,
                 "latest_external_metrics": latest_metrics,
+                "latest_performance_status": latest_performance_status,
                 "latest_listing_health": latest_listing_health,
                 "listing_health_observed": latest_listing_health is not None,
                 "listing_health_note": (
@@ -9402,6 +9586,8 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
                 "status": (
                     "configured"
                     if external_metrics_configured
+                    else "collection_error"
+                    if latest_performance_status
                     else "watching"
                     if local_calls
                     else "no_local_activity"
@@ -9422,15 +9608,25 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
             "local_recorded_mcp_tool_calls": 0,
             "all_recorded_mcp_tool_calls": int(overview.get("mcp_tool_calls") or 0),
             "metrics_ingestion_configured": bool(
-                SMITHERY_METRICS_API_URL or latest_external_metrics.get("smithery")
+                latest_external_metrics.get("smithery")
+            ),
+            "performance_collection_configured": bool(
+                SMITHERY_METRICS_API_URL
+                or MARKETPLACE_METRICS_FEEDS.get("smithery")
+                or os.getenv("SMITHERY_QUALIFIED_NAME", "").strip()
+                or latest_external_metrics.get("smithery")
+                or performance_status_by_platform.get("smithery")
             ),
             "metrics_api_url": MARKETPLACE_METRICS_FEEDS.get("smithery")
             or SMITHERY_METRICS_API_URL
             or None,
             "latest_external_metrics": latest_external_metrics.get("smithery"),
+            "latest_performance_status": performance_status_by_platform.get("smithery"),
             "status": (
                 "configured"
-                if SMITHERY_METRICS_API_URL or latest_external_metrics.get("smithery")
+                if latest_external_metrics.get("smithery")
+                else "collection_error"
+                if performance_status_by_platform.get("smithery")
                 else "not_ingested"
             ),
             "note": (
@@ -9443,15 +9639,24 @@ def _with_external_observability_context(summary: dict[str, Any]) -> dict[str, A
             "listing_url": PAY_SH_SERVICE_URL,
             "local_recorded_calls": int(registry_sources.get("Pay.sh") or 0),
             "metrics_ingestion_configured": bool(
-                PAY_SH_METRICS_API_URL or latest_external_metrics.get("pay_sh")
+                latest_external_metrics.get("pay_sh")
+            ),
+            "performance_collection_configured": bool(
+                PAY_SH_METRICS_API_URL
+                or MARKETPLACE_METRICS_FEEDS.get("pay_sh")
+                or latest_external_metrics.get("pay_sh")
+                or performance_status_by_platform.get("pay_sh")
             ),
             "metrics_api_url": MARKETPLACE_METRICS_FEEDS.get("pay_sh")
             or PAY_SH_METRICS_API_URL
             or None,
             "latest_external_metrics": latest_external_metrics.get("pay_sh"),
+            "latest_performance_status": performance_status_by_platform.get("pay_sh"),
             "status": (
                 "configured"
-                if PAY_SH_METRICS_API_URL or latest_external_metrics.get("pay_sh")
+                if latest_external_metrics.get("pay_sh")
+                else "collection_error"
+                if performance_status_by_platform.get("pay_sh")
                 else "not_ingested"
             ),
             "note": (

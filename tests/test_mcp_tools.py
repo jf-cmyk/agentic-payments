@@ -15,7 +15,11 @@ from src.mcp_server import (
     get_fx_rate, get_metal_price,
     search_pairs, list_instruments, get_pricing_info, search, fetch, server_info,
 )
-from src.public_mcp_server import public_get_market_data_endpoint, public_mcp
+from src.public_mcp_server import (
+    public_get_market_data_endpoint,
+    public_get_workflow_endpoint,
+    public_mcp,
+)
 from src.blocksize_client import BlocksizeAPIError
 from src.models import (
     VWAPData, BidAskData, FXData,
@@ -294,6 +298,21 @@ class TestPublicRemoteDiscoveryTools:
 
         assert parsed["status"] == "ok"
         assert parsed["request"]["method"] == "GET"
-        assert parsed["request"]["url"].endswith("/v1/bidask/AAPL")
+        assert parsed["request"]["url"].startswith(
+            "https://mcp.blocksize.info/v1/bidask/AAPL?"
+        )
+        assert "selection_source=public_mcp_resolver" in parsed["request"]["url"]
+        assert "utm_campaign=resolver_handoff" in parsed["request"]["url"]
         assert parsed["behavior"]["returns_live_data"] is False
         assert parsed["behavior"]["starts_payment"] is False
+
+    @pytest.mark.asyncio
+    async def test_workflow_builder_preserves_revenue_attribution_and_spend_controls(self):
+        result = await public_get_workflow_endpoint("pre_trade_sanity_check")
+        parsed = json.loads(result)
+
+        assert parsed["request"]["method"] == "POST"
+        assert "selection_source=public_mcp_resolver" in parsed["request"]["url"]
+        assert "utm_campaign=workflow_handoff" in parsed["request"]["url"]
+        assert parsed["repeat_usage"]["preflight_each_run"] is True
+        assert parsed["repeat_usage"]["reuse_exact_request_only_after_approval"] is True

@@ -94,15 +94,22 @@ def smithery_metrics(payload: Any, *, start: datetime, end: datetime) -> dict[st
     tool_calls: dict[str, int] = {}
     successful = 0
     failed = 0
-    for item in invocations[:1000]:
+    for item in invocations[:100]:
         if not isinstance(item, dict):
             continue
         tool = str(item.get("toolName") or item.get("tool_name") or "unknown")[:80]
         tool_calls[tool] = tool_calls.get(tool, 0) + 1
-        status = str(item.get("status") or "").lower()
+        response = item.get("response") if isinstance(item.get("response"), dict) else {}
+        status = str(response.get("outcome") or item.get("status") or "").lower()
+        http_status = response.get("status")
+        has_exceptions = bool(item.get("exceptions"))
         if status in {"success", "succeeded", "ok", "completed"}:
             successful += 1
-        elif status in {"error", "failed", "failure"}:
+        elif (
+            status in {"error", "failed", "failure"}
+            or has_exceptions
+            or (isinstance(http_status, (int, float)) and http_status >= 400)
+        ):
             failed += 1
     total = payload.get("total")
     return normalize_metrics_payload(
@@ -177,7 +184,7 @@ def main() -> int:
                     response = client.get(
                         source_url,
                         headers={"Authorization": f"Bearer {smithery_token}"},
-                        params={"from": start.isoformat(), "to": end.isoformat(), "limit": 1000},
+                        params={"from": start.isoformat(), "to": end.isoformat(), "limit": 100},
                     )
                     response.raise_for_status()
                     snapshots["smithery"] = (
