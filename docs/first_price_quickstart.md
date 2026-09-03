@@ -39,6 +39,18 @@ The public remote endpoint `https://mcp.blocksize.info/mcp/server/` supports sym
 The HTTP endpoint returns a standards-based x402 v2 challenge when no payment
 is attached:
 
+Preview the response shape without receiving live data or creating a payment:
+
+```bash
+curl -sS \
+  'https://mcp.blocksize.info/v1/samples/market-data?service=vwap&symbol=BTCUSD'
+```
+
+The preview is synthetic and not for trading. Follow its attributed
+`paid_endpoint` when you are ready to request the current result.
+
+Then request the live route:
+
 ```bash
 curl -i -sS \
   'https://mcp.blocksize.info/v1/vwap/btc-usd'
@@ -65,7 +77,8 @@ Runnable, spend-capped buyer examples are published in `examples/x402/`:
 Each example filters the challenge to the expected network and USDC asset and
 refuses an advertised amount above its configured cap. A rejected or expired
 signature should be rebuilt from the fresh `PAYMENT-REQUIRED` challenge returned
-by Blocksize.
+by Blocksize. Every paid `402` response also includes `purchase_handoff` links
+to the free value preview and the maintained Base and Solana buyer clients.
 
 ## Verify the result
 

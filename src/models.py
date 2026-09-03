@@ -270,6 +270,12 @@ class PairInfo(BaseModel):
         None,
         description="Attributed public URL for continuing from discovery to purchase",
     )
+    preview_url: Optional[str] = Field(
+        None,
+        description=(
+            "Free synthetic response preview for the recommended service and symbol"
+        ),
+    )
     copy_request: Optional[str] = Field(
         None,
         description="Copyable unsigned request that returns the x402 challenge",

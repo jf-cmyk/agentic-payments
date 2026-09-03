@@ -112,6 +112,8 @@ Free discovery endpoints:
 - `GET /v1/coverage`
 - `GET /v1/search`
 - `GET /v1/instruments/{service}`
+- `GET /v1/samples/market-data?service=vwap&symbol=BTCUSD` for a clearly
+  synthetic value preview and attributed paid handoff
 - `GET /health`
 
 `/v1/search` is paginated with `limit` and `offset`. Its `total_matches`

@@ -11,6 +11,38 @@
     }
   ],
   "paths": {
+    "/v1/samples/market-data": {
+      "get": {
+        "summary": "Preview a market-data response before paying",
+        "description": "Return a clearly labeled synthetic response preview plus an attributed URL for buying the current live result. No live market data or payment is returned by this route.",
+        "operationId": "previewMarketDataValue",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["vwap", "bidask", "fx", "metal", "state", "vwap30m", "vwap24h"]
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "example": "BTCUSD"}
+          }
+        ],
+        "responses": {
+          "200": {"description": "Synthetic, non-live value preview and purchase handoff."}
+        },
+        "x-payment-info": {
+          "protocols": [],
+          "pricingMode": "free_preview",
+          "price": "$0.00"
+        }
+      }
+    },
     "/v1/vwap/BTC-USD": {
       "get": {
         "summary": "Fetch crypto VWAP market data",

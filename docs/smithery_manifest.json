@@ -1,7 +1,7 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
-  "version": "0.6.13",
-  "description": "Read-only MCP discovery for Blocksize real-time market data. Direct public HTTP uses signed x402; starter credits are for eligible authenticated connector users only; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.",
+  "version": "0.6.14",
+  "description": "Read-only MCP discovery for Blocksize real-time market data, with free synthetic value previews and attributed x402 purchase handoffs. Starter credits are for eligible authenticated connector users only; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
   "license": "MIT",
@@ -16,6 +16,7 @@
     ],
     "starter_credit_scope": "Eligible authenticated connector users only",
     "direct_public_http_payment": "Signed x402 per call",
+    "free_value_preview": "Synthetic response preview before the first paid call",
     "sustained_or_higher_volume_access": "Contact Blocksize sales for an authenticated account plan",
     "networks": ["Solana", "Base L2"],
     "public_remote_server": "Read-only discovery and documentation tools"
@@ -23,6 +24,7 @@
   "endpoints": {
     "remote_mcp": "https://mcp.blocksize.info/mcp/server/",
     "quickstart": "https://mcp.blocksize.info/quickstart/remote-mcp",
+    "value_preview": "https://mcp.blocksize.info/v1/samples/market-data?service=vwap&symbol=BTCUSD",
     "openapi": "https://mcp.blocksize.info/openapi.json",
     "pricing": "https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf"
   }

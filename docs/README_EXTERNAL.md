@@ -84,9 +84,12 @@ Feed mapping from the upstream Blocksize documentation:
 Free discovery endpoints:
 
 - `GET /instruments` - human-searchable catalog with canonical symbols, readiness,
-  per-call price, and copyable purchase requests
+  per-call price, free value previews, and copyable purchase requests
 - `GET /v1/search`, including `GET /v1/search?q=AAPL&asset_class=equity`
 - `GET /v1/instruments/{service}`; use `bidask` for the shared bid/ask namespace
+- `GET /v1/samples/market-data?service=vwap&symbol=BTCUSD` - illustrative
+  response shape plus an attributed live purchase handoff, with no payment and
+  no live-data claim
 - `GET /v1/samples/pre-trade` - illustrative pre-trade product output with no
   payment and no live-data claim
 - `GET /v1/samples/macro-snapshot` - illustrative multi-asset macro package

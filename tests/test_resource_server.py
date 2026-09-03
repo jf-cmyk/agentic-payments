@@ -143,6 +143,28 @@ def test_macro_package_catalog_links_to_free_sample(test_client):
     assert package["sample_url"].endswith("/v1/samples/macro-snapshot")
 
 
+def test_raw_data_packages_link_to_free_value_previews(test_client):
+    response = test_client.get("/data-packages.json")
+
+    assert response.status_code == 200
+    packages = {item["id"]: item for item in response.json()["packages"]}
+    for package_id in {
+        "crypto-vwap",
+        "bid-ask",
+        "equities-bidask",
+        "state-price",
+        "vwap-30m",
+        "vwap-24h",
+        "fx",
+        "metals",
+        "x402-market-data",
+    }:
+        sample_url = packages[package_id]["sample_url"]
+        assert sample_url.startswith(
+            "https://mcp.blocksize.info/v1/samples/market-data?"
+        )
+
+
 def test_unsupported_paid_symbol_fails_before_payment(test_client):
     seeded_at = resource_server.time.monotonic()
     app.state.instrument_catalog_cache["vwap"] = (
@@ -199,6 +221,48 @@ def test_search_returns_a_purchase_ready_canonical_result(test_client):
     )
     assert "selection_source=public_http_resolver" in result["purchase_url"]
     assert result["copy_request"].startswith("curl -i")
+    assert result["preview_url"].startswith(
+        "https://mcp.blocksize.info/v1/samples/market-data?"
+    )
+    assert "service=vwap" in result["preview_url"]
+    assert "symbol=BTCUSD" in result["preview_url"]
+
+
+def test_raw_market_data_sample_is_free_safe_and_purchase_ready(
+    test_client,
+    observability_store,
+):
+    response = test_client.get(
+        "/v1/samples/market-data?service=metal&symbol=XAU-USD"
+        "&selection_source=public_http_resolver"
+    )
+
+    assert response.status_code == 200
+    assert "PAYMENT-REQUIRED" not in response.headers
+    payload = response.json()
+    assert payload["sample"] is True
+    assert payload["live_data"] is False
+    assert payload["values_are_synthetic"] is True
+    assert payload["not_for_trading"] is True
+    assert payload["product"] == "metal"
+    assert payload["symbol"] == "XAUUSD"
+    assert payload["price_usdc"] == "0.005"
+    assert "/v1/metal/XAUUSD?" in payload["paid_endpoint"]
+    assert "selection_source=raw_data_preview" in payload["paid_endpoint"]
+    assert {network["name"] for network in payload["payment"]["networks"]} == {
+        "Base",
+        "Solana",
+    }
+    assert payload["example_response"]["meta"]["live_data"] is False
+
+    event = next(
+        event
+        for event in observability_store.recent_events(limit=20)
+        if event["event"] == "product_sample_viewed"
+    )
+    assert event["metadata"]["sample_service"] == "metal"
+    assert event["metadata"]["sample_symbol"] == "XAUUSD"
+    assert event["metadata"]["selection_source"] == "public_http_resolver"
 
 
 @pytest.fixture
@@ -778,6 +842,11 @@ class TestPublicListingSurfaces:
         assert data["links"]["anthropic_mcp"].endswith("/anthropic/mcp/")
         assert data["links"]["claude_connector"].endswith("/claude-connector")
         assert data["links"]["first_price_quickstart"].endswith("/quickstart/first-price")
+        assert data["links"]["instrument_explorer"].endswith("/instruments")
+        assert data["links"]["free_value_preview"].endswith(
+            "/v1/samples/market-data?service=vwap&symbol=BTCUSD"
+        )
+        assert data["links"]["data_packages"].endswith("/data-packages.json")
         assert data["links"]["category_hubs_json"].endswith("/category-hubs.json")
         assert data["links"]["rwa_market_data"].endswith("/rwa-market-data")
         assert data["links"]["market_data_licensing"].endswith("/market-data-licensing")
@@ -1351,6 +1420,19 @@ class TestPaymentGate:
         assert handoff["retry_method"] == "GET"
         assert handoff["retry_url"] == resource_url
         assert handoff["quickstart"].endswith("/quickstart/first-price")
+        assert handoff["preview_url"].endswith(
+            "/v1/samples/market-data?service=vwap&symbol=BTCUSD"
+        )
+        assert handoff["buyer_examples"]["base_python"].endswith(
+            "/examples/x402/buy_with_base.py"
+        )
+        assert handoff["buyer_examples"]["base_typescript"].endswith(
+            "/examples/x402/typescript/buy-with-base.ts"
+        )
+        assert handoff["buyer_examples"]["solana_python"].endswith(
+            "/scripts/run_funded_x402_canary.py"
+        )
+        assert "private key" in handoff["wallet_safety"]
 
     def test_invalid_payment_returns_fresh_machine_recoverable_challenge(
         self,
@@ -1404,6 +1486,22 @@ class TestPaymentGate:
             "direct_http",
             "package_preview",
         }
+
+    def test_raw_preview_handoff_is_attributed(self, test_client, observability_store):
+        response = test_client.get(
+            "/v1/vwap/BTCUSD?selection_source=raw_data_preview"
+        )
+
+        assert response.status_code == 402
+        assert response.json()["purchase_handoff"]["preview_url"].endswith(
+            "/v1/samples/market-data?service=vwap&symbol=BTCUSD"
+        )
+        event = next(
+            event
+            for event in observability_store.recent_events(limit=20)
+            if event["event"] == "payment_required"
+        )
+        assert event["metadata"]["selection_source"] == "raw_data_preview"
 
     def test_unusable_solana_rail_is_not_advertised(self, test_client, monkeypatch):
         monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
@@ -4408,8 +4506,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_13"
-        assert github["observed_version"] == "0.6.13 candidate"
+        assert github["release_status"] == "release_source_v0_6_14"
+        assert github["observed_version"] == "0.6.14 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
@@ -5515,6 +5613,57 @@ process.stdout.write(JSON.stringify({
         assert stats["request_quality"]["non_monitor_requests"] == 1
         packages = stats["product_performance"]["market_intelligence_rows"]
         assert any(row["product_id"] == "agent_market_brief" for row in packages)
+
+    def test_conversion_experiment_reports_preview_to_purchase_funnel(
+        self,
+        observability_store,
+        test_client,
+    ):
+        observability_store.record(
+            "product_sample_viewed",
+            surface="http_api",
+            endpoint="/v1/samples/market-data",
+            metadata={"sample_service": "vwap", "sample_symbol": "BTCUSD"},
+        )
+        observability_store.record(
+            "payment_required",
+            surface="http_api",
+            endpoint="/v1/vwap/BTCUSD",
+            subject="BTCUSD",
+            metadata={"selection_source": "raw_data_preview"},
+        )
+
+        response = test_client.get("/internal/observability/stats?days=1")
+
+        assert response.status_code == 200
+        preview = response.json()["conversion_experiment"]["preview_funnel"]
+        assert preview == {
+            "sample_views": 1,
+            "attributed_live_attempts": 1,
+            "validated_deliveries": 0,
+            "recognized_revenue_usdc": 0.0,
+            "sample_to_live_attempt_rate": 1.0,
+            "live_attempt_to_delivery_rate": 0.0,
+        }
+
+    def test_preview_stall_alert_waits_for_meaningful_sample(self):
+        summary = {
+            "event_counts": {"product_sample_viewed": 30},
+            "request_quality": {
+                "gross_live_data_requests": 0,
+                "selection_source_mix": {},
+            },
+            "product_performance": {"rows": []},
+        }
+        summary["conversion_experiment"] = (
+            resource_server._build_conversion_experiment(summary)
+        )
+
+        alerts = resource_server._build_operational_alerts(summary)["alerts"]
+
+        assert any(
+            alert["id"] == "preview-to-live-handoff-stalled" for alert in alerts
+        )
 
     def test_stats_reconcile_legacy_inflow_and_expose_alert_feed(
         self,

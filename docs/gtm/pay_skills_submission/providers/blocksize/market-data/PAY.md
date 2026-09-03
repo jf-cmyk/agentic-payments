@@ -23,6 +23,15 @@ instrument endpoints before paying for live data. Prefer a narrow lookup such as
 one VWAP pair, one bid/ask symbol, one FX pair, or one metals ticker before
 making batch calls.
 
+Before authorizing a first payment, preview the exact response family for free:
+
+`GET /v1/samples/market-data?service=vwap&symbol=BTCUSD`
+
+The preview is explicitly synthetic and not for trading. Its `paid_endpoint`
+field carries attribution into the corresponding live x402 request. A live
+`402` response also links back to the preview and to maintained spend-capped
+Base and Solana buyer examples.
+
 Responses preserve source timestamps and provider context, and premium workflows
 can generate provenance records and audit-grade price receipts. RWA discovery and
 quality evidence is available as a monitored research surface; no RWA feed is
@@ -31,6 +40,8 @@ represented as production-promoted until its explicit quality gates pass.
 ## Spend-aware usage
 
 - Search available instruments before making a paid market-data request.
+- Use the free synthetic preview to inspect value and response shape before a
+  first paid call.
 - Prefer one-symbol calls for exploratory tasks.
 - Use `/v1/batch` only when the user needs several prices in the same workflow.
 - Reuse returned symbols exactly instead of guessing unsupported pair formats.

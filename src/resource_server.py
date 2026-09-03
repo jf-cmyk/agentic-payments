@@ -381,6 +381,7 @@ SELECTION_SOURCE_VALUES = {
     "published_example_path",
     "direct_http",
     "package_preview",
+    "raw_data_preview",
 }
 
 
@@ -727,9 +728,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_13",
-        "observed_version": "0.6.13 candidate",
-        "audited_at": "2026-09-02",
+        "release_status": "release_source_v0_6_14",
+        "observed_version": "0.6.14 candidate",
+        "audited_at": "2026-09-03",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
@@ -2650,6 +2651,7 @@ DISCOVERY_RATE_LIMIT_PATHS = (
     "/v1/coverage",
     "/v1/search",
     "/v1/instruments/",
+    "/v1/samples/",
     "/v1/rwa/",
 )
 # ---------------------------------------------------------------------------
@@ -2965,7 +2967,7 @@ def _x402_purchase_handoff(
     payment_required: dict[str, Any],
 ) -> dict[str, Any]:
     """Return one machine-readable retry contract for initial and failed payments."""
-    return {
+    handoff: dict[str, Any] = {
         "protocol": "x402 v2",
         "challenge_header": "PAYMENT-REQUIRED",
         "payment_header": "PAYMENT-SIGNATURE",
@@ -2990,7 +2992,60 @@ def _x402_purchase_handoff(
         },
         "quickstart": FIRST_PRICE_QUICKSTART_URL,
         "agent_manual": AGENT_MANUAL_URL,
+        "buyer_examples": {
+            "base_python": (
+                f"{REPOSITORY_URL}/blob/main/examples/x402/buy_with_base.py"
+            ),
+            "base_typescript": (
+                f"{REPOSITORY_URL}/blob/main/examples/x402/typescript/buy-with-base.ts"
+            ),
+            "solana_python": (
+                f"{REPOSITORY_URL}/blob/main/scripts/run_funded_x402_canary.py"
+            ),
+        },
+        "wallet_safety": (
+            "Sign locally with a dedicated low-balance wallet and enforce a USDC "
+            "spend cap. Blocksize never needs the buyer private key."
+        ),
     }
+    preview_url = _sample_url_for_paid_request(request)
+    if preview_url:
+        handoff["preview_url"] = preview_url
+    return handoff
+
+
+def _sample_url_for_paid_request(request: Request) -> str | None:
+    """Return a free, non-live response preview for a paid endpoint when available."""
+    path = request.url.path
+    product_samples = {
+        "/v1/checks/pre-trade": f"{PUBLIC_BASE_URL}/v1/samples/pre-trade",
+        "/v1/snapshots/macro": f"{PUBLIC_BASE_URL}/v1/samples/macro-snapshot",
+    }
+    if path in product_samples:
+        return product_samples[path]
+
+    prefixes = {
+        "/v1/vwap/": "vwap",
+        "/v1/bidask/": "bidask",
+        "/v1/fx/": "fx",
+        "/v1/metal/": "metal",
+        "/v1/state/": "state",
+        "/v1/vwap30m/": "vwap30m",
+        "/v1/vwap24h/": "vwap24h",
+    }
+    for prefix, service in prefixes.items():
+        if path.startswith(prefix):
+            symbol = path.removeprefix(prefix).strip("/")
+            if symbol:
+                try:
+                    symbol = _normalise_symbol(symbol, "symbol")
+                except ValueError:
+                    return None
+                return (
+                    f"{PUBLIC_BASE_URL}/v1/samples/market-data?"
+                    + urlencode({"service": service, "symbol": symbol})
+                )
+    return None
 
 
 def _payment_failure_code(reason: str) -> str:
@@ -3442,7 +3497,7 @@ PAID_PRODUCT_SYMBOL_MODES = {
 
 
 def _purchase_ready_pair(pair: PairInfo) -> PairInfo:
-    """Attach an attributed purchase URL and a copyable unsigned request."""
+    """Attach free-preview and attributed purchase handoffs to a search result."""
     if not pair.endpoint_path:
         return pair
     query = urlencode(
@@ -3454,9 +3509,20 @@ def _purchase_ready_pair(pair: PairInfo) -> PairInfo:
         }
     )
     url = f"{PUBLIC_BASE_URL}{pair.endpoint_path}?{query}"
+    preview_query = urlencode(
+        {
+            "service": pair.recommended_service or "vwap",
+            "symbol": pair.canonical_symbol or pair.pair,
+            "selection_source": "public_http_resolver",
+            "utm_source": "instrument_search",
+            "utm_medium": "free_discovery",
+            "utm_campaign": "value_preview",
+        }
+    )
     return pair.model_copy(
         update={
             "purchase_url": url,
+            "preview_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?{preview_query}",
             "copy_request": f"curl -i '{url}'",
         }
     )
@@ -6769,6 +6835,130 @@ async def pre_trade_sample() -> dict[str, Any]:
     }
 
 
+RAW_MARKET_DATA_SAMPLE_SERVICES = frozenset(
+    {"vwap", "bidask", "fx", "metal", "state", "vwap30m", "vwap24h"}
+)
+
+
+def _raw_market_data_sample_payload(service: str, symbol: str) -> dict[str, Any]:
+    """Build a plainly synthetic example matching one paid raw-data family."""
+    common = {
+        "timestamp": "<provider UTC timestamp>",
+        "source": "Blocksize Capital",
+    }
+    if service == "bidask":
+        return {"pair": symbol, "bid": 64999.0, "ask": 65001.0, **common}
+    if service == "fx":
+        return {
+            "pair": symbol,
+            "bid": 1.0799,
+            "ask": 1.0801,
+            "mid": 1.08,
+            **common,
+        }
+    if service == "metal":
+        return {"ticker": symbol, "price": 2350.0, "currency": "USD", **common}
+    if service == "state":
+        return {"pair": symbol, "price": 65000.0, **common}
+    if service in {"vwap30m", "vwap24h"}:
+        return {
+            "pair": symbol,
+            "vwap": 65000.0,
+            "window": "30m" if service == "vwap30m" else "24h",
+            "currency": "USD",
+            **common,
+        }
+    return {"pair": symbol, "vwap": 65000.0, "currency": "USD", **common}
+
+
+@app.get("/v1/samples/market-data")
+async def raw_market_data_sample(
+    request: Request,
+    service: str = Query(..., pattern="^(vwap|bidask|fx|metal|state|vwap30m|vwap24h)$"),
+    symbol: str = Query(..., min_length=2, max_length=64),
+) -> dict[str, Any]:
+    """Preview a raw-data response contract without returning live market data."""
+    service = service.lower()
+    if service not in RAW_MARKET_DATA_SAMPLE_SERVICES:
+        raise HTTPException(status_code=400, detail="unsupported sample service")
+    clean_symbol = _normalise_symbol(symbol, "symbol")
+    paid_path = f"/v1/{service}/{clean_symbol}"
+    if service == "bidask":
+        price = _bidask_price_for_symbol(clean_symbol)
+    elif service in {"vwap", "state", "vwap30m", "vwap24h"}:
+        price = settings.pricing.get_crypto_price(_base_from_symbol(clean_symbol))
+    else:
+        price = settings.pricing.tradfi
+    paid_url = f"{PUBLIC_BASE_URL}{paid_path}?" + urlencode(
+        {
+            "selection_source": "raw_data_preview",
+            "utm_source": "blocksize",
+            "utm_medium": "product_sample",
+            "utm_campaign": f"{service}_first_value",
+        }
+    )
+    requirements = _facilitator_supported_requirements(
+        settings.payment_requirements(price),
+        getattr(request.app.state, "facilitator_support", None),
+    )
+    network_labels = {"solana": "Solana", "evm": "Base"}
+    payment_networks = [
+        {
+            "name": network_labels.get(
+                _network_kind(str(requirement.get("network") or "")),
+                "Unknown",
+            ),
+            "caip2": str(requirement.get("network") or ""),
+        }
+        for requirement in requirements
+    ]
+    _record_product_event(
+        "product_sample_viewed",
+        request,
+        price_usdc=price,
+        metadata={
+            "sample_service": service,
+            "sample_symbol": clean_symbol,
+            "paid_endpoint": paid_path,
+        },
+    )
+    return {
+        "status": "ok",
+        "sample": True,
+        "live_data": False,
+        "values_are_synthetic": True,
+        "not_for_trading": True,
+        "product": service,
+        "symbol": clean_symbol,
+        "purpose": (
+            "Preview the paid response shape before authorizing an x402 payment. "
+            "Illustrative values below are never fetched from a live market."
+        ),
+        "paid_endpoint": paid_url,
+        "price_usdc": str(price),
+        "payment": {
+            "protocol": "x402 v2",
+            "networks": payment_networks,
+            "challenge_header": "PAYMENT-REQUIRED",
+            "payment_header": "PAYMENT-SIGNATURE",
+            "quickstart": FIRST_PRICE_QUICKSTART_URL,
+        },
+        "example_response": {
+            "status": "ok",
+            "data": _raw_market_data_sample_payload(service, clean_symbol),
+            "meta": {
+                "sample": True,
+                "live_data": False,
+                "provider": "Blocksize Capital",
+            },
+        },
+        "limitations": [
+            "All numeric values are synthetic and intentionally not live.",
+            "Use the paid endpoint for current market data and preserve its source timestamp.",
+        ],
+    }
+
+
 @app.get("/v1/samples/macro-snapshot")
 async def macro_snapshot_sample() -> dict[str, Any]:
     """Return a free, clearly labeled preview of the paid macro package."""
@@ -9910,6 +10100,12 @@ def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
     rows = rows if isinstance(rows, list) else []
     quality = summary.get("request_quality")
     quality = quality if isinstance(quality, dict) else {}
+    event_counts = summary.get("event_counts")
+    event_counts = event_counts if isinstance(event_counts, dict) else {}
+    delivered_mix = summary.get("delivered_selection_source_mix")
+    delivered_mix = delivered_mix if isinstance(delivered_mix, dict) else {}
+    revenue_mix = summary.get("recognized_revenue_by_selection_source_usdc")
+    revenue_mix = revenue_mix if isinstance(revenue_mix, dict) else {}
     candidates = [row for row in rows if int(row.get("non_monitor_attempts") or 0) > 0]
     candidates.sort(
         key=lambda row: (
@@ -9936,6 +10132,10 @@ def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
     attribution_rate = min(attributed / gross, 1.0) if gross else None
     monitor_share = quality.get("known_monitor_share")
     monitor_share = float(monitor_share) if monitor_share is not None else None
+    preview_views = int(event_counts.get("product_sample_viewed") or 0)
+    preview_live_attempts = int(selection_mix.get("raw_data_preview") or 0)
+    preview_deliveries = int(delivered_mix.get("raw_data_preview") or 0)
+    preview_revenue = float(revenue_mix.get("raw_data_preview") or 0.0)
     blockers: list[str] = []
     if selected:
         if attribution_rate is None or attribution_rate < 0.8:
@@ -9952,7 +10152,7 @@ def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
         else "ready_to_run"
     )
     return {
-        "experiment_id": "official_x402_handoff_for_top_non_monitor_product",
+        "experiment_id": "free_value_preview_to_x402_purchase",
         "status": status,
         "selected_product_id": selected.get("product_id") if selected else None,
         "selected_product_family": selected.get("product_family") if selected else None,
@@ -9971,14 +10171,28 @@ def _build_conversion_experiment(summary: dict[str, Any]) -> dict[str, Any]:
         "selection_attribution_rate": attribution_rate,
         "known_monitor_share": monitor_share,
         "blockers": blockers,
-        "hypothesis": "An explicit resolver-selected handoff using the official x402 v2 client will convert more non-monitor prompts to verified authorization and delivery than the generic path.",
-        "control": "Current resolver or direct endpoint handoff and purchase instructions.",
-        "treatment": "Resolver-selected endpoint plus official x402 v2 preflight, client example, and failure-specific recovery guidance.",
-        "primary_metric": "correlated_proof_attempts / non-monitor payment prompts",
+        "preview_funnel": {
+            "sample_views": preview_views,
+            "attributed_live_attempts": preview_live_attempts,
+            "validated_deliveries": preview_deliveries,
+            "recognized_revenue_usdc": round(preview_revenue, 6),
+            "sample_to_live_attempt_rate": (
+                preview_live_attempts / preview_views if preview_views else None
+            ),
+            "live_attempt_to_delivery_rate": (
+                preview_deliveries / preview_live_attempts
+                if preview_live_attempts
+                else None
+            ),
+        },
+        "hypothesis": "A free, explicitly synthetic response preview with an attributed live endpoint and official x402 clients will convert more non-monitor interest into verified delivery than a generic paid-endpoint handoff alone.",
+        "control": "Direct endpoint, registry, or resolver handoff without opening the free value preview.",
+        "treatment": "Free response preview followed by a raw_data_preview-attributed live endpoint, spend-capped buyer examples, and failure-specific recovery guidance.",
+        "primary_metric": "validated deliveries / raw_data_preview-attributed live attempts",
         "secondary_metrics": [
+            "raw_data_preview-attributed live attempts / product sample views",
             "verified_authorizations / correlated_proof_attempts",
-            "validated_deliveries / non-monitor payment prompts",
-            "recognized_revenue_usdc per non-monitor attempt",
+            "recognized revenue attributed to raw_data_preview",
             "repeat_7d_rate for trusted identities",
         ],
         "guardrails": [
@@ -10102,6 +10316,10 @@ def _build_operational_alerts(summary: dict[str, Any]) -> dict[str, Any]:
     reconciliation = reconciliation if isinstance(reconciliation, dict) else {}
     resolver = summary.get("resolver_funnel")
     resolver = resolver if isinstance(resolver, dict) else {}
+    experiment = summary.get("conversion_experiment")
+    experiment = experiment if isinstance(experiment, dict) else {}
+    preview_funnel = experiment.get("preview_funnel")
+    preview_funnel = preview_funnel if isinstance(preview_funnel, dict) else {}
     alerts: list[dict[str, str]] = []
 
     def add(
@@ -10156,6 +10374,20 @@ def _build_operational_alerts(summary: dict[str, Any]) -> dict[str, Any]:
         add("legacy-x402-lifecycle-backfill", "P1", "Historical x402 inflows lack decision-grade joins", f"${amount:.4f} remains excluded from recognized revenue.", "Payments + finance", "legacy_transaction_backed_x402_usdc", f"${amount:.4f}", "$0 unresolved", "Backfill only reviewed settlement-to-delivery joins.")
     if resolver.get("status") == "collecting_after_instrumentation":
         add("resolver-funnel-collecting", "P2", "Resolver conversion is collecting its baseline", "Search and resolution are visible, but paid delivery has not matured.", "Agent experience", "resolver_to_delivery_rate", "collecting", "measured", "Run the fixed long-tail resolver QA suite.")
+    preview_views = int(preview_funnel.get("sample_views") or 0)
+    preview_live_attempts = int(preview_funnel.get("attributed_live_attempts") or 0)
+    if preview_views >= 30 and preview_live_attempts == 0:
+        add(
+            "preview-to-live-handoff-stalled",
+            "P1",
+            "Free value previews are not progressing to live requests",
+            f"{preview_views} preview views produced no attributed live attempts.",
+            "Growth engineering",
+            "sample_to_live_attempt_rate",
+            "0%",
+            "> 0% after 30 views",
+            "Check the preview paid_endpoint, listing CTA, and buyer-client guidance before changing price.",
+        )
     severity_rank = {"P0": 0, "P1": 1, "P2": 2}
     alerts.sort(key=lambda alert: (severity_rank.get(alert["severity"], 9), alert["id"]))
     return {
@@ -11754,11 +11986,15 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     function renderProductPerformance(data) {
       const performance = data.product_performance || {};
       const experiment = data.conversion_experiment || {};
+      const preview = experiment.preview_funnel || {};
       const rows = performance.rows || [];
       document.getElementById("experiment-kpis").innerHTML = [
         summaryItem("Experiment", text(experiment.status).replaceAll("_", " ")),
         summaryItem("Candidate", text(experiment.selected_product_id)),
-        summaryItem("Package candidate", text(experiment.market_intelligence_candidate_product_id)),
+        summaryItem("Preview views", fmt.format(preview.sample_views || 0)),
+        summaryItem("Preview → live", fmt.format(preview.attributed_live_attempts || 0)),
+        summaryItem("Preview deliveries", fmt.format(preview.validated_deliveries || 0)),
+        summaryItem("Preview revenue", money(preview.recognized_revenue_usdc)),
         summaryItem("Attribution", pct(experiment.selection_attribution_rate)),
       ].join("");
       const blockers = experiment.blockers || [];
@@ -13916,6 +14152,12 @@ async def health_check() -> dict[str, Any]:
         },
         "links": {
             "coverage": f"{PUBLIC_BASE_URL.rstrip('/')}/v1/coverage",
+            "instrument_explorer": INSTRUMENT_EXPLORER_URL,
+            "free_value_preview": (
+                f"{PUBLIC_BASE_URL.rstrip('/')}/v1/samples/market-data"
+                "?service=vwap&symbol=BTCUSD"
+            ),
+            "data_packages": DATA_PACKAGES_JSON_URL,
             "remote_mcp": REMOTE_MCP_URL,
             "manifest": MCP_MANIFEST_URL,
             "robots": ROBOTS_URL,
