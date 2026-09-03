@@ -1,6 +1,6 @@
 [project]
 name = "blocksize-mcp-x402"
-version = "0.6.13"
+version = "0.6.14"
 description = "Blocksize live multi-asset market data for AI agents: signed x402 for direct public HTTP, authenticated-connector-only starter credits, and a contact-sales authenticated account plan"
 readme = "README.md"
 requires-python = ">=3.11"

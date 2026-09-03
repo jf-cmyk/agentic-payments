@@ -4,6 +4,16 @@ These examples use the official x402 v2 clients and fail closed at an explicit
 USDC spend limit. They make one read-only Blocksize data request and never
 execute a trade.
 
+Inspect the synthetic response shape for free before using a wallet:
+
+```bash
+curl -sS \
+  'https://mcp.blocksize.info/v1/samples/market-data?service=vwap&symbol=BTCUSD'
+```
+
+The preview's `paid_endpoint` is the attributed live route. It returns an x402
+challenge until the selected official client supplies a valid payment.
+
 ## Python: Base USDC
 
 Install the repository environment, put a dedicated Base wallet private key in

@@ -3882,8 +3882,8 @@ def test_release_ci_builds_twice_and_smokes_the_installed_wheel() -> None:
 
     assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == "3.12"
     assert 'python-version: "3.12"' in github
-    assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4" in github
-    assert "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5" in github
+    assert "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5" in github
+    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6" in github
     assert "cancel-in-progress: true" in github
     assert "timeout-minutes: 20" in github
     assert "railway up --" not in gitlab.lower()

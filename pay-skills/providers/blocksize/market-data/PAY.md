@@ -21,6 +21,15 @@ macro snapshots, token quality indicators, state divergence checks, Solana token
 briefs, or trader signal packs. Prefer a narrow lookup or packaged workflow with explicit user
 approval for repeated paid calls.
 
+Before authorizing a first payment, preview the exact response family for free:
+
+`GET /v1/samples/market-data?service=vwap&symbol=BTCUSD`
+
+The preview is explicitly synthetic and not for trading. Its `paid_endpoint`
+field carries attribution into the corresponding live x402 request. A live
+`402` response also links back to the preview and to maintained spend-capped
+Base and Solana buyer examples.
+
 ## Starter allowance
 
 - Position as: `Start with 50 live data credits`.
@@ -85,5 +94,7 @@ approval for repeated paid calls.
 ## Spend-aware usage
 
 - Prefer one-symbol calls for exploratory tasks.
+- Use the free synthetic preview to inspect value and response shape before a
+  first paid call.
 - Use the listed route examples exactly as shown in the OpenAPI sidecar.
 - Avoid polling unless the user has explicitly approved repeated paid calls.

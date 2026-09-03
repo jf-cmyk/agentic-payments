@@ -63,14 +63,17 @@
       <section class="card">
         <span class="status split">Discovery + HTTP live price</span>
         <h2>ChatGPT</h2>
-        <p>Add <code>https://mcp.blocksize.info/mcp/server/</code> for discovery and endpoint construction. Inspect the standard x402 v2 challenge:</p>
+        <p>Add <code>https://mcp.blocksize.info/mcp/server/</code> for discovery and endpoint construction. Preview the response shape without live data or payment:</p>
+        <pre><code>curl -sS \
+  'https://mcp.blocksize.info/v1/samples/market-data?service=vwap&amp;symbol=BTCUSD'</code></pre>
+        <p>The preview is synthetic and not for trading. Follow its attributed <code>paid_endpoint</code>, then inspect the standard x402 v2 challenge:</p>
         <pre><code>curl -i -sS \
   'https://mcp.blocksize.info/v1/vwap/btc-usd'</code></pre>
         <p>Use an official x402 client to sign an advertised requirement and retry with <code>PAYMENT-SIGNATURE</code>. Raw identity headers do not grant production credits; included credits use authenticated connector identities.</p>
       </section>
     </div>
 
-    <aside class="note"><strong>Use the maintained clients.</strong> The GitHub repository includes spend-capped official x402 buyer examples for Base in Python and TypeScript, plus the hardened Solana canary. If a signature is rejected, rebuild it from the fresh <code>PAYMENT-REQUIRED</code> challenge.</aside>
+    <aside class="note"><strong>Use the maintained clients.</strong> Every paid <code>402</code> response links to the free value preview and spend-capped official x402 buyer examples for Base in Python and TypeScript, plus the hardened Solana canary. If a signature is rejected, rebuild it from the fresh <code>PAYMENT-REQUIRED</code> challenge.</aside>
     <aside class="note"><strong>Verify the evidence.</strong> A live result should include the instrument, price or VWAP, currency, source timestamp, provider context, and citation or methodology metadata. Discovery output is not a live price.</aside>
     <p><a href="https://github.com/jf-cmyk/agentic-payments/tree/main/examples/x402">Base buyer examples</a> · <a href="https://github.com/jf-cmyk/agentic-payments/blob/main/scripts/run_funded_x402_canary.py">Solana canary</a> · <a href="/claude-connector">Claude connector details</a> · <a href="/quickstart/remote-mcp">Public MCP discovery guide</a> · <a href="/docs">HTTP API reference</a></p>
   </main>
