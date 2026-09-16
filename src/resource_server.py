@@ -729,9 +729,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_14",
-        "observed_version": "0.6.14 candidate",
-        "audited_at": "2026-09-03",
+        "release_status": "release_source_v0_6_15",
+        "observed_version": "0.6.15 candidate",
+        "audited_at": "2026-09-16",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
