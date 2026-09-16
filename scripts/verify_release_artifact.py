@@ -27,6 +27,7 @@ RWA_RUNTIME_DATA_FILES = {
 REQUIRED_MEMBERS = (
     "src/resource_server.py",
     "src/agent_discovery.py",
+    "src/search_discovery.py",
     "src/agent_skills/discover-blocksize-market-data/SKILL.md",
     "scripts/__init__.py",
     "scripts/build_rwa_pilot_promotion_packet.py",
