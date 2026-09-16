@@ -26,6 +26,8 @@ RWA_RUNTIME_DATA_FILES = {
 }
 REQUIRED_MEMBERS = (
     "src/resource_server.py",
+    "src/agent_discovery.py",
+    "src/agent_skills/discover-blocksize-market-data/SKILL.md",
     "scripts/__init__.py",
     "scripts/build_rwa_pilot_promotion_packet.py",
     "scripts/run_rwa_growth_pilot.py",
@@ -66,6 +68,7 @@ PUBLIC_HTML_FILES = {
     "share/blocksize-mcp/docs/claude_connector.html",
 }
 ALLOWED_PUBLIC_DOC_FILES = PUBLIC_HTML_FILES | {
+    "share/blocksize-mcp/docs/assets/agent-tools.js",
     "share/blocksize-mcp/docs/assets/agent_demo.gif",
     "share/blocksize-mcp/docs/assets/architecture_diagram.png",
     "share/blocksize-mcp/docs/assets/favicon.ico",
