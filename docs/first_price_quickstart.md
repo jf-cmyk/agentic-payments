@@ -80,6 +80,15 @@ signature should be rebuilt from the fresh `PAYMENT-REQUIRED` challenge returned
 by Blocksize. Every paid `402` response also includes `purchase_handoff` links
 to the free value preview and the maintained Base and Solana buyer clients.
 
+For recurring usage, inspect `GET /v1/account-plans` or call the public MCP
+tool `recommend_account_plan`. These are sales-assisted starting points, not
+self-serve subscriptions.
+
+For a repeatable, spend-bounded workflow, call `POST /v1/monitors/recipe`.
+It returns the cadence, maximum run count, maximum spend, and attributed
+`/v1/monitors/evaluate` request. Your agent remains the scheduler and must use a
+fresh x402 signature or authenticated connector authorization for each run.
+
 ## Verify the result
 
 A successful response should include the instrument, price/VWAP, currency, source timestamp, provider context, and citation or methodology metadata. Do not treat discovery output as a live price.

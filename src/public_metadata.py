@@ -7,8 +7,11 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.17"
+from src.commercial_plans import account_plan_catalog
+
+APP_VERSION = "0.6.18"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.18": "2026-09-16",
     "0.6.17": "2026-09-16",
     "0.6.16": "2026-09-16",
     "0.6.15": "2026-09-16",
@@ -445,6 +448,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
         "price_usdc_min": "1.00",
         "price_usdc_max": "2.50",
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/macro-snapshot",
+        "free_preview_url": f"{PUBLIC_BASE_URL}/v1/previews/macro",
     },
     {
         "id": "agent-data-provenance",
@@ -1868,6 +1872,11 @@ def build_data_packages_json() -> dict[str, object]:
         "instrument_explorer": INSTRUMENT_EXPLORER_URL,
         "unified_coverage": f"{PUBLIC_BASE_URL}/v1/coverage",
         "data_catalog_pdf": DATA_CATALOG_URL,
+        "account_plans": {
+            **account_plan_catalog(),
+            "catalog_url": f"{PUBLIC_BASE_URL}/v1/account-plans",
+            "recommendation_url": f"{PUBLIC_BASE_URL}/v1/account-plans/recommend",
+        },
         "routing": {
             "discover": "Open /instruments or call /v1/search to resolve a canonical symbol, verify live readiness, inspect the exact price, preview a clearly labeled synthetic response, and copy an attributed purchase request. Read /v1/coverage for current counts and qualification boundaries.",
             "readiness": "Use /v1/cache/status for stream-cache readiness and /v1/capabilities/check before paid optional state or VWAP-window products.",

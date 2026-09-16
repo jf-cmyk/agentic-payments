@@ -68,6 +68,11 @@ from src.blocksize_client import (
     BlocksizeAPIError,
     BlocksizeClient,
 )
+from src.commercial_plans import (
+    account_plan_catalog,
+    recommend_account_plan,
+    tracked_plan_contact_path,
+)
 from src.search_discovery import router as search_discovery_router
 from src.blocksize_stream_cache import BlocksizeStreamCache
 from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
@@ -730,8 +735,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_17",
-        "observed_version": "0.6.17 candidate",
+        "release_status": "release_source_v0_6_18",
+        "observed_version": "0.6.18 candidate",
         "audited_at": "2026-09-16",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
@@ -2119,6 +2124,223 @@ async def get_products() -> dict[str, Any]:
     }
 
 
+@app.get("/v1/account-plans")
+async def get_account_plans(request: Request) -> dict[str, Any]:
+    """Return truthful sales-assisted account-plan starting points. FREE."""
+
+    _record_product_event("account_plan_catalog_viewed", request)
+    catalog = account_plan_catalog()
+    catalog["recommendation_path"] = "/v1/account-plans/recommend"
+    return catalog
+
+
+@app.post("/v1/account-plans/recommend")
+async def get_account_plan_recommendation(
+    request: Request,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Recommend a plan using bounded non-sensitive operating inputs. FREE."""
+
+    try:
+        expected_calls = int(payload.get("expected_monthly_live_calls", 0))
+        team_seats = int(payload.get("team_seats", 1))
+        recurring_days = int(payload.get("recurring_days_per_month", 0))
+        needs_sla = bool(payload.get("needs_sla", False))
+        recommendation = recommend_account_plan(
+            expected_monthly_live_calls=expected_calls,
+            team_seats=team_seats,
+            needs_sla=needs_sla,
+            recurring_days_per_month=recurring_days,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    plan_id = str(recommendation["recommended_plan"]["id"])
+    _record_product_event(
+        "account_plan_recommended",
+        request,
+        metadata={
+            "recommended_plan_id": plan_id,
+            "expected_monthly_live_calls_bucket": (
+                "100k_plus"
+                if expected_calls > 100_000
+                else "10k_to_100k"
+                if expected_calls > 10_000
+                else "under_10k"
+            ),
+            "team_seats_bucket": "multi_user" if team_seats > 1 else "single_user",
+            "needs_sla": needs_sla,
+            "recurring_usage": recurring_days >= 8,
+        },
+    )
+    return {
+        "status": "ok",
+        **recommendation,
+        "conversion": {
+            "contact_path": tracked_plan_contact_path(
+                plan_id,
+                source="account-plan-recommender",
+            ),
+            "purchase_mode": "sales_assisted",
+            "self_serve_purchase_available": False,
+        },
+    }
+
+
+@app.get("/v1/previews/macro")
+async def preview_multi_asset_macro_snapshot(request: Request) -> dict[str, Any]:
+    """Return an explicit synthetic preview and an attributed live handoff. FREE."""
+
+    preview_id = secrets.token_hex(8)
+    _record_product_event(
+        "product_sample_viewed",
+        request,
+        metadata={
+            "product_id": "macro_snapshot",
+            "preview_id": preview_id,
+            "selection_source": "product_preview",
+            "synthetic": True,
+        },
+    )
+    live_url = (
+        f"{PUBLIC_BASE_URL}/v1/snapshots/macro"
+        f"?selection_source=product_preview&resolution_id={preview_id}"
+        "&utm_source=mcp.blocksize.info&utm_medium=product-preview"
+        "&utm_campaign=macro-snapshot-conversion"
+    )
+    return {
+        "status": "ok",
+        "product": "multi_asset_macro_snapshot",
+        "preview_id": preview_id,
+        "preview": {
+            "data_class": "synthetic_example",
+            "live_market_data": False,
+            "headline": "Four-asset macro snapshot with quality flags and provenance.",
+            "assets": [
+                {"symbol": "BTCUSD", "asset_class": "crypto", "value": 65000.0},
+                {"symbol": "ETHUSD", "asset_class": "crypto", "value": 3500.0},
+                {"symbol": "EURUSD", "asset_class": "fx", "value": 1.08},
+                {"symbol": "XAUUSD", "asset_class": "metal", "value": 2400.0},
+            ],
+            "quality_flags": [],
+            "provenance_included_in_paid_result": True,
+        },
+        "live_request": {
+            "method": "POST",
+            "url": live_url,
+            "body": {"universe": ["BTCUSD", "ETHUSD", "EURUSD", "XAUUSD"]},
+            "price_usdc": "1.00",
+            "starter_credit_cost": CREDIT_COSTS["macro_snapshot"],
+            "payment": "signed x402 v2 or authenticated connector credits",
+        },
+        "account_plan": {
+            "recommendation_path": "/v1/account-plans/recommend",
+            "contact_path": tracked_plan_contact_path(
+                "developer",
+                source="macro-snapshot-preview",
+            ),
+        },
+    }
+
+
+@app.post("/v1/monitors/recipe")
+async def build_repeat_monitor_recipe(
+    request: Request,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a bounded caller-scheduled monitor recipe. FREE."""
+
+    raw_symbols = payload.get("symbols") or ["BTCUSD", "ETHUSD"]
+    if isinstance(raw_symbols, str):
+        raw_symbols = [item.strip() for item in raw_symbols.split(",") if item.strip()]
+    if not isinstance(raw_symbols, list) or not raw_symbols or len(raw_symbols) > 12:
+        raise HTTPException(status_code=400, detail="symbols must contain 1 to 12 items")
+    symbols = [_normalise_symbol(str(symbol), "symbol") for symbol in raw_symbols]
+
+    raw_rules = payload.get("rules") or []
+    if not isinstance(raw_rules, list) or len(raw_rules) > 10:
+        raise HTTPException(status_code=400, detail="rules must contain at most 10 items")
+    if any(not isinstance(rule, dict) for rule in raw_rules):
+        raise HTTPException(status_code=400, detail="each monitor rule must be an object")
+
+    try:
+        cadence_seconds = int(payload.get("cadence_seconds", 300))
+        requested_runs = int(payload.get("max_runs", 12))
+        max_spend = Decimal(str(payload.get("max_spend_usdc", "3.00")))
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise HTTPException(status_code=400, detail="invalid repeat-workflow budget") from exc
+    if not 60 <= cadence_seconds <= 86_400:
+        raise HTTPException(status_code=400, detail="cadence_seconds must be 60 to 86400")
+    if not 1 <= requested_runs <= 288:
+        raise HTTPException(status_code=400, detail="max_runs must be 1 to 288")
+    per_run_price = Decimal("0.25")
+    if max_spend < per_run_price or max_spend > Decimal("500"):
+        raise HTTPException(status_code=400, detail="max_spend_usdc must be 0.25 to 500")
+
+    affordable_runs = int(max_spend // per_run_price)
+    effective_runs = min(requested_runs, affordable_runs)
+    maximum_spend = per_run_price * effective_runs
+    workflow_id = secrets.token_hex(8)
+    live_url = (
+        f"{PUBLIC_BASE_URL}/v1/monitors/evaluate"
+        f"?selection_source=repeat_workflow_recipe&resolution_id={workflow_id}"
+        "&utm_source=mcp.blocksize.info&utm_medium=workflow-recipe"
+        "&utm_campaign=repeat-monitor"
+    )
+    _record_product_event(
+        "repeat_workflow_recipe_created",
+        request,
+        metadata={
+            "product_id": "spend_controlled_market_monitor",
+            "workflow_id": workflow_id,
+            "symbol_count": len(symbols),
+            "rule_count": len(raw_rules),
+            "cadence_bucket": (
+                "under_5m"
+                if cadence_seconds < 300
+                else "5m_to_1h"
+                if cadence_seconds <= 3600
+                else "over_1h"
+            ),
+            "effective_runs": effective_runs,
+        },
+    )
+    return {
+        "status": "ok",
+        "product": "spend_controlled_market_monitor",
+        "workflow_id": workflow_id,
+        "execution": {
+            "owner": "caller",
+            "server_side_scheduler_enabled": False,
+            "cadence_seconds": cadence_seconds,
+            "max_runs": effective_runs,
+            "stop_after_seconds": cadence_seconds * effective_runs,
+            "instruction": "Schedule the live_request from your agent and stop after max_runs.",
+        },
+        "spend_control": {
+            "price_per_run_usdc": str(per_run_price),
+            "maximum_spend_usdc": str(maximum_spend),
+            "requested_max_spend_usdc": str(max_spend),
+            "budget_reduced_runs": effective_runs < requested_runs,
+            "reuse_payment_signature": False,
+        },
+        "live_request": {
+            "method": "POST",
+            "url": live_url,
+            "body": {
+                "symbols": symbols,
+                "rules": raw_rules,
+                "max_credits": CREDIT_COSTS["market_brief"],
+            },
+            "payment": "new signed x402 v2 request or authenticated connector credits per run",
+        },
+        "upgrade": {
+            "recommendation_path": "/v1/account-plans/recommend",
+            "reason": "Use an account plan when this workflow becomes sustained production traffic.",
+        },
+    }
+
+
 async def get_open_graph_svg(request: Request) -> Response:
     """Serve lightweight social preview artwork for high-intent pages."""
     filename = request.path_params.get("filename", "")
@@ -2617,6 +2839,7 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     "/v1/checks/pre-trade": Decimal("0.10"),
     "/v1/receipts/price": Decimal("0.25"),
     "/v1/snapshots/macro": Decimal("1.00"),
+    "/v1/monitors/recipe": None,
     "/v1/monitors/evaluate": Decimal("0.25"),
     "/v1/indicators/token-quality": Decimal("0.50"),
     "/v1/indicators/state-divergence": Decimal("0.50"),

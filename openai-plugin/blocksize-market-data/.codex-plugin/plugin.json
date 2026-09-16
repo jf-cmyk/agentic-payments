@@ -1,6 +1,6 @@
 {
   "name": "blocksize-market-data",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Read-only authenticated Blocksize live market data for ChatGPT and Codex.",
   "author": {
     "name": "Blocksize Capital GmbH",

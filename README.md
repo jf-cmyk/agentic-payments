@@ -90,6 +90,7 @@ It exposes only read-only discovery tools:
 - `list_instruments`
 - `get_pricing_info`
 - `get_product_catalog`
+- `recommend_account_plan`
 - `get_workflow_endpoint`
 - `get_market_data_endpoint`
 - `search`

@@ -19,6 +19,7 @@ The public MCP server is read-only and exposes:
 - `list_instruments`
 - `get_pricing_info`
 - `get_product_catalog`
+- `recommend_account_plan`
 - `get_workflow_endpoint`
 - `get_market_data_endpoint`
 - `search`
@@ -147,6 +148,22 @@ The public pricing guide documents direct x402 rates, authenticated connector
 starter credits, and how to discuss an authenticated account plan:
 
 - `https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf`
+- `GET https://mcp.blocksize.info/v1/account-plans` returns indicative
+  Developer ($49/month), Production ($249/month), and Institutional
+  ($999/month) starting points. Plans are sales-assisted and require a signed
+  order form; this endpoint does not create an entitlement.
+- `POST https://mcp.blocksize.info/v1/account-plans/recommend` selects a plan
+  from expected monthly calls, team size, recurring-use days, and SLA needs
+  without collecting contact details.
+
+The paid Multi-Asset Macro Snapshot has an explicitly synthetic free preview at
+`GET https://mcp.blocksize.info/v1/previews/macro`. It contains no live values
+and returns an attributed x402 handoff for the paid result.
+
+For repeat use, `POST https://mcp.blocksize.info/v1/monitors/recipe` creates a
+free caller-scheduled monitor recipe with an explicit cadence, run cap, maximum
+USDC spend, and attributed live endpoint. The calling agent owns execution and
+presents a fresh x402 signature or connector authorization for every run.
 
 ## Policy and support
 

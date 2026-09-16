@@ -19,6 +19,7 @@ const expectedTools = [
   "get_product_catalog",
   "get_workflow_endpoint",
   "list_instruments",
+  "recommend_account_plan",
   "search",
   "search_pairs",
 ];
@@ -28,6 +29,7 @@ const toolCalls = {
   get_pricing_info: {},
   get_product_catalog: {},
   get_workflow_endpoint: { product: "agent_market_brief" },
+  recommend_account_plan: { expected_monthly_live_calls: 20000, team_seats: 2 },
   get_market_data_endpoint: { service: "vwap", symbol: "BTC-USD" },
   search: { query: "pricing" },
   fetch: { id: "doc:pricing" },

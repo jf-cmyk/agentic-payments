@@ -44,14 +44,14 @@ https://github.com/jf-cmyk/agentic-payments/tree/main/claude-plugin/blocksize-ma
 ```
 
 Release gate: the canonical GitHub path currently contains an older public
-package. Do not submit it as the `0.3.0` source until the accepted release
+package. Do not submit it as the `0.4.0` source until the accepted release
 commit, repository marketplace manifest, tag, checksum, and clean-install smoke
 evidence are public and mutually consistent.
 
 Prepared upload archive:
 
 ```text
-deliverables/blocksize-market-data-claude-plugin-0.3.0.zip
+deliverables/blocksize-market-data-claude-plugin-0.4.0.zip
 ```
 
 Remote MCP endpoint:
@@ -84,9 +84,9 @@ https://platform.claude.com/plugins/submit
 - If Anthropic requires a GitHub URL, sync and verify the canonical repository
   release gate above before using the GitHub option.
 - Until GitHub is synced, use
-  `deliverables/blocksize-market-data-claude-plugin-0.3.0.zip` only for a
+  `deliverables/blocksize-market-data-claude-plugin-0.4.0.zip` only for a
   controlled local validation or an explicit archive-upload workflow. Its
-  checksum is recorded in `deliverables/agent-skill-release-0.4.0.json`, whose
+  checksum is recorded in `deliverables/agent-skill-release-0.5.0.json`, whose
   current signature status is `unsigned-local-build`.
 - Run `claude plugin validate claude-plugin/blocksize-market-data` before plugin
   submission where the Claude CLI is available.

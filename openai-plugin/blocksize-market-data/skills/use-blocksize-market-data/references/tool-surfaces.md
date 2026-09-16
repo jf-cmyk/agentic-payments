@@ -30,12 +30,13 @@ wallet, trading, or account-mutation tools.
 
 MCP URL: `https://mcp.blocksize.info/mcp/server/`
 
-The public server exposes exactly eight read-only tools:
+The public server exposes exactly nine read-only tools:
 
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
 - `get_product_catalog`
+- `recommend_account_plan`
 - `get_workflow_endpoint`
 - `get_market_data_endpoint`
 - `search`

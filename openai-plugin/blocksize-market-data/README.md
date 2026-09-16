@@ -38,7 +38,7 @@ messages, submit payment proofs, or provide investment advice.
 
 ## Install Locally Now
 
-The public repository mirrors do not yet contain this `0.4.0` plugin and its
+The public repository mirrors do not yet contain this `0.5.0` plugin and its
 marketplace manifest. Do not use a remote marketplace URL for the current local
 release candidate.
 
@@ -53,7 +53,7 @@ codex plugin add blocksize-market-data@blocksize-plugins
 The deterministic local archive is:
 
 ```text
-deliverables/blocksize-market-data-openai-plugin-0.4.0.zip
+deliverables/blocksize-market-data-openai-plugin-0.5.0.zip
 ```
 
 That archive contains the plugin, not a standalone marketplace. To test the
@@ -61,7 +61,7 @@ ZIP, extract it under a dedicated local marketplace root as
 `plugins/blocksize-market-data`, add a local marketplace entry whose
 `source.path` is `./plugins/blocksize-market-data`, then add that root with
 `codex plugin marketplace add /absolute/path/to/local-marketplace`. Verify its
-SHA-256 against `deliverables/agent-skill-release-0.4.0.json` first; the current
+SHA-256 against `deliverables/agent-skill-release-0.5.0.json` first; the current
 archive is an unsigned local build.
 
 ## Future Remote Install Gate

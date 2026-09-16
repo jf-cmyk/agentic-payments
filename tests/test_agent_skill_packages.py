@@ -38,6 +38,7 @@ PUBLIC_DISCOVERY_TOOLS = (
     "list_instruments",
     "get_pricing_info",
     "get_product_catalog",
+    "recommend_account_plan",
     "get_workflow_endpoint",
     "get_market_data_endpoint",
     "search",
@@ -112,7 +113,7 @@ def test_public_tool_inventories_match_fastmcp_contract() -> None:
             str(skill_root.relative_to(ROOT) / "references/tool-surfaces.md")
         ] = _backtick_inventory(
             skill_root / "references/tool-surfaces.md",
-            "The public server exposes exactly eight read-only tools:",
+                "The public server exposes exactly nine read-only tools:",
             "They cover catalog search",
         )
 
@@ -158,7 +159,7 @@ def test_openai_plugin_uses_distinct_live_and_public_mcp_identities() -> None:
     )
     dependency = skill_metadata["dependencies"]["tools"][0]
 
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.5.0"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert bundled_mcp == {
@@ -198,7 +199,7 @@ def test_claude_plugin_mcp_and_repo_marketplace_are_installable() -> None:
         ROOT / "docs/gtm/claude_plugin_submission/README.md"
     ).read_text(encoding="utf-8")
 
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.4.0"
     assert "defaultEnabled" not in manifest
     assert mcp == {
         "mcpServers": {
@@ -238,12 +239,12 @@ def test_plugin_install_guidance_does_not_claim_stale_remote_availability() -> N
         assert CANONICAL_REPOSITORY in text
 
     assert "codex plugin marketplace add /absolute/path/to/agentic-payments" in openai_readme
-    assert "blocksize-market-data-openai-plugin-0.4.0.zip" in openai_readme
+    assert "blocksize-market-data-openai-plugin-0.5.0.zip" in openai_readme
     assert "Future Remote Install Gate" in openai_readme
     assert "claude --plugin-dir /absolute/path/to/claude-plugin/blocksize-market-data" in (
         claude_setup
     )
-    assert "blocksize-market-data-claude-plugin-0.3.0.zip" in claude_setup
+    assert "blocksize-market-data-claude-plugin-0.4.0.zip" in claude_setup
     assert "Future remote install gate" in claude_setup
 
     assert _json(OPENAI_ROOT / ".codex-plugin/plugin.json")["repository"] == (
@@ -261,7 +262,7 @@ def test_cursor_manifests_and_scoped_oauth_docs_are_consistent() -> None:
     readme = (CURSOR_ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "$schema" not in manifest
-    assert manifest["version"] == "1.3.0"
+    assert manifest["version"] == "1.4.0"
     assert marketplace["metadata"]["version"] == manifest["version"]
     assert marketplace["plugins"][0]["source"] == "./plugins/blocksize-market-data"
     assert mcp == {
@@ -344,7 +345,7 @@ def test_package_builder_is_reproducible_and_allowlisted(tmp_path: Path) -> None
 
 def test_versioned_release_artifacts_match_reproducible_build(tmp_path: Path) -> None:
     build_agent_skill_packages.build_all(tmp_path)
-    release_version = "0.4.0"
+    release_version = "0.5.0"
 
     for spec in build_agent_skill_packages.package_specs():
         assert (ROOT / "deliverables" / spec.filename).read_bytes() == (

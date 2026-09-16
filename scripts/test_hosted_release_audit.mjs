@@ -13,6 +13,7 @@ const expectedTools = [
   "get_product_catalog",
   "get_workflow_endpoint",
   "list_instruments",
+  "recommend_account_plan",
   "search",
   "search_pairs",
 ];
