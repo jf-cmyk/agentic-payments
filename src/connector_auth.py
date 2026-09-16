@@ -49,6 +49,9 @@ def build_connector_auth_provider(
 ):
     """Build a FastMCP OAuth provider for a named connector surface."""
     provider = _env(prefix, "AUTH_PROVIDER").strip().lower()
+    agent_enabled = prefix == "ANTHROPIC" and os.environ.get("AGENT_AUTH_ENABLED", "").lower() == "true"
+    if agent_enabled and provider != "clerk":
+        raise ValueError("AGENT_AUTH_ENABLED requires the Anthropic Clerk provider")
     base_url = _env(prefix, "MCP_PUBLIC_URL", default_public_url).rstrip("/")
     redirect_path = _env(prefix, "OAUTH_REDIRECT_PATH").strip() or None
     allowed_client_redirect_uris = allowed_client_redirect_uris_for(
@@ -69,6 +72,8 @@ def build_connector_auth_provider(
         client_id = os.environ.get("CLERK_CLIENT_ID", "").strip()
         client_secret = os.environ.get("CLERK_CLIENT_SECRET", "").strip() or None
         if not domain or not client_id or (not client_secret and not jwt_signing_key):
+            if agent_enabled:
+                raise ValueError("Agent registration requires complete Clerk OAuth configuration")
             logger.warning("%s_AUTH_PROVIDER=clerk but Clerk env vars are incomplete", prefix)
             return None
         from fastmcp.server.auth.providers.clerk import ClerkProvider
@@ -79,7 +84,12 @@ def build_connector_auth_provider(
             fallback_secret=client_secret,
         )
 
-        return ClerkProvider(
+        provider_class = ClerkProvider
+        if agent_enabled:
+            from src.agent_auth_provider import AgentClerkProvider
+            provider_class = AgentClerkProvider
+
+        return provider_class(
             domain=domain,
             client_id=client_id,
             client_secret=client_secret,

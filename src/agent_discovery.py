@@ -66,7 +66,9 @@ async def get_api_catalog(request: Request):
     return public_response(request, {"linkset": [{
         "anchor": base,
         "service-desc": [{"href": meta.OPENAPI_URL, "type": "application/json"}],
-        "service-doc": [{"href": meta.SWAGGER_URL, "type": "text/html"}],
+        "service-doc": [{"href": meta.SWAGGER_URL, "type": "text/html"},
+                        {"href": f"{base}/auth.md", "type": "text/markdown"},
+                        {"href": f"{base}/.well-known/x402", "type": "application/json"}],
         "status": [{"href": f"{base}/health", "type": "application/json"}],
     }]}, "application/linkset+json")
 
@@ -117,7 +119,7 @@ async def get_skill(request: Request, name: str):
 @router.api_route("/auth.md", methods=["GET", "HEAD"])
 async def get_auth_guide(request: Request):
     base = meta.PUBLIC_BASE_URL
-    text = f"""# Blocksize authentication and access
+    text = f"""# Auth.md — Blocksize agent authentication
 
 Public discovery at {meta.REMOTE_MCP_URL} requires no credentials and cannot fetch paid data.
 Use {base}/openapi.json to discover HTTP operations and {base}/.well-known/x402 for payment metadata.
@@ -146,12 +148,46 @@ headers cannot claim or spend them. Check credit balance before live calls.
 Paid HTTP routes use signed x402 v2 payments. An unpaid request to a paid route returns its
 payment requirements. Read the current challenge for price, network, asset, and recipient.
 Only authorize payment within the user's approved budget. Never put wallet secrets in requests.
-There is no separate auth.md autonomous registration API. Account plans are available by agreement.
+Account plans are available by agreement.
 
 Integration guide: {meta.QUICKSTART_URL}
 First live price: {meta.FIRST_PRICE_QUICKSTART_URL}
 Support: {meta.SUPPORT_URL}
 """
+    from src.anthropic_mcp_server import anthropic_mcp
+    service = getattr(getattr(anthropic_mcp, "auth", None), "agent_auth", None)
+    if service is not None:
+        text += f"""
+## Account-linked agents (service_auth)
+
+Authorization server: {service.issuer}
+Metadata: {base}/.well-known/oauth-authorization-server/anthropic/mcp
+Resource: {service.issuer}/
+
+1. POST JSON to {service.base}/identity with `type: service_auth`, `login_hint`
+   (the user's email), and optional `agent_name`. No anonymous or external ID-JAG registration.
+2. Show the returned `claim.verification_uri` and six-digit `claim.user_code` to the user.
+   The user signs in with Clerk using the same verified email, enters the code, and explicitly
+   approves spending their existing connector credits. Do not complete consent on their behalf.
+3. Poll {service.issuer}/token with form-encoded `grant_type=urn:workos:agent-auth:grant-type:claim`
+   and `claim_token`, at most every five seconds. On `authorization_pending`, wait;
+   on `slow_down`, increase the interval; on `access_denied` or `expired_token`, stop.
+4. Use the returned Bearer `access_token` only at {service.issuer}/. Tokens expire within
+   one hour and cannot outlive the underlying sign-in. No refresh token is issued.
+5. The returned `identity_assertion` can be exchanged at the same token endpoint using
+   `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, `assertion`, and the exact `resource`
+   above until expiry. After expiry, repeat sign-in and consent.
+
+Manage or revoke delegations: {service.base}/agents
+Revoke a delegated token: POST form field `token` to {service.base}/revoke.
+Revoking the delegation in the management page also invalidates its assertion.
+Token-only revocation allows re-exchange of an unexpired assertion. Both block new requests
+using the revoked credential immediately.
+Requests already in progress may finish. Unknown tokens return HTTP 200.
+Never expose claim tokens, assertions, or access tokens in URLs, logs, or public messages.
+"""
+    else:
+        text += "\nAccount-linked agent registration is not enabled on this deployment. Use connector OAuth.\n"
     return public_response(request, text, "text/markdown")
 
 

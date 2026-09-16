@@ -31,6 +31,10 @@ _SENSITIVE_QUERY_PARAMETERS = frozenset(
         "password",
         "api_key",
         "signature",
+        "claim_token",
+        "claim_attempt_token",
+        "identity_assertion",
+        "state",
     }
 )
 _QUERY_PAIR_RE = re.compile(r"([?&])([^=&\s#]+)=([^&\s#]*)")

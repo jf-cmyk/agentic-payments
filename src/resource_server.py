@@ -730,8 +730,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_16",
-        "observed_version": "0.6.16 candidate",
+        "release_status": "release_source_v0_6_17",
+        "observed_version": "0.6.17 candidate",
         "audited_at": "2026-09-16",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
@@ -2282,6 +2282,8 @@ def _oauth_protected_resource_metadata(
 ) -> dict[str, object]:
     return {
         "resource": f"{mcp_url}/",
+        "resource_name": "Blocksize authenticated market data",
+        "resource_documentation": f"{PUBLIC_BASE_URL.rstrip('/')}/auth.md",
         "authorization_servers": [mcp_url] if oauth_available else [],
         "scopes_supported": scopes,
         "bearer_methods_supported": ["header"],
@@ -2315,6 +2317,12 @@ def _oauth_authorization_server_metadata(
         "code_challenge_methods_supported": ["S256"],
         "client_id_metadata_document_supported": True,
     })
+    agent_auth = getattr(getattr(anthropic_mcp, "auth", None), "agent_auth", None)
+    if agent_auth is not None and mcp_url == agent_auth.issuer:
+        from src.agent_auth import CLAIM_GRANT, ASSERTION_GRANT
+        metadata.update(agent_auth.metadata())
+        metadata["grant_types_supported"].extend([CLAIM_GRANT, ASSERTION_GRANT])
+        metadata["token_endpoint_auth_methods_supported"].append("none")
     return metadata
 
 
@@ -2826,31 +2834,8 @@ def _x402_endpoint_description(path: str) -> str:
 
 
 def _x402_query_schema_for_request(request: Request) -> dict[str, Any]:
-    if request.url.path.startswith("/v1/batch"):
-        return {
-            "type": "object",
-            "properties": {
-                "reqs": {
-                    "type": "string",
-                    "description": "Comma-separated service:symbol items, for example vwap:BTCUSD,fx:EURUSD.",
-                }
-            },
-            "required": ["reqs"],
-            "additionalProperties": False,
-        }
-    if request.url.path.startswith("/v1/credits/purchase"):
-        return {
-            "type": "object",
-            "properties": {
-                "tier": {
-                    "type": "string",
-                    "enum": ["starter", "pro", "institutional"],
-                }
-            },
-            "required": ["tier"],
-            "additionalProperties": False,
-        }
-    return {"type": "object", "properties": {}, "additionalProperties": False}
+    from src.commerce_discovery import query_contract
+    return query_contract(request, app)
 
 
 def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
@@ -2861,11 +2846,8 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
     if "tier" in query_schema.get("properties", {}):
         query_example["tier"] = "starter"
 
-    output_example = {
-        "status": "ok",
-        "data": {},
-        "meta": {"provider": "Blocksize Capital"},
-    }
+    from src.commerce_discovery import output_contract
+    output_info, output_schema = output_contract(request.url.path)
     method = request.method.upper()
     body_method = method in {"POST", "PUT", "PATCH"}
     if body_method:
@@ -2877,7 +2859,7 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
         }
         input_properties = {
             "type": {"type": "string", "const": "http"},
-            "method": {"type": "string", "enum": ["POST", "PUT", "PATCH"]},
+            "method": {"type": "string", "const": method},
             "bodyType": {
                 "type": "string",
                 "enum": ["json", "form-data", "text"],
@@ -2893,14 +2875,14 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
         }
         input_properties = {
             "type": {"type": "string", "const": "http"},
-            "method": {"type": "string", "enum": ["GET", "HEAD", "DELETE"]},
+            "method": {"type": "string", "const": method},
             "queryParams": query_schema,
         }
         input_required = ["type", "method"]
     return {
         "info": {
             "input": input_info,
-            "output": {"type": "json", "example": output_example},
+            "output": output_info,
         },
         "schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2916,7 +2898,7 @@ def _x402_bazaar_extension(request: Request) -> dict[str, Any]:
                     "type": "object",
                     "properties": {
                         "type": {"type": "string"},
-                        "example": {"type": "object"},
+                        "example": output_schema,
                     },
                     "required": ["type"],
                 },
