@@ -156,6 +156,7 @@ from src.public_metadata import (
     build_seo_landing_page,
     build_sitemap_xml,
 )
+from src.agent_discovery import PUBLIC_DISCOVERY_PATHS, prefers_markdown, router as discovery_router
 from src.runtime_data import (
     INSTALLED_DISTRIBUTION as INSTALLED_DISTRIBUTION,
     PACKAGED_DATA_ROOT,
@@ -1459,6 +1460,9 @@ app.add_middleware(
 app.add_middleware(RWARequestBodyLimitMiddleware)
 
 
+app.include_router(discovery_router, include_in_schema=False)
+
+
 X402_EXPOSE_HEADERS = (
     "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, "
     "X-Blocksize-Provider, X-Blocksize-Citation, X-Blocksize-Activation, "
@@ -1473,6 +1477,7 @@ SECURITY_HEADERS = {
 }
 
 _INDEXABLE_PUBLIC_PATHS = {
+    *PUBLIC_DISCOVERY_PATHS,
     "/",
     "/docs",
     "/openapi.json",
@@ -1838,9 +1843,26 @@ def _record_charged_delivery_outcome(
 
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" and request.url.path in PUBLIC_DISCOVERY_PATHS:
+        return Response(status_code=204, headers={
+            **SECURITY_HEADERS,
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, If-None-Match",
+            "Access-Control-Max-Age": "300",
+        })
     response = await call_next(request)
     response = _apply_security_headers(response)
     path = request.url.path.rstrip("/") or "/"
+    if path == "/":
+        base = PUBLIC_BASE_URL.rstrip("/")
+        discovery_links = [
+            f'<{base}/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+            f'<{base}/.well-known/ai-catalog.json>; rel="ai-catalog"; type="application/ai-catalog+json"',
+            f'<{base}/openapi.json>; rel="service-desc"; type="application/json"',
+            f'<{base}/auth.md>; rel="service-doc"; type="text/markdown"',
+        ]
+        response.headers["Link"] = ", ".join([response.headers.get("Link", ""), *discovery_links])
     if path in _INDEXABLE_PUBLIC_PATHS:
         canonical_url = f"{PUBLIC_BASE_URL.rstrip('/')}{path if path != '/' else '/'}"
         canonical_link = f'<{canonical_url}>; rel="canonical"'
@@ -1929,13 +1951,16 @@ def _anthropic_only_block_response() -> JSONResponse:
 
 # Serve the Developer Portal as the main landing page
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-async def get_portal():
+async def get_portal(request: Request):
     """Serve the institutional developer portal."""
+    if prefers_markdown(request.headers.get("accept", "")):
+        return PlainTextResponse(build_llms_txt(), media_type="text/markdown",
+                                 headers={"Vary": "Accept", "Cache-Control": "no-store"})
     portal_path = DOCS_DIR / "developer_portal.html"
     if portal_path.exists():
         return FileResponse(
             portal_path,
-            headers={"Cache-Control": "no-store, max-age=0"},
+            headers={"Cache-Control": "no-store, max-age=0", "Vary": "Accept"},
         )
     raise HTTPException(status_code=404, detail="Developer Portal not found")
 
