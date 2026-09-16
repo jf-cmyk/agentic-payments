@@ -68,6 +68,7 @@ from src.blocksize_client import (
     BlocksizeAPIError,
     BlocksizeClient,
 )
+from src.search_discovery import router as search_discovery_router
 from src.blocksize_stream_cache import BlocksizeStreamCache
 from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
 from src.config import TOP_250_CRYPTO, settings
@@ -729,8 +730,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_15",
-        "observed_version": "0.6.15 candidate",
+        "release_status": "release_source_v0_6_16",
+        "observed_version": "0.6.16 candidate",
         "audited_at": "2026-09-16",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
@@ -1461,6 +1462,7 @@ app.add_middleware(RWARequestBodyLimitMiddleware)
 
 
 app.include_router(discovery_router, include_in_schema=False)
+app.include_router(search_discovery_router, include_in_schema=False)
 
 
 X402_EXPOSE_HEADERS = (
