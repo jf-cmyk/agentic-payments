@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
+from src.commercial_plans import recommend_account_plan, tracked_plan_contact_path
 from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
     InstrumentPageLimit,
@@ -128,6 +129,18 @@ PremiumWorkflowProduct = Annotated[
     ],
     Field(description="Premium Blocksize workflow product to prepare."),
 ]
+ExpectedMonthlyLiveCalls = Annotated[
+    int,
+    Field(description="Expected live-data calls per month.", ge=0, le=100_000_000),
+]
+TeamSeats = Annotated[
+    int,
+    Field(description="People or service identities sharing access.", ge=1, le=10_000),
+]
+RecurringDaysPerMonth = Annotated[
+    int,
+    Field(description="Days per month the workflow is expected to run.", ge=0, le=31),
+]
 
 public_mcp = FastMCP(
     PUBLIC_DISPLAY_NAME,
@@ -231,6 +244,61 @@ async def public_get_product_catalog() -> str:
     """Return product catalog guidance for agents and listing surfaces."""
     _record_public_mcp_usage("get_product_catalog")
     return json.dumps(build_data_packages_json(), indent=2)
+
+
+@public_mcp.tool(
+    name="recommend_account_plan",
+    title="Account Plan Recommender",
+    description=(
+        "Recommend a sales-assisted Blocksize account plan from expected live-call "
+        "volume, team size, recurring use, and SLA needs. This is free and does not "
+        "collect contact details, create an entitlement, or start a purchase."
+    ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
+async def public_recommend_account_plan(
+    expected_monthly_live_calls: ExpectedMonthlyLiveCalls,
+    team_seats: TeamSeats = 1,
+    recurring_days_per_month: RecurringDaysPerMonth = 0,
+    needs_sla: bool = False,
+) -> str:
+    """Return a deterministic, non-activating commercial recommendation."""
+
+    recommendation = recommend_account_plan(
+        expected_monthly_live_calls=expected_monthly_live_calls,
+        team_seats=team_seats,
+        recurring_days_per_month=recurring_days_per_month,
+        needs_sla=needs_sla,
+    )
+    plan_id = str(recommendation["recommended_plan"]["id"])
+    _record_public_mcp_usage(
+        "recommend_account_plan",
+        subject=plan_id,
+        expected_monthly_live_calls_bucket=(
+            "100k_plus"
+            if expected_monthly_live_calls > 100_000
+            else "10k_to_100k"
+            if expected_monthly_live_calls > 10_000
+            else "under_10k"
+        ),
+    )
+    return json.dumps(
+        {
+            "status": "ok",
+            **recommendation,
+            "conversion": {
+                "catalog_url": f"{PUBLIC_BASE_URL}/v1/account-plans",
+                "recommendation_url": f"{PUBLIC_BASE_URL}/v1/account-plans/recommend",
+                "contact_path": tracked_plan_contact_path(
+                    plan_id,
+                    source="public-mcp-plan-recommender",
+                ),
+                "purchase_mode": "sales_assisted",
+                "self_serve_purchase_available": False,
+            },
+        },
+        indent=2,
+    )
 
 
 @public_mcp.tool(
@@ -385,6 +453,32 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
                 "starter_positioning": "Start with 50 live data credits",
                 "upgrade_path": "x402 payment or an authenticated account plan",
             },
+            **(
+                {
+                    "free_preview": {
+                        "url": f"{PUBLIC_BASE_URL}/v1/previews/macro",
+                        "data_class": "synthetic_example",
+                        "live_market_data": False,
+                        "purpose": "Inspect the response shape before starting x402 payment.",
+                    }
+                }
+                if product == "multi_asset_macro_snapshot"
+                else {}
+            ),
+            **(
+                {
+                    "repeat_recipe": {
+                        "method": "POST",
+                        "url": f"{PUBLIC_BASE_URL}/v1/monitors/recipe",
+                        "cost": "free",
+                        "execution_owner": "caller",
+                        "server_side_scheduler_enabled": False,
+                        "purpose": "Create a bounded cadence, run count, maximum spend, and attributed live-request handoff.",
+                    }
+                }
+                if product == "spend_controlled_market_monitor"
+                else {}
+            ),
             "behavior": {
                 "returns_live_data": False,
                 "starts_payment": False,
@@ -478,11 +572,21 @@ async def public_get_market_data_endpoint(
                     "x402 challenge; after valid USDC settlement it returns JSON market data."
                 ),
             },
+            "x402_handoff": {
+                "protocol": "x402",
+                "version": 2,
+                "challenge_header": "PAYMENT-REQUIRED",
+                "payment_header": "PAYMENT-SIGNATURE",
+                "request_binding": "Sign and retry the exact method, public URL, and request body.",
+                "safe_recovery": "Fetch a fresh challenge after any rejection; never edit or reuse a bound signature.",
+            },
             "links": {
                 "pricing": PRICING_GUIDE_URL,
                 "openapi": OPENAPI_URL,
                 "swagger": SWAGGER_URL,
                 "quickstart": QUICKSTART_URL,
+                "account_plans": f"{PUBLIC_BASE_URL}/v1/account-plans",
+                "account_plan_recommendation": f"{PUBLIC_BASE_URL}/v1/account-plans/recommend",
             },
             "notes": notes[service],
         },

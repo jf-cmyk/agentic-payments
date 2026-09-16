@@ -30,6 +30,15 @@ field carries attribution into the corresponding live x402 request. A live
 `402` response also links back to the preview and to maintained spend-capped
 Base and Solana buyer examples.
 
+Preview the premium macro workflow without live data or payment at
+`GET /v1/previews/macro`. For recurring workloads, inspect the sales-assisted
+tiers at `GET /v1/account-plans` or request a usage-based recommendation from
+`POST /v1/account-plans/recommend`; neither route creates an entitlement.
+
+Build a bounded repeat-monitor plan with `POST /v1/monitors/recipe`. The free
+recipe fixes cadence, run count, and maximum spend while leaving scheduling and
+fresh x402 authorization to the calling agent.
+
 ## Starter allowance
 
 - Position as: `Start with 50 live data credits`.

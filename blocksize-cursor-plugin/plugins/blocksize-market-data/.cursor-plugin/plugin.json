@@ -1,7 +1,7 @@
 {
   "name": "blocksize-market-data",
   "displayName": "Blocksize Market Data",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Clerk-authenticated remote MCP for read-only live crypto, supported equity ticker, FX, and metals market data in Cursor.",
   "author": {
     "name": "Blocksize Capital GmbH",

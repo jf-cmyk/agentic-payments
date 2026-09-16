@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from src.blocksize_client import BlocksizeAPIError, BlocksizeClient
+from src.commercial_plans import upgrade_recommendation
 from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
 from src.mcp_server import (
@@ -129,13 +130,17 @@ def create_authenticated_market_data_mcp(
 
     def credit_payload(status: CreditStatus) -> dict[str, object]:
         """Return account-scoped credit state without exposing direct identifiers."""
-        return {
+        payload: dict[str, object] = {
             "date": status.date,
             "daily_limit": status.daily_limit,
             "credits_spent": status.credits_spent,
             "credits_remaining": status.credits_remaining,
             "status": status.status,
         }
+        recommendation = upgrade_recommendation(status.credits_remaining)
+        if recommendation is not None:
+            payload["upgrade_recommendation"] = recommendation
+        return payload
 
     def telemetry_credit_payload(status: CreditStatus) -> dict[str, object]:
         return {
@@ -166,6 +171,31 @@ def create_authenticated_market_data_mcp(
         if identity.source not in {"oauth", "beta-token"}:
             payload["synthetic"] = True
         return payload
+
+    def record_upgrade_trigger(
+        status: CreditStatus,
+        identity: ConnectorIdentity,
+        *,
+        tool_name: str,
+    ) -> dict[str, object] | None:
+        recommendation = upgrade_recommendation(status.credits_remaining)
+        if recommendation is None:
+            return None
+        record_usage_event_once(
+            "account_plan_upgrade_triggered",
+            fingerprint(
+                f"{identity.ledger_subject}:{status.date}:{recommendation['status']}"
+            ),
+            surface=observability_surface,
+            tool_name=tool_name,
+            metadata={
+                **telemetry_credit_payload(status),
+                **telemetry_identity_payload(identity),
+                "trigger_status": recommendation["status"],
+                "recommended_plan_id": recommendation["recommended_plan_id"],
+            },
+        )
+        return recommendation
 
     def normalise_symbol(value: str, field_name: str = "symbol") -> str:
         raw = value.strip()
@@ -434,10 +464,22 @@ def create_authenticated_market_data_mcp(
                 "payment_mode": "starter_credit",
             },
         )
+        recommendation = record_upgrade_trigger(
+            current,
+            identity,
+            tool_name=tool_name,
+        )
+        upgrade_suffix = (
+            "\nAccount plan recommendation: "
+            f"{recommendation['recommendation_path']}"
+            if recommendation is not None
+            else ""
+        )
         return (
             f"{rendered}\n\n"
             f"Starter credits remaining: {current.credits_remaining}/{current.daily_limit} "
             f"(Credits remaining today: {current.credits_remaining}/{current.daily_limit})"
+            f"{upgrade_suffix}"
         )
 
     @mcp.tool(
@@ -659,8 +701,12 @@ def create_authenticated_market_data_mcp(
             "mcp_credit_balance_viewed",
             surface=observability_surface,
             tool_name="get_credit_balance",
-            metadata=telemetry_credit_payload(status),
+            metadata={
+                **telemetry_credit_payload(status),
+                **telemetry_identity_payload(identity),
+            },
         )
+        record_upgrade_trigger(status, identity, tool_name="get_credit_balance")
         return json.dumps({"status": "ok", "credits": credit_payload(status)}, indent=2)
 
     @mcp.tool(

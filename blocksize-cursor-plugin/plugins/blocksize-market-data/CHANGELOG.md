@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+- Documents the public account-plan recommender and sales-assisted conversion boundary.
+- Keeps discovery, authenticated live data, and paid x402 execution separate.
+
 ## 1.3.0
 
 - Removes an unsupported manifest field so the plugin passes Cursor's official

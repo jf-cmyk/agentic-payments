@@ -8,7 +8,7 @@ https://mcp.blocksize.info/anthropic/mcp/
 
 ## Controlled local install
 
-The public repository mirrors do not yet contain this `0.3.0` plugin and its
+The public repository mirrors do not yet contain this `0.4.0` plugin and its
 marketplace manifest. Until the corrected release is published, load the
 complete source directory:
 
@@ -17,11 +17,11 @@ claude --plugin-dir /absolute/path/to/claude-plugin/blocksize-market-data
 ```
 
 To test the deterministic local ZIP instead, verify its SHA-256 against
-`deliverables/agent-skill-release-0.4.0.json`, extract it, and load the
+`deliverables/agent-skill-release-0.5.0.json`, extract it, and load the
 extracted plugin directory:
 
 ```sh
-unzip deliverables/blocksize-market-data-claude-plugin-0.3.0.zip -d /absolute/path/to/unpacked
+unzip deliverables/blocksize-market-data-claude-plugin-0.4.0.zip -d /absolute/path/to/unpacked
 claude --plugin-dir /absolute/path/to/unpacked/blocksize-market-data
 ```
 

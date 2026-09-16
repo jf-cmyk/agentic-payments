@@ -3547,6 +3547,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
         "get_product_catalog",
         "get_workflow_endpoint",
         "list_instruments",
+        "recommend_account_plan",
         "search",
         "search_pairs",
     ]

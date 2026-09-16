@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Blocksize Cursor plugins for authenticated crypto, supported equity ticker, FX, and metals market-data workflows.",
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "plugins": [
     {
