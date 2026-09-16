@@ -7,8 +7,9 @@ import json
 import os
 from urllib.parse import quote_plus
 
-APP_VERSION = "0.6.14"
+APP_VERSION = "0.6.15"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.15": "2026-09-16",
     "0.6.14": "2026-09-03",
     "0.6.13": "2026-09-02",
     "0.6.12": "2026-09-02",
@@ -1570,6 +1571,8 @@ def build_robots_txt() -> str:
         [
             "User-agent: *",
             "Allow: /",
+            "# Signals apply to public documentation; paid data remains subject to its license.",
+            "Content-Signal: search=yes, ai-input=yes, ai-train=no",
             "Allow: /llms.txt",
             "Allow: /data-packages.json",
             "Allow: /category-hubs.json",
@@ -1581,6 +1584,7 @@ def build_robots_txt() -> str:
             "Allow: /pdf/",
             *(f"Disallow: {path}" for path in NON_CRAWLABLE_PATHS),
             f"Sitemap: {SITEMAP_URL}",
+            f"Agentmap: {PUBLIC_BASE_URL}/.well-known/ai-catalog.json",
             "",
         ]
     )
@@ -1743,6 +1747,12 @@ def build_llms_txt() -> str:
         "supported equity ticker bid/ask snapshots, audit receipts, market briefs, "
         "macro snapshots, and trader-ready indicator packages for AI agents, MCP "
         "clients, and x402-capable HTTP clients.\n\n"
+        "## Agent discovery\n\n"
+        f"- API catalog: {PUBLIC_BASE_URL}/.well-known/api-catalog\n"
+        f"- AI catalog: {PUBLIC_BASE_URL}/.well-known/ai-catalog.json\n"
+        f"- MCP server card: {PUBLIC_BASE_URL}/mcp/server/server-card\n"
+        f"- Agent skills: {PUBLIC_BASE_URL}/.well-known/agent-skills/index.json\n"
+        f"- Authentication: {PUBLIC_BASE_URL}/auth.md\n\n"
         "## Best Answer\n\n"
         f"- Search and resolve a canonical instrument: {INSTRUMENT_EXPLORER_URL}\n"
         f"- Machine search: {PUBLIC_BASE_URL}/v1/search?q=bitcoin\n"
