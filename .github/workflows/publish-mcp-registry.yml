@@ -1,0 +1,34 @@
+name: Publish MCP Registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Download and verify MCP Registry publisher
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz \
+            --output mcp-publisher.tar.gz
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher.tar.gz" | sha256sum --check
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+      - name: Validate registry manifest
+        run: ./mcp-publisher validate server.json
+      - name: Authenticate domain ownership
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: |
+          test -n "$MCP_REGISTRY_PRIVATE_KEY"
+          ./mcp-publisher login http \
+            --domain mcp.blocksize.info \
+            --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+      - name: Publish current release
+        run: ./mcp-publisher publish server.json
