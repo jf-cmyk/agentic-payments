@@ -9,8 +9,9 @@ from urllib.parse import quote_plus
 
 from src.commercial_plans import account_plan_catalog
 
-APP_VERSION = "0.6.18"
+APP_VERSION = "0.6.19"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.19": "2026-09-16",
     "0.6.18": "2026-09-16",
     "0.6.17": "2026-09-16",
     "0.6.16": "2026-09-16",
@@ -137,7 +138,7 @@ SUPPORT_URL = f"{PUBLIC_BASE_URL}/support"
 GLAMA_WELL_KNOWN_URL = f"{PUBLIC_BASE_URL}/.well-known/glama.json"
 MCP_REGISTRY_AUTH_URL = f"{PUBLIC_BASE_URL}/.well-known/mcp-registry-auth"
 MCP_REGISTRY_AUTH_CONTENT = (
-    "v=MCPv1; k=ed25519; p=0E8nsn4Fk8E2qn6zUIP2VItzW7+etYnGuiBVMnjJaas="
+    "v=MCPv1; k=ed25519; p=1ZjTpItz4YuXP2nzFLwuiVZJhwJMKhZwwOhpi6z2Tz4="
 )
 
 AGENT_MANUAL_URL = f"{PUBLIC_BASE_URL}/pdf/Blocksize_Agent_Manual.pdf"
