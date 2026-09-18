@@ -97,6 +97,16 @@
       </p>
     </div>
 
+    <h2>Session cleanup and reconnecting</h2>
+    <p>
+      Public discovery sessions expire after 30 minutes without an HTTP request.
+      Requests refresh that timer. If a request with an old <code>Mcp-Session-Id</code>
+      receives <code>404</code>, initialize a new session without the old session header,
+      then retry the discovery request. Send <code>DELETE</code> with the session header
+      when finished to release resources immediately. This policy applies to the public
+      discovery endpoint, not the authenticated live-data connectors or payment receipts.
+    </p>
+
     <h2>ChatGPT Developer Mode</h2>
     <p>
       OpenAI’s current docs say developer mode supports remote MCP servers over Streamable HTTP.

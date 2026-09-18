@@ -312,6 +312,39 @@ def test_client(monkeypatch, tmp_path):
         yield client
 
 
+def test_only_public_mcp_has_idle_cleanup(test_client):
+    from fastmcp.server.http import StreamableHTTPASGIApp
+
+    public_manager = resource_server.PUBLIC_MCP_HTTP_APP.state.public_session_manager
+    assert public_manager.session_idle_timeout == 1800
+    for connector in (
+        resource_server.ANTHROPIC_MCP_HTTP_APP,
+        resource_server.CURSOR_MCP_HTTP_APP,
+        resource_server.OPENAI_MCP_HTTP_APP,
+    ):
+        # These mounts have their own managers; the public policy cannot leak.
+        managers = []
+        for route in connector.routes:
+            endpoint = getattr(route, "endpoint", None)
+            while endpoint is not None:
+                if isinstance(endpoint, StreamableHTTPASGIApp):
+                    managers.append(endpoint.session_manager)
+                    break
+                endpoint = getattr(endpoint, "app", None)
+        assert len(managers) == 1
+        assert managers[0] is not public_manager
+        assert managers[0].session_idle_timeout is None
+
+
+def test_registry_links_target_stable_latest_api():
+    expected = "https://registry.modelcontextprotocol.io/v0.1/servers/info.blocksize.mcp%2Fagentic-payments/versions/latest"
+    portal = Path("docs/developer_portal.html").read_text()
+    assert portal.count(expected) == 4
+    assert "registry.modelcontextprotocol.io/v0/" not in portal
+    registry = next(item for item in resource_server.DISTRIBUTION_PLATFORMS if item["id"] == "mcp_registry")
+    assert registry["listing_url"] == expected
+
+
 @pytest.fixture
 def observability_store(tmp_path, monkeypatch):
     """Route observability writes into a per-test SQLite database."""
@@ -4506,8 +4539,8 @@ class TestObservabilityDashboard:
             platform for platform in platforms if platform["id"] == "github_package"
         )
         assert github["listing_url"] == "https://github.com/jf-cmyk/agentic-payments"
-        assert github["release_status"] == "release_source_v0_6_21"
-        assert github["observed_version"] == "0.6.21 candidate"
+        assert github["release_status"] == "release_source_v0_6_22"
+        assert github["observed_version"] == "0.6.22 candidate"
         gitlab = next(platform for platform in platforms if platform["id"] == "gitlab_mirror")
         assert gitlab["release_status"] == "stale_mirror_not_install_source"
         assert "not a release or package-install source" in gitlab["note"]
