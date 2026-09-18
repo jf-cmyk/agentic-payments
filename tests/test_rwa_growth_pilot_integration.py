@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -115,3 +116,41 @@ async def test_scheduler_persists_to_ledger_without_file_sidecar(
     assert len(rows) == len(PILOT_FEEDS)
     assert all(row["ingestion_source"] == "growth_pilot" for row in rows)
     assert not list(tmp_path.glob("*.json*"))
+
+
+@pytest.mark.asyncio
+async def test_depth_history_evaluation_is_off_event_loop_and_failure_is_contained(
+    tmp_path, monkeypatch, caplog,
+):
+    store = RWAObservationStore(str(tmp_path / "rwa.db"))
+    target_app = SimpleNamespace(state=SimpleNamespace(rwa_store=store, blocksize=object()))
+    main_thread = threading.get_ident()
+    worker_threads = []
+    sleeps = 0
+
+    async def captures(*args, **kwargs):
+        return [_capture(feed) for feed in PILOT_FEEDS]
+
+    async def inputs(*args, **kwargs):
+        return {}
+
+    def bounded_evaluation(captures, books, history_path):
+        worker_threads.append(threading.get_ident())
+        raise ValueError("Depth history record exceeds the safe byte limit")
+
+    async def sleep(seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(resource_server, "capture_pilot", captures)
+    monkeypatch.setattr(resource_server, "capture_blocksize_benchmarks", inputs)
+    monkeypatch.setattr(resource_server, "capture_depth_inputs", inputs)
+    monkeypatch.setattr(resource_server, "evaluate_depth_from_history", bounded_evaluation)
+    monkeypatch.setattr(resource_server.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await resource_server._run_rwa_growth_pilot_loop(target_app)
+    assert len(worker_threads) == 1
+    assert worker_threads[0] != main_thread
+    assert "safe byte limit" in caplog.text

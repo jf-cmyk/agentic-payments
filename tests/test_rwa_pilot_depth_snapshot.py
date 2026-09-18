@@ -1,9 +1,14 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
 
 from scripts.run_rwa_growth_pilot import PILOT_FEEDS
 from scripts.run_rwa_pilot_depth_snapshot import (
     evaluate_depth_evidence,
+    evaluate_depth_from_history,
+    load_depth_history,
     persist_depth_report,
 )
 
@@ -226,3 +231,67 @@ def test_depth_history_uses_robust_spread_outlier_rule():
     stats = report["history_statistics"][0]
     assert stats["snapshot_count"] == 5
     assert stats["current_spread_robust_outlier"] is True
+
+
+def test_history_streaming_preserves_all_statistics_without_replay_payloads(tmp_path, monkeypatch):
+    captures, books = _evidence_inputs()
+    reports = []
+    for index in range(6):
+        report = evaluate_depth_evidence(captures, books)
+        for row in report["rows"]:
+            row.update({
+                "spread_bps": index + 1,
+                "organic_volume": {"notional_volume_usd": 100_000 + index},
+                "pool_state": {"active_liquidity_units": 500 + index},
+                "replay_evidence": {"large_payload": "x" * 100_000},
+            })
+        # Exercise the onchain fallback, including incomplete windows.
+        report["rows"][-1]["organic_volume"] = {}
+        report["rows"][-1]["exact_tick_replay"] = {"volume_window": {
+            "status": "ok" if index % 2 else "unavailable",
+            "quote_volume_usd": 200_000 + index,
+        }}
+        reports.append(report)
+    path = tmp_path / "history.jsonl"
+    path.write_text("\n".join(json.dumps(report) for report in reports))
+
+    def forbid_whole_file_read(*args, **kwargs):
+        raise AssertionError("History must never be read as a whole file")
+
+    monkeypatch.setattr(Path, "read_text", forbid_whole_file_read)
+    monkeypatch.setattr(Path, "read_bytes", forbid_whole_file_read)
+    compact = load_depth_history(path)
+    assert len(json.dumps(compact)) < 30_000
+    assert "large_payload" not in json.dumps(compact)
+    expected = evaluate_depth_evidence(captures, books, history=reports)
+    actual = evaluate_depth_from_history(captures, books, path)
+    assert actual["history_statistics"] == expected["history_statistics"]
+    assert actual["gate_assessment"] == expected["gate_assessment"]
+    assert actual["gate_assessment"]["production_promotion_allowed"] is False
+
+
+def test_history_retains_bounded_recent_reports(tmp_path, monkeypatch):
+    from scripts import run_rwa_pilot_depth_snapshot as module
+
+    monkeypatch.setattr(module, "MAX_DEPTH_HISTORY_REPORTS", 3)
+    path = tmp_path / "history.jsonl"
+    pilot = str(PILOT_FEEDS[0]["pilot_id"])
+    path.write_text("\n".join(json.dumps({"rows": [
+        {"pilot_id": pilot, "spread_bps": index},
+    ]}) for index in range(10)))
+    history = load_depth_history(path)
+    assert [row["rows"][0]["spread_bps"] for row in history] == [7, 8, 9]
+    assert len(path.read_text().splitlines()) == 10  # Raw evidence is untouched.
+
+
+def test_history_rejects_oversized_record_and_tolerates_incomplete_records(tmp_path, monkeypatch):
+    from scripts import run_rwa_pilot_depth_snapshot as module
+
+    path = tmp_path / "history.jsonl"
+    assert load_depth_history(path) == []
+    path.write_bytes(b'broken\n[]\n{"rows": []}\n\xff\n{"partial":')
+    assert load_depth_history(path) == [{"rows": []}]
+    monkeypatch.setattr(module, "MAX_DEPTH_HISTORY_LINE_BYTES", 16)
+    path.write_text("x" * 17)
+    with pytest.raises(ValueError, match="safe byte limit"):
+        load_depth_history(path)

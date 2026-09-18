@@ -13,8 +13,11 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import statistics
+import time
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +36,11 @@ MAX_NATIVE_SPREAD_BPS = 75.0
 REQUIRED_NATIVE_BLOCK_USD = 10_000.0
 MINIMUM_ORGANIC_24H_VOLUME_USD = 100_000.0
 MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS = 100.0
+# Over 85 days at the scheduled 30-minute cadence. This is only the rolling
+# outlier baseline; the authoritative monitoring ledger and raw evidence remain intact.
+MAX_DEPTH_HISTORY_REPORTS = 4096
+MAX_DEPTH_HISTORY_LINE_BYTES = 16 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def _finite(value: Any) -> float | None:
@@ -543,6 +551,11 @@ def evaluate_depth_evidence(
             ),
         },
         "history_statistics": _history_stats(history or [], rows),
+        "history_statistics_policy": {
+            "scope": "rolling_outlier_baseline_not_authoritative_monitoring_ledger",
+            "historical_reports_used": len(history or []),
+            "loader_max_reports": MAX_DEPTH_HISTORY_REPORTS,
+        },
         "rows": rows,
         "policy": {
             "automatic_promotion": False,
@@ -596,18 +609,85 @@ async def capture_depth_inputs(
     return dict(await asyncio.gather(*(capture_feed(feed) for feed in PILOT_FEEDS)))
 
 
+def _compact_depth_history(report: dict[str, Any]) -> dict[str, Any]:
+    """Keep only scalar inputs used by _history_stats, never raw replay payloads."""
+    pilots = {str(feed["pilot_id"]) for feed in PILOT_FEEDS}
+    compact = []
+    rows = report.get("rows")
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("pilot_id") not in pilots:
+            continue
+        native = row.get("organic_volume")
+        native = native if isinstance(native, dict) else {}
+        replay = row.get("exact_tick_replay")
+        replay = replay if isinstance(replay, dict) else {}
+        window = replay.get("volume_window")
+        window = window if isinstance(window, dict) else {}
+        pool = row.get("pool_state")
+        pool = pool if isinstance(pool, dict) else {}
+        native_volume = native.get("notional_volume_usd")
+        # Preserve the original fallback rule: only absent/None native volume
+        # falls back to the pool window; invalid non-null volume remains invalid.
+        normalized_volume = _finite(native_volume)
+        if native_volume is not None and normalized_volume is None:
+            normalized_volume = math.nan
+        compact.append({
+            "pilot_id": row["pilot_id"],
+            "status": "pass" if row.get("status") in ("pass", "warn") else "fail",
+            "spread_bps": _finite(row.get("spread_bps")),
+            "organic_volume": {"notional_volume_usd": normalized_volume},
+            "exact_tick_replay": {"volume_window": {
+                "status": "ok" if window.get("status") == "ok" else "unavailable",
+                "quote_volume_usd": _finite(window.get("quote_volume_usd")),
+            }},
+            "pool_state": {"active_liquidity_units": _finite(pool.get("active_liquidity_units"))},
+        })
+    return {"rows": compact}
+
+
 def load_depth_history(path: Path) -> list[dict[str, Any]]:
+    """Stream legacy full-evidence JSONL into a bounded scalar-only baseline.
+
+    Do not use read_text/splitlines here: production histories can be gigabytes.
+    An oversized record fails the capture rather than exhausting the API process.
+    No historical evidence is rewritten or deleted.
+    """
     if not path.exists():
         return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    started = time.monotonic()
+    valid_reports = 0
+    malformed_records = 0
+    rows: deque[dict[str, Any]] = deque(maxlen=MAX_DEPTH_HISTORY_REPORTS)
+    with path.open("rb") as handle:
+        while line := handle.readline(MAX_DEPTH_HISTORY_LINE_BYTES + 1):
+            if len(line) > MAX_DEPTH_HISTORY_LINE_BYTES:
+                raise ValueError("Depth history record exceeds the safe byte limit")
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                malformed_records += 1
+                continue
+            if isinstance(row, dict):
+                rows.append(_compact_depth_history(row))
+                valid_reports += 1
+        scanned_bytes = handle.tell()
+    logger.info(
+        "RWA depth history streamed: bytes=%s reports_seen=%s reports_retained=%s "
+        "malformed_records=%s elapsed_seconds=%.3f",
+        scanned_bytes, valid_reports, len(rows), malformed_records, time.monotonic() - started,
+    )
+    return list(rows)
+
+
+def evaluate_depth_from_history(
+    captures: list[dict[str, Any]],
+    books_by_pilot: dict[str, dict[str, Any]],
+    history_path: Path,
+) -> dict[str, Any]:
+    """Load and evaluate off the event loop; release history before returning."""
+    return evaluate_depth_evidence(
+        captures, books_by_pilot, history=load_depth_history(history_path),
+    )
 
 
 def persist_depth_report(
