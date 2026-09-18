@@ -9,8 +9,9 @@ from urllib.parse import quote_plus
 
 from src.commercial_plans import account_plan_catalog
 
-APP_VERSION = "0.6.20"
+APP_VERSION = "0.6.21"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.21": "2026-09-18",
     "0.6.20": "2026-09-18",
     "0.6.19": "2026-09-16",
     "0.6.18": "2026-09-16",
