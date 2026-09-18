@@ -77,6 +77,7 @@ from src.search_discovery import router as search_discovery_router
 from src.blocksize_stream_cache import BlocksizeStreamCache
 from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
 from src.config import TOP_250_CRYPTO, settings
+from src.public_mcp_http import create_public_http_app
 from src.credit_manager import (
     CREDIT_COSTS,
     STARTER_CREDIT_ALLOWANCE,
@@ -342,7 +343,7 @@ def _load_release_build() -> dict[str, Any]:
 
 
 RELEASE_BUILD = _load_release_build()
-PUBLIC_MCP_HTTP_APP = public_mcp.http_app(path="/", transport="streamable-http")
+PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp)
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
 OPENAI_MCP_HTTP_APP = openai_mcp.http_app(path="/", transport="streamable-http")
@@ -706,11 +707,11 @@ DISTRIBUTION_PLATFORMS = [
         "id": "mcp_registry",
         "name": "Official MCP Registry",
         "source_label": "MCP Registry",
-        "listing_url": "https://registry.modelcontextprotocol.io/v0/servers?search=blocksize",
+        "listing_url": "https://registry.modelcontextprotocol.io/v0.1/servers/info.blocksize.mcp%2Fagentic-payments/versions/latest",
         "metric_status": "local_attribution_only",
         "release_status": "version_behind_candidate",
-        "observed_version": "0.6.3",
-        "audited_at": "2026-07-30",
+        "observed_version": "0.6.21",
+        "audited_at": "2026-09-18",
         "note": "Official registry discovery is recorded through /server.json and domain-verification traffic.",
     },
     {
@@ -731,8 +732,8 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_21",
-        "observed_version": "0.6.21 candidate",
+        "release_status": "release_source_v0_6_22",
+        "observed_version": "0.6.22 candidate",
         "audited_at": "2026-09-18",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
