@@ -284,8 +284,7 @@ from scripts.run_rwa_pilot_alignment_snapshot import (
 )
 from scripts.run_rwa_pilot_depth_snapshot import (
     capture_depth_inputs,
-    evaluate_depth_evidence,
-    load_depth_history,
+    evaluate_depth_from_history,
     persist_depth_report,
 )
 from scripts.build_rwa_pilot_promotion_packet import (
@@ -585,14 +584,11 @@ async def _run_rwa_growth_pilot_loop(app: FastAPI) -> None:
                     captures,
                     timeout_seconds=timeout,
                 )
-                depth_history = await asyncio.to_thread(
-                    load_depth_history,
-                    depth_history_path,
-                )
-                depth = evaluate_depth_evidence(
+                depth = await asyncio.to_thread(
+                    evaluate_depth_from_history,
                     captures,
                     depth_inputs,
-                    history=depth_history,
+                    depth_history_path,
                 )
                 alignment = evaluate_alignment(captures, benchmarks)
             report = await asyncio.to_thread(
@@ -735,9 +731,9 @@ DISTRIBUTION_PLATFORMS = [
         "source_label": "GitHub",
         "listing_url": REPOSITORY_URL,
         "metric_status": "repository_referral_only",
-        "release_status": "release_source_v0_6_19",
-        "observed_version": "0.6.19 candidate",
-        "audited_at": "2026-09-16",
+        "release_status": "release_source_v0_6_20",
+        "observed_version": "0.6.20 candidate",
+        "audited_at": "2026-09-18",
         "note": "GitHub activity is visible here only when it sends traffic to instrumented Blocksize surfaces.",
     },
     {
