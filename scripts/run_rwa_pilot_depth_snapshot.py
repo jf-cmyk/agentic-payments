@@ -15,7 +15,9 @@ import hashlib
 import json
 import logging
 import math
+import os
 import statistics
+import tempfile
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -40,6 +42,7 @@ MAXIMUM_REQUIRED_BLOCK_SLIPPAGE_BPS = 100.0
 # outlier baseline; the authoritative monitoring ledger and raw evidence remain intact.
 MAX_DEPTH_HISTORY_REPORTS = 4096
 MAX_DEPTH_HISTORY_LINE_BYTES = 16 * 1024 * 1024
+MAX_DEPTH_CACHE_BYTES = 8 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
@@ -645,7 +648,72 @@ def _compact_depth_history(report: dict[str, Any]) -> dict[str, Any]:
     return {"rows": compact}
 
 
-def load_depth_history(path: Path) -> list[dict[str, Any]]:
+def _history_signature(stat: os.stat_result) -> dict[str, int]:
+    return {"inode": stat.st_ino, "bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _depth_cache_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".stats-cache.json")
+
+
+def _read_depth_cache(path: Path, source_stat: os.stat_result) -> list[dict[str, Any]] | None:
+    """A disposable cache is valid only for this exact archive generation."""
+    try:
+        with _depth_cache_path(path).open("rb") as handle:
+            encoded = handle.read(MAX_DEPTH_CACHE_BYTES + 1)
+        if len(encoded) > MAX_DEPTH_CACHE_BYTES:
+            return None
+        cached = json.loads(encoded)
+        if (
+            not isinstance(cached, dict)
+            or cached.get("schema_version") != 1
+            or cached.get("source") != _history_signature(source_stat)
+            or cached.get("max_reports") != MAX_DEPTH_HISTORY_REPORTS
+            or not isinstance(cached.get("reports"), list)
+            or len(cached["reports"]) > MAX_DEPTH_HISTORY_REPORTS
+            or any(not isinstance(row, dict) for row in cached["reports"])
+        ):
+            return None
+        return [_compact_depth_history(row) for row in cached["reports"]]
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _write_depth_cache(
+    path: Path, source_stat: os.stat_result, reports: list[dict[str, Any]],
+) -> None:
+    """Atomically refresh derived statistics; cache failure cannot lose evidence."""
+    temporary: str | None = None
+    try:
+        encoded = json.dumps({
+            "schema_version": 1,
+            "source": _history_signature(source_stat),
+            "max_reports": MAX_DEPTH_HISTORY_REPORTS,
+            "reports": reports[-MAX_DEPTH_HISTORY_REPORTS:],
+        }, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > MAX_DEPTH_CACHE_BYTES:
+            logger.warning("RWA depth statistics cache exceeded its byte limit; not saved")
+            return
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=".rwa-depth-stats-", delete=False,
+        ) as handle:
+            temporary = handle.name
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, _depth_cache_path(path))
+        temporary = None
+    except OSError:
+        logger.warning("RWA depth statistics cache could not be saved; raw evidence retained")
+    finally:
+        if temporary is not None:
+            try:
+                Path(temporary).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("RWA depth statistics temporary cache cleanup failed")
+
+
+def load_depth_history(path: Path, *, use_cache: bool = False) -> list[dict[str, Any]]:
     """Stream legacy full-evidence JSONL into a bounded scalar-only baseline.
 
     Do not use read_text/splitlines here: production histories can be gigabytes.
@@ -655,6 +723,15 @@ def load_depth_history(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     started = time.monotonic()
+    source_stat = path.stat()
+    if use_cache:
+        cached = _read_depth_cache(path, source_stat)
+        if cached is not None:
+            logger.info(
+                "RWA depth statistics cache hit: reports_retained=%s elapsed_seconds=%.3f",
+                len(cached), time.monotonic() - started,
+            )
+            return cached
     valid_reports = 0
     malformed_records = 0
     rows: deque[dict[str, Any]] = deque(maxlen=MAX_DEPTH_HISTORY_REPORTS)
@@ -676,7 +753,10 @@ def load_depth_history(path: Path) -> list[dict[str, Any]]:
         "malformed_records=%s elapsed_seconds=%.3f",
         scanned_bytes, valid_reports, len(rows), malformed_records, time.monotonic() - started,
     )
-    return list(rows)
+    result = list(rows)
+    if use_cache and _history_signature(path.stat()) == _history_signature(source_stat):
+        _write_depth_cache(path, source_stat, result)
+    return result
 
 
 def evaluate_depth_from_history(
@@ -686,7 +766,7 @@ def evaluate_depth_from_history(
 ) -> dict[str, Any]:
     """Load and evaluate off the event loop; release history before returning."""
     return evaluate_depth_evidence(
-        captures, books_by_pilot, history=load_depth_history(history_path),
+        captures, books_by_pilot, history=load_depth_history(history_path, use_cache=True),
     )
 
 
@@ -698,12 +778,22 @@ def persist_depth_report(
 ) -> dict[str, str]:
     history_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_stat = history_path.stat() if history_path.exists() else None
+    cached = _read_depth_cache(history_path, previous_stat) if previous_stat is not None else None
+    encoded = json.dumps(report, sort_keys=True, default=str) + "\n"
     with history_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(report, sort_keys=True, default=str) + "\n")
+        handle.write(encoded)
     latest_path.write_text(
         json.dumps(report, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
+    current_stat = history_path.stat()
+    if (
+        cached is not None and previous_stat is not None
+        and current_stat.st_ino == previous_stat.st_ino
+        and current_stat.st_size == previous_stat.st_size + len(encoded.encode("utf-8"))
+    ):
+        _write_depth_cache(history_path, current_stat, [*cached, _compact_depth_history(report)])
     return {"history_path": str(history_path), "latest_path": str(latest_path)}
 
 

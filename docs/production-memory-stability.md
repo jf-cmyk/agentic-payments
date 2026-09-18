@@ -1,4 +1,4 @@
-# Production memory incident and v0.6.20
+# Production memory incident and v0.6.20–0.6.21
 
 ## Evidence (2026-09-18 UTC)
 
@@ -61,6 +61,33 @@ After stability verification, refresh public registry release metadata and
 test discovery-to-data journeys across covered assets. Do not advertise candidate
 RWA feeds as production coverage or count payment prompts as revenue.
 
-Raw depth and promotion history still grows on disk and is streamed each cycle.
-A separate archival/retention policy and compact indexed statistics are the next
-storage improvements; do not silently delete existing evidence in this hotfix.
+Raw depth and promotion history still grows on disk. A separate archival/retention
+policy remains a storage follow-up; do not silently delete existing evidence.
+
+## v0.6.20 production QA and v0.6.21 follow-up
+
+v0.6.20 deployed at commit f9fc06ea94575d84e0bb3d35901ecc8bb395649e.
+The first full pilot cycle finished at 05:44:28 UTC on September 18, recording
+3/3 feeds and all 1,014 historical reports, with no automatic promotion.
+At 05:45:06 UTC Python RSS was 372,948 KiB (about 382 MB), compared with
+16,568,056 KiB (about 17 GB) before deployment. Container memory was about 2.52 GB,
+including reclaimable file cache. This is early verification, not a long soak.
+
+Cold-start archive scanning took 136 seconds inside the running service and
+coincided with slow public requests and a 30-second preview timeout. After that
+scan, all 13 unsigned API/discovery checks passed, with preview response time
+0.225 seconds. Passing after warmup is insufficient to dismiss the cold-start issue.
+
+v0.6.21 adds a disposable, bounded statistics sidecar next to the raw JSONL.
+It is valid only when archive inode, byte size, and nanosecond modification time
+match, with the same schema and report limit. Normal report persistence appends
+raw evidence and atomically refreshes the compact sidecar. Cache hits avoid
+opening the raw archive entirely. Changed/truncated/replaced archives and invalid
+or oversized caches trigger a bounded-memory rebuild; cache-write failures do not
+delete evidence or fail an otherwise valid capture. Unexpected concurrent appends
+leave the old cache invalid rather than silently omitting records from a new one.
+
+Seed the derived cache with the tested code before deploying v0.6.21, while the
+current production history is already warm. Verify a cache hit and completed pilot
+capture after deployment, plus repeated unsigned API checks during the job.
+Neither release signs payments or creates a staging environment.

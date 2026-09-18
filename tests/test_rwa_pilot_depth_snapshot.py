@@ -295,3 +295,96 @@ def test_history_rejects_oversized_record_and_tolerates_incomplete_records(tmp_p
     path.write_text("x" * 17)
     with pytest.raises(ValueError, match="safe byte limit"):
         load_depth_history(path)
+
+
+def test_persistent_cache_avoids_archive_reads_and_tracks_new_reports(tmp_path, monkeypatch):
+    captures, books = _evidence_inputs()
+    report = evaluate_depth_evidence(captures, books)
+    history = tmp_path / "history.jsonl"
+    latest = tmp_path / "latest.json"
+    persist_depth_report(report, history_path=history, latest_path=latest)
+    baseline = load_depth_history(history, use_cache=True)
+    original_open = Path.open
+
+    def no_archive_read(path, mode="r", *args, **kwargs):
+        if path == history and "r" in mode:
+            raise AssertionError("A valid cache must avoid rereading the raw archive")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", no_archive_read)
+    assert load_depth_history(history, use_cache=True) == baseline
+    persist_depth_report(report, history_path=history, latest_path=latest)
+    assert load_depth_history(history, use_cache=True) == baseline * 2
+    assert not list(tmp_path.glob(".rwa-depth-stats-*"))
+
+
+@pytest.mark.parametrize("change", ["append", "rewrite", "replace", "corrupt_cache", "oversized_cache"])
+def test_cache_invalidates_when_evidence_or_cache_changes(tmp_path, change):
+    from scripts import run_rwa_pilot_depth_snapshot as module
+
+    history = tmp_path / "history.jsonl"
+    pilot = str(PILOT_FEEDS[0]["pilot_id"])
+    first = json.dumps({"rows": [{"pilot_id": pilot, "spread_bps": 1}]}) + "\n"
+    second = first.replace('"spread_bps": 1', '"spread_bps": 9')
+    history.write_text(first)
+    load_depth_history(history, use_cache=True)
+    if change == "append":
+        with history.open("a") as handle:
+            handle.write(second)
+    elif change == "rewrite":
+        history.write_text(second)
+    elif change == "replace":
+        replacement = tmp_path / "replacement.jsonl"
+        replacement.write_text(second)
+        replacement.replace(history)
+    elif change == "corrupt_cache":
+        module._depth_cache_path(history).write_text("{broken")
+    else:
+        module._depth_cache_path(history).write_bytes(b"x" * (module.MAX_DEPTH_CACHE_BYTES + 1))
+    assert load_depth_history(history, use_cache=True) == load_depth_history(history)
+
+
+def test_cache_write_failure_preserves_history_and_statistics(tmp_path, monkeypatch):
+    from scripts import run_rwa_pilot_depth_snapshot as module
+
+    history = tmp_path / "history.jsonl"
+    history.write_text('{"rows": []}\n')
+
+    def denied(*args, **kwargs):
+        raise OSError("test disk denial")
+
+    monkeypatch.setattr(module.tempfile, "NamedTemporaryFile", denied)
+    assert load_depth_history(history, use_cache=True) == [{"rows": []}]
+    assert history.read_text() == '{"rows": []}\n'
+
+
+def test_cache_is_bounded_after_persist(tmp_path, monkeypatch):
+    from scripts import run_rwa_pilot_depth_snapshot as module
+
+    monkeypatch.setattr(module, "MAX_DEPTH_HISTORY_REPORTS", 2)
+    history = tmp_path / "history.jsonl"
+    latest = tmp_path / "latest.json"
+    persist_depth_report({"rows": []}, history_path=history, latest_path=latest)
+    load_depth_history(history, use_cache=True)
+    for _ in range(5):
+        persist_depth_report({"rows": []}, history_path=history, latest_path=latest)
+    assert len(load_depth_history(history, use_cache=True)) == 2
+    assert len(history.read_text().splitlines()) == 6
+
+
+def test_concurrent_append_does_not_get_hidden_by_a_refreshed_cache(tmp_path, monkeypatch):
+    history = tmp_path / "history.jsonl"
+    latest = tmp_path / "latest.json"
+    persist_depth_report({"rows": []}, history_path=history, latest_path=latest)
+    load_depth_history(history, use_cache=True)
+    original_write = Path.write_text
+
+    def append_during_latest_write(path, *args, **kwargs):
+        if path == latest:
+            with history.open("a") as handle:
+                handle.write('{"rows": []}\n')
+        return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", append_during_latest_write)
+    persist_depth_report({"rows": []}, history_path=history, latest_path=latest)
+    assert len(load_depth_history(history, use_cache=True)) == 3
