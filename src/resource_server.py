@@ -90,6 +90,7 @@ from src.entitlement_manager import (
     connector_entitlement_manager,
 )
 from src import free_tier
+from src import live_showcase
 from src.free_tier_ledger import get_free_tier_ledger
 from src.models import (
     BidAskResponse,
@@ -391,6 +392,7 @@ SELECTION_SOURCE_VALUES = {
     "direct_http",
     "package_preview",
     "raw_data_preview",
+    "live_showcase",
 }
 
 
@@ -7241,10 +7243,188 @@ async def raw_market_data_sample(
                 "provider": "Blocksize Capital",
             },
         },
+        "free_live_showcase": live_showcase.showcase_handoff(),
         "limitations": [
             "All numeric values are synthetic and intentionally not live.",
             "Use the paid endpoint for current market data and preserve its source timestamp.",
+            "For one real, free, attributed price see free_live_showcase.",
         ],
+    }
+
+
+@app.get(live_showcase.LIVE_SHOWCASE_PATH)
+async def live_showcase_price(
+    request: Request,
+    symbol: str | None = Query(None, min_length=2, max_length=64),
+) -> dict[str, Any]:
+    """Return one free, real, attributed price with a recomputable provenance digest. FREE.
+
+    This is the proof-of-quality call: an agent sees an actual multi-venue VWAP,
+    the bid/ask spread, freshness, and a digest it can recompute, before it pays.
+    It is bounded to an allowlist, briefly cached, and rate limited like every
+    other free discovery route, so it cannot become a free production feed.
+    """
+    allowed = live_showcase.allowed_showcase_symbols()
+    if not settings.server.showcase_live_enabled or not allowed:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorResponse(
+                error_code="SHOWCASE_DISABLED",
+                message="The free live showcase is not enabled on this deployment.",
+                details=(
+                    "Use /v1/samples/market-data for the response shape or the "
+                    "paid endpoints for live data."
+                ),
+            ).model_dump(),
+        )
+    if symbol is None:
+        clean = allowed[0]
+    else:
+        try:
+            clean = _normalise_symbol(symbol, "symbol")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if clean not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=ErrorResponse(
+                error_code="SHOWCASE_SYMBOL_NOT_ALLOWED",
+                message=f"{clean} is not a free showcase symbol.",
+                details=(
+                    f"Free showcase symbols: {', '.join(allowed)}. Every other symbol "
+                    "uses the paid endpoints; build the URL with get_market_data_endpoint."
+                ),
+            ).model_dump(),
+        )
+
+    ttl_seconds = max(0, int(settings.server.showcase_live_cache_seconds))
+    cache = getattr(request.app.state, "live_showcase_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.live_showcase_cache = cache
+    now = time.monotonic()
+    cached = cache.get(clean)
+    served_from_cache = (
+        isinstance(cached, tuple) and len(cached) == 2 and now - cached[0] < ttl_seconds
+    )
+    if served_from_cache:
+        vwap_data, bidask_data, bidask_error = cached[1]
+    else:
+        client: BlocksizeClient = request.app.state.blocksize
+        try:
+            vwap_data = await client.get_vwap_latest(clean)
+        except BlocksizeAPIError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=ErrorResponse(
+                    error_code="BLOCKSIZE_ERROR",
+                    message=f"Failed to retrieve showcase VWAP for {clean}",
+                    details=str(e),
+                ).model_dump(),
+            )
+        bidask_data = None
+        bidask_error: str | None = None
+        try:
+            bidask_data = await client.get_bidask_snapshot(clean)
+        except BlocksizeAPIError as e:
+            bidask_error = str(e)
+        cache[clean] = (now, (vwap_data, bidask_data, bidask_error))
+
+    served_at = datetime.now(UTC)
+    observed_at = vwap_data.timestamp
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    age_ms = max(0, int((served_at - observed_at).total_seconds() * 1000))
+
+    data: dict[str, Any] = {
+        "symbol": clean,
+        "vwap": vwap_data.model_dump(mode="json"),
+        "bidask": bidask_data.model_dump(mode="json") if bidask_data else None,
+    }
+    spread_bps: float | None = None
+    if bidask_data is not None:
+        mid = (bidask_data.bid + bidask_data.ask) / 2
+        if mid > 0:
+            spread_bps = round(bidask_data.spread / mid * 10_000, 3)
+    digest = live_showcase.canonical_digest(data)
+    price = settings.pricing.get_crypto_price(_base_from_symbol(clean))
+    paid_url = f"{PUBLIC_BASE_URL}/v1/vwap/{clean}?" + urlencode(
+        {
+            "selection_source": "live_showcase",
+            "utm_source": "blocksize",
+            "utm_medium": "live_showcase",
+            "utm_campaign": "showcase_to_paid",
+        }
+    )
+    _record_product_event(
+        "live_showcase_viewed",
+        request,
+        metadata={
+            "showcase_symbol": clean,
+            "served_from_cache": served_from_cache,
+            "bidask_included": bidask_data is not None,
+        },
+    )
+    return {
+        "status": "ok",
+        "showcase": True,
+        "live_data": True,
+        "free": True,
+        "symbol": clean,
+        "data": data,
+        "quality": {
+            "observed_at": observed_at.isoformat(),
+            "served_at": served_at.isoformat(),
+            "age_ms": age_ms,
+            "spread_bps": spread_bps,
+            "aggregation": (
+                "Multi-venue VWAP from Blocksize vwap_latest; best bid/ask from "
+                "bidask_getSnapshot."
+            ),
+            "bidask_status": "included" if bidask_data is not None else (bidask_error or "unavailable"),
+        },
+        "provenance": {
+            "payload_digest": digest,
+            "digest_scope": "data",
+            "verify": live_showcase.DIGEST_VERIFY_INSTRUCTIONS,
+            "upstream_methods": ["vwap_latest", "bidask_getSnapshot"],
+            "citation": _citation_metadata(
+                methodology_path="crypto-vwap-api",
+                product_path="crypto-vwap-api",
+                timestamp=observed_at.isoformat(),
+                lineage={"upstream_method": "vwap_latest", "symbol": clean},
+            ),
+            "receipts": (
+                "Paid and credited calls add a stored receipt id with a "
+                "/v1/provenance/{receipt_id} lookup. The showcase digest is "
+                "recomputable but not stored."
+            ),
+        },
+        "licence": {
+            "attribution": "Data by Blocksize",
+            "scope": (
+                "Evaluation and prototyping only. Not for production, trading, "
+                "redistribution, or resale."
+            ),
+            "production_path": (
+                "Signed x402 per call for direct public HTTP, or an authenticated "
+                "connector plan."
+            ),
+        },
+        "cache": {"served_from_cache": served_from_cache, "ttl_seconds": ttl_seconds},
+        "limits": {
+            "allowed_symbols": list(allowed),
+            "rate_limit": "Public discovery fair-use limits apply.",
+        },
+        "next_step": {
+            "paid_url": paid_url,
+            "price_usdc": str(price),
+            "response_shape_preview": (
+                f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap&symbol={clean}"
+            ),
+            "account_plans": f"{PUBLIC_BASE_URL}/v1/account-plans",
+            "endpoint_builder": "get_market_data_endpoint on the public remote MCP server",
+        },
     }
 
 
@@ -14588,6 +14768,7 @@ async def health_check() -> dict[str, Any]:
                 f"{PUBLIC_BASE_URL.rstrip('/')}/v1/samples/market-data"
                 "?service=vwap&symbol=BTCUSD"
             ),
+            "free_live_showcase": live_showcase.showcase_url(),
             "data_packages": DATA_PACKAGES_JSON_URL,
             "remote_mcp": REMOTE_MCP_URL,
             "manifest": MCP_MANIFEST_URL,

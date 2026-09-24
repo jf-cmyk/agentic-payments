@@ -93,6 +93,10 @@ Free discovery endpoints:
 - `GET /v1/samples/market-data?service=vwap&symbol=BTCUSD` - illustrative
   response shape plus an attributed live purchase handoff, with no payment and
   no live-data claim
+- `GET /v1/samples/live-showcase?symbol=BTCUSD` - one free, real, attributed
+  BTCUSD multi-venue VWAP and bid/ask with freshness, spread, and a
+  recomputable provenance digest, so an agent can inspect data quality before
+  paying; allowlisted symbols only, briefly cached, evaluation licence
 - `GET /v1/samples/pre-trade` - illustrative pre-trade product output with no
   payment and no live-data claim
 - `GET /v1/samples/macro-snapshot` - illustrative multi-asset macro package
