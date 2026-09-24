@@ -244,24 +244,29 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
         "short_name": "Equities",
         "url": f"{PUBLIC_BASE_URL}/equities-bidask-api",
         "description": (
-            "Supported stock ticker bid/ask snapshots through the shared "
-            "Blocksize bid/ask namespace, with AAPL-style symbols discoverable "
-            "by MCP search before live data use."
+            "Equities bid/ask snapshots for tokenized stocks (xStocks such as "
+            "AAPLx, TSLAx and NVDAx, quoted as AAPLXUSD) through the shared "
+            "Blocksize bid/ask namespace, discoverable by MCP search before "
+            "live data use."
         ),
         "endpoint_template": "/v1/bidask/{ticker}",
         "examples": ["AAPL", "MSFT", "NVDA"],
-        "asset_classes": ["equities", "stocks"],
+        "asset_classes": ["equities", "tokenized equities", "stocks"],
         "keywords": [
             "equity bid ask API",
             "stock ticker price API",
             "AAPL bid ask data",
             "equities market data for AI agents",
+            "tokenized equities price API",
+            "xStocks bid ask data",
         ],
         "price_usdc_min": "0.008",
         "price_usdc_max": "0.008",
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=bidask&symbol=AAPLXUSD",
         "notes": (
-            "Equities use the existing /v1/bidask/{ticker} route; use "
+            "Equities are tokenized stocks (xStocks) quoted on crypto venues, "
+            "not exchange-listed NBBO quotes. They use the existing "
+            "/v1/bidask/{ticker} route; use "
             "/v1/search?q=AAPL&asset_class=equity or MCP search_pairs before "
             "requesting live data."
         ),

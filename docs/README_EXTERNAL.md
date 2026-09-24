@@ -37,7 +37,7 @@ Live market data is available via the HTTP API and documented here:
 Supported paid endpoints:
 
 - `GET /v1/vwap/{pair}`
-- `GET /v1/bidask/{pair}` for crypto pairs and supported equity tickers
+- `GET /v1/bidask/{pair}` for crypto pairs and equities as tokenized stocks (xStocks, for example `AAPLXUSD`)
 - `GET /v1/state/{pair}`
 - `GET /v1/vwap30m/{pair}`
 - `GET /v1/vwap24h/{pair}`
