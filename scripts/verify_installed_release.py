@@ -431,10 +431,16 @@ with TestClient(app, base_url="https://mcp.blocksize.info") as client:
         "cursor_mcp",
         "openai_mcp",
     }
+    # These links serve real upstream data, which the offline smoke sandbox
+    # has no credentials for; they must exist and fail cleanly, not 200.
+    live_data_links = {"free_live_showcase"}
     for name, url in health["links"].items():
         if name in protocol_links:
             continue
         response = client.get(path_for(url), follow_redirects=False)
+        if name in live_data_links:
+            assert response.status_code in {200, 502, 503}, (name, url, response.status_code)
+            continue
         assert response.status_code == 200, (name, url, response.status_code)
 
     for connector in ("anthropic", "cursor", "openai"):
