@@ -23,6 +23,8 @@ class ConnectorIdentity:
     email: str | None = None
     source: str = "oauth"
     principal_id: str | None = None
+    # OIDC ``email_verified`` when the issuer provides it; None when absent.
+    email_verified: bool | None = None
 
     @property
     def ledger_subject(self) -> str:
@@ -308,6 +310,7 @@ def identity_from_access_token(
         return None
 
     email = claims.get("email") or claims.get("preferred_username")
+    email_verified = _optional_bool(claims.get("email_verified"))
     issuer = str(claims.get("iss") or "unknown-issuer")
     audience_claim = claims.get("aud") or claims.get("audience") or token.client_id or "unknown-audience"
     if isinstance(audience_claim, list):
@@ -322,7 +325,22 @@ def identity_from_access_token(
         email=str(email) if email else None,
         source="oauth",
         principal_id=f"{namespace.strip().lower()}:{scope}:{user_id}",
+        email_verified=email_verified,
     )
+
+
+def _optional_bool(value: object) -> bool | None:
+    """Interpret an OIDC boolean claim that may arrive as bool or string."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    return None
 
 
 def current_bearer_token(get_http_headers_fn: HeaderGetter) -> str | None:
@@ -357,6 +375,7 @@ def identity_from_beta_token(prefix: str, token: str) -> ConnectorIdentity | Non
             email=str(email) if email else None,
             source="beta-token",
             principal_id=f"{prefix.strip().lower()}:beta:{user_id}",
+            email_verified=_optional_bool(raw_identity.get("email_verified")),
         )
     return None
 

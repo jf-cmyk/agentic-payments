@@ -27,7 +27,14 @@ DEFAULT_ENTITLEMENT_DB_PATH = "anthropic_entitlements.db"
 DEFAULT_PENDING_CHARGE_LEASE_SECONDS = 15 * 60
 MIN_PENDING_CHARGE_LEASE_SECONDS = 5 * 60
 PENDING_RECOVERY_BATCH_LIMIT = 100
-ENTITLEMENT_SCHEMA_VERSION = 3
+# v4: monthly pool accounting plus the allowance_overrides table.
+ENTITLEMENT_SCHEMA_VERSION = 4
+# The pre-free-tier default written into ``users.daily_limit``. Rows still
+# holding it are "on the default" and follow FREE_TIER_MONTHLY_CREDITS; any
+# other value found when the overrides table is first created is preserved as
+# an explicit subscriber override.
+LEGACY_DEFAULT_ALLOWANCE = 50
+VALID_USER_STATUSES = frozenset({"active", "suspended", "disabled"})
 VALID_CHARGE_STATES = frozenset({"pending", "delivered", "refunded"})
 ENTITLEMENT_SCHEMA_COLUMNS = {
     "users": {
@@ -71,7 +78,27 @@ ENTITLEMENT_SCHEMA_COLUMNS = {
         "created_at": "TEXT",
         "updated_at": "TEXT",
     },
+    "allowance_overrides": {
+        "user_id": "TEXT",
+        "allowance": "INTEGER",
+        "reason": "TEXT",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+    },
 }
+
+
+def month_prefix(usage_date: str) -> str:
+    """Return the ``YYYY-MM`` calendar month (UTC) that a usage date belongs to."""
+    return str(usage_date)[:7]
+
+
+def month_reset_date(usage_date: str) -> str:
+    """Return the ISO date on which the monthly pool for ``usage_date`` resets."""
+    year, month = (int(part) for part in month_prefix(usage_date).split("-"))
+    if month == 12:
+        return f"{year + 1:04d}-01-01"
+    return f"{year:04d}-{month + 1:02d}-01"
 
 
 def connector_entitlement_db_path(
@@ -123,6 +150,14 @@ def connector_entitlement_manager(
 
 @dataclass(frozen=True)
 class CreditStatus:
+    """Monthly free-tier state for one ledger owner.
+
+    ``daily_limit`` is the historical column name for the per-identity
+    allowance; it now means the monthly pool (``monthly_limit`` is the same
+    number). ``credits_spent`` and ``credits_remaining`` are for the calendar
+    month (UTC) containing ``date``.
+    """
+
     user_id: str
     email: str | None
     date: str
@@ -130,6 +165,16 @@ class CreditStatus:
     credits_spent: int
     credits_remaining: int
     status: str
+    credits_spent_today: int = 0
+    resets_at: str = ""
+
+    @property
+    def monthly_limit(self) -> int:
+        return self.daily_limit
+
+    @property
+    def period(self) -> str:
+        return month_prefix(self.date)
 
 
 class EntitlementManager:
@@ -418,6 +463,39 @@ class EntitlementManager:
                 )
                 """
             )
+            overrides_existed = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'allowance_overrides'"
+            ).fetchone() is not None
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS allowance_overrides (
+                    user_id TEXT PRIMARY KEY,
+                    allowance INTEGER NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+                """
+            )
+            if not overrides_existed:
+                # One-time migration: rows that were not on the legacy default
+                # were set explicitly (subscribers, manual beta grants). Keep
+                # them as overrides; rows on the legacy default move to the
+                # configured free-tier allowance lazily, without a bulk write.
+                now = _utc_now()
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO allowance_overrides (
+                        user_id, allowance, reason, created_at, updated_at
+                    )
+                    SELECT user_id, daily_limit, 'migrated_explicit_limit', ?, ?
+                    FROM users
+                    WHERE daily_limit != ?
+                    """,
+                    (now, now, LEGACY_DEFAULT_ALLOWANCE),
+                )
             charge_columns = self._table_columns(conn, "credit_charges")
             if "delivered_at" not in charge_columns:
                 conn.execute("ALTER TABLE credit_charges ADD COLUMN delivered_at TEXT")
@@ -663,6 +741,76 @@ class EntitlementManager:
             """,
             (user_id, email, self.default_daily_credits, now, now),
         )
+        # Keep the rollback-visible column in step with the effective allowance
+        # for rows on the default, so a v0.6.x reader sees the same pool.
+        conn.execute(
+            """
+            UPDATE users
+            SET daily_limit = ?
+            WHERE user_id = ?
+              AND daily_limit != ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM allowance_overrides o WHERE o.user_id = users.user_id
+              )
+            """,
+            (self.default_daily_credits, user_id, self.default_daily_credits),
+        )
+
+    def _effective_limit(self, conn: sqlite3.Connection, user_id: str) -> int:
+        """Return the override allowance or the configured free-tier default."""
+        row = conn.execute(
+            "SELECT allowance FROM allowance_overrides WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is not None:
+            return int(row[0])
+        return int(self.default_daily_credits)
+
+    @staticmethod
+    def _month_spent(conn: sqlite3.Connection, user_id: str, usage_date: str) -> int:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(credits_spent), 0)
+            FROM daily_usage
+            WHERE user_id = ? AND usage_date LIKE ?
+            """,
+            (user_id, f"{month_prefix(usage_date)}-%"),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    @staticmethod
+    def _date_spent(conn: sqlite3.Connection, user_id: str, usage_date: str) -> int:
+        row = conn.execute(
+            "SELECT credits_spent FROM daily_usage WHERE user_id = ? AND usage_date = ?",
+            (user_id, usage_date),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _snapshot(
+        self,
+        conn: sqlite3.Connection,
+        user_id: str,
+        usage_date: str,
+    ) -> CreditStatus:
+        user_row = conn.execute(
+            "SELECT email, status FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if user_row is None:
+            raise sqlite3.IntegrityError("entitlement user row is missing")
+        limit = self._effective_limit(conn, user_id)
+        month_spent = self._month_spent(conn, user_id, usage_date)
+        return CreditStatus(
+            user_id=user_id,
+            email=user_row[0],
+            date=usage_date,
+            daily_limit=limit,
+            credits_spent=month_spent,
+            credits_remaining=max(0, limit - month_spent),
+            status=str(user_row[1]),
+            credits_spent_today=self._date_spent(conn, user_id, usage_date),
+            resets_at=month_reset_date(usage_date),
+        )
 
     def _ensure_daily_usage(
         self,
@@ -686,41 +834,13 @@ class EntitlementManager:
         *,
         usage_date: str | None = None,
     ) -> CreditStatus:
-        """Return the user's current starter credit state, creating rows as needed."""
+        """Return the user's monthly free-tier state, creating rows as needed."""
         self.recover_stale_pending()
         usage_date = usage_date or _today()
         with self._connection() as conn:
             self._ensure_user(conn, user_id, email)
             self._ensure_daily_usage(conn, user_id, usage_date)
-            user_row = conn.execute(
-                """
-                SELECT email, daily_limit, status
-                FROM users u
-                WHERE u.user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            spent_row = conn.execute(
-                """
-                SELECT COALESCE(SUM(credits_spent), 0)
-                FROM daily_usage
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-
-        stored_email, daily_limit, status = user_row
-        credits_spent = spent_row[0]
-        remaining = max(0, int(daily_limit) - int(credits_spent))
-        return CreditStatus(
-            user_id=user_id,
-            email=stored_email,
-            date=usage_date,
-            daily_limit=int(daily_limit),
-            credits_spent=int(credits_spent),
-            credits_remaining=remaining,
-            status=status,
-        )
+            return self._snapshot(conn, user_id, usage_date)
 
     def spend(
         self,
@@ -733,7 +853,7 @@ class EntitlementManager:
         usage_date: str | None = None,
         charge_id: str | None = None,
     ) -> tuple[bool, CreditStatus]:
-        """Atomically reserve starter credits in a durable pending charge."""
+        """Atomically reserve monthly free-tier credits in a durable pending charge."""
         if amount < 0:
             raise ValueError("amount must be non-negative")
         self.recover_stale_pending()
@@ -745,60 +865,20 @@ class EntitlementManager:
             self._ensure_user(conn, user_id, email)
             self._ensure_daily_usage(conn, user_id, usage_date)
 
-            user_row = conn.execute(
-                """
-                SELECT email, daily_limit, status
-                FROM users u
-                WHERE u.user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            spent_row = conn.execute(
-                """
-                SELECT COALESCE(SUM(credits_spent), 0)
-                FROM daily_usage
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            date_spent_row = conn.execute(
-                """
-                SELECT credits_spent
-                FROM daily_usage
-                WHERE user_id = ? AND usage_date = ?
-                """,
-                (user_id, usage_date),
-            ).fetchone()
-            stored_email, daily_limit, status = user_row
-            lifetime_spent = int(spent_row[0])
-            date_spent = int(date_spent_row[0])
+            before = self._snapshot(conn, user_id, usage_date)
+            daily_limit = before.daily_limit
+            month_spent = before.credits_spent
+            date_spent = before.credits_spent_today
+            status = before.status
 
             existing_charge = conn.execute(
                 "SELECT state FROM credit_charges WHERE charge_id = ?",
                 (effective_charge_id,),
             ).fetchone()
             if existing_charge is not None:
-                return False, CreditStatus(
-                    user_id=user_id,
-                    email=stored_email,
-                    date=usage_date,
-                    daily_limit=int(daily_limit),
-                    credits_spent=lifetime_spent,
-                    credits_remaining=max(0, int(daily_limit) - lifetime_spent),
-                    status=status,
-                )
+                return False, before
 
             if status != "active":
-                remaining = max(0, int(daily_limit) - lifetime_spent)
-                credit_status = CreditStatus(
-                    user_id=user_id,
-                    email=stored_email,
-                    date=usage_date,
-                    daily_limit=int(daily_limit),
-                    credits_spent=lifetime_spent,
-                    credits_remaining=remaining,
-                    status=status,
-                )
                 self._record_event(
                     conn,
                     user_id,
@@ -806,22 +886,13 @@ class EntitlementManager:
                     tool_name,
                     subject,
                     0,
-                    remaining,
+                    before.credits_remaining,
                     "blocked",
                 )
-                return False, credit_status
+                return False, before
 
-            remaining_before = int(daily_limit) - lifetime_spent
+            remaining_before = daily_limit - month_spent
             if remaining_before < amount:
-                credit_status = CreditStatus(
-                    user_id=user_id,
-                    email=stored_email,
-                    date=usage_date,
-                    daily_limit=int(daily_limit),
-                    credits_spent=lifetime_spent,
-                    credits_remaining=max(0, remaining_before),
-                    status=status,
-                )
                 self._record_event(
                     conn,
                     user_id,
@@ -832,9 +903,9 @@ class EntitlementManager:
                     max(0, remaining_before),
                     "insufficient_credits",
                 )
-                return False, credit_status
+                return False, before
 
-            new_lifetime_spent = lifetime_spent + amount
+            new_month_spent = month_spent + amount
             new_date_spent = date_spent + amount
             conn.execute(
                 """
@@ -852,7 +923,7 @@ class EntitlementManager:
                 """,
                 (effective_charge_id, user_id, usage_date, amount, _utc_now()),
             )
-            remaining_after = int(daily_limit) - new_lifetime_spent
+            remaining_after = daily_limit - new_month_spent
             self._record_event(
                 conn,
                 user_id,
@@ -866,12 +937,14 @@ class EntitlementManager:
 
         return True, CreditStatus(
             user_id=user_id,
-            email=stored_email,
+            email=before.email,
             date=usage_date,
-            daily_limit=int(daily_limit),
-            credits_spent=new_lifetime_spent,
+            daily_limit=daily_limit,
+            credits_spent=new_month_spent,
             credits_remaining=remaining_after,
             status=status,
+            credits_spent_today=new_date_spent,
+            resets_at=month_reset_date(usage_date),
         )
 
     def finalize_delivery(
@@ -911,30 +984,12 @@ class EntitlementManager:
             )
             if cursor.rowcount != 1:
                 return None
-            user_row = conn.execute(
-                "SELECT email, daily_limit, status FROM users WHERE user_id = ?",
-                (user_id,),
-            ).fetchone()
-            spent_row = conn.execute(
-                """
-                SELECT COALESCE(SUM(credits_spent), 0)
-                FROM daily_usage WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            if user_row is None or spent_row is None:
-                raise sqlite3.IntegrityError("Delivered charge has no entitlement balance")
-            email, daily_limit, status = user_row
-            lifetime_spent = int(spent_row[0])
-            return CreditStatus(
-                user_id=user_id,
-                email=email,
-                date=usage_date,
-                daily_limit=int(daily_limit),
-                credits_spent=lifetime_spent,
-                credits_remaining=max(0, int(daily_limit) - lifetime_spent),
-                status=str(status),
-            )
+            try:
+                return self._snapshot(conn, user_id, usage_date)
+            except sqlite3.IntegrityError as exc:
+                raise sqlite3.IntegrityError(
+                    "Delivered charge has no entitlement balance"
+                ) from exc
 
     def _recovery_cutoff(self, now: datetime | None = None) -> str:
         current = now or datetime.now(UTC)
@@ -1002,21 +1057,18 @@ class EntitlementManager:
                     (amount, _utc_now(), user_id, usage_date),
                 )
                 user_row = conn.execute(
-                    "SELECT daily_limit FROM users WHERE user_id = ?",
+                    "SELECT 1 FROM users WHERE user_id = ?",
                     (user_id,),
                 ).fetchone()
-                spent_row = conn.execute(
-                    """
-                    SELECT COALESCE(SUM(credits_spent), 0)
-                    FROM daily_usage WHERE user_id = ?
-                    """,
-                    (user_id,),
-                ).fetchone()
-                if user_row is None or spent_row is None:
+                if user_row is None:
                     raise sqlite3.IntegrityError(
                         "Recovered charge has no entitlement balance"
                     )
-                remaining = max(0, int(user_row[0]) - int(spent_row[0]))
+                remaining = max(
+                    0,
+                    self._effective_limit(conn, str(user_id))
+                    - self._month_spent(conn, str(user_id), str(usage_date)),
+                )
                 self._record_event(
                     conn,
                     str(user_id),
@@ -1075,14 +1127,15 @@ class EntitlementManager:
 
             row = conn.execute(
                 """
-                SELECT u.email, u.daily_limit, u.status, du.credits_spent
+                SELECT u.email, u.status, du.credits_spent
                 FROM users u
                 JOIN daily_usage du ON du.user_id = u.user_id
                 WHERE u.user_id = ? AND du.usage_date = ?
                 """,
                 (user_id, authoritative_date),
             ).fetchone()
-            stored_email, daily_limit, status, credits_spent = row
+            stored_email, status, credits_spent = row
+            daily_limit = self._effective_limit(conn, user_id)
             refundable = (
                 charge is not None
                 and int(charge[1]) == amount
@@ -1113,16 +1166,8 @@ class EntitlementManager:
                 """,
                 (new_spent, _utc_now(), user_id, authoritative_date),
             )
-            spent_row = conn.execute(
-                """
-                SELECT COALESCE(SUM(credits_spent), 0)
-                FROM daily_usage
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            lifetime_spent = int(spent_row[0])
-            remaining = max(0, int(daily_limit) - lifetime_spent)
+            month_spent = self._month_spent(conn, user_id, authoritative_date)
+            remaining = max(0, int(daily_limit) - month_spent)
             if new_spent != int(credits_spent):
                 self._record_event(
                     conn,
@@ -1140,9 +1185,11 @@ class EntitlementManager:
             email=stored_email,
             date=authoritative_date,
             daily_limit=int(daily_limit),
-            credits_spent=lifetime_spent,
+            credits_spent=month_spent,
             credits_remaining=remaining,
             status=status,
+            credits_spent_today=new_spent,
+            resets_at=month_reset_date(authoritative_date),
         )
 
     def set_daily_limit(
@@ -1151,21 +1198,83 @@ class EntitlementManager:
         daily_limit: int,
         *,
         email: str | None = None,
+        reason: str = "manual_override",
     ) -> CreditStatus:
-        """Set a user's daily allowance for subscriptions or manual beta grants."""
+        """Set an explicit monthly allowance override (subscribers, beta grants).
+
+        Overrides survive changes to ``FREE_TIER_MONTHLY_CREDITS``; use
+        ``clear_allowance_override`` to put a user back on the default.
+        """
         if daily_limit < 0:
             raise ValueError("daily_limit must be non-negative")
+        now = _utc_now()
         with self._connection() as conn:
             self._ensure_user(conn, user_id, email)
+            conn.execute(
+                """
+                INSERT INTO allowance_overrides (
+                    user_id, allowance, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    allowance = excluded.allowance,
+                    reason = excluded.reason,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, daily_limit, reason, now, now),
+            )
             conn.execute(
                 """
                 UPDATE users
                 SET daily_limit = ?, email = COALESCE(?, email), updated_at = ?
                 WHERE user_id = ?
                 """,
-                (daily_limit, email, _utc_now(), user_id),
+                (daily_limit, email, now, user_id),
             )
         return self.status(user_id, email)
+
+    def clear_allowance_override(self, user_id: str) -> CreditStatus:
+        """Return a user to the configured free-tier default allowance."""
+        with self._connection() as conn:
+            self._ensure_user(conn, user_id, None)
+            conn.execute("DELETE FROM allowance_overrides WHERE user_id = ?", (user_id,))
+            conn.execute(
+                "UPDATE users SET daily_limit = ?, updated_at = ? WHERE user_id = ?",
+                (self.default_daily_credits, _utc_now(), user_id),
+            )
+        return self.status(user_id)
+
+    def set_status(
+        self,
+        user_id: str,
+        status: str,
+        *,
+        reason: str = "",
+        email: str | None = None,
+    ) -> CreditStatus:
+        """Suspend or reinstate a user; ``spend`` blocks any non-active status."""
+        if status not in VALID_USER_STATUSES:
+            raise ValueError(f"status must be one of {sorted(VALID_USER_STATUSES)}")
+        usage_date = _today()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_user(conn, user_id, email)
+            self._ensure_daily_usage(conn, user_id, usage_date)
+            conn.execute(
+                "UPDATE users SET status = ?, updated_at = ? WHERE user_id = ?",
+                (status, _utc_now(), user_id),
+            )
+            snapshot = self._snapshot(conn, user_id, usage_date)
+            self._record_event(
+                conn,
+                user_id,
+                usage_date,
+                "system_status",
+                reason,
+                0,
+                snapshot.credits_remaining,
+                f"status_{status}",
+            )
+        return snapshot
 
     @staticmethod
     def _record_event(

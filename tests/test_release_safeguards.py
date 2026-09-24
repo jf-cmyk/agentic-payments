@@ -34,6 +34,25 @@ from scripts import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _install_fake_railway(tmp_path: Path, source: str, *, encoding: str = "utf-8") -> Path:
+    """Install a fake ``railway`` CLI that survives spaces in the checkout path.
+
+    A ``#!{sys.executable}`` shebang breaks when the interpreter path contains
+    whitespace (the kernel truncates it at the first space), so the Python body
+    lives in ``railway.py`` and ``railway`` is a POSIX shell wrapper that quotes
+    the interpreter path.
+    """
+    script = tmp_path / "railway.py"
+    script.write_text(source, encoding=encoding)
+    wrapper = tmp_path / "railway"
+    wrapper.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return wrapper
+
+
 def _canonical_json(value: object) -> str:
     if isinstance(value, dict):
         return "{" + ",".join(
@@ -1500,11 +1519,10 @@ def test_first_legacy_cutover_is_hard_blocked_before_deploy_mutation() -> None:
 def test_railway_bridge_variable_mutation_uses_stdin_skip_deploys_and_readback(
     tmp_path: Path,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import json
             import os
             from pathlib import Path
@@ -1529,7 +1547,6 @@ def test_railway_bridge_variable_mutation_uses_stdin_skip_deploys_and_readback(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     state_dir = tmp_path / "state"
     probe = textwrap.dedent(
         f"""
@@ -1833,11 +1850,10 @@ def _run_exact_railway_helper(
     *,
     forbidden_environment: str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import datetime
             import json
             import os
@@ -2045,7 +2061,6 @@ def _run_exact_railway_helper(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     state_dir = tmp_path / "state"
     environment = {
         **os.environ,
@@ -2196,11 +2211,10 @@ def test_repository_deploy_authority_preflight_fails_closed(
     accepted: bool,
     expected_error: str | None,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import json
             import os
             import sys
@@ -2238,7 +2252,6 @@ def test_repository_deploy_authority_preflight_fails_closed(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     probe = textwrap.dedent(
         f"""
         import {{ verifyNoRepositoryDeployTriggers }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
@@ -2500,11 +2513,10 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
     tmp_path: Path,
     candidate_status: str,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import datetime
             import json
             import os
@@ -2629,7 +2641,6 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
 
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
@@ -2747,11 +2758,10 @@ def _run_recovery_adversary(
     *,
     initial_recovery: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]], dict[str, object]]:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             """\
-            #!__PYTHON__
             import datetime
             import json
             import os
@@ -3000,7 +3010,6 @@ def _run_recovery_adversary(
         ).replace("__PYTHON__", sys.executable),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
 
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
@@ -3388,11 +3397,10 @@ def test_release_acceptance_requires_the_exact_active_ready_commit(
     prior_id = "22222222-2222-4222-8222-222222222222"
     interfering_id = "44444444-4444-4444-8444-444444444444"
     message = f"bsmcp:staging:123:456:{expected_commit}"
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    fake_railway = _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import json
             import sys
             args = sys.argv[1:]
@@ -3451,7 +3459,6 @@ def test_release_acceptance_requires_the_exact_active_ready_commit(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
         "globalThis.fetch = async () => ({ status: 200, async json() { "

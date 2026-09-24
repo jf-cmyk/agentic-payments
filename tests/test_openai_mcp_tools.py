@@ -74,7 +74,7 @@ async def test_openai_vwap_returns_live_observation_and_spends_credit(monkeypatc
     result = await server.openai_get_vwap("btc-usd")
 
     assert "VWAP [btc-usd]" in result
-    assert "Credits remaining today: 1/2" in result
+    assert "Credits remaining this month: 1/2" in result
     mock_client.get_vwap_latest.assert_awaited_once_with("BTCUSD")
     assert server._entitlements.status("openai-user-1").credits_remaining == 1
     assert server._entitlements.schema_status()["charge_states"] == {"delivered": 1}

@@ -5486,6 +5486,38 @@ async def x402_payment_middleware(request: Request, call_next):
                 ),
             )
 
+        if path.startswith("/v1/batch"):
+            try:
+                batch_items = len(_parse_batch_reqs(request.query_params.get("reqs", "")))
+            except ValueError:
+                batch_items = 0
+            if not free_tier.batch_items_allowed(batch_items):
+                _record_product_event(
+                    "credit_drawdown_failed",
+                    request,
+                    price_usdc=price,
+                    reason="free_tier_batch_cap",
+                    metadata={"batch_items": batch_items},
+                )
+                return _apply_x402_cors_headers(
+                    request,
+                    JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": "Bad Request",
+                            "message": (
+                                "Free-tier batch calls are capped at "
+                                f"{settings.free_tier.max_batch_items} items. Split the "
+                                "request or pay per call with signed x402 (up to "
+                                f"{settings.server.max_batch_size} items)."
+                            ),
+                            "free_tier_max_batch_items": settings.free_tier.max_batch_items,
+                            "paid_max_batch_size": settings.server.max_batch_size,
+                            "batch_items": batch_items,
+                        },
+                    ),
+                )
+
         mgr: CreditManager = request.app.state.credits
         client_ip = _request_client_ip(request)
         starter = await mgr.ensure_starter_allowance(

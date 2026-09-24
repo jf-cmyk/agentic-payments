@@ -19,6 +19,7 @@ from src.commercial_plans import upgrade_recommendation
 from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
 from src import free_tier
+from src.free_tier_ledger import FreeTierDecision, FreeTierSnapshot, get_free_tier_ledger
 from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
     DISCOVERY_SEARCH_DEFAULT_LIMIT,
@@ -40,6 +41,7 @@ from src.observability import (
     record_usage_event,
     record_usage_event_once,
 )
+from src.config import settings
 from src.public_metadata import APP_VERSION, MAIN_WEBSITE_PRICING_URL, PUBLIC_BASE_URL
 from src.transaction_bridge import economic_writes_locked
 
@@ -80,6 +82,46 @@ TOOL_COSTS = {
     "get_metal_price": 2,
 }
 SYMBOL_RE = re.compile(r"^[A-Z0-9.]{2,32}$")
+
+# Denial reasons from the shared ledger mapped to stable client-facing codes.
+# DAILY_CREDIT_LIMIT_REACHED is kept for the exhausted pool because published
+# agent skills already handle it; the message explains the monthly semantics.
+FREE_TIER_DENIAL_CODES = {
+    "monthly_pool_exhausted": (
+        "DAILY_CREDIT_LIMIT_REACHED",
+        "Your free-tier live-data credits for this month are exhausted. No credit was used.",
+    ),
+    "rate_limited_minute": (
+        "FREE_TIER_RATE_LIMITED",
+        "Free-tier calls are rate limited per minute. Retry after the given delay. No credit was used.",
+    ),
+    "daily_soft_cap": (
+        "FREE_TIER_DAILY_CAP_REACHED",
+        "You reached today's free-tier soft cap. It resets at the next UTC day. No credit was used.",
+    ),
+    "global_daily_cap": (
+        "FREE_TIER_AT_CAPACITY",
+        "The free tier is at capacity for today. Signed x402 payment still works. No credit was used.",
+    ),
+    "suspended": (
+        "FREE_TIER_SUSPENDED",
+        "This free-tier grant is suspended pending review. No credit was used.",
+    ),
+    "free_tier_disabled": (
+        "FREE_TIER_DISABLED",
+        "The Blocksize free tier is temporarily unavailable. No credit was used.",
+    ),
+}
+FREE_TIER_INELIGIBLE_MESSAGES = {
+    "missing_verified_email": (
+        "The free tier requires an account with a verified email address."
+    ),
+    "email_not_verified": "Verify the email on your Blocksize account to use the free tier.",
+    "disposable_email_domain": (
+        "Disposable email domains are not eligible for the free tier. Sign in with a "
+        "permanent address."
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -129,19 +171,77 @@ def create_authenticated_market_data_mcp(
             ).model_dump()
         )
 
-    def credit_payload(status: CreditStatus) -> dict[str, object]:
-        """Return account-scoped credit state without exposing direct identifiers."""
+    def credit_payload(
+        status: CreditStatus,
+        shared: FreeTierSnapshot | None = None,
+    ) -> dict[str, object]:
+        """Return account-scoped credit state without exposing direct identifiers.
+
+        ``credits_remaining`` is the effective figure: the lower of this
+        connector's ledger and the shared cross-connector pool.
+        """
+        remaining = status.credits_remaining
+        if shared is not None:
+            remaining = min(remaining, shared.credits_remaining)
         payload: dict[str, object] = {
             "date": status.date,
+            "period": status.period,
             "daily_limit": status.daily_limit,
+            "monthly_limit": status.monthly_limit,
             "credits_spent": status.credits_spent,
-            "credits_remaining": status.credits_remaining,
+            "credits_spent_today": status.credits_spent_today,
+            "credits_remaining": remaining,
+            "resets_at": status.resets_at or free_tier.FREE_TIER_RESET_RULE,
             "status": status.status,
+            "free_tier": {
+                "enabled": free_tier.enabled(),
+                "free_scope": sorted(settings.free_tier.allowed_service_set),
+                "daily_soft_cap": int(settings.free_tier.daily_soft_cap_credits),
+                "per_minute_credits": int(settings.free_tier.per_minute_credits),
+                "licence": free_tier.LICENCE_ID,
+            },
+            "attribution": free_tier.attribution_payload(),
         }
-        recommendation = upgrade_recommendation(status.credits_remaining)
+        if shared is not None:
+            payload["shared_pool"] = shared.as_payload()
+        recommendation = upgrade_recommendation(remaining)
         if recommendation is not None:
             payload["upgrade_recommendation"] = recommendation
         return payload
+
+    def denial_payload(decision: FreeTierDecision) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "reason": decision.reason,
+            **decision.snapshot.as_payload(),
+            "upgrade_path": free_tier.upgrade_path_text(),
+            "attribution": free_tier.attribution_payload(),
+        }
+        if decision.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = decision.retry_after_seconds
+        return payload
+
+    def free_tier_event(
+        event: str,
+        *,
+        tool_name: str,
+        subject: str,
+        grant_key: str,
+        identity: ConnectorIdentity,
+        reason: str | None = None,
+        **metadata: object,
+    ) -> None:
+        record_usage_event(
+            event,
+            surface=observability_surface,
+            tool_name=tool_name,
+            subject=subject,
+            reason=reason,
+            metadata={
+                "grant_hash": fingerprint(grant_key),
+                **telemetry_identity_payload(identity),
+                **metadata,
+            },
+        )
 
     def telemetry_credit_payload(status: CreditStatus) -> dict[str, object]:
         return {
@@ -256,13 +356,118 @@ def create_authenticated_market_data_mcp(
 
         cost = TOOL_COSTS[tool_name]
         charge_id = uuid.uuid4().hex
+
+        # --- Free-tier gate (kill switch, eligibility, data-rights scope) ----
+        def gate_failure(code: str, message: str, reason: str, details: dict[str, object]) -> str:
+            record_usage_event(
+                "mcp_credit_drawdown_failed",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                reason=reason,
+                metadata={"attempt_id": attempt_id, **identity_metadata},
+            )
+            return error_payload(
+                code,
+                f"{message} {free_tier.upgrade_path_text()}",
+                json.dumps({**details, "attribution": free_tier.attribution_payload()}),
+            )
+
+        if not free_tier.enabled():
+            code, message = FREE_TIER_DENIAL_CODES["free_tier_disabled"]
+            return gate_failure(
+                code,
+                message,
+                "free_tier_disabled",
+                {"reason": "free_tier_disabled", "upgrade_path": free_tier.upgrade_path_text()},
+            )
+        eligibility = free_tier.eligibility_for(identity)
+        if not eligibility.eligible or eligibility.grant_key is None:
+            return gate_failure(
+                "FREE_TIER_INELIGIBLE",
+                FREE_TIER_INELIGIBLE_MESSAGES.get(
+                    eligibility.reason, "This account is not eligible for the free tier."
+                ),
+                f"ineligible_{eligibility.reason}",
+                {"reason": eligibility.reason, "upgrade_path": free_tier.upgrade_path_text()},
+            )
+        grant_key = eligibility.grant_key
+        service = free_tier.service_for_tool(tool_name, subject)
+        if not free_tier.service_in_free_scope(service):
+            return gate_failure(
+                "FREE_TIER_SCOPE_EXCLUDED",
+                f"'{subject}' ({service}) is outside the current free-tier scope. No credit was used.",
+                "free_scope_excluded",
+                free_tier.scope_excluded_payload(service),
+            )
+
         entitlements = get_entitlements()
+        ledger = get_free_tier_ledger()
         try:
             canonical_user_id = entitlements.bind_identity(
                 identity.ledger_subject,
                 identity.legacy_ledger_subject,
                 email=identity.email,
             )
+            decision = ledger.reserve(grant_key, cost, symbol=subject)
+            ledger.bind_subject(grant_key, identity.ledger_subject)
+            if decision.grant_created:
+                free_tier_event(
+                    "free_tier_grant_created",
+                    tool_name=tool_name,
+                    subject=subject,
+                    grant_key=grant_key,
+                    identity=identity,
+                    monthly_limit=decision.snapshot.monthly_limit,
+                )
+            if not decision.allowed:
+                code, message = FREE_TIER_DENIAL_CODES.get(
+                    decision.reason,
+                    ("FREE_TIER_UNAVAILABLE", "The free tier declined this call. No credit was used."),
+                )
+                event = (
+                    "free_tier_exhausted"
+                    if decision.reason == "monthly_pool_exhausted"
+                    else "free_tier_rate_limited"
+                    if decision.reason in {"rate_limited_minute", "daily_soft_cap", "global_daily_cap"}
+                    else "mcp_credit_drawdown_failed"
+                )
+                free_tier_event(
+                    event,
+                    tool_name=tool_name,
+                    subject=subject,
+                    grant_key=grant_key,
+                    identity=identity,
+                    reason=decision.reason,
+                    attempt_id=attempt_id,
+                    retry_after_seconds=decision.retry_after_seconds,
+                    **decision.snapshot.as_payload(),
+                )
+                return error_payload(
+                    code,
+                    f"{message} {free_tier.upgrade_path_text()}",
+                    json.dumps(denial_payload(decision)),
+                )
+            for level in decision.thresholds_crossed:
+                free_tier_event(
+                    "free_tier_threshold_crossed",
+                    tool_name=tool_name,
+                    subject=subject,
+                    grant_key=grant_key,
+                    identity=identity,
+                    threshold_pct=level,
+                    **decision.snapshot.as_payload(),
+                )
+                if level == 100:
+                    free_tier_event(
+                        "free_tier_exhausted",
+                        tool_name=tool_name,
+                        subject=subject,
+                        grant_key=grant_key,
+                        identity=identity,
+                        reason="monthly_pool_consumed",
+                        **decision.snapshot.as_payload(),
+                    )
             ok, status = entitlements.spend(
                 canonical_user_id,
                 cost,
@@ -271,6 +476,28 @@ def create_authenticated_market_data_mcp(
                 subject=subject,
                 charge_id=charge_id,
             )
+            if not ok:
+                ledger.release(grant_key, cost)
+            if decision.abuse_flags:
+                # The call that tripped the detector still completes (the shared
+                # ledger already admitted it); every later call is blocked in
+                # both ledgers until an operator reinstates the grant.
+                free_tier_event(
+                    "free_tier_abuse_flagged",
+                    tool_name=tool_name,
+                    subject=subject,
+                    grant_key=grant_key,
+                    identity=identity,
+                    reason=",".join(decision.abuse_flags),
+                    flags=list(decision.abuse_flags),
+                    action="suspended",
+                )
+                entitlements.set_status(
+                    canonical_user_id,
+                    "suspended",
+                    reason=",".join(decision.abuse_flags),
+                    email=identity.email,
+                )
         except sqlite3.Error:
             logger.error("Connector credit ledger is unavailable for %s", tool_name)
             record_usage_event(
@@ -303,14 +530,13 @@ def create_authenticated_market_data_mcp(
                     **identity_metadata,
                 },
             )
+            code, message = FREE_TIER_DENIAL_CODES["monthly_pool_exhausted"]
+            if status.status != "active":
+                code, message = FREE_TIER_DENIAL_CODES["suspended"]
             return error_payload(
-                "DAILY_CREDIT_LIMIT_REACHED",
-                (
-                    "Blocksize starter live-data credits are exhausted for this "
-                    "allowance window. Upgrade outside the connector with x402 "
-                    "payment or an authenticated account plan to continue production usage."
-                ),
-                json.dumps(credit_payload(status)),
+                code,
+                f"{message} {free_tier.upgrade_path_text()}",
+                json.dumps(credit_payload(status, decision.snapshot)),
             )
         record_usage_event(
             "mcp_credit_drawdown_success",
@@ -327,6 +553,10 @@ def create_authenticated_market_data_mcp(
         )
 
         def refund_pending_charge() -> dict[str, object]:
+            try:
+                ledger.release(grant_key, cost)
+            except sqlite3.Error:
+                logger.error("Shared free-tier release is pending recovery for %s", tool_name)
             try:
                 refunded = entitlements.refund(
                     canonical_user_id,
@@ -476,10 +706,13 @@ def create_authenticated_market_data_mcp(
             if recommendation is not None
             else ""
         )
+        remaining = min(current.credits_remaining, decision.snapshot.credits_remaining)
         return (
             f"{rendered}\n\n"
-            f"Starter credits remaining: {current.credits_remaining}/{current.daily_limit} "
-            f"(Credits remaining today: {current.credits_remaining}/{current.daily_limit})"
+            f"Starter credits remaining: {remaining}/{current.daily_limit} "
+            f"(Credits remaining this month: {remaining}/{current.daily_limit}, "
+            f"resets {current.resets_at})\n"
+            f"{free_tier.ATTRIBUTION_TEXT}: {free_tier.ATTRIBUTION_URL}"
             f"{upgrade_suffix}"
         )
 
@@ -695,6 +928,12 @@ def create_authenticated_market_data_mcp(
                 email=identity.email,
             )
             status = entitlements.status(canonical_user_id, identity.email)
+            eligibility = free_tier.eligibility_for(identity)
+            shared = (
+                get_free_tier_ledger().status(eligibility.grant_key)
+                if eligibility.eligible and eligibility.grant_key
+                else None
+            )
         except sqlite3.Error:
             logger.error("Connector credit ledger is unavailable for get_credit_balance")
             return error_payload(
@@ -711,7 +950,10 @@ def create_authenticated_market_data_mcp(
             },
         )
         record_upgrade_trigger(status, identity, tool_name="get_credit_balance")
-        return json.dumps({"status": "ok", "credits": credit_payload(status)}, indent=2)
+        balance = credit_payload(status, shared)
+        if not eligibility.eligible:
+            balance["free_tier_eligibility"] = eligibility.reason
+        return json.dumps({"status": "ok", "credits": balance}, indent=2)
 
     @mcp.tool(
         name="get_vwap",

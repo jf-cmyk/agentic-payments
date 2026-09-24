@@ -7149,3 +7149,23 @@ class TestDataEndpoints:
         assert response.json()["meta"]["asset_class"] == "equity"
         assert "PAYMENT-RESPONSE" in response.headers
         mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")
+
+
+class TestFreeTierBatchCap:
+    def test_legacy_starter_batch_is_capped_below_paid_maximum(self, test_client, tmp_path, monkeypatch):
+        monkeypatch.setattr(settings.free_tier, "max_batch_items", 2)
+        app.state.credits = CreditManager(str(tmp_path / "credits.db"))
+        headers = {"X-AGENT-ID": "agent-batch-12345678"}
+
+        response = test_client.get(
+            "/v1/batch?reqs=vwap:BTCUSD,vwap:ETHUSD,vwap:SOLUSD",
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["free_tier_max_batch_items"] == 2
+        assert data["paid_max_batch_size"] == settings.server.max_batch_size
+        assert data["batch_items"] == 3
+        assert "signed x402" in data["message"]
+        assert app.state.credits.get_balance("agent-batch-12345678") == 0.0
