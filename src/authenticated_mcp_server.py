@@ -174,6 +174,8 @@ def create_authenticated_market_data_mcp(
     def credit_payload(
         status: CreditStatus,
         shared: FreeTierSnapshot | None = None,
+        *,
+        breadth: int | None = None,
     ) -> dict[str, object]:
         """Return account-scoped credit state without exposing direct identifiers.
 
@@ -204,21 +206,83 @@ def create_authenticated_market_data_mcp(
         }
         if shared is not None:
             payload["shared_pool"] = shared.as_payload()
-        recommendation = upgrade_recommendation(remaining)
+        recommendation = upgrade_recommendation(
+            remaining,
+            monthly_limit=status.monthly_limit,
+            distinct_instruments_30d=breadth,
+            source=observability_surface,
+        )
         if recommendation is not None:
             payload["upgrade_recommendation"] = recommendation
+            payload["upgrade"] = {
+                "plan_id": recommendation["recommended_plan_id"],
+                "trigger": recommendation["trigger"],
+                **recommendation["ctas"],
+            }
         return payload
 
-    def denial_payload(decision: FreeTierDecision) -> dict[str, object]:
+    def instrument_breadth(entitlements: EntitlementManager, user_id: str) -> int | None:
+        try:
+            return entitlements.distinct_subjects(user_id, days=30)
+        except sqlite3.Error:
+            return None
+
+    def denial_payload(
+        decision: FreeTierDecision,
+        *,
+        identity: ConnectorIdentity,
+        tool_name: str,
+        breadth: int | None = None,
+    ) -> dict[str, object]:
+        snapshot = decision.snapshot
+        recommendation = upgrade_recommendation(
+            snapshot.credits_remaining,
+            monthly_limit=snapshot.monthly_limit,
+            distinct_instruments_30d=breadth,
+            source=observability_surface,
+        ) or upgrade_recommendation(0, monthly_limit=None, source=observability_surface)
         payload: dict[str, object] = {
             "reason": decision.reason,
-            **decision.snapshot.as_payload(),
+            **snapshot.as_payload(),
             "upgrade_path": free_tier.upgrade_path_text(),
+            "upgrade": {
+                "plan_id": recommendation["recommended_plan_id"],
+                "trigger": decision.reason,
+                **recommendation["ctas"],
+            },
             "attribution": free_tier.attribution_payload(),
         }
         if decision.retry_after_seconds is not None:
             payload["retry_after_seconds"] = decision.retry_after_seconds
+        record_cta_shown(
+            identity,
+            tool_name=tool_name,
+            plan_id=recommendation["recommended_plan_id"],
+            trigger=decision.reason,
+        )
         return payload
+
+    def record_cta_shown(
+        identity: ConnectorIdentity,
+        *,
+        tool_name: str,
+        plan_id: str,
+        trigger: str,
+    ) -> None:
+        """Count one CTA impression per identity, trigger, and UTC day."""
+        record_usage_event_once(
+            "upgrade_cta_shown",
+            fingerprint(f"cta:{identity.ledger_subject}:{free_tier.today_utc()}:{trigger}"),
+            surface=observability_surface,
+            tool_name=tool_name,
+            metadata={
+                **telemetry_identity_payload(identity),
+                "plan_id": plan_id,
+                "trigger": trigger,
+                "primary_destination": "free-trial",
+                "secondary_destination": "pricing",
+            },
+        )
 
     def free_tier_event(
         event: str,
@@ -278,8 +342,15 @@ def create_authenticated_market_data_mcp(
         identity: ConnectorIdentity,
         *,
         tool_name: str,
+        remaining: int | None = None,
+        breadth: int | None = None,
     ) -> dict[str, object] | None:
-        recommendation = upgrade_recommendation(status.credits_remaining)
+        recommendation = upgrade_recommendation(
+            status.credits_remaining if remaining is None else remaining,
+            monthly_limit=status.monthly_limit,
+            distinct_instruments_30d=breadth,
+            source=observability_surface,
+        )
         if recommendation is None:
             return None
         record_usage_event_once(
@@ -293,8 +364,15 @@ def create_authenticated_market_data_mcp(
                 **telemetry_credit_payload(status),
                 **telemetry_identity_payload(identity),
                 "trigger_status": recommendation["status"],
+                "trigger": recommendation["trigger"],
                 "recommended_plan_id": recommendation["recommended_plan_id"],
             },
+        )
+        record_cta_shown(
+            identity,
+            tool_name=tool_name,
+            plan_id=recommendation["recommended_plan_id"],
+            trigger=recommendation["trigger"],
         )
         return recommendation
 
@@ -392,7 +470,11 @@ def create_authenticated_market_data_mcp(
                 {"reason": eligibility.reason, "upgrade_path": free_tier.upgrade_path_text()},
             )
         grant_key = eligibility.grant_key
-        service = free_tier.service_for_tool(tool_name, subject)
+        try:
+            catalog_client = await get_client()
+        except Exception:  # pragma: no cover - client construction failures surface later
+            catalog_client = None
+        service = await free_tier.service_for_tool_async(tool_name, subject, catalog_client)
         if not free_tier.service_in_free_scope(service):
             return gate_failure(
                 "FREE_TIER_SCOPE_EXCLUDED",
@@ -446,7 +528,14 @@ def create_authenticated_market_data_mcp(
                 return error_payload(
                     code,
                     f"{message} {free_tier.upgrade_path_text()}",
-                    json.dumps(denial_payload(decision)),
+                    json.dumps(
+                        denial_payload(
+                            decision,
+                            identity=identity,
+                            tool_name=tool_name,
+                            breadth=instrument_breadth(entitlements, canonical_user_id),
+                        )
+                    ),
                 )
             for level in decision.thresholds_crossed:
                 free_tier_event(
@@ -533,10 +622,23 @@ def create_authenticated_market_data_mcp(
             code, message = FREE_TIER_DENIAL_CODES["monthly_pool_exhausted"]
             if status.status != "active":
                 code, message = FREE_TIER_DENIAL_CODES["suspended"]
+            else:
+                record_cta_shown(
+                    identity,
+                    tool_name=tool_name,
+                    plan_id="developer",
+                    trigger="monthly_pool_exhausted",
+                )
             return error_payload(
                 code,
                 f"{message} {free_tier.upgrade_path_text()}",
-                json.dumps(credit_payload(status, decision.snapshot)),
+                json.dumps(
+                    credit_payload(
+                        status,
+                        decision.snapshot,
+                        breadth=instrument_breadth(entitlements, canonical_user_id),
+                    )
+                ),
             )
         record_usage_event(
             "mcp_credit_drawdown_success",
@@ -695,18 +797,22 @@ def create_authenticated_market_data_mcp(
                 "payment_mode": "starter_credit",
             },
         )
+        remaining = min(current.credits_remaining, decision.snapshot.credits_remaining)
         recommendation = record_upgrade_trigger(
             current,
             identity,
             tool_name=tool_name,
+            remaining=remaining,
+            breadth=instrument_breadth(entitlements, canonical_user_id),
         )
         upgrade_suffix = (
-            "\nAccount plan recommendation: "
-            f"{recommendation['recommendation_path']}"
+            f"\nUpgrade: {recommendation['ctas']['primary']['label']} "
+            f"{PUBLIC_BASE_URL}{recommendation['ctas']['primary']['path']} | "
+            f"{recommendation['ctas']['secondary']['label']} "
+            f"{PUBLIC_BASE_URL}{recommendation['ctas']['secondary']['path']}"
             if recommendation is not None
             else ""
         )
-        remaining = min(current.credits_remaining, decision.snapshot.credits_remaining)
         return (
             f"{rendered}\n\n"
             f"Starter credits remaining: {remaining}/{current.daily_limit} "
@@ -949,8 +1055,20 @@ def create_authenticated_market_data_mcp(
                 **telemetry_identity_payload(identity),
             },
         )
-        record_upgrade_trigger(status, identity, tool_name="get_credit_balance")
-        balance = credit_payload(status, shared)
+        breadth = instrument_breadth(entitlements, canonical_user_id)
+        effective_remaining = (
+            min(status.credits_remaining, shared.credits_remaining)
+            if shared is not None
+            else status.credits_remaining
+        )
+        record_upgrade_trigger(
+            status,
+            identity,
+            tool_name="get_credit_balance",
+            remaining=effective_remaining,
+            breadth=breadth,
+        )
+        balance = credit_payload(status, shared, breadth=breadth)
         if not eligibility.eligible:
             balance["free_tier_eligibility"] = eligibility.reason
         return json.dumps({"status": "ok", "credits": balance}, indent=2)

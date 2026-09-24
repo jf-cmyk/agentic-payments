@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from src.commercial_plans import conversion_ctas
 from src.config import TOP_250_CRYPTO, settings
 
 logger = logging.getLogger(__name__)
@@ -87,10 +88,23 @@ def allowance_sentence() -> str:
 def upgrade_path_text() -> str:
     """Return the upgrade sentence shown once the pool is exhausted or capped."""
     return (
-        "When the monthly free allowance is exhausted or rate limited, use signed "
-        "x402 for direct public HTTP or contact Blocksize sales about an "
-        "authenticated account plan."
+        "When the monthly free allowance is exhausted or rate limited, start a free "
+        "trial at /go/free-trial, compare plans at /go/pricing, or use signed x402 "
+        "for direct public HTTP. For Enterprise terms, contact Blocksize sales about "
+        "an authenticated account plan."
     )
+
+
+def upgrade_fields(*, source: str, trigger: str = "surface", plan_id: str = "developer") -> dict[str, Any]:
+    """Return the standard ``upgrade`` block for catalogs, 402s, and denials."""
+    return {
+        "upgrade_path": upgrade_path_text(),
+        "upgrade": {
+            "plan_id": plan_id,
+            "trigger": trigger,
+            **conversion_ctas(plan_id, source=source, trigger=trigger),
+        },
+    }
 
 
 def attribution_payload() -> dict[str, Any]:
@@ -299,6 +313,36 @@ def service_for_tool(tool_name: str, symbol: str = "") -> str:
     if service == "crypto_bidask" and symbol and looks_like_equity_symbol(symbol):
         return "equity_bidask"
     return service
+
+
+async def service_for_tool_async(tool_name: str, symbol: str, client: Any) -> str:
+    """Resolve the free-scope service using the live instrument catalog.
+
+    The catalog is authoritative (``BlocksizeClient.classify_symbol``). The
+    naming heuristic is used only when the catalog cannot be read, so an
+    upstream outage never turns cleared crypto data into a scope refusal.
+    """
+    service = TOOL_SERVICES.get(tool_name)
+    if service is None:
+        raise KeyError(f"No free-scope service is defined for tool {tool_name!r}")
+    if service != "crypto_bidask" or not symbol:
+        return service
+    classify = getattr(client, "classify_symbol", None)
+    if classify is None:
+        return service_for_tool(tool_name, symbol)
+    try:
+        asset_class = await classify(symbol)
+    except Exception:  # catalog unavailable: fall back, never fail closed on outage
+        logger.warning("free_tier: instrument catalog unavailable, using symbol heuristic")
+        return service_for_tool(tool_name, symbol)
+    if not isinstance(asset_class, str):
+        return service_for_tool(tool_name, symbol)
+    return {
+        "crypto": "crypto_bidask",
+        "equity": "equity_bidask",
+        "fx": "fx",
+        "metal": "metals",
+    }.get(asset_class, service_for_tool(tool_name, symbol))
 
 
 def service_in_free_scope(service: str) -> bool:

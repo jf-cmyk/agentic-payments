@@ -1192,6 +1192,22 @@ class EntitlementManager:
             resets_at=month_reset_date(authoritative_date),
         )
 
+    def distinct_subjects(self, user_id: str, *, days: int = 30) -> int:
+        """Count distinct instruments charged in the trailing window (plan breadth)."""
+        if days <= 0:
+            raise ValueError("days must be positive")
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT subject) FROM usage_events
+                WHERE user_id = ? AND credits_delta > 0 AND subject != ''
+                  AND created_at >= ?
+                """,
+                (user_id, cutoff),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def set_daily_limit(
         self,
         user_id: str,

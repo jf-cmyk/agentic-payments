@@ -60,16 +60,24 @@ def test_account_plan_catalog_is_sales_assisted_and_bounded() -> None:
 
     assert catalog["sales_model"] == "sales_assisted"
     assert catalog["self_serve_purchase_available"] is False
+    assert catalog["currency"] == "EUR"
+    assert catalog["annual_discount_pct"] == 15
+    assert catalog["free_trial_path"] == "/go/free-trial"
     assert [plan["id"] for plan in catalog["plans"]] == [
         "developer",
-        "production",
-        "institutional",
+        "startup",
+        "business",
+        "enterprise",
     ]
-    assert [plan["indicative_monthly_price_usd"] for plan in catalog["plans"]] == [
+    assert [plan["indicative_monthly_price_eur"] for plan in catalog["plans"]] == [
         49,
-        249,
-        999,
+        299,
+        799,
+        None,
     ]
+    assert [plan["feeds"] for plan in catalog["plans"]] == [5, 50, 350, None]
+    assert [plan["seats"] for plan in catalog["plans"]] == [1, 5, 10, None]
+    assert "State Prices" in catalog["plans"][2]["features"]
 
 
 @pytest.mark.parametrize(
@@ -82,7 +90,7 @@ def test_account_plan_catalog_is_sales_assisted_and_bounded() -> None:
                 "team_seats": 3,
                 "recurring_days_per_month": 20,
             },
-            "production",
+            "startup",
         ),
         (
             {
@@ -90,18 +98,62 @@ def test_account_plan_catalog_is_sales_assisted_and_bounded() -> None:
                 "team_seats": 3,
                 "needs_sla": True,
             },
-            "institutional",
+            "enterprise",
         ),
+        ({"distinct_instruments": 3}, "developer"),
+        ({"distinct_instruments": 6}, "startup"),
+        ({"distinct_instruments": 51}, "business"),
+        ({"distinct_instruments": 351}, "enterprise"),
+        ({"expected_monthly_live_calls": 500_000}, "business"),  # ~58 feeds at 5-minute polling
+        ({"team_seats": 6}, "business"),
+        ({"team_seats": 11}, "enterprise"),
     ],
 )
 def test_account_plan_recommendation(kwargs, expected) -> None:
     result = recommend_account_plan(**kwargs)
     assert result["recommended_plan"]["id"] == expected
+    assert result["ctas"]["primary"]["path"].startswith("/go/free-trial?")
+    assert result["ctas"]["secondary"]["path"].startswith("/go/pricing?")
 
 
-def test_upgrade_trigger_appears_only_for_low_or_exhausted_starter_balance() -> None:
+def test_legacy_plan_ids_still_resolve() -> None:
+    assert tracked_plan_contact_path("production", source="test").endswith("utm_content=startup")
+    assert tracked_plan_contact_path("institutional", source="test").endswith("utm_content=business")
+    with pytest.raises(ValueError):
+        tracked_plan_contact_path("gold", source="test")
+
+
+def test_upgrade_trigger_follows_consumption_thresholds_and_breadth() -> None:
+    limit = 15_000
+    assert upgrade_recommendation(limit, monthly_limit=limit) is None
+    assert upgrade_recommendation(7_501, monthly_limit=limit) is None
+    half = upgrade_recommendation(7_500, monthly_limit=limit)
+    assert (half["status"], half["trigger"], half["consumed_pct"]) == ("half", "consumption_50", 50.0)
+    assert upgrade_recommendation(3_000, monthly_limit=limit)["status"] == "high"
+    assert upgrade_recommendation(750, monthly_limit=limit)["status"] == "critical"
+    exhausted = upgrade_recommendation(0, monthly_limit=limit)
+    assert (exhausted["status"], exhausted["trigger"]) == ("exhausted", "consumption_100")
+    assert exhausted["recommended_plan_id"] == "developer"
+    assert exhausted["ctas"]["primary"]["path"].startswith("/go/free-trial?utm_source=authenticated-connector")
+    assert "utm_term=consumption_100" in exhausted["ctas"]["primary"]["path"]
+    assert exhausted["ctas"]["secondary"]["label"] == "See plans from EUR 49/month"
+    assert exhausted["contact_path"].startswith("/go/contact?")
+
+    breadth = upgrade_recommendation(14_000, monthly_limit=limit, distinct_instruments_30d=60)
+    assert (breadth["status"], breadth["trigger"], breadth["recommended_plan_id"]) == (
+        "breadth",
+        "instruments_business",
+        "business",
+    )
+    both = upgrade_recommendation(100, monthly_limit=limit, distinct_instruments_30d=400)
+    assert both["status"] == "critical"
+    assert both["recommended_plan_id"] == "enterprise"
+    assert both["ctas"]["sales"]["path"].startswith("/go/contact?")
+    assert upgrade_recommendation(14_000, monthly_limit=limit, distinct_instruments_30d=5) is None
+
+    # Legacy callers without a monthly limit keep the old 10-credit rule.
     assert upgrade_recommendation(11) is None
-    assert upgrade_recommendation(10)["status"] == "low_balance"
+    assert upgrade_recommendation(10)["status"] == "half"
     assert upgrade_recommendation(0)["status"] == "exhausted"
     assert tracked_plan_contact_path("developer", source="test").startswith(
         "/go/contact?"
@@ -123,10 +175,13 @@ def test_account_plan_endpoints_and_macro_preview_are_free(
     preview = commercial_test_client.get("/v1/previews/macro")
 
     assert catalog.status_code == 200
-    assert catalog.json()["plans"][1]["id"] == "production"
+    assert catalog.json()["plans"][1]["id"] == "startup"
+    assert catalog.json()["currency"] == "EUR"
     assert recommendation.status_code == 200
-    assert recommendation.json()["recommended_plan"]["id"] == "production"
+    assert recommendation.json()["recommended_plan"]["id"] == "startup"
     assert recommendation.json()["conversion"]["purchase_mode"] == "sales_assisted"
+    assert recommendation.json()["conversion"]["primary"]["path"].startswith("/go/free-trial?")
+    assert recommendation.json()["conversion"]["secondary"]["path"].startswith("/go/pricing?")
     assert preview.status_code == 200
     payload = preview.json()
     assert payload["preview"]["data_class"] == "synthetic_example"
@@ -196,8 +251,9 @@ async def test_public_mcp_recommends_plan_and_exposes_growth_handoffs() -> None:
         await public_mcp_server.public_get_market_data_endpoint("vwap", "BTCUSD")
     )
 
-    assert recommendation["recommended_plan"]["id"] == "production"
+    assert recommendation["recommended_plan"]["id"] == "startup"
     assert recommendation["conversion"]["self_serve_purchase_available"] is False
+    assert recommendation["conversion"]["primary"]["path"].startswith("/go/free-trial?")
     assert macro["free_preview"]["data_class"] == "synthetic_example"
     assert macro["free_preview"]["live_market_data"] is False
     assert monitor["repeat_recipe"]["cost"] == "free"

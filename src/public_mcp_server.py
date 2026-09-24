@@ -288,6 +288,7 @@ async def public_recommend_account_plan(
             "status": "ok",
             **recommendation,
             "conversion": {
+                **recommendation["ctas"],
                 "catalog_url": f"{PUBLIC_BASE_URL}/v1/account-plans",
                 "recommendation_url": f"{PUBLIC_BASE_URL}/v1/account-plans/recommend",
                 "contact_path": tracked_plan_contact_path(

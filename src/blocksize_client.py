@@ -810,6 +810,65 @@ class BlocksizeClient:
         result = await self._rpc_call("bidask_instruments")
         return self._extract_instrument_entries(result)
 
+    # -----------------------------------------------------------------------
+    # Symbol classification (free-tier data-rights scope)
+    # -----------------------------------------------------------------------
+
+    _classification_cache: dict[str, str] | None = None
+    _classification_cached_at: float = 0.0
+    CLASSIFICATION_CACHE_TTL_SECONDS = 3600.0
+
+    async def _classification_map(self) -> dict[str, str]:
+        """Build (and cache) symbol -> asset class from the live catalogs."""
+        import time
+
+        now = time.monotonic()
+        cached = self._classification_cache
+        if cached is not None and now - self._classification_cached_at < self.CLASSIFICATION_CACHE_TTL_SECONDS:
+            return cached
+        entries = await self._list_bidask_entries()
+        vwap_instruments = await self.list_vwap_instruments()
+        if not isinstance(entries, list) or not isinstance(vwap_instruments, list):
+            raise BlocksizeAPIError(-1, "Instrument catalog unavailable for classification")
+        mapping: dict[str, str] = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("ticker"):
+                continue
+            ticker = str(entry["ticker"]).upper()
+            if self._is_fx_entry(entry):
+                mapping[ticker] = "fx"
+            elif self._is_metal_entry(entry):
+                mapping[ticker] = "metal"
+            elif self._is_equity_like_entry(entry):
+                mapping[ticker] = "equity"
+            else:
+                mapping[ticker] = "crypto"
+        for instrument in vwap_instruments:
+            ticker = str(instrument).upper()
+            # VWAP is a crypto-only service; it is authoritative for its symbols.
+            mapping[ticker] = "crypto"
+        self._classification_cache = mapping
+        self._classification_cached_at = now
+        return mapping
+
+    async def classify_symbol(self, symbol: str) -> str:
+        """Return ``crypto``, ``equity``, ``fx``, ``metal``, or ``unknown``.
+
+        Uses the upstream instrument catalogs (cached for an hour), so a bare
+        long-tail crypto ticker listed by Blocksize is classified as crypto and
+        a tokenized equity is classified as equity by the catalog's own
+        asset-class metadata, not by a naming heuristic. Raises
+        ``BlocksizeAPIError`` when the catalog cannot be read.
+        """
+        clean = symbol.strip().upper().replace("-", "").replace("/", "").replace("_", "")
+        mapping = await self._classification_map()
+        if clean in mapping:
+            return mapping[clean]
+        for quote in ("USDT", "USDC", "USD"):
+            if f"{clean}{quote}" in mapping:
+                return mapping[f"{clean}{quote}"]
+        return "unknown"
+
     @staticmethod
     def _extract_instrument_entries(result: Any) -> list[dict[str, str]]:
         """Normalize instrument payloads into ticker/base/quote records."""

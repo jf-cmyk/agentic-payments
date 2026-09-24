@@ -90,6 +90,7 @@ from src.entitlement_manager import (
     connector_entitlement_manager,
 )
 from src import free_tier
+from src.free_tier_ledger import get_free_tier_ledger
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -2113,7 +2114,7 @@ async def get_products() -> dict[str, Any]:
             **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "direct_public_http": "Signed x402 payment is required per live-data request.",
-            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+            **free_tier.upgrade_fields(source="http-products-catalog", trigger="surface"),
         },
         "credit_costs": CREDIT_COSTS,
         "catalog": catalog,
@@ -2169,10 +2170,16 @@ async def get_account_plan_recommendation(
             "recurring_usage": recurring_days >= 8,
         },
     )
+    _record_product_event(
+        "upgrade_cta_shown",
+        request,
+        metadata={"plan_id": plan_id, "trigger": "recommendation", "primary_destination": "free-trial"},
+    )
     return {
         "status": "ok",
         **recommendation,
         "conversion": {
+            **recommendation["ctas"],
             "contact_path": tracked_plan_contact_path(
                 plan_id,
                 source="account-plan-recommender",
@@ -3683,7 +3690,7 @@ def _credit_meta_for_request(request: Request) -> dict[str, Any] | None:
         "credit_cost": context["credits_spent"],
         "credits_remaining": context["credits_remaining"],
         "starter_allowance_credits": STARTER_CREDIT_ALLOWANCE,
-        "upgrade_path": "After authenticated connector credits are exhausted, use signed x402 or contact sales for an account plan.",
+        **free_tier.upgrade_fields(source="http-starter-meta", trigger="surface"),
     }
 
 
@@ -5714,6 +5721,17 @@ async def x402_payment_middleware(request: Request, call_next):
             str(item["name"]) for item in accepted_networks
         )
         _record_product_event(
+            "upgrade_cta_shown",
+            request,
+            price_usdc=price,
+            metadata={
+                "plan_id": "developer",
+                "trigger": "payment_required",
+                "primary_destination": "free-trial",
+                "secondary_destination": "pricing",
+            },
+        )
+        _record_product_event(
             "payment_required",
             request,
             price_usdc=price,
@@ -5764,7 +5782,7 @@ async def x402_payment_middleware(request: Request, call_next):
                             else []
                         ),
                         "direct_public_http": "This request requires the signed x402 payment shown above.",
-                        "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+                        **free_tier.upgrade_fields(source="http-402", trigger="surface"),
                     },
                     "networks": accepted_networks,
                     "purchase_handoff": _x402_purchase_handoff(
@@ -9787,7 +9805,7 @@ async def get_credit_balance(request: Request, wallet: str):
             "eligibility": "local_qa_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
         },
-        "upgrade_path": "Production direct HTTP uses signed x402; contact sales for an authenticated account plan.",
+        **free_tier.upgrade_fields(source="http-legacy-balance", trigger="surface"),
     }
 
 @app.post("/v1/credits/purchase", include_in_schema=False)
@@ -10022,7 +10040,7 @@ async def mcp_manifest():
                     "provenance",
                 ],
                 "direct_public_http": "Signed x402 payment is required per live-data request.",
-                "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+                **free_tier.upgrade_fields(source="http-manifest", trigger="surface"),
             },
         },
     }
@@ -11196,6 +11214,17 @@ async def observability_stats(
     content["operational_alerts"] = _build_operational_alerts(content)
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
     content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
+    free_tier_panel = content.get("free_tier") if isinstance(content.get("free_tier"), dict) else {}
+    try:
+        free_tier_panel["ledger"] = get_free_tier_ledger().summary()
+    except Exception:  # the panel must never break the dashboard
+        free_tier_panel["ledger"] = {"error": "free-tier ledger unavailable"}
+    free_tier_panel["config"] = {
+        "enabled": free_tier.enabled(),
+        "monthly_credits": free_tier.allowance_credits(),
+        **free_tier.guard_summary(),
+    }
+    content["free_tier"] = free_tier_panel
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
@@ -11905,6 +11934,37 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         <div class="scroll"><table id="rwa-pilot-table"></table></div>
       </section>
 
+      <section class="card section" id="free-tier">
+        <div class="headline">
+          <div>
+            <h2>Free Tier</h2>
+            <div class="sub">Monthly free allowance funnel: grants, pool consumption, exhaustion, upgrade CTA impressions, tracked /go clicks, and trial starts. Worst-case exposure is grants times the monthly allowance.</div>
+          </div>
+          <div class="summary-strip" id="free-tier-kpis"></div>
+        </div>
+        <div class="grid two">
+          <div>
+            <h3>Pool consumption thresholds</h3>
+            <div id="free-tier-thresholds" class="bars"></div>
+          </div>
+          <div>
+            <h3>Denials and abuse flags</h3>
+            <div id="free-tier-denials" class="bars"></div>
+          </div>
+        </div>
+        <div class="grid two" style="margin-top:12px">
+          <div>
+            <h3>CTA impressions by trigger</h3>
+            <div id="free-tier-cta" class="bars"></div>
+          </div>
+          <div>
+            <h3>Tracked /go clicks</h3>
+            <div id="free-tier-clicks" class="bars"></div>
+          </div>
+        </div>
+        <div class="metric-note" id="free-tier-boundary"></div>
+      </section>
+
       <section class="card section" id="daily-brief">
         <div class="brief-header">
           <div>
@@ -12318,6 +12378,31 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const unattributed = Number(summary.unattributed_activation_events || 0);
       document.getElementById("growth-boundary").textContent =
         `${boundary} ${fmt.format(unattributed)} activation event${unattributed === 1 ? " is" : "s are"} currently unattributed.`;
+    }
+
+    function renderFreeTier(data) {
+      const panel = data.free_tier || {};
+      const summary = panel.summary || {};
+      const ledger = panel.ledger || {};
+      const config = panel.config || {};
+      document.getElementById("free-tier-kpis").innerHTML = [
+        summaryItem("Grants", fmt.format(summary.grants_created || 0)),
+        summaryItem("Pool consumed", `${fmt.format(ledger.credits_consumed_this_month || 0)} cr`),
+        summaryItem("Exhaustion", pct(summary.exhaustion_rate)),
+        summaryItem("CTA impressions", fmt.format(summary.cta_impressions || 0)),
+        summaryItem("/go clicks", fmt.format(summary.go_clicks || 0)),
+        summaryItem("Trial starts", fmt.format(summary.trial_starts || 0)),
+        summaryItem("Worst-case exposure", `${fmt.format(ledger.worst_case_exposure_credits || 0)} cr`),
+      ].join("");
+      bars("free-tier-thresholds", summary.threshold_crossings || {}, "blue");
+      bars("free-tier-denials", { ...(summary.denials_by_reason || {}), ...(summary.abuse_flags_by_reason || {}) }, "amber");
+      bars("free-tier-cta", summary.cta_impressions_by_trigger || {}, "blue");
+      bars("free-tier-clicks", summary.go_clicks_by_destination || {}, "amber");
+      const capNote = ledger.global_daily_cap_credits
+        ? ` Global cap: ${fmt.format(ledger.global_credits_today || 0)} / ${fmt.format(ledger.global_daily_cap_credits)} credits today.`
+        : " Global daily cap is disabled.";
+      document.getElementById("free-tier-boundary").textContent =
+        `${config.enabled === false ? "Free tier is DISABLED (kill switch)." : "Free tier is enabled."} Allowance ${fmt.format(config.monthly_credits || 0)} credits per verified identity per month; free scope: ${(config.allowed_services || []).join(", ") || "none"}.${capNote} CTA click-through: ${pct(summary.cta_click_through_rate)}. Trial starts count tracked /go/free-trial clicks; matrix signups tagged source_channel=mcp are reconciled outside this dashboard.`;
     }
 
     function renderRwaPilot(data) {
@@ -12741,6 +12826,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       ].join("");
       renderAttention(data);
       renderGrowthFunnel(data);
+      renderFreeTier(data);
       renderRwaPilot(data);
       renderDailyInterpretation(data);
       renderOperatorAlerts(data);
@@ -14405,7 +14491,7 @@ async def health_check() -> dict[str, Any]:
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
             "direct_public_http": "Signed x402 payment is required per live-data request.",
-            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+            **free_tier.upgrade_fields(source="http-health", trigger="surface"),
         },
         "equities": {
             "positioning": "Supported equity tickers are first-class Blocksize symbols.",

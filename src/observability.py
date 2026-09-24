@@ -830,6 +830,7 @@ class UsageEventStore:
             ),
         }
         growth_funnel = self._growth_funnel(events, correlation)
+        free_tier_panel = self._free_tier_panel(events)
         reliability = self._reliability_summary(events, correlation)
         evidence = self._source_evidence(events)
         unsupported_symbol_opportunities = self._unsupported_symbol_opportunities(events)
@@ -979,6 +980,7 @@ class UsageEventStore:
             "data_called": data_called,
             "popularity": popularity,
             "growth_funnel": growth_funnel,
+            "free_tier": free_tier_panel,
             "reliability": reliability,
             "source_evidence": evidence,
             "decision_confidence": decision_confidence,
@@ -1172,7 +1174,7 @@ class UsageEventStore:
                 event_name == "credit_drawdown_failed"
                 and str(event.get("reason") or "") == "insufficient_credits"
                 and float(metadata.get("credits_remaining") or 0) <= 0
-            ):
+            ) or event_name == "free_tier_exhausted":
                 exhausted.add(identity)
 
         activated_identities = set(activations)
@@ -1275,6 +1277,74 @@ class UsageEventStore:
                 "repeat_7d": "At least two successful paid or starter-credit delivery events during the seven days beginning at activation; only mature seven-day cohorts enter the denominator.",
                 "starter_to_paid": "Starter-credit activated identity later observed with a finalized x402 settlement in the selected window.",
                 "measurement_boundary": "Rates include trusted identities observed inside the selected dashboard window; anonymous IP acquisition and legacy untrusted identity rows are excluded.",
+            },
+        }
+
+    @classmethod
+    def _free_tier_panel(cls, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Summarize the free-tier funnel from privacy-safe events."""
+        grants: set[str] = set()
+        exhausted: set[str] = set()
+        thresholds: Counter[str] = Counter()
+        denials: Counter[str] = Counter()
+        abuse: Counter[str] = Counter()
+        cta_by_trigger: Counter[str] = Counter()
+        cta_by_plan: Counter[str] = Counter()
+        go_clicks: Counter[str] = Counter()
+        grant_events = 0
+        for event in events:
+            name = str(event.get("event") or "")
+            metadata = cls._metadata(event)
+            grant_hash = str(metadata.get("grant_hash") or "")
+            if name == "free_tier_grant_created":
+                grant_events += 1
+                if grant_hash:
+                    grants.add(grant_hash)
+            elif name == "free_tier_threshold_crossed":
+                thresholds[f"{metadata.get('threshold_pct', '?')}%"] += 1
+            elif name == "free_tier_exhausted":
+                if grant_hash:
+                    exhausted.add(grant_hash)
+            elif name == "free_tier_rate_limited":
+                denials[str(event.get("reason") or "rate_limited")] += 1
+            elif name == "free_tier_abuse_flagged":
+                for flag in metadata.get("flags") or [str(event.get("reason") or "flagged")]:
+                    abuse[str(flag)] += 1
+            elif name == "mcp_credit_drawdown_failed":
+                reason = str(event.get("reason") or "")
+                if reason.startswith("free_") or reason.startswith("ineligible_") or reason == "suspended":
+                    denials[reason] += 1
+            elif name == "upgrade_cta_shown":
+                cta_by_trigger[str(metadata.get("trigger") or "unknown")] += 1
+                cta_by_plan[str(metadata.get("plan_id") or "unknown")] += 1
+            elif name == "outbound_conversion_click":
+                destination = str(metadata.get("destination") or event.get("subject") or "")
+                if destination:
+                    go_clicks[destination] += 1
+        cta_impressions = sum(cta_by_trigger.values())
+        total_clicks = sum(go_clicks.values())
+        trial_starts = go_clicks.get("free-trial", 0)
+        return {
+            "summary": {
+                "grants_created": len(grants) or grant_events,
+                "exhausted_grants": len(exhausted),
+                "exhaustion_rate": (len(exhausted) / len(grants)) if grants else None,
+                "threshold_crossings": dict(sorted(thresholds.items())),
+                "denials_by_reason": dict(denials.most_common()),
+                "abuse_flags_by_reason": dict(abuse.most_common()),
+                "cta_impressions": cta_impressions,
+                "cta_impressions_by_trigger": dict(cta_by_trigger.most_common()),
+                "cta_impressions_by_plan": dict(cta_by_plan.most_common()),
+                "go_clicks": total_clicks,
+                "go_clicks_by_destination": dict(go_clicks.most_common()),
+                "trial_starts": trial_starts,
+                "cta_click_through_rate": (total_clicks / cta_impressions) if cta_impressions else None,
+            },
+            "definitions": {
+                "grant": "First free-tier reservation for a salted email grant key (one per person across connectors).",
+                "exhaustion": "Grant whose monthly pool reached 100% or was denied for an exhausted pool.",
+                "cta_impression": "Upgrade CTA rendered once per identity, trigger, and UTC day on connectors; every 402 on HTTP.",
+                "trial_start": "Tracked /go/free-trial click; matrix.blocksize.capital signups tagged source_channel=mcp are reconciled outside this dashboard.",
             },
         }
 

@@ -231,3 +231,31 @@ async def test_abuse_flag_suspends_both_ledgers(monkeypatch, isolate_usage_event
     assert get_free_tier_ledger().status(grant_key).status == "suspended"
     counts = _event_counts(isolate_usage_event_store)
     assert counts["free_tier_abuse_flagged"] == 1
+
+
+@pytest.mark.asyncio
+async def test_catalog_listed_long_tail_crypto_is_in_free_scope(monkeypatch):
+    """A bare long-tail ticker the catalog lists as crypto must not be refused."""
+    from src.models import BidAskData
+
+    _use(monkeypatch, claude, _identity("u1", "one@example.org"))
+    claude._client.classify_symbol = AsyncMock(
+        side_effect=lambda symbol: "equity" if symbol.upper().startswith("AAPL") else "crypto"
+    )
+    claude._client.get_bidask_snapshot = AsyncMock(
+        return_value=BidAskData(
+            pair="arkm-usd",
+            bid=1.0,
+            ask=1.01,
+            spread=0.01,
+            spread_pct=1.0,
+            timestamp=datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    crypto = await claude.anthropic_get_bid_ask("ARKM")
+    equity = json.loads(await claude.anthropic_get_bid_ask("AAPL"))
+
+    assert "Credits remaining this month: 2/3" in crypto
+    assert equity["error_code"] == "FREE_TIER_SCOPE_EXCLUDED"
+    assert json.loads(equity["details"])["service"] == "equity_bidask"

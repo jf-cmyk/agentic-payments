@@ -4072,7 +4072,9 @@ class TestPaymentGate:
         data = response.json()
         assert data["starter_allowance"]["eligibility"] == "authenticated_connector_only"
         assert "Signed x402" in data["starter_allowance"]["direct_public_http"]
-        assert "Contact sales" in data["starter_allowance"]["upgrade_path"]
+        assert "/go/free-trial" in data["starter_allowance"]["upgrade_path"]
+        assert data["starter_allowance"]["upgrade"]["primary"]["path"].startswith("/go/free-trial?")
+        assert data["starter_allowance"]["upgrade"]["secondary"]["path"].startswith("/go/pricing?")
         assert data["credit_costs"]["market_brief"] == 10.0
 
 

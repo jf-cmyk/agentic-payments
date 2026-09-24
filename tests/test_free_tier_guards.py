@@ -353,3 +353,84 @@ def test_get_free_tier_ledger_follows_configured_path(tmp_path, monkeypatch):
     with sqlite3.connect(first.db_path) as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"grants", "grant_usage", "global_usage", "grant_minute_events", "grant_symbol_events"} <= tables
+
+
+# --- catalog-backed classification -------------------------------------------
+
+class _CatalogClient:
+    """Minimal stand-in for BlocksizeClient with a fixed instrument catalog."""
+
+    def __init__(self, entries, vwap):
+        from src.blocksize_client import BlocksizeClient
+
+        self._entries = entries
+        self._vwap = vwap
+        self._classification_cache = None
+        self._classification_cached_at = 0.0
+        self.CLASSIFICATION_CACHE_TTL_SECONDS = 3600.0
+        self._is_fx_entry = BlocksizeClient._is_fx_entry
+        self._is_metal_entry = BlocksizeClient._is_metal_entry
+        self._is_equity_like_entry = BlocksizeClient._is_equity_like_entry
+        self.calls = 0
+
+    async def _list_bidask_entries(self):
+        self.calls += 1
+        return self._entries
+
+    async def list_vwap_instruments(self):
+        return self._vwap
+
+    _classification_map = __import__("src.blocksize_client", fromlist=["BlocksizeClient"]).BlocksizeClient._classification_map
+    classify_symbol = __import__("src.blocksize_client", fromlist=["BlocksizeClient"]).BlocksizeClient.classify_symbol
+
+
+def _entry(ticker, base, quote, asset_class=""):
+    return {"ticker": ticker, "base_currency": base, "quote_currency": quote, "asset_class": asset_class}
+
+
+@pytest.fixture
+def catalog_client():
+    return _CatalogClient(
+        entries=[
+            _entry("BTCUSD", "BTC", "USD"),
+            _entry("ARKMUSD", "ARKM", "USD"),  # long-tail crypto, bare ticker not top-250
+            _entry("AAPLXUSD", "AAPLX", "USD", "equity"),
+            _entry("NVDAXUSDC", "NVDAX", "USDC"),  # tokenized equity by shape
+            _entry("EURUSD", "EUR", "USD"),
+            _entry("XAUUSD", "XAU", "USD"),
+        ],
+        vwap=["BTCUSD", "ETHUSD", "ARKMUSD"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_catalog_classifies_symbols_by_metadata_not_naming(catalog_client):
+    assert await catalog_client.classify_symbol("btc-usd") == "crypto"
+    assert await catalog_client.classify_symbol("ARKM") == "crypto"  # heuristic alone would say equity
+    assert await catalog_client.classify_symbol("ARKMUSD") == "crypto"
+    assert await catalog_client.classify_symbol("AAPLXUSD") == "equity"
+    assert await catalog_client.classify_symbol("NVDAX") == "equity"
+    assert await catalog_client.classify_symbol("EURUSD") == "fx"
+    assert await catalog_client.classify_symbol("XAUUSD") == "metal"
+    assert await catalog_client.classify_symbol("NOPE") == "unknown"
+    assert catalog_client.calls == 1  # catalog is cached across lookups
+
+
+@pytest.mark.asyncio
+async def test_service_resolution_prefers_catalog_and_falls_back_on_outage(catalog_client):
+    assert await free_tier.service_for_tool_async("get_bid_ask", "ARKM", catalog_client) == "crypto_bidask"
+    assert await free_tier.service_for_tool_async("get_bid_ask", "AAPLXUSD", catalog_client) == "equity_bidask"
+    assert await free_tier.service_for_tool_async("get_bid_ask", "EURUSD", catalog_client) == "fx"
+    assert await free_tier.service_for_tool_async("get_vwap", "ARKM", catalog_client) == "crypto_vwap"
+    assert await free_tier.service_for_tool_async("get_fx_rate", "EURUSD", catalog_client) == "fx"
+    # Not in the catalog: the naming heuristic decides (the upstream call would fail anyway).
+    assert await free_tier.service_for_tool_async("get_bid_ask", "ZZZZ", catalog_client) == "equity_bidask"
+    assert await free_tier.service_for_tool_async("get_bid_ask", "ZZZZUSD", catalog_client) == "crypto_bidask"
+
+    class Outage:
+        async def classify_symbol(self, symbol):
+            raise RuntimeError("catalog down")
+
+    assert await free_tier.service_for_tool_async("get_bid_ask", "ARKM", Outage()) == "equity_bidask"
+    assert await free_tier.service_for_tool_async("get_bid_ask", "BTCUSD", Outage()) == "crypto_bidask"
+    assert await free_tier.service_for_tool_async("get_bid_ask", "BTCUSD", None) == "crypto_bidask"
