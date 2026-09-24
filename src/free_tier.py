@@ -302,8 +302,14 @@ def eligibility_for(identity: Any) -> Eligibility:
     normalized = normalize_email(email)
     if normalized is None:
         return Eligibility(False, "missing_verified_email")
-    if settings.free_tier.require_verified_email and getattr(identity, "email_verified", None) is False:
-        return Eligibility(False, "email_not_verified", normalized_email=normalized)
+    verified = getattr(identity, "email_verified", None)
+    if settings.free_tier.require_verified_email:
+        if verified is False:
+            return Eligibility(False, "email_not_verified", normalized_email=normalized)
+        # OAuth logins must state verification explicitly; a login that says
+        # nothing fails closed. Operator-issued beta tokens are vetted out of band.
+        if verified is None and getattr(identity, "source", "oauth") == "oauth":
+            return Eligibility(False, "email_verification_unknown", normalized_email=normalized)
     if is_disposable_email(normalized):
         return Eligibility(False, "disposable_email_domain", normalized_email=normalized)
     return Eligibility(True, "ok", grant_key_for_email(normalized), normalized)

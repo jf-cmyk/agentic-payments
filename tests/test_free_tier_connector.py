@@ -319,3 +319,47 @@ async def test_shared_pool_released_when_connector_ledger_errors(monkeypatch):
     assert result["error_code"] == "CREDIT_LEDGER_UNAVAILABLE"
     grant_key = free_tier.grant_key_for_email("err@example.org")
     assert get_free_tier_ledger().status(grant_key).credits_spent == 0
+
+
+@pytest.mark.asyncio
+async def test_shared_pool_is_restored_when_delivery_finalization_is_lost(monkeypatch):
+    """Ledger reservation stays pending if finalization fails, then the lease refunds it."""
+    _use(monkeypatch, claude, _identity("u1", "one@example.org"))
+    entitlements = claude._entitlements
+    monkeypatch.setattr(entitlements, "finalize_delivery", lambda *a, **k: None)
+
+    parsed = json.loads(await claude.anthropic_get_vwap("btc-usd"))
+    assert parsed["error_code"] == "CREDIT_FINALIZATION_FAILED"
+
+    ledger = get_free_tier_ledger()
+    grant_key = free_tier.grant_key_for_email("one@example.org")
+    assert ledger.status(grant_key).credits_spent == 1
+    assert ledger.summary()["pending_reservations"] == 1
+
+    import time as _time
+
+    recovered = ledger.recover_stale_reservations(now=_time.time() + 16 * 60)
+    assert recovered["recovered_reservations"] == 1
+    assert ledger.status(grant_key).credits_spent == 0
+
+
+@pytest.mark.asyncio
+async def test_delivered_call_finalizes_the_shared_reservation(monkeypatch):
+    _use(monkeypatch, claude, _identity("u1", "one@example.org"))
+    await claude.anthropic_get_vwap("btc-usd")
+    ledger = get_free_tier_ledger()
+    assert ledger.summary()["pending_reservations"] == 0
+    import time as _time
+
+    assert ledger.recover_stale_reservations(now=_time.time() + 3600)["recovered_reservations"] == 0
+    assert ledger.status(free_tier.grant_key_for_email("one@example.org")).credits_spent == 1
+
+
+@pytest.mark.asyncio
+async def test_oauth_identity_without_verification_claim_is_refused(monkeypatch):
+    identity = ConnectorIdentity(user_id="u1", email="one@example.org", source="oauth", principal_id="oauth:u1")
+    _use(monkeypatch, claude, identity)
+    parsed = json.loads(await claude.anthropic_get_vwap("btc-usd"))
+    assert parsed["error_code"] == "FREE_TIER_INELIGIBLE"
+    assert json.loads(parsed["details"])["reason"] == "email_verification_unknown"
+    claude._client.get_vwap_latest.assert_not_called()

@@ -118,6 +118,10 @@ FREE_TIER_INELIGIBLE_MESSAGES = {
         "The free tier requires an account with a verified email address."
     ),
     "email_not_verified": "Verify the email on your Blocksize account to use the free tier.",
+    "email_verification_unknown": (
+        "Your sign-in did not confirm a verified email, so the free tier is unavailable. "
+        "Sign in again with a provider that verifies email, or contact support."
+    ),
     "disposable_email_domain": (
         "Disposable email domains are not eligible for the free tier. Sign in with a "
         "permanent address."
@@ -528,13 +532,13 @@ def create_authenticated_market_data_mcp(
         def release_shared() -> None:
             nonlocal shared_reserved
             if shared_reserved and grant_key is not None:
-                ledger.release(grant_key, cost, usage_date=usage_date)
+                ledger.release(grant_key, cost, usage_date=usage_date, charge_id=charge_id)
                 shared_reserved = False
 
         try:
             if grant_key is not None:
                 decision = ledger.reserve(
-                    grant_key, cost, symbol=subject, usage_date=usage_date
+                    grant_key, cost, symbol=subject, usage_date=usage_date, charge_id=charge_id
                 )
                 shared_reserved = decision.allowed
                 ledger.bind_subject(grant_key, identity.ledger_subject)
@@ -785,6 +789,13 @@ def create_authenticated_market_data_mcp(
         except sqlite3.Error:
             logger.error("Connector credit delivery finalization failed for %s", tool_name)
             current = None
+        if current is not None and shared_reserved and grant_key is not None:
+            try:
+                ledger.finalize(charge_id)
+            except sqlite3.Error:
+                # Left pending on purpose: stale recovery will refund it after the
+                # lease rather than risk double-charging the shared pool.
+                logger.error("Shared free-tier finalization is pending recovery for %s", tool_name)
         if current is None:
             record_usage_event(
                 "mcp_tool_error",

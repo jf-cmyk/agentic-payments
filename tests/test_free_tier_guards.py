@@ -117,7 +117,9 @@ def test_eligibility_requires_email_and_rejects_unverified_or_disposable(guard_s
         ConnectorIdentity(user_id="u", email="a@mailinator.com", email_verified=True)
     )
     assert (disposable.eligible, disposable.reason) == (False, "disposable_email_domain")
-    ok = free_tier.eligibility_for(ConnectorIdentity(user_id="u", email="A@Example.org"))
+    ok = free_tier.eligibility_for(
+        ConnectorIdentity(user_id="u", email="A@Example.org", email_verified=True)
+    )
     assert ok.eligible is True
     assert ok.normalized_email == "a@example.org"
     assert ok.grant_key == free_tier.grant_key_for_email("a@example.org")
@@ -438,3 +440,64 @@ async def test_service_resolution_prefers_catalog_and_falls_back_on_outage(catal
     assert await free_tier.service_for_tool_async("get_bid_ask", "ARKM", Outage()) == "equity_bidask"
     assert await free_tier.service_for_tool_async("get_bid_ask", "BTCUSD", Outage()) == "crypto_bidask"
     assert await free_tier.service_for_tool_async("get_bid_ask", "BTCUSD", None) == "crypto_bidask"
+
+
+# --- shared-pool reservations recover like connector charges ------------------
+
+def test_stale_shared_reservation_is_refunded_after_the_lease(guard_settings, ledger, monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    first = ledger.reserve("g1", 3, usage_date="2026-09-23", now=T0, charge_id="charge-1")
+    assert first.allowed and first.snapshot.credits_spent == 3
+    assert ledger.summary(usage_date="2026-09-23")["pending_reservations"] == 1
+
+    # Within the lease nothing is refunded.
+    untouched = ledger.recover_stale_reservations(now=T0 + 60)
+    assert untouched["recovered_reservations"] == 0
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 3
+
+    # A crash between reservation and delivery: after the lease the pool is restored.
+    recovered = ledger.recover_stale_reservations(now=T0 + 15 * 60 + 1)
+    assert recovered == {
+        "recovered_reservations": 1,
+        "recovered_credits": 3,
+        "remaining_stale_reservations": 0,
+    }
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 0
+    assert ledger.summary(usage_date="2026-09-23")["global_credits_today"] == 0
+    # Recovery is idempotent and a later reserve() runs it automatically.
+    assert ledger.recover_stale_reservations(now=T0 + 20 * 60)["recovered_reservations"] == 0
+    ledger.reserve("g1", 1, usage_date="2026-09-23", now=T0 + 40 * 60, charge_id="charge-2")
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 1
+
+
+def test_finalized_reservation_is_never_recovered_and_release_is_idempotent(guard_settings, ledger, monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    ledger.reserve("g1", 2, usage_date="2026-09-23", now=T0, charge_id="charge-1")
+    assert ledger.finalize("charge-1") is True
+    assert ledger.finalize("charge-1") is False
+    assert ledger.recover_stale_reservations(now=T0 + 3600)["recovered_reservations"] == 0
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 2
+
+    ledger.reserve("g1", 2, usage_date="2026-09-23", now=T0 + 10, charge_id="charge-2")
+    assert ledger.release("g1", 2, usage_date="2026-09-23", charge_id="charge-2").credits_spent == 2
+    # Second release of the same charge (or a later stale recovery) changes nothing.
+    assert ledger.release("g1", 2, usage_date="2026-09-23", charge_id="charge-2").credits_spent == 2
+    assert ledger.recover_stale_reservations(now=T0 + 3600)["recovered_reservations"] == 0
+    # Releases without a charge id keep the legacy unconditional behaviour.
+    assert ledger.release("g1", 1, usage_date="2026-09-23").credits_spent == 1
+
+
+# --- unverified email fails closed for OAuth logins ---------------------------
+
+def test_oauth_login_without_verification_claim_is_ineligible(guard_settings, monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "require_verified_email", True)
+    oauth_unknown = ConnectorIdentity(user_id="u", email="a@example.org", source="oauth")
+    oauth_verified = ConnectorIdentity(user_id="u", email="a@example.org", source="oauth", email_verified=True)
+    beta_unknown = ConnectorIdentity(user_id="u", email="a@example.org", source="beta-token")
+
+    assert free_tier.eligibility_for(oauth_unknown).reason == "email_verification_unknown"
+    assert free_tier.eligibility_for(oauth_verified).eligible is True
+    assert free_tier.eligibility_for(beta_unknown).eligible is True  # operator-vetted
+
+    monkeypatch.setattr(settings.free_tier, "require_verified_email", False)
+    assert free_tier.eligibility_for(oauth_unknown).eligible is True

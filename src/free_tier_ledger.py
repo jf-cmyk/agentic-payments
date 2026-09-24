@@ -19,13 +19,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 import sqlite3
 import time
 from typing import Any
 
 from src.config import settings
-from src.entitlement_manager import month_prefix, month_reset_date
+from src.entitlement_manager import (
+    DEFAULT_PENDING_CHARGE_LEASE_SECONDS,
+    PENDING_RECOVERY_BATCH_LIMIT,
+    month_prefix,
+    month_reset_date,
+)
 
 THRESHOLDS = (50, 80, 95, 100)
 VALID_GRANT_STATUSES = frozenset({"active", "suspended"})
@@ -130,6 +136,17 @@ class FreeTierLedger:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (grant_key, ledger_subject)
                 );
+                CREATE TABLE IF NOT EXISTS grant_reservations (
+                    charge_id TEXT PRIMARY KEY,
+                    grant_key TEXT NOT NULL,
+                    usage_date TEXT NOT NULL,
+                    credits INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    reserved_at REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_grant_reservations_pending
+                    ON grant_reservations(state, reserved_at);
                 """
             )
 
@@ -217,13 +234,21 @@ class FreeTierLedger:
         symbol: str = "",
         usage_date: str | None = None,
         now: float | None = None,
+        charge_id: str | None = None,
     ) -> FreeTierDecision:
-        """Apply every guard and, if allowed, record the spend atomically."""
+        """Apply every guard and, if allowed, record the spend atomically.
+
+        With ``charge_id`` the spend is tracked as a pending reservation that
+        ``finalize`` confirms or ``release`` / ``recover_stale_reservations``
+        gives back, mirroring the connector ledger's charge lifecycle so a
+        crash between reservation and delivery never strands shared credits.
+        """
         if credits < 0:
             raise ValueError("credits must be non-negative")
         usage_date = usage_date or _today()
         current = float(now if now is not None else time.time())
         free_tier = settings.free_tier
+        self.recover_stale_reservations(now=current)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             created = self._ensure_grant(conn, grant_key)
@@ -319,6 +344,16 @@ class FreeTierLedger:
                     "INSERT INTO grant_symbol_events (grant_key, occurred_at, symbol) VALUES (?, ?, ?)",
                     (grant_key, current, symbol.strip().upper()),
                 )
+            if charge_id:
+                conn.execute(
+                    """
+                    INSERT INTO grant_reservations (
+                        charge_id, grant_key, usage_date, credits, state, reserved_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                    ON CONFLICT(charge_id) DO NOTHING
+                    """,
+                    (charge_id, grant_key, usage_date, credits, current, now_iso),
+                )
             conn.execute(
                 "UPDATE grants SET first_call_at = COALESCE(first_call_at, ?), updated_at = ? "
                 "WHERE grant_key = ?",
@@ -344,14 +379,30 @@ class FreeTierLedger:
                 abuse_flags=tuple(abuse_flags),
             )
 
+    def finalize(self, charge_id: str) -> bool:
+        """Confirm a pending reservation after delivery; True if it was pending."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE grant_reservations SET state = 'delivered', updated_at = ? "
+                "WHERE charge_id = ? AND state = 'pending'",
+                (self._now_iso(), charge_id),
+            )
+            return cursor.rowcount == 1
+
     def release(
         self,
         grant_key: str,
         credits: int,
         *,
         usage_date: str | None = None,
+        charge_id: str | None = None,
     ) -> FreeTierSnapshot:
-        """Give credits back after a failed delivery (mirrors an entitlement refund)."""
+        """Give credits back after a failed delivery (mirrors an entitlement refund).
+
+        With ``charge_id`` the release is idempotent: only a pending reservation
+        is refunded, so a refund followed by stale recovery cannot double-credit.
+        """
         if credits < 0:
             raise ValueError("credits must be non-negative")
         usage_date = usage_date or _today()
@@ -359,6 +410,14 @@ class FreeTierLedger:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             self._ensure_grant(conn, grant_key)
+            if charge_id:
+                cursor = conn.execute(
+                    "UPDATE grant_reservations SET state = 'released', updated_at = ? "
+                    "WHERE charge_id = ? AND grant_key = ? AND state = 'pending'",
+                    (now_iso, charge_id, grant_key),
+                )
+                if cursor.rowcount != 1:
+                    return self._snapshot(conn, grant_key, usage_date)
             conn.execute(
                 "UPDATE grant_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
                 "WHERE grant_key = ? AND usage_date = ?",
@@ -370,6 +429,68 @@ class FreeTierLedger:
                 (credits, now_iso, usage_date),
             )
             return self._snapshot(conn, grant_key, usage_date)
+
+    def recover_stale_reservations(
+        self,
+        *,
+        now: float | None = None,
+        lease_seconds: int | None = None,
+        limit: int = PENDING_RECOVERY_BATCH_LIMIT,
+    ) -> dict[str, int]:
+        """Give back reservations that were never finalized within the lease.
+
+        The lease matches the connector ledger's pending-charge lease, so a
+        charge the entitlement manager auto-refunds is refunded here too.
+        """
+        current = float(now if now is not None else time.time())
+        lease = int(
+            lease_seconds
+            if lease_seconds is not None
+            else int(os.environ.get(
+                "ENTITLEMENT_PENDING_CHARGE_LEASE_SECONDS",
+                str(DEFAULT_PENDING_CHARGE_LEASE_SECONDS),
+            ))
+        )
+        cutoff = current - lease
+        now_iso = self._now_iso()
+        recovered = 0
+        credits_recovered = 0
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT charge_id, grant_key, usage_date, credits FROM grant_reservations "
+                "WHERE state = 'pending' AND reserved_at <= ? ORDER BY reserved_at LIMIT ?",
+                (cutoff, max(1, min(int(limit), PENDING_RECOVERY_BATCH_LIMIT))),
+            ).fetchall()
+            for charge_id, grant_key, usage_date, credits in rows:
+                cursor = conn.execute(
+                    "UPDATE grant_reservations SET state = 'recovered', updated_at = ? "
+                    "WHERE charge_id = ? AND state = 'pending'",
+                    (now_iso, charge_id),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                conn.execute(
+                    "UPDATE grant_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
+                    "WHERE grant_key = ? AND usage_date = ?",
+                    (int(credits), now_iso, grant_key, usage_date),
+                )
+                conn.execute(
+                    "UPDATE global_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
+                    "WHERE usage_date = ?",
+                    (int(credits), now_iso, usage_date),
+                )
+                recovered += 1
+                credits_recovered += int(credits)
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM grant_reservations WHERE state = 'pending' AND reserved_at <= ?",
+                (cutoff,),
+            ).fetchone()[0]
+        return {
+            "recovered_reservations": recovered,
+            "recovered_credits": credits_recovered,
+            "remaining_stale_reservations": int(remaining),
+        }
 
     def set_status(self, grant_key: str, status: str, *, reason: str = "") -> FreeTierSnapshot:
         if status not in VALID_GRANT_STATUSES:
@@ -401,6 +522,9 @@ class FreeTierLedger:
                 (f"{month_prefix(usage_date)}-%",),
             ).fetchone()[0]
             global_today = self._global_spent(conn, usage_date)
+            pending_reservations = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(credits), 0) FROM grant_reservations WHERE state = 'pending'"
+            ).fetchone()
         cap = int(settings.free_tier.global_daily_cap_credits)
         return {
             "grants": int(grants),
@@ -411,6 +535,8 @@ class FreeTierLedger:
             "global_daily_cap_credits": cap,
             "global_cap_remaining_today": max(0, cap - int(global_today)) if cap > 0 else None,
             "worst_case_exposure_credits": int(grants) * int(settings.free_tier.monthly_credits),
+            "pending_reservations": int(pending_reservations[0]),
+            "pending_reservation_credits": int(pending_reservations[1]),
         }
 
     # -- internals ---------------------------------------------------------
