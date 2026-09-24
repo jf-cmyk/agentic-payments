@@ -76,21 +76,37 @@ def _false_claims(text: str) -> list[str]:
 
 
 def _assert_complete_access_model(text: str) -> None:
+    """Every public access statement must carry the full, current model.
+
+    Direct HTTP is signed x402; the free starter allowance is for eligible
+    authenticated connector users only; subscriptions start from EUR 49/month
+    with a free trial; Enterprise terms come from contacting Blocksize sales.
+    """
     normalized = " ".join(text.lower().replace("-", " ").split())
+    # MCP registries cap the description at 100 characters; it carries the
+    # compressed model and every longer surface carries the full one.
+    is_registry_description = text == public_metadata.PUBLIC_REGISTRY_DESCRIPTION
     assert "signed x402" in normalized
-    assert "direct public http" in normalized or text == public_metadata.PUBLIC_REGISTRY_DESCRIPTION
+    assert "direct public http" in normalized or is_registry_description
     assert "starter credit" in normalized or "starter allowance" in normalized
     assert "authenticated connector" in normalized
     assert re.search(
         r"(?:only.{0,45}authenticated connector|authenticated connector.{0,45}only)",
         normalized,
     )
+    # The free allowance is stated as a recurring monthly number, never "50".
+    assert "15,000" in normalized or "free live data credits every month" in normalized
+    assert "per utc day" not in normalized and "50 credit" not in normalized
+    # The upgrade path is a real subscription CTA, not only "contact sales".
+    assert "eur 49" in normalized or "free trial" in normalized
     assert (
         "contact sales" in normalized
         or "contact blocksize sales" in normalized
         or "contacting blocksize sales" in normalized
     )
-    assert "authenticated account plan" in normalized
+    assert "authenticated account plan" in normalized or is_registry_description
+    if is_registry_description:
+        assert len(text) <= 100
 
 
 def test_public_copy_does_not_advertise_hidden_self_serve_credit_products() -> None:

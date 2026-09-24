@@ -1,7 +1,7 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
   "version": "0.6.22",
-  "description": "Read-only MCP discovery for Blocksize real-time market data, with free synthetic value previews and attributed x402 purchase handoffs. Starter credits are for eligible authenticated connector users only; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.",
+  "description": "Read-only MCP discovery for Blocksize real-time market data, with free synthetic value previews and attributed x402 purchase handoffs. The free starter allowance (15,000 free live-data credits every month, then from EUR 49/month via free trial) is for eligible authenticated connector users only; Enterprise access requires contacting Blocksize sales for an authenticated account plan.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",
   "license": "MIT",
@@ -11,13 +11,15 @@
     "remote_transport": "streamable-http",
     "pricing_models": [
       "Signed x402 per call for direct public HTTP",
-      "Starter credits for eligible authenticated connector users only",
-      "Contact-sales authenticated account plan for sustained or higher-volume access"
+      "Free starter allowance of 15,000 live-data credits every month for eligible authenticated connector users only",
+      "Subscription plans from EUR 49/month with a free trial at /go/free-trial",
+      "Contact-sales authenticated account plan for Enterprise access"
     ],
-    "starter_credit_scope": "Eligible authenticated connector users only",
+    "starter_credit_scope": "Eligible authenticated connector users only; 15,000 free live-data credits every calendar month",
+    "subscriptions": "From EUR 49/month; free trial at /go/free-trial, plans at /go/pricing",
     "direct_public_http_payment": "Signed x402 per call",
     "free_value_preview": "Synthetic response preview before the first paid call",
-    "sustained_or_higher_volume_access": "Contact Blocksize sales for an authenticated account plan",
+    "sustained_or_higher_volume_access": "Contact Blocksize sales for an Enterprise authenticated account plan",
     "networks": ["Solana", "Base L2"],
     "public_remote_server": "Read-only discovery and documentation tools"
   },

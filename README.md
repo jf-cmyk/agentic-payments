@@ -5,7 +5,8 @@ Institutional-grade market data for AI agents, with three integration surfaces:
 - Public remote MCP discovery server: free symbol discovery, pricing inspection, and document search
 - Paid HTTP API: live market data protected by direct x402 settlement
 - Authenticated Claude, Cursor, and OpenAI MCP connectors: read-only market data
-  with eligible starter credits
+  with a free starter allowance of 15,000 live-data credits every month, then
+  subscriptions from EUR 49/month
 
 ## Public URLs
 
@@ -134,8 +135,9 @@ required attribution; production commercial use requires a subscription. The
 number is configured once in `FREE_TIER_MONTHLY_CREDITS` (`src/config.py`) and
 every surface renders it from there. Raw caller-selected HTTP identity headers
 are disabled in production and cannot claim or spend credits. When the monthly
-allowance is exhausted, agents can use direct x402 payment or contact Blocksize
-about an authenticated account plan.
+allowance is exhausted, agents can use direct x402 payment, start a subscription
+trial at `/go/free-trial` (plans from EUR 49/month, see `/go/pricing`), or
+contact Blocksize sales about an Enterprise authenticated account plan.
 
 ### 3. Anthropic-safe MCP beta
 

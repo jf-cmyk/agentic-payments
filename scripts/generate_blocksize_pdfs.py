@@ -64,9 +64,10 @@ def generate_docs():
     pdf.section_title("3. Authentication Modes")
     pdf.body_text(
         "- Direct HTTP: use an official signed x402 v2 PAYMENT-SIGNATURE.\n"
-        "- Connectors: sign in through the supported OAuth flow to use an eligible "
-        "starter-credit allowance. Caller-selected identity headers do not grant "
-        "production credits."
+        "- Connectors: sign in through the supported OAuth flow to use the free "
+        "starter allowance of 15,000 live-data credits every month, then a "
+        "subscription from EUR 49/month. Caller-selected identity headers do not "
+        "grant production credits."
     )
 
     pdf.output("docs/pdf/Blocksize_API_Documentation.pdf")
@@ -112,7 +113,8 @@ def generate_flow():
     pdf.body_text(
         "After facilitator verification, successful settlement, and durable local "
         "finalization, the gateway returns the paid JSON payload and prevents proof "
-        "replay. Authenticated connectors can separately use an eligible starter allowance."
+        "replay. Authenticated connectors can separately use the free starter "
+        "allowance of 15,000 live-data credits every month."
     )
     
     pdf.output("docs/pdf/Blocksize_User_Flow.pdf")
@@ -135,16 +137,23 @@ def generate_pricing():
     pdf.section_title("2. Production Access Paths")
     paths = [
         ("Direct x402", "Public HTTP", "Live route price"),
-        ("Connector credits", "Eligible users", "Starter allowance"),
-        ("Account plan", "Contact sales", "Agreed terms"),
+        ("Free tier (connectors)", "Eligible users", "15,000 credits/month"),
+        ("Developer", "Free trial", "EUR 49/month"),
+        ("Start-Up", "Free trial", "EUR 299/month"),
+        ("Business", "Free trial", "EUR 799/month"),
+        ("Enterprise", "Contact sales", "Custom"),
     ]
     pdf.pricing_table(paths)
 
-    pdf.section_title("3. Account Plans")
+    pdf.section_title("3. Subscription Plans")
     pdf.body_text(
-        "Self-serve purchase routes are not exposed in production. Teams that need "
-        "sustained authenticated access should contact "
-        "Blocksize to discuss an account plan."
+        "Self-serve purchase routes are not exposed in production. The free monthly "
+        "allowance is an evaluation licence with required attribution. Developer "
+        "(5 feeds, 7-day history, 1 seat), Start-Up (50 feeds, 1-month history, "
+        "5 seats), and Business (350 feeds, 3-month history, 10 seats, State Prices, "
+        "Slack SLA) start with a free trial at /go/free-trial; annual billing is 15% "
+        "off. Enterprise terms (unlimited feeds, commodities, SLA) require contacting "
+        "Blocksize sales about an authenticated account plan."
     )
     
     pdf.output("docs/pdf/Blocksize_Pricing_Guide.pdf")
@@ -160,8 +169,9 @@ def generate_agent_manual():
     pdf.body_text(
         "Direct HTTP clients use an official signed x402 v2 payment flow. Eligible "
         "OpenAI, Claude, and Cursor connector users authenticate through OAuth to use "
-        "a starter allowance. Raw wallet and caller-selected identity headers do not "
-        "grant production credits."
+        "the free starter allowance of 15,000 live-data credits every month, then a "
+        "subscription from EUR 49/month. Raw wallet and caller-selected identity "
+        "headers do not grant production credits."
     )
     
     pdf.section_title("2. Automated Discovery")
@@ -171,7 +181,8 @@ def generate_agent_manual():
     pdf.body_text(
         "Request a paid route, parse its PAYMENT-REQUIRED challenge with an official "
         "x402 v2 client, then retry the exact request with PAYMENT-SIGNATURE. For "
-        "sustained authenticated access, contact Blocksize about an account plan."
+        "sustained authenticated access, start a subscription trial at /go/free-trial "
+        "or contact Blocksize sales about an Enterprise account plan."
     )
     
     pdf.output("docs/pdf/Blocksize_Agent_Manual.pdf")

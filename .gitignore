@@ -27,3 +27,6 @@ backups/
 mcp-registry-key.pem
 tools/mcp-publisher
 .railway-release-*.json*
+
+# Shared free-tier grant ledger (set FREE_TIER_LEDGER_DB_PATH to the volume in production)
+free_tier_ledger.db

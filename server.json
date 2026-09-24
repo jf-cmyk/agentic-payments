@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "info.blocksize.mcp/agentic-payments",
   "title": "Blocksize Agentic Market Intelligence",
-  "description": "Signed x402; starter credit: authenticated connector only; contact sales: authenticated account plan",
+  "description": "Signed x402; starter credit: authenticated connector only; 15,000/mo free, EUR 49+; contact sales",
   "homepage": "https://mcp.blocksize.info/",
   "websiteUrl": "https://mcp.blocksize.info/",
   "version": "0.6.22",

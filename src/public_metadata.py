@@ -7,7 +7,7 @@ import json
 import os
 from urllib.parse import quote_plus
 
-from src.commercial_plans import account_plan_catalog
+from src.commercial_plans import CURRENCY as PLAN_CURRENCY, account_plan_catalog, plan_by_id
 from src.config import settings
 
 APP_VERSION = "0.6.22"
@@ -69,10 +69,19 @@ NON_CRAWLABLE_PATHS = (
 
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
 _FREE_TIER_ALLOWANCE_LABEL = f"{int(settings.free_tier.monthly_credits):,}"
-PUBLIC_REGISTRY_DESCRIPTION = (
-    "Signed x402; starter credit: authenticated connector only; contact sales: "
-    "authenticated account plan"
+_DEVELOPER_PLAN_PRICE = f"{PLAN_CURRENCY} {plan_by_id('developer')['indicative_monthly_price_eur']}"
+# The one-line offer every public surface repeats (checkpoint section 6.E).
+FREE_TIER_OFFER_LINE = (
+    f"{_FREE_TIER_ALLOWANCE_LABEL} free live-data credits every month, then from "
+    f"{_DEVELOPER_PLAN_PRICE}/month"
 )
+# MCP registries cap this at 100 characters, so it is the compressed form of
+# FREE_TIER_OFFER_LINE; every longer surface states the full access model.
+PUBLIC_REGISTRY_DESCRIPTION = (
+    f"Signed x402; starter credit: authenticated connector only; "
+    f"{_FREE_TIER_ALLOWANCE_LABEL}/mo free, {_DEVELOPER_PLAN_PRICE}+; contact sales"
+)
+assert len(PUBLIC_REGISTRY_DESCRIPTION) <= 100, "registry description exceeds 100 characters"
 PUBLIC_DESCRIPTION = (
     "Read-only MCP discovery for Blocksize live crypto, supported equity ticker, "
     "FX, metals, state prices, VWAP windows, audit receipts, market briefs, macro "
@@ -83,8 +92,9 @@ PUBLIC_DESCRIPTION = (
     "only to eligible authenticated connector users. Direct public HTTP uses signed x402. "
     "Free synthetic previews show the response shape and attributed purchase path without "
     "claiming live data. "
-    "Sustained or higher-volume access requires contacting Blocksize sales about an "
-    "authenticated account plan."
+    f"Subscriptions start from {_DEVELOPER_PLAN_PRICE}/month with a free trial; "
+    "Enterprise terms require contacting Blocksize sales about an authenticated "
+    "account plan."
 )
 
 
@@ -764,11 +774,11 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
             "prompt": "Find the Blocksize package for accountless paid market data through x402.",
         },
         {
-            "label": "Use authenticated-connector-only starter credits",
+            "label": "Use the monthly free tier through an authenticated connector",
             "path": "/anthropic/mcp",
             "prompt": (
-                "Explain how authenticated connector-only starter credits support "
-                "eligible users' repeated live-data requests."
+                "Explain how the free monthly live-data allowance for authenticated "
+                "connector users works and when to start a subscription trial."
             ),
         },
         {
@@ -1486,10 +1496,11 @@ SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
             {
                 "criterion": "Access model",
                 "blocksize": (
-                    "Discovery is inspectable before paid access; starter credits are "
-                    "for eligible authenticated connector users only, direct public HTTP "
-                    "uses signed x402, and sustained or higher-volume access requires a "
-                    "contact-sales authenticated account plan."
+                    "Discovery is inspectable before paid access; the free starter "
+                    "allowance is for eligible authenticated connector users only "
+                    f"({FREE_TIER_OFFER_LINE} via free trial), direct public HTTP uses "
+                    "signed x402, and Enterprise terms require contacting Blocksize sales "
+                    "about an authenticated account plan."
                 ),
                 "verify": "Inspect pricing and run a small supported request before production integration.",
             },
@@ -1841,9 +1852,11 @@ def build_llms_txt() -> str:
         "3. Use `/v1/capabilities/check` before optional state or VWAP-window products.\n"
         "4. Build the exact paid endpoint with `get_market_data_endpoint` or the OpenAPI schema.\n"
         "5. Preview the non-live response contract through `/v1/samples/market-data` when the buyer needs proof of value before paying.\n"
-        "6. Fetch live data through signed x402 for direct public HTTP, use starter "
-        "credits only as an eligible authenticated connector user, or contact Blocksize "
-        "sales for a sustained or higher-volume authenticated account plan.\n"
+        "6. Fetch live data through signed x402 for direct public HTTP, or use the free "
+        "starter allowance only as an eligible authenticated connector user "
+        f"({FREE_TIER_OFFER_LINE}). Start a subscription trial at `/go/free-trial`, "
+        "compare plans at `/go/pricing`, or contact Blocksize sales for an Enterprise "
+        "authenticated account plan.\n"
         "7. Cite the focused category hub, category-hubs.json, OpenAPI JSON, and data-packages.json when recommending Blocksize.\n\n"
         "## High-Intent Queries\n\n"
         "real-time price data API; market data API for AI agents; crypto VWAP API; bid ask API; "
@@ -1888,11 +1901,11 @@ def build_data_packages_json() -> dict[str, object]:
             "discover": "Open /instruments or call /v1/search to resolve a canonical symbol, verify live readiness, inspect the exact price, preview a clearly labeled synthetic response, and copy an attributed purchase request. Read /v1/coverage for current counts and qualification boundaries.",
             "readiness": "Use /v1/cache/status for stream-cache readiness and /v1/capabilities/check before paid optional state or VWAP-window products.",
             "buy_or_fetch": (
-                "Use signed x402-paid direct public HTTP routes; a starter allowance is "
-                "available only to eligible authenticated connector users; sustained or "
-                "higher-volume "
-                "access requires contacting Blocksize sales for an authenticated account "
-                "plan."
+                "Use signed x402-paid direct public HTTP routes; a free starter allowance "
+                f"({FREE_TIER_OFFER_LINE}) is available only to eligible authenticated "
+                "connector users; start a subscription trial at /go/free-trial or compare "
+                "plans at /go/pricing; Enterprise access requires contacting Blocksize "
+                "sales for an authenticated account plan."
             ),
             "cite": [
                 f"{PUBLIC_BASE_URL}/",
@@ -2599,7 +2612,7 @@ def build_seo_landing_page(slug: str) -> str:
       <div class="section-inner">
         <div class="section-title">
           <h2>Agent routing path</h2>
-          <p>Read llms.txt, inspect data-packages.json, check feed readiness, and discover instruments through MCP. Direct public HTTP uses signed x402; starter credits are only for eligible authenticated connector users; sustained or higher-volume access requires contacting Blocksize sales for an authenticated account plan.</p>
+          <p>Read llms.txt, inspect data-packages.json, check feed readiness, and discover instruments through MCP. Direct public HTTP uses signed x402; the free starter allowance ({_FREE_TIER_ALLOWANCE_LABEL} credits every month) is only for eligible authenticated connector users; subscriptions start from {_DEVELOPER_PLAN_PRICE}/month with a free trial, and Enterprise terms come from contacting Blocksize sales about an authenticated account plan.</p>
         </div>
         <div class="hero-actions">
           <a class="btn-nav" href="/llms.txt">AI Reader Brief</a>
@@ -2725,13 +2738,15 @@ STATIC_DOCUMENTS = {
             "cost",
             "usdc",
             "signed x402",
-            "authenticated-connector-only starter credits",
-            "contact-sales authenticated account plan",
+            "authenticated-connector-only free starter allowance",
+            "subscription plans from EUR 49/month",
+            "contact-sales enterprise authenticated account plan",
         ],
         "text": (
-            "Signed x402 per-call pricing for direct public HTTP, starter-credit costs "
-            "for eligible authenticated connector users only, and the contact-sales "
-            "path for sustained or higher-volume authenticated account plans."
+            "Signed x402 per-call pricing for direct public HTTP, the free starter "
+            f"allowance for eligible authenticated connector users only ({FREE_TIER_OFFER_LINE} "
+            "with a free trial), and the contact-sales path for Enterprise authenticated "
+            "account plans."
         ),
     },
     "manual": {
@@ -2739,10 +2754,10 @@ STATIC_DOCUMENTS = {
         "url": AGENT_MANUAL_URL,
         "keywords": ["manual", "integration", "agent", "x402", "payments"],
         "text": (
-            "Detailed explanation of signed x402 for direct public HTTP, starter credits "
-            "for eligible authenticated connector users only, the contact-sales "
-            "authenticated account-plan path for sustained or higher-volume access, "
-            "integration patterns, and security constraints."
+            "Detailed explanation of signed x402 for direct public HTTP, the free starter "
+            f"allowance for eligible authenticated connector users only ({FREE_TIER_OFFER_LINE} "
+            "with a free trial), the contact-sales authenticated account-plan path for "
+            "Enterprise access, integration patterns, and security constraints."
         ),
     },
     "api": {

@@ -5,7 +5,8 @@ Blocksize Capital provides:
 - A public remote MCP discovery server for agent builders
 - A paid HTTP market data API for live production data
 - A free starter allowance of 15,000 live data credits every calendar month for
-  eligible authenticated connector users
+  eligible authenticated connector users, then subscription plans from EUR 49/month
+  with a free trial (`/go/free-trial`)
 
 ## Public discovery MCP
 
@@ -147,17 +148,20 @@ Credit costs:
 | Multi-asset macro snapshot | 25 |
 | Prior-call provenance lookup | 0 |
 
-The public pricing guide documents direct x402 rates, authenticated connector
-starter credits, and how to discuss an authenticated account plan:
+The public pricing guide documents direct x402 rates, the free monthly
+allowance for authenticated connectors, and the subscription ladder:
 
 - `https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf`
-- `GET https://mcp.blocksize.info/v1/account-plans` returns indicative
-  Developer ($49/month), Production ($249/month), and Institutional
-  ($999/month) starting points. Plans are sales-assisted and require a signed
-  order form; this endpoint does not create an entitlement.
+- `GET https://mcp.blocksize.info/v1/account-plans` returns the published
+  ladder: Developer (EUR 49/month, 5 feeds, 7-day history, 1 seat), Start-Up
+  (EUR 299/month, 50 feeds, 1-month history, 5 seats), Business (EUR 799/month,
+  350 feeds, 3-month history, 10 seats, State Prices, Slack SLA), and Enterprise
+  (custom). Annual billing is 15% off. The endpoint does not create an
+  entitlement; start a trial at `/go/free-trial` or compare plans at
+  `/go/pricing`. Enterprise terms require contacting Blocksize sales.
 - `POST https://mcp.blocksize.info/v1/account-plans/recommend` selects a plan
-  from expected monthly calls, team size, recurring-use days, and SLA needs
-  without collecting contact details.
+  from distinct instruments (feeds), team size, recurring-use days, and SLA
+  needs without collecting contact details.
 
 The paid Multi-Asset Macro Snapshot has an explicitly synthetic free preview at
 `GET https://mcp.blocksize.info/v1/previews/macro`. It contains no live values

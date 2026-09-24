@@ -1474,15 +1474,16 @@
     <div class="container">
       <div class="welcome-strip">
         <div class="welcome-count">
-          50
-          <span>Welcome Credits</span>
+          15,000
+          <span>Free credits every month</span>
         </div>
         <div class="welcome-copy">
           <h2>Start with 15,000 free live-data credits every month.</h2>
           <p>
-            Eligible authenticated connector users can try live data,
-            market briefs, macro snapshots, pre-trade checks, receipts, and trader
-            indicators before using direct x402 settlement or contacting Blocksize about an authenticated account plan.
+            Eligible authenticated connector users get a recurring evaluation
+            allowance for live data, then continue with a subscription from EUR 49/month
+            (free trial via <code>/go/free-trial</code>) or direct x402 settlement.
+            Enterprise terms come from Blocksize sales.
           </p>
           <code class="welcome-code">Authenticated Claude, Cursor, or OpenAI connector identity</code>
           <p class="welcome-note">Eligibility checks protect the trial from abuse; free discovery remains available through the public remote MCP server.</p>
@@ -1767,11 +1768,11 @@
       </table>
 
       <div class="callout">
-        <h3>Authenticated Account Plans</h3>
+        <h3>Subscription Plans</h3>
         <p>
-          Self-serve purchase routes are not exposed in production.
-          Teams that outgrow direct x402 or connector starter credits can discuss an
-          authenticated account plan with Blocksize.
+          Self-serve purchase routes are not exposed in production. Teams that outgrow
+          the free monthly allowance or direct x402 start a trial of a published plan;
+          Enterprise terms are agreed with Blocksize sales.
         </p>
         <table class="pricing-table" style="margin-top: 1rem; background: transparent;">
           <thead>
@@ -1790,27 +1791,33 @@
               <td><span class="credit-badge">Use x402 client</span></td>
             </tr>
             <tr>
-              <td>Connector starter credits</td>
+              <td>Free tier (connectors)</td>
               <td>Eligible authenticated users</td>
-              <td class="price-bold" style="color: #fff;">Included evaluation allowance</td>
+              <td class="price-bold" style="color: #fff;">15,000 free live-data credits every month</td>
               <td><span class="credit-badge">Sign in</span></td>
             </tr>
             <tr>
               <td>Developer</td>
-              <td>Sales assisted</td>
-              <td class="price-bold" style="color: #fff;">From $49/month</td>
-              <td><span class="credit-badge">Allowance by agreement</span></td>
+              <td>5 feeds, 7-day history, 1 seat</td>
+              <td class="price-bold" style="color: #fff;">EUR 49/month</td>
+              <td><span class="credit-badge">Start free trial</span></td>
             </tr>
             <tr>
-              <td>Production</td>
-              <td>Sales assisted</td>
-              <td class="price-bold" style="color: #fff;">From $249/month</td>
-              <td><span class="credit-badge">Allowance by agreement</span></td>
+              <td>Start-Up</td>
+              <td>50 feeds, 1-month history, 5 seats</td>
+              <td class="price-bold" style="color: #fff;">EUR 299/month</td>
+              <td><span class="credit-badge">Start free trial</span></td>
             </tr>
             <tr>
-              <td>Institutional</td>
-              <td>By agreement</td>
-              <td class="price-bold" style="color: #fff;">From $999/month</td>
+              <td>Business</td>
+              <td>350 feeds, 3-month history, 10 seats, State Prices, Slack SLA</td>
+              <td class="price-bold" style="color: #fff;">EUR 799/month</td>
+              <td><span class="credit-badge">Start free trial</span></td>
+            </tr>
+            <tr>
+              <td>Enterprise</td>
+              <td>Unlimited feeds, commodities, SLA</td>
+              <td class="price-bold" style="color: #fff;">Custom (annual billing 15% off all plans)</td>
               <td><span class="credit-badge">Contact sales</span></td>
             </tr>
           </tbody>
@@ -1819,10 +1826,14 @@
 
       <div style="margin-top: 2rem; padding: 2rem; border: 1px solid var(--border); border-radius: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);">
         <div>
-          <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Authenticated Account Plans</h3>
-          <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">Indicative Developer, Production, and Institutional starting points are available at <code>/v1/account-plans</code>. Use <code>/v1/account-plans/recommend</code> for a usage-based recommendation; final service, rights, and SLA terms require a signed agreement.</p>
+          <h3 style="margin-bottom: 0.55rem; color: var(--heading); font-size: 1.35rem;">Subscription Plans</h3>
+          <p style="margin: 0; max-width: 42rem; color: var(--light-paragraph); font-size: 0.98rem; line-height: 1.55;">The Developer, Start-Up, Business, and Enterprise ladder is published at <code>/v1/account-plans</code>. Use <code>/v1/account-plans/recommend</code> for a feed-based recommendation, then start a free trial; final service, rights, and SLA terms require a signed agreement.</p>
         </div>
-        <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">Contact Sales</a>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <a href="/go/free-trial?utm_source=developer-portal&utm_medium=product&utm_campaign=free-tier-upgrade&utm_content=developer&utm_term=portal" class="btn-nav" style="white-space: nowrap;">Start Free Trial</a>
+          <a href="/go/pricing?utm_source=developer-portal&utm_medium=product&utm_campaign=free-tier-upgrade&utm_content=developer&utm_term=portal" class="btn-nav" style="white-space: nowrap;">See Plans</a>
+          <a href="https://blocksize.info/contact/?utm_source=agentic-widget&utm_medium=ai" target="_blank" rel="noreferrer" class="btn-nav" style="white-space: nowrap;">Contact Sales (Enterprise)</a>
+        </div>
       </div>
     </div>
   </section>
