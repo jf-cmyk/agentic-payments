@@ -76,21 +76,48 @@ def _false_claims(text: str) -> list[str]:
 
 
 def _assert_complete_access_model(text: str) -> None:
+    """Every public access statement must carry the full, current model.
+
+    Direct HTTP is signed x402; the free starter allowance is for eligible
+    authenticated connector users only; subscriptions start from EUR 49/month
+    with a free trial; Enterprise terms come from contacting Blocksize sales.
+    """
     normalized = " ".join(text.lower().replace("-", " ").split())
     assert "signed x402" in normalized
-    assert "direct public http" in normalized or text == public_metadata.PUBLIC_REGISTRY_DESCRIPTION
+    assert "direct public http" in normalized
     assert "starter credit" in normalized or "starter allowance" in normalized
     assert "authenticated connector" in normalized
     assert re.search(
         r"(?:only.{0,45}authenticated connector|authenticated connector.{0,45}only)",
         normalized,
     )
+    # The free allowance is stated as a recurring monthly number, never "50".
+    assert "15,000" in normalized or "free live data credits every month" in normalized
+    assert "per utc day" not in normalized and "50 credit" not in normalized
+    # The upgrade path is a real subscription CTA, not only "contact sales".
+    assert "eur 49" in normalized or "free trial" in normalized
     assert (
         "contact sales" in normalized
         or "contact blocksize sales" in normalized
         or "contacting blocksize sales" in normalized
     )
     assert "authenticated account plan" in normalized
+
+
+def _assert_registry_description(text: str) -> None:
+    """The registry line is capped at 100 characters by MCP registries.
+
+    It is the one line an agent or a human sees in registry search, so it
+    states what the data is and why to choose it. The full access model lives
+    on every longer surface and is checked by _assert_complete_access_model.
+    """
+    assert len(text) <= 100
+    assert text == public_metadata.PUBLIC_REGISTRY_DESCRIPTION
+    normalized = " ".join(text.lower().split())
+    assert "vwap" in normalized
+    assert "provenance" in normalized
+    assert "ai agents" in normalized
+    assert not _false_claims(text)
 
 
 def test_public_copy_does_not_advertise_hidden_self_serve_credit_products() -> None:
@@ -142,9 +169,9 @@ def test_machine_readable_access_surfaces_state_the_complete_boundary() -> None:
     project_description = tomllib.loads(
         (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )["project"]["description"]
+    _assert_registry_description(public_metadata.build_server_json()["description"])
     surfaces = {
         "Python project metadata": project_description,
-        "registry description": public_metadata.build_server_json()["description"],
         "public description": public_metadata.PUBLIC_DESCRIPTION,
         "smithery": smithery_access,
         "llms routing": public_metadata.build_llms_txt(),
@@ -203,7 +230,7 @@ def test_pay_skill_sidecars_are_direct_x402_only() -> None:
 
 def test_latest_universal_skill_archive_matches_truthful_source() -> None:
     archive_path = (
-        ROOT / "deliverables/use-blocksize-market-data-universal-skill-0.5.0.zip"
+        ROOT / "deliverables/use-blocksize-market-data-universal-skill-0.6.0.zip"
     )
     source_root = (
         ROOT
@@ -227,9 +254,9 @@ def test_latest_universal_skill_archive_matches_truthful_source() -> None:
 
 def test_latest_plugin_archives_do_not_reintroduce_false_credit_claims() -> None:
     archives = (
-        ROOT / "deliverables/blocksize-market-data-claude-plugin-0.4.0.zip",
-        ROOT / "deliverables/blocksize-market-data-cursor-plugin-1.4.0.zip",
-        ROOT / "deliverables/blocksize-market-data-openai-plugin-0.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-claude-plugin-0.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-cursor-plugin-1.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-openai-plugin-0.6.0.zip",
     )
 
     for archive_path in archives:

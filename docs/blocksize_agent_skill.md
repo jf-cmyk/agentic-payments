@@ -84,8 +84,9 @@ server release passes staging and production promotion.
   payment proofs.
 - Discovery does not prove live readiness.
 - A generated HTTP route is not a retrieved market-data observation.
-- Starter credits are for evaluation; production access can require x402 or
-  an authenticated account plan outside the connector.
+- The free monthly allowance is an evaluation licence with required attribution;
+  production access uses x402 or a subscription (free trial at `/go/free-trial`)
+  outside the connector.
 
 ## Release checklist
 

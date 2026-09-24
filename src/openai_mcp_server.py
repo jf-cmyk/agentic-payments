@@ -13,6 +13,7 @@ from src.entitlement_manager import (
     EntitlementManager,
     connector_entitlement_manager,
 )
+from src.free_tier import allowance_label
 
 TOOL_COSTS = SHARED_TOOL_COSTS
 
@@ -59,9 +60,10 @@ _bundle = create_authenticated_market_data_mcp(
     instructions=(
         "Read-only Blocksize Capital live market data for ChatGPT and OpenAI "
         "Responses API clients across crypto VWAP, supported equity bid/ask, FX, "
-        "and metals. OAuth users receive a 50-credit starter allowance; production "
-        "usage can continue through direct x402 or a Blocksize authenticated account "
-        "plan. All tools are read-only: they never place trades, move funds, sign "
+        f"and metals. OAuth users receive a free starter allowance of {allowance_label()} "
+        "live-data credits every calendar month; production usage can continue through "
+        "direct x402 or a Blocksize authenticated account plan. All tools are "
+        "read-only: they never place trades, move funds, sign "
         "wallet messages, or submit x402 payment proofs."
     ),
     auth_provider=openai_auth.build_openai_auth_provider(),

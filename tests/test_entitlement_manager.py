@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from src.config import settings
 from src.entitlement_manager import (
     DEFAULT_PENDING_CHARGE_LEASE_SECONDS,
     ENTITLEMENT_SCHEMA_VERSION,
@@ -84,7 +85,7 @@ def test_spend_is_atomic_and_caps_starter_usage(tmp_path):
     assert status.credits_remaining == 1
 
 
-def test_starter_usage_does_not_reset_by_day(tmp_path):
+def test_starter_usage_does_not_reset_by_day_but_resets_by_calendar_month(tmp_path):
     manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=3)
 
     manager.spend(
@@ -97,10 +98,102 @@ def test_starter_usage_does_not_reset_by_day(tmp_path):
 
     same_day = manager.status("user-1", usage_date="2026-04-29")
     next_day = manager.status("user-1", usage_date="2026-04-30")
+    next_month = manager.status("user-1", usage_date="2026-05-01")
 
     assert same_day.credits_remaining == 0
+    assert same_day.credits_spent_today == 3
+    assert same_day.resets_at == "2026-05-01"
     assert next_day.credits_remaining == 0
     assert next_day.credits_spent == 3
+    assert next_day.credits_spent_today == 0
+    assert next_month.credits_remaining == 3
+    assert next_month.credits_spent == 0
+    assert next_month.monthly_limit == 3
+    assert next_month.resets_at == "2026-06-01"
+
+    ok, _ = manager.spend(
+        "user-1",
+        1,
+        tool_name="get_vwap",
+        subject="BTC-USD",
+        usage_date="2026-04-30",
+    )
+    assert ok is False
+    ok, may = manager.spend(
+        "user-1",
+        1,
+        tool_name="get_vwap",
+        subject="BTC-USD",
+        usage_date="2026-05-02",
+    )
+    assert ok is True
+    assert may.credits_remaining == 2
+
+
+def test_year_boundary_month_reset(tmp_path):
+    manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=2)
+    manager.spend("user-1", 2, tool_name="get_vwap", subject="BTC", usage_date="2026-12-31")
+
+    assert manager.status("user-1", usage_date="2026-12-31").resets_at == "2027-01-01"
+    assert manager.status("user-1", usage_date="2027-01-01").credits_remaining == 2
+
+
+def test_rows_on_the_legacy_default_follow_the_configured_allowance(tmp_path, monkeypatch):
+    """Users created under the 50-credit era move to the new pool; overrides stay."""
+    db_path = tmp_path / "legacy-default.db"
+    created_at = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).isoformat()
+    legacy_manager_class = _load_v062_entitlement_manager()
+    legacy = legacy_manager_class(db_path, default_daily_credits=50)
+    legacy.status("default-user", usage_date="2026-08-13")
+    legacy.status("subscriber", usage_date="2026-08-13")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET daily_limit = 250 WHERE user_id = 'subscriber'"
+        )
+        conn.execute(
+            "UPDATE daily_usage SET credits_spent = 50, updated_at = ? "
+            "WHERE user_id = 'default-user' AND usage_date = '2026-08-13'",
+            (created_at,),
+        )
+
+    manager = EntitlementManager(db_path, default_daily_credits=15_000)
+
+    default_user = manager.status("default-user", usage_date="2026-09-23")
+    subscriber = manager.status("subscriber", usage_date="2026-09-23")
+    assert default_user.daily_limit == 15_000
+    assert default_user.credits_remaining == 15_000
+    assert subscriber.daily_limit == 250
+    assert subscriber.credits_remaining == 250
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT user_id, allowance, reason FROM allowance_overrides"
+        ).fetchall() == [("subscriber", 250, "migrated_explicit_limit")]
+        # The rollback-visible column follows the effective allowance.
+        assert conn.execute(
+            "SELECT daily_limit FROM users WHERE user_id = 'default-user'"
+        ).fetchone() == (15_000,)
+
+    # A later change to the configured default reaches rows on the default only.
+    bumped = EntitlementManager(db_path, default_daily_credits=20_000)
+    assert bumped.status("default-user", usage_date="2026-09-23").daily_limit == 20_000
+    assert bumped.status("subscriber", usage_date="2026-09-23").daily_limit == 250
+    assert bumped.clear_allowance_override("subscriber").daily_limit == 20_000
+
+
+def test_suspended_user_is_blocked_until_reinstated(tmp_path):
+    manager = EntitlementManager(tmp_path / "entitlements.db", default_daily_credits=5)
+
+    suspended = manager.set_status("user-1", "suspended", reason="fast_drain")
+    assert suspended.status == "suspended"
+    ok, blocked = manager.spend("user-1", 1, tool_name="get_vwap", subject="BTC")
+    assert ok is False
+    assert blocked.status == "suspended"
+
+    manager.set_status("user-1", "active", reason="manual_review")
+    ok, _ = manager.spend("user-1", 1, tool_name="get_vwap", subject="BTC")
+    assert ok is True
+    with pytest.raises(ValueError):
+        manager.set_status("user-1", "banned")
 
 
 def test_refund_restores_credits(tmp_path):
@@ -180,27 +273,41 @@ def test_connector_entitlement_manager_uses_prefix_specific_env(tmp_path, monkey
     anthropic_db = tmp_path / "anthropic.db"
     cursor_db = tmp_path / "cursor.db"
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
-    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_PENDING_LEASE_SECONDS", "600")
     monkeypatch.setenv("CURSOR_ENTITLEMENT_DB_PATH", str(cursor_db))
-    monkeypatch.setenv("CURSOR_DAILY_CREDITS", "25")
 
     anthropic = connector_entitlement_manager("ANTHROPIC")
     cursor = connector_entitlement_manager("CURSOR")
 
     assert anthropic.db_path == str(anthropic_db)
-    assert anthropic.default_daily_credits == 75
     assert anthropic.pending_charge_lease_seconds == 600
     assert cursor.db_path == str(cursor_db)
-    assert cursor.default_daily_credits == 25
+
+
+def test_connector_allowance_comes_only_from_free_tier_settings(monkeypatch):
+    """Legacy per-connector credit variables must not create separate pools."""
+    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
+    monkeypatch.setenv("CURSOR_DAILY_CREDITS", "25")
+    monkeypatch.setattr(settings.free_tier, "monthly_credits", 12_345)
+
+    anthropic = connector_entitlement_manager("ANTHROPIC", fallback_db_path=":memory:")
+    cursor = connector_entitlement_manager("CURSOR", fallback_db_path=":memory:")
+    explicit = connector_entitlement_manager(
+        "OPENAI",
+        fallback_db_path=":memory:",
+        fallback_daily_credits=7,
+    )
+
+    assert anthropic.default_daily_credits == 12_345
+    assert cursor.default_daily_credits == 12_345
+    assert explicit.default_daily_credits == 7
+    assert EntitlementManager(":memory:").default_daily_credits == 12_345
 
 
 def test_cursor_fallback_does_not_follow_anthropic_db_path(tmp_path, monkeypatch):
     anthropic_db = tmp_path / "anthropic.db"
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
-    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
     monkeypatch.delenv("CURSOR_ENTITLEMENT_DB_PATH", raising=False)
-    monkeypatch.delenv("CURSOR_DAILY_CREDITS", raising=False)
 
     cursor = connector_entitlement_manager(
         "CURSOR",
@@ -352,7 +459,13 @@ def test_scoped_identity_preserves_v062_balance_and_rollback_visibility(tmp_path
         )
         == "legacy-user"
     )
-    assert reupgraded.status("legacy-user").credits_remaining == 1
+    assert reupgraded.status("legacy-user", usage_date="2026-08-13").credits_remaining == 1
+    # The pool is monthly: the following calendar month starts fresh, and the
+    # explicit legacy limit (5, not the old 50 default) is preserved as an override.
+    september = reupgraded.status("legacy-user", usage_date="2026-09-01")
+    assert september.credits_remaining == 5
+    assert september.daily_limit == 5
+    assert september.resets_at == "2026-10-01"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             "SELECT ledger_subject, user_id FROM identity_aliases"
@@ -421,7 +534,7 @@ def test_exact_v062_manager_reads_candidate_charges_and_writes_visible_usage(tmp
     reupgraded = EntitlementManager(db_path, default_daily_credits=50)
     assert reupgraded.schema_status()["ready"] is True
     assert reupgraded.bind_identity(scoped_subject, legacy_user_id) == legacy_user_id
-    assert reupgraded.status(legacy_user_id).credits_remaining == 1
+    assert reupgraded.status(legacy_user_id, usage_date="2026-08-13").credits_remaining == 1
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             "SELECT user_id, daily_limit FROM users"
@@ -623,6 +736,7 @@ def test_schema_status_rejects_credit_manager_charge_table(tmp_path):
     assert status["integrity"] == "ok"
     assert status["initialization_blocker"] == "incompatible_existing_schema"
     assert status["missing_tables"] == [
+        "allowance_overrides",
         "daily_usage",
         "identity_aliases",
         "usage_events",
@@ -670,6 +784,7 @@ def test_schema_status_rejects_wrong_required_column_type(tmp_path):
     assert status["ready"] is False
     assert status["initialization_blocker"] == "incompatible_existing_schema"
     assert status["missing_tables"] == [
+        "allowance_overrides",
         "daily_usage",
         "identity_aliases",
         "usage_events",

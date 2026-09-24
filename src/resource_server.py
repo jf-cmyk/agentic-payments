@@ -89,6 +89,9 @@ from src.entitlement_manager import (
     connector_entitlement_db_path,
     connector_entitlement_manager,
 )
+from src import free_tier
+from src import live_showcase
+from src.free_tier_ledger import get_free_tier_ledger
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -389,6 +392,7 @@ SELECTION_SOURCE_VALUES = {
     "direct_http",
     "package_preview",
     "raw_data_preview",
+    "live_showcase",
 }
 
 
@@ -1346,6 +1350,14 @@ async def lifespan(app: FastAPI):
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
+    logger.info(
+        "Free tier: enabled=%s monthly_credits=%s scope=%s ledger=%s",
+        free_tier.enabled(),
+        free_tier.allowance_credits(),
+        ",".join(sorted(settings.free_tier.allowed_service_set)),
+        settings.free_tier.ledger_db_path,
+    )
+    free_tier.log_legacy_allowance_env_warnings()
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
@@ -2109,12 +2121,10 @@ async def get_products() -> dict[str, Any]:
     return {
         "status": "ok",
         "starter_allowance": {
-            "positioning": "Authenticated connectors receive up to 50 live data credits.",
-            "eligibility": "authenticated_connector_only",
+            **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
-            "not_free_forever": True,
             "direct_public_http": "Signed x402 payment is required per live-data request.",
-            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+            **free_tier.upgrade_fields(source="http-products-catalog", trigger="surface"),
         },
         "credit_costs": CREDIT_COSTS,
         "catalog": catalog,
@@ -2170,10 +2180,16 @@ async def get_account_plan_recommendation(
             "recurring_usage": recurring_days >= 8,
         },
     )
+    _record_product_event(
+        "upgrade_cta_shown",
+        request,
+        metadata={"plan_id": plan_id, "trigger": "recommendation", "primary_destination": "free-trial"},
+    )
     return {
         "status": "ok",
         **recommendation,
         "conversion": {
+            **recommendation["ctas"],
             "contact_path": tracked_plan_contact_path(
                 plan_id,
                 source="account-plan-recommender",
@@ -3684,7 +3700,7 @@ def _credit_meta_for_request(request: Request) -> dict[str, Any] | None:
         "credit_cost": context["credits_spent"],
         "credits_remaining": context["credits_remaining"],
         "starter_allowance_credits": STARTER_CREDIT_ALLOWANCE,
-        "upgrade_path": "After authenticated connector credits are exhausted, use signed x402 or contact sales for an account plan.",
+        **free_tier.upgrade_fields(source="http-starter-meta", trigger="surface"),
     }
 
 
@@ -5487,6 +5503,38 @@ async def x402_payment_middleware(request: Request, call_next):
                 ),
             )
 
+        if path.startswith("/v1/batch"):
+            try:
+                batch_items = len(_parse_batch_reqs(request.query_params.get("reqs", "")))
+            except ValueError:
+                batch_items = 0
+            if not free_tier.batch_items_allowed(batch_items):
+                _record_product_event(
+                    "credit_drawdown_failed",
+                    request,
+                    price_usdc=price,
+                    reason="free_tier_batch_cap",
+                    metadata={"batch_items": batch_items},
+                )
+                return _apply_x402_cors_headers(
+                    request,
+                    JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": "Bad Request",
+                            "message": (
+                                "Free-tier batch calls are capped at "
+                                f"{settings.free_tier.max_batch_items} items. Split the "
+                                "request or pay per call with signed x402 (up to "
+                                f"{settings.server.max_batch_size} items)."
+                            ),
+                            "free_tier_max_batch_items": settings.free_tier.max_batch_items,
+                            "paid_max_batch_size": settings.server.max_batch_size,
+                            "batch_items": batch_items,
+                        },
+                    ),
+                )
+
         mgr: CreditManager = request.app.state.credits
         client_ip = _request_client_ip(request)
         starter = await mgr.ensure_starter_allowance(
@@ -5683,6 +5731,17 @@ async def x402_payment_middleware(request: Request, call_next):
             str(item["name"]) for item in accepted_networks
         )
         _record_product_event(
+            "upgrade_cta_shown",
+            request,
+            price_usdc=price,
+            metadata={
+                "plan_id": "developer",
+                "trigger": "payment_required",
+                "primary_destination": "free-trial",
+                "secondary_destination": "pricing",
+            },
+        )
+        _record_product_event(
             "payment_required",
             request,
             price_usdc=price,
@@ -5709,7 +5768,10 @@ async def x402_payment_middleware(request: Request, call_next):
                     ),
                     "price_usdc": str(price),
                     "starter_credits": {
-                        "positioning": "Up to 50 live data credits are for authenticated connectors only.",
+                        "positioning": (
+                            f"{free_tier.allowance_label()} free live data credits every "
+                            "calendar month are for authenticated connectors only."
+                        ),
                         "eligibility": "authenticated_connector_only",
                         "available_on_this_surface": False,
                         "allowance_credits": STARTER_CREDIT_ALLOWANCE,
@@ -5730,7 +5792,7 @@ async def x402_payment_middleware(request: Request, call_next):
                             else []
                         ),
                         "direct_public_http": "This request requires the signed x402 payment shown above.",
-                        "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+                        **free_tier.upgrade_fields(source="http-402", trigger="surface"),
                     },
                     "networks": accepted_networks,
                     "purchase_handoff": _x402_purchase_handoff(
@@ -7181,10 +7243,188 @@ async def raw_market_data_sample(
                 "provider": "Blocksize Capital",
             },
         },
+        "free_live_showcase": live_showcase.showcase_handoff(),
         "limitations": [
             "All numeric values are synthetic and intentionally not live.",
             "Use the paid endpoint for current market data and preserve its source timestamp.",
+            "For one real, free, attributed price see free_live_showcase.",
         ],
+    }
+
+
+@app.get(live_showcase.LIVE_SHOWCASE_PATH)
+async def live_showcase_price(
+    request: Request,
+    symbol: str | None = Query(None, min_length=2, max_length=64),
+) -> dict[str, Any]:
+    """Return one free, real, attributed price with a recomputable provenance digest. FREE.
+
+    This is the proof-of-quality call: an agent sees an actual multi-venue VWAP,
+    the bid/ask spread, freshness, and a digest it can recompute, before it pays.
+    It is bounded to an allowlist, briefly cached, and rate limited like every
+    other free discovery route, so it cannot become a free production feed.
+    """
+    allowed = live_showcase.allowed_showcase_symbols()
+    if not settings.server.showcase_live_enabled or not allowed:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorResponse(
+                error_code="SHOWCASE_DISABLED",
+                message="The free live showcase is not enabled on this deployment.",
+                details=(
+                    "Use /v1/samples/market-data for the response shape or the "
+                    "paid endpoints for live data."
+                ),
+            ).model_dump(),
+        )
+    if symbol is None:
+        clean = allowed[0]
+    else:
+        try:
+            clean = _normalise_symbol(symbol, "symbol")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if clean not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=ErrorResponse(
+                error_code="SHOWCASE_SYMBOL_NOT_ALLOWED",
+                message=f"{clean} is not a free showcase symbol.",
+                details=(
+                    f"Free showcase symbols: {', '.join(allowed)}. Every other symbol "
+                    "uses the paid endpoints; build the URL with get_market_data_endpoint."
+                ),
+            ).model_dump(),
+        )
+
+    ttl_seconds = max(0, int(settings.server.showcase_live_cache_seconds))
+    cache = getattr(request.app.state, "live_showcase_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.live_showcase_cache = cache
+    now = time.monotonic()
+    cached = cache.get(clean)
+    served_from_cache = (
+        isinstance(cached, tuple) and len(cached) == 2 and now - cached[0] < ttl_seconds
+    )
+    if served_from_cache:
+        vwap_data, bidask_data, bidask_error = cached[1]
+    else:
+        client: BlocksizeClient = request.app.state.blocksize
+        try:
+            vwap_data = await client.get_vwap_latest(clean)
+        except BlocksizeAPIError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=ErrorResponse(
+                    error_code="BLOCKSIZE_ERROR",
+                    message=f"Failed to retrieve showcase VWAP for {clean}",
+                    details=str(e),
+                ).model_dump(),
+            )
+        bidask_data = None
+        bidask_error: str | None = None
+        try:
+            bidask_data = await client.get_bidask_snapshot(clean)
+        except BlocksizeAPIError as e:
+            bidask_error = str(e)
+        cache[clean] = (now, (vwap_data, bidask_data, bidask_error))
+
+    served_at = datetime.now(UTC)
+    observed_at = vwap_data.timestamp
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    age_ms = max(0, int((served_at - observed_at).total_seconds() * 1000))
+
+    data: dict[str, Any] = {
+        "symbol": clean,
+        "vwap": vwap_data.model_dump(mode="json"),
+        "bidask": bidask_data.model_dump(mode="json") if bidask_data else None,
+    }
+    spread_bps: float | None = None
+    if bidask_data is not None:
+        mid = (bidask_data.bid + bidask_data.ask) / 2
+        if mid > 0:
+            spread_bps = round(bidask_data.spread / mid * 10_000, 3)
+    digest = live_showcase.canonical_digest(data)
+    price = settings.pricing.get_crypto_price(_base_from_symbol(clean))
+    paid_url = f"{PUBLIC_BASE_URL}/v1/vwap/{clean}?" + urlencode(
+        {
+            "selection_source": "live_showcase",
+            "utm_source": "blocksize",
+            "utm_medium": "live_showcase",
+            "utm_campaign": "showcase_to_paid",
+        }
+    )
+    _record_product_event(
+        "live_showcase_viewed",
+        request,
+        metadata={
+            "showcase_symbol": clean,
+            "served_from_cache": served_from_cache,
+            "bidask_included": bidask_data is not None,
+        },
+    )
+    return {
+        "status": "ok",
+        "showcase": True,
+        "live_data": True,
+        "free": True,
+        "symbol": clean,
+        "data": data,
+        "quality": {
+            "observed_at": observed_at.isoformat(),
+            "served_at": served_at.isoformat(),
+            "age_ms": age_ms,
+            "spread_bps": spread_bps,
+            "aggregation": (
+                "Multi-venue VWAP from Blocksize vwap_latest; best bid/ask from "
+                "bidask_getSnapshot."
+            ),
+            "bidask_status": "included" if bidask_data is not None else (bidask_error or "unavailable"),
+        },
+        "provenance": {
+            "payload_digest": digest,
+            "digest_scope": "data",
+            "verify": live_showcase.DIGEST_VERIFY_INSTRUCTIONS,
+            "upstream_methods": ["vwap_latest", "bidask_getSnapshot"],
+            "citation": _citation_metadata(
+                methodology_path="crypto-vwap-api",
+                product_path="crypto-vwap-api",
+                timestamp=observed_at.isoformat(),
+                lineage={"upstream_method": "vwap_latest", "symbol": clean},
+            ),
+            "receipts": (
+                "Paid and credited calls add a stored receipt id with a "
+                "/v1/provenance/{receipt_id} lookup. The showcase digest is "
+                "recomputable but not stored."
+            ),
+        },
+        "licence": {
+            "attribution": "Data by Blocksize",
+            "scope": (
+                "Evaluation and prototyping only. Not for production, trading, "
+                "redistribution, or resale."
+            ),
+            "production_path": (
+                "Signed x402 per call for direct public HTTP, or an authenticated "
+                "connector plan."
+            ),
+        },
+        "cache": {"served_from_cache": served_from_cache, "ttl_seconds": ttl_seconds},
+        "limits": {
+            "allowed_symbols": list(allowed),
+            "rate_limit": "Public discovery fair-use limits apply.",
+        },
+        "next_step": {
+            "paid_url": paid_url,
+            "price_usdc": str(price),
+            "response_shape_preview": (
+                f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap&symbol={clean}"
+            ),
+            "account_plans": f"{PUBLIC_BASE_URL}/v1/account-plans",
+            "endpoint_builder": "get_market_data_endpoint on the public remote MCP server",
+        },
     }
 
 
@@ -9746,12 +9986,14 @@ async def get_credit_balance(request: Request, wallet: str):
         "balance_credits": balance,
         "credit_unit": "Blocksize service credit",
         "starter_allowance": {
-            "positioning": "Legacy local-QA wallets may receive up to 50 test credits.",
+            "positioning": (
+                f"Legacy local-QA wallets may receive up to {free_tier.allowance_label()} "
+                "test credits."
+            ),
             "eligibility": "local_qa_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
-            "not_free_forever": True,
         },
-        "upgrade_path": "Production direct HTTP uses signed x402; contact sales for an authenticated account plan.",
+        **free_tier.upgrade_fields(source="http-legacy-balance", trigger="surface"),
     }
 
 @app.post("/v1/credits/purchase", include_in_schema=False)
@@ -9932,7 +10174,10 @@ async def mcp_manifest():
             "data_package_catalog": DATA_PACKAGES_JSON_URL,
             "category_hubs": CATEGORY_HUBS_JSON_URL,
             "instrument_explorer": INSTRUMENT_EXPLORER_URL,
-            "starter_allowance": "Authenticated connectors receive up to 50 live data credits; direct public HTTP uses signed x402.",
+            "starter_allowance": (
+                f"Authenticated connectors receive {free_tier.allowance_label()} free live "
+                "data credits every calendar month; direct public HTTP uses signed x402."
+            ),
             "equities": "Supported stock tickers are discoverable with asset_class=equity and fetched through /v1/bidask/{ticker}.",
         },
         "links": {
@@ -9963,8 +10208,7 @@ async def mcp_manifest():
             "swagger_url": SWAGGER_URL,
             "payment_model": "direct x402 or authenticated connector starter credits",
             "starter_allowance": {
-                "positioning": "Authenticated connectors receive up to 50 live data credits.",
-                "eligibility": "authenticated_connector_only",
+                **free_tier.offer_payload(),
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
                 "applies_to": [
                     "raw_vwap",
@@ -9984,7 +10228,7 @@ async def mcp_manifest():
                     "provenance",
                 ],
                 "direct_public_http": "Signed x402 payment is required per live-data request.",
-                "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+                **free_tier.upgrade_fields(source="http-manifest", trigger="surface"),
             },
         },
     }
@@ -10617,6 +10861,77 @@ def _build_operational_alerts(summary: dict[str, Any]) -> dict[str, Any]:
             "> 0% after 30 views",
             "Check the preview paid_endpoint, listing CTA, and buyer-client guidance before changing price.",
         )
+    free_tier_panel = summary.get("free_tier") if isinstance(summary.get("free_tier"), dict) else {}
+    free_tier_summary = free_tier_panel.get("summary") if isinstance(free_tier_panel.get("summary"), dict) else {}
+    free_tier_ledger = free_tier_panel.get("ledger") if isinstance(free_tier_panel.get("ledger"), dict) else {}
+    free_tier_config = free_tier_panel.get("config") if isinstance(free_tier_panel.get("config"), dict) else {}
+    if free_tier_config.get("enabled") is False:
+        add(
+            "free-tier-disabled",
+            "P1",
+            "The free tier kill switch is engaged",
+            "Every free-tier call returns FREE_TIER_DISABLED; only x402 and subscriptions serve live data.",
+            "Growth engineering",
+            "free_tier_enabled",
+            "false",
+            "true",
+            "Re-enable FREE_TIER_ENABLED once the capacity or abuse incident is resolved.",
+        )
+    global_cap = int(free_tier_ledger.get("global_daily_cap_credits") or 0)
+    global_today = int(free_tier_ledger.get("global_credits_today") or 0)
+    if global_cap > 0 and global_today >= 0.8 * global_cap:
+        add(
+            "free-tier-global-cap-pressure",
+            "P1",
+            "Free-tier global daily cap is nearly consumed",
+            f"{global_today} of {global_cap} credits used today across all identities.",
+            "Growth + API engineering",
+            "free_tier_global_cap_used_share",
+            _brief_pct(global_today / global_cap),
+            "< 80%",
+            "Check upstream request limits and cache hit rate before raising FREE_TIER_GLOBAL_DAILY_CAP_CREDITS.",
+        )
+    abuse_flags = sum(int(value) for value in (free_tier_summary.get("abuse_flags_by_reason") or {}).values())
+    if abuse_flags > 0:
+        add(
+            "free-tier-abuse-flags",
+            "P1",
+            "Free-tier grants were auto-suspended for abuse patterns",
+            f"{abuse_flags} flag(s): {', '.join(sorted((free_tier_summary.get('abuse_flags_by_reason') or {}).keys()))}.",
+            "Trust and safety",
+            "free_tier_abuse_flags",
+            str(abuse_flags),
+            "0",
+            "Review the suspended grants; reinstate with FreeTierLedger.set_status or keep suspended.",
+        )
+    grants = int(free_tier_summary.get("grants_created") or 0)
+    exhaustion_rate = free_tier_summary.get("exhaustion_rate")
+    if grants >= 10 and exhaustion_rate is not None and float(exhaustion_rate) >= 0.3:
+        add(
+            "free-tier-exhaustion-high",
+            "P2",
+            "A large share of free-tier grants exhaust the monthly pool",
+            f"{_brief_pct(float(exhaustion_rate))} of {grants} grants hit 100% this window.",
+            "Product + sales",
+            "free_tier_exhaustion_rate",
+            _brief_pct(float(exhaustion_rate)),
+            "< 30% or converting",
+            "Confirm the CTA click-through and trial starts; these identities are the subscription pipeline.",
+        )
+    cta_impressions = int(free_tier_summary.get("cta_impressions") or 0)
+    go_clicks = int(free_tier_summary.get("go_clicks") or 0)
+    if cta_impressions >= 50 and go_clicks == 0:
+        add(
+            "free-tier-cta-not-converting",
+            "P2",
+            "Upgrade CTAs are shown but never clicked",
+            f"{cta_impressions} impressions produced no tracked /go clicks.",
+            "Growth engineering",
+            "free_tier_cta_click_through_rate",
+            "0%",
+            "> 0% after 50 impressions",
+            "Check that agent clients surface the CTA links and that /go/free-trial resolves.",
+        )
     severity_rank = {"P0": 0, "P1": 1, "P2": 2}
     alerts.sort(key=lambda alert: (severity_rank.get(alert["severity"], 9), alert["id"]))
     return {
@@ -11152,6 +11467,17 @@ async def observability_stats(
             "latest_timestamp": None,
             "rows": [],
         }
+    free_tier_panel = content.get("free_tier") if isinstance(content.get("free_tier"), dict) else {}
+    try:
+        free_tier_panel["ledger"] = get_free_tier_ledger().summary()
+    except Exception:  # the panel must never break the dashboard
+        free_tier_panel["ledger"] = {"error": "free-tier ledger unavailable"}
+    free_tier_panel["config"] = {
+        "enabled": free_tier.enabled(),
+        "monthly_credits": free_tier.allowance_credits(),
+        **free_tier.guard_summary(),
+    }
+    content["free_tier"] = free_tier_panel
     content["revenue_reconciliation"] = _build_revenue_reconciliation(content)
     content["revenue_operating_scorecard"] = _build_revenue_operating_scorecard(content)
     content["conversion_experiment"] = _build_conversion_experiment(content)
@@ -11867,6 +12193,37 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         <div class="scroll"><table id="rwa-pilot-table"></table></div>
       </section>
 
+      <section class="card section" id="free-tier">
+        <div class="headline">
+          <div>
+            <h2>Free Tier</h2>
+            <div class="sub">Monthly free allowance funnel: grants, pool consumption, exhaustion, upgrade CTA impressions, tracked /go clicks, and trial starts. Worst-case exposure is grants times the monthly allowance.</div>
+          </div>
+          <div class="summary-strip" id="free-tier-kpis"></div>
+        </div>
+        <div class="grid two">
+          <div>
+            <h3>Pool consumption thresholds</h3>
+            <div id="free-tier-thresholds" class="bars"></div>
+          </div>
+          <div>
+            <h3>Denials and abuse flags</h3>
+            <div id="free-tier-denials" class="bars"></div>
+          </div>
+        </div>
+        <div class="grid two" style="margin-top:12px">
+          <div>
+            <h3>CTA impressions by trigger</h3>
+            <div id="free-tier-cta" class="bars"></div>
+          </div>
+          <div>
+            <h3>Tracked /go clicks</h3>
+            <div id="free-tier-clicks" class="bars"></div>
+          </div>
+        </div>
+        <div class="metric-note" id="free-tier-boundary"></div>
+      </section>
+
       <section class="card section" id="daily-brief">
         <div class="brief-header">
           <div>
@@ -12280,6 +12637,31 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       const unattributed = Number(summary.unattributed_activation_events || 0);
       document.getElementById("growth-boundary").textContent =
         `${boundary} ${fmt.format(unattributed)} activation event${unattributed === 1 ? " is" : "s are"} currently unattributed.`;
+    }
+
+    function renderFreeTier(data) {
+      const panel = data.free_tier || {};
+      const summary = panel.summary || {};
+      const ledger = panel.ledger || {};
+      const config = panel.config || {};
+      document.getElementById("free-tier-kpis").innerHTML = [
+        summaryItem("Grants", fmt.format(summary.grants_created || 0)),
+        summaryItem("Pool consumed", `${fmt.format(ledger.credits_consumed_this_month || 0)} cr`),
+        summaryItem("Exhaustion", pct(summary.exhaustion_rate)),
+        summaryItem("CTA impressions", fmt.format(summary.cta_impressions || 0)),
+        summaryItem("/go clicks", fmt.format(summary.go_clicks || 0)),
+        summaryItem("Trial starts", fmt.format(summary.trial_starts || 0)),
+        summaryItem("Worst-case exposure", `${fmt.format(ledger.worst_case_exposure_credits || 0)} cr`),
+      ].join("");
+      bars("free-tier-thresholds", summary.threshold_crossings || {}, "blue");
+      bars("free-tier-denials", { ...(summary.denials_by_reason || {}), ...(summary.abuse_flags_by_reason || {}) }, "amber");
+      bars("free-tier-cta", summary.cta_impressions_by_trigger || {}, "blue");
+      bars("free-tier-clicks", summary.go_clicks_by_destination || {}, "amber");
+      const capNote = ledger.global_daily_cap_credits
+        ? ` Global cap: ${fmt.format(ledger.global_credits_today || 0)} / ${fmt.format(ledger.global_daily_cap_credits)} credits today.`
+        : " Global daily cap is disabled.";
+      document.getElementById("free-tier-boundary").textContent =
+        `${config.enabled === false ? "Free tier is DISABLED (kill switch)." : "Free tier is enabled."} Allowance ${fmt.format(config.monthly_credits || 0)} credits per verified identity per month; free scope: ${(config.allowed_services || []).join(", ") || "none"}.${capNote} CTA click-through: ${pct(summary.cta_click_through_rate)}. Trial starts count tracked /go/free-trial clicks; matrix signups tagged source_channel=mcp are reconciled outside this dashboard.`;
     }
 
     function renderRwaPilot(data) {
@@ -12703,6 +13085,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       ].join("");
       renderAttention(data);
       renderGrowthFunnel(data);
+      renderFreeTier(data);
       renderRwaPilot(data);
       renderDailyInterpretation(data);
       renderOperatorAlerts(data);
@@ -14305,10 +14688,9 @@ async def health_check() -> dict[str, Any]:
             "support": SUPPORT_URL,
             "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
-            "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
+            "daily_credits": free_tier.allowance_credits(),
             "starter_allowance": {
-                "positioning": "Authenticated connectors receive up to 50 live data credits.",
-                "eligibility": "authenticated_connector_only",
+                **free_tier.offer_payload(),
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             },
             "tool_surface": "read-only",
@@ -14357,6 +14739,7 @@ async def health_check() -> dict[str, Any]:
             "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
         },
         "pricing": settings.pricing_summary,
+        "free_tier": free_tier.operator_status(),
         **(
             {"legacy_local_qa_bulk_pricing": BULK_TIERS}
             if settings.server.unverified_http_credits_enabled
@@ -14364,12 +14747,11 @@ async def health_check() -> dict[str, Any]:
             else {}
         ),
         "starter_allowance": {
-            "positioning": "Authenticated connectors receive up to 50 live data credits.",
-            "eligibility": "authenticated_connector_only",
+            **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
             "direct_public_http": "Signed x402 payment is required per live-data request.",
-            "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
+            **free_tier.upgrade_fields(source="http-health", trigger="surface"),
         },
         "equities": {
             "positioning": "Supported equity tickers are first-class Blocksize symbols.",
@@ -14386,6 +14768,7 @@ async def health_check() -> dict[str, Any]:
                 f"{PUBLIC_BASE_URL.rstrip('/')}/v1/samples/market-data"
                 "?service=vwap&symbol=BTCUSD"
             ),
+            "free_live_showcase": live_showcase.showcase_url(),
             "data_packages": DATA_PACKAGES_JSON_URL,
             "remote_mcp": REMOTE_MCP_URL,
             "manifest": MCP_MANIFEST_URL,

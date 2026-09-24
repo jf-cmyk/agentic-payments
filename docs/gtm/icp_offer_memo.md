@@ -3,10 +3,11 @@
 > Superseded. Historical pricing hypothesis, not a production offer; do not use
 > it as current product or sales guidance. The package prices below were
 > planning inputs; self-serve prepaid or bulk credit tiers are not exposed in
-> production. Current access is signed x402 for direct public HTTP.
-> Starter credits only apply to eligible authenticated connector users; use a contact-sales
-> authenticated account plan. Use `docs/README_EXTERNAL.md` for current public
-> guidance.
+> production. Current access is signed x402 for direct public HTTP. The free
+> starter allowance only applies to eligible authenticated connector users
+> (15,000 free live-data credits every month, then from EUR 49/month via free
+> trial); Enterprise uses a contact-sales authenticated account plan. Use
+> `docs/README_EXTERNAL.md` for current public guidance.
 
 ## Recommendation
 

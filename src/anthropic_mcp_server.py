@@ -9,6 +9,7 @@ from src.authenticated_mcp_server import (
 )
 from src.blocksize_client import BlocksizeClient
 from src.entitlement_manager import EntitlementManager, connector_entitlement_manager
+from src.free_tier import allowance_label
 from src.mcp_server import READ_ONLY_TOOL_ANNOTATIONS
 
 TOOL_COSTS = SHARED_TOOL_COSTS
@@ -54,8 +55,9 @@ _bundle = create_authenticated_market_data_mcp(
     instructions=(
         "Read-only Blocksize Capital market data for Claude across crypto VWAP, "
         "supported equity ticker bid/ask, FX, and metals. The connector uses a "
-        "50-credit starter live-data allowance for market data access, then points "
-        "production usage to direct x402 or a Blocksize authenticated account plan. "
+        f"free starter allowance of {allowance_label()} live-data credits every "
+        "calendar month for market data access, then points production usage to "
+        "direct x402 or a Blocksize authenticated account plan. "
         "It exposes only safe, read-only data and metadata tools."
     ),
     auth_provider=anthropic_auth.build_anthropic_auth_provider(),

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+- Describes the monthly free tier (15,000 live-data credits, attribution
+  required) and the subscription trial and pricing paths.
+- Documents the `FREE_TIER_*` error codes and the upgrade CTA in tool results.
+
 ## 1.4.0
 
 - Documents the public account-plan recommender and sales-assisted conversion boundary.

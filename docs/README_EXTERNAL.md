@@ -4,7 +4,9 @@ Blocksize Capital provides:
 
 - A public remote MCP discovery server for agent builders
 - A paid HTTP market data API for live production data
-- A 50-credit starter allowance for eligible authenticated connector users
+- A free starter allowance of 15,000 live data credits every calendar month for
+  eligible authenticated connector users, then subscription plans from EUR 49/month
+  with a free trial (`/go/free-trial`)
 
 ## Public discovery MCP
 
@@ -91,6 +93,10 @@ Free discovery endpoints:
 - `GET /v1/samples/market-data?service=vwap&symbol=BTCUSD` - illustrative
   response shape plus an attributed live purchase handoff, with no payment and
   no live-data claim
+- `GET /v1/samples/live-showcase?symbol=BTCUSD` - one free, real, attributed
+  BTCUSD multi-venue VWAP and bid/ask with freshness, spread, and a
+  recomputable provenance digest, so an agent can inspect data quality before
+  paying; allowlisted symbols only, briefly cached, evaluation licence
 - `GET /v1/samples/pre-trade` - illustrative pre-trade product output with no
   payment and no live-data claim
 - `GET /v1/samples/macro-snapshot` - illustrative multi-asset macro package
@@ -118,9 +124,11 @@ On macOS, local key files are rejected unless the caller explicitly supplies
 
 ## Pricing
 
-Eligible authenticated connector users start with 50 live data credits. This
-is a starter allowance, not a free-forever tier. Raw caller-selected identity
-headers do not grant production credits. After credits are exhausted or rate
+Eligible authenticated connector users receive 15,000 free live data credits
+every calendar month (UTC). The allowance is an evaluation and prototyping
+licence: attribution ("Data by Blocksize") is required, and production
+commercial use requires a subscription. Raw caller-selected identity headers do
+not grant production credits. After the monthly allowance is exhausted or rate
 limits are hit, agents use signed x402 v2 payment or contact Blocksize about an
 authenticated account plan.
 
@@ -144,17 +152,20 @@ Credit costs:
 | Multi-asset macro snapshot | 25 |
 | Prior-call provenance lookup | 0 |
 
-The public pricing guide documents direct x402 rates, authenticated connector
-starter credits, and how to discuss an authenticated account plan:
+The public pricing guide documents direct x402 rates, the free monthly
+allowance for authenticated connectors, and the subscription ladder:
 
 - `https://mcp.blocksize.info/pdf/Blocksize_Pricing_Guide.pdf`
-- `GET https://mcp.blocksize.info/v1/account-plans` returns indicative
-  Developer ($49/month), Production ($249/month), and Institutional
-  ($999/month) starting points. Plans are sales-assisted and require a signed
-  order form; this endpoint does not create an entitlement.
+- `GET https://mcp.blocksize.info/v1/account-plans` returns the published
+  ladder: Developer (EUR 49/month, 5 feeds, 7-day history, 1 seat), Start-Up
+  (EUR 299/month, 50 feeds, 1-month history, 5 seats), Business (EUR 799/month,
+  350 feeds, 3-month history, 10 seats, State Prices, Slack SLA), and Enterprise
+  (custom). Annual billing is 15% off. The endpoint does not create an
+  entitlement; start a trial at `/go/free-trial` or compare plans at
+  `/go/pricing`. Enterprise terms require contacting Blocksize sales.
 - `POST https://mcp.blocksize.info/v1/account-plans/recommend` selects a plan
-  from expected monthly calls, team size, recurring-use days, and SLA needs
-  without collecting contact details.
+  from distinct instruments (feeds), team size, recurring-use days, and SLA
+  needs without collecting contact details.
 
 The paid Multi-Asset Macro Snapshot has an explicitly synthetic free preview at
 `GET https://mcp.blocksize.info/v1/previews/macro`. It contains no live values

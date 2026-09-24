@@ -9,6 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
 
+from src.config import settings
 from src.payment_limits import (
     MAX_CACHED_PAYMENT_RESPONSE_BYTES,
     MAX_PAYMENT_REPLAY_ENTRIES,
@@ -18,7 +19,9 @@ from src.payment_limits import (
 logger = logging.getLogger(__name__)
 
 
-STARTER_CREDIT_ALLOWANCE = float(os.environ.get("STARTER_CREDIT_ALLOWANCE", "50"))
+# Legacy local-QA HTTP allowance. It mirrors the free tier so no surface can
+# advertise a different number; the STARTER_CREDIT_ALLOWANCE env var is ignored.
+STARTER_CREDIT_ALLOWANCE = float(settings.free_tier.monthly_credits)
 _PAYMENT_REPLAY_HEADER_ALLOWLIST = frozenset(
     {
         "cache-control",

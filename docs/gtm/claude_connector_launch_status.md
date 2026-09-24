@@ -114,7 +114,8 @@ These require access outside the repo/deploy shell.
 1. Create or confirm a fully populated reviewer account.
    - Suggested email: `claude-reviewer@blocksize-capital.com`
    - The account should complete the Clerk OAuth flow.
-   - It should have at least 50 daily credits or an override high enough for review.
+   - It receives the standard free-tier allowance (15,000 credits per month) or an
+     override high enough for review.
    - Credentials must be shared only through Anthropic's private submission form.
 
 2. Test as a Claude custom connector.

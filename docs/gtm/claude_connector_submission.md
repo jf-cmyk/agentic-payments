@@ -196,7 +196,7 @@ Create a Blocksize reviewer account before submission:
 
 ```text
 Email: claude-reviewer@blocksize-capital.com
-Daily credits: 50 or higher
+Monthly free-tier credits: 15,000 (standard allowance) or higher
 Sample access: BTCUSD VWAP, BTCUSD bid/ask, EURUSD FX, XAUUSD metal price
 ```
 

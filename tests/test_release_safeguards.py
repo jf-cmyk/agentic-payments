@@ -34,6 +34,25 @@ from scripts import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _install_fake_railway(tmp_path: Path, source: str, *, encoding: str = "utf-8") -> Path:
+    """Install a fake ``railway`` CLI that survives spaces in the checkout path.
+
+    A ``#!{sys.executable}`` shebang breaks when the interpreter path contains
+    whitespace (the kernel truncates it at the first space), so the Python body
+    lives in ``railway.py`` and ``railway`` is a POSIX shell wrapper that quotes
+    the interpreter path.
+    """
+    script = tmp_path / "railway.py"
+    script.write_text(source, encoding=encoding)
+    wrapper = tmp_path / "railway"
+    wrapper.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return wrapper
+
+
 def _canonical_json(value: object) -> str:
     if isinstance(value, dict):
         return "{" + ",".join(
@@ -1500,11 +1519,10 @@ def test_first_legacy_cutover_is_hard_blocked_before_deploy_mutation() -> None:
 def test_railway_bridge_variable_mutation_uses_stdin_skip_deploys_and_readback(
     tmp_path: Path,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
-            f"""\
-            #!{sys.executable}
+            """\
             import json
             import os
             from pathlib import Path
@@ -1517,19 +1535,18 @@ def test_railway_bridge_variable_mutation_uses_stdin_skip_deploys_and_readback(
                 value = sys.stdin.read()
                 (root / "value").write_text(value.strip(), encoding="utf-8")
                 (root / "set-call.json").write_text(
-                    json.dumps({{"args": args, "stdin": value}}), encoding="utf-8"
+                    json.dumps({"args": args, "stdin": value}), encoding="utf-8"
                 )
                 raise SystemExit(0)
             if args[:2] == ["variable", "list"]:
                 value = (root / "value").read_text(encoding="utf-8")
-                print(json.dumps({{"LEGACY_TRANSACTION_BRIDGE_LOCK": value}}))
+                print(json.dumps({"LEGACY_TRANSACTION_BRIDGE_LOCK": value}))
                 raise SystemExit(0)
             raise SystemExit("unexpected Railway command")
             """
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     state_dir = tmp_path / "state"
     probe = textwrap.dedent(
         f"""
@@ -1833,11 +1850,10 @@ def _run_exact_railway_helper(
     *,
     forbidden_environment: str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
-            f"""\
-            #!{sys.executable}
+            """\
             import datetime
             import json
             import os
@@ -1872,18 +1888,18 @@ def _run_exact_railway_helper(
                     if is_production
                     else service_id
                 )
-                print(json.dumps({{
+                print(json.dumps({
                     "id": project_id if requested_project == "project-id" else requested_project,
-                    "environments": {{"edges": [{{"node": {{
+                    "environments": {"edges": [{"node": {
                         "id": resolved_environment_id,
                         "name": requested_environment,
-                        "serviceInstances": {{"edges": [{{"node": {{
+                        "serviceInstances": {"edges": [{"node": {
                             "serviceId": resolved_service_id,
                             "serviceName": "production-service" if is_production else "service-id",
                             "environmentId": resolved_environment_id,
-                        }}}}]}},
-                    }}}}]}},
-                }}))
+                        }}]},
+                    }}]},
+                }))
                 raise SystemExit(0)
             if args[0] == "up":
                 message = args[args.index("--message") + 1]
@@ -1891,18 +1907,18 @@ def _run_exact_railway_helper(
                 if mode == "fallback":
                     print("simulated lost upload response", file=sys.stderr)
                     raise SystemExit(1)
-                print(json.dumps({{"deploymentId": deployment_id, "logsUrl": "https://example.invalid"}}))
+                print(json.dumps({"deploymentId": deployment_id, "logsUrl": "https://example.invalid"}))
                 raise SystemExit(0)
             if args[:2] == ["deployment", "list"]:
                 now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
                 message_file = state_dir / "message"
                 if not message_file.exists():
-                    print(json.dumps([{{
+                    print(json.dumps([{
                         "id": unrelated_id,
                         "status": "SUCCESS",
                         "createdAt": now,
-                        "meta": {{"cliMessage": "old-deployment"}},
-                    }}]))
+                        "meta": {"cliMessage": "old-deployment"},
+                    }]))
                     raise SystemExit(0)
                 message = message_file.read_text(encoding="utf-8")
                 count_file = state_dir / "count"
@@ -1920,18 +1936,18 @@ def _run_exact_railway_helper(
                 else:
                     status = "UNKNOWN_NEW_STATE"
                 rows = [
-                    {{
+                    {
                         "id": unrelated_id,
                         "status": "SUCCESS",
                         "createdAt": now,
-                        "meta": {{"cliMessage": "unrelated-newer-deployment"}},
-                    }},
-                    {{
+                        "meta": {"cliMessage": "unrelated-newer-deployment"},
+                    },
+                    {
                         "id": deployment_id,
                         "status": status,
                         "createdAt": now,
-                        "meta": {{"cliMessage": message}},
-                    }},
+                        "meta": {"cliMessage": message},
+                    },
                 ]
                 print(json.dumps(rows))
                 raise SystemExit(0)
@@ -1939,57 +1955,57 @@ def _run_exact_railway_helper(
                 query = args[1]
                 if "ReleaseMutationContract" in query:
                     fields = [
-                        {{
+                        {
                             "name": name,
-                            "args": [] if mode == "contract_drift" else [{{
+                            "args": [] if mode == "contract_drift" else [{
                                 "name": "id",
-                                "type": {{
+                                "type": {
                                     "kind": "NON_NULL",
                                     "name": None,
-                                    "ofType": {{"kind": "SCALAR", "name": "String"}},
-                                }},
-                            }}],
-                            "type": {{
+                                    "ofType": {"kind": "SCALAR", "name": "String"},
+                                },
+                            }],
+                            "type": {
                                 "kind": "NON_NULL",
                                 "name": None,
-                                "ofType": {{"kind": "SCALAR", "name": "Boolean"}},
-                            }},
-                        }}
+                                "ofType": {"kind": "SCALAR", "name": "Boolean"},
+                            },
+                        }
                         for name in ("deploymentCancel", "deploymentStop", "deploymentRollback")
                     ]
-                    print(json.dumps({{"data": {{"__type": {{"fields": fields}}}}}}))
+                    print(json.dumps({"data": {"__type": {"fields": fields}}}))
                     raise SystemExit(0)
                 if "ReleaseDeployAuthority" in query:
-                    print(json.dumps({{"data": {{"service": {{
+                    print(json.dumps({"data": {"service": {
                         "id": service_id,
                         "projectId": project_id,
-                        "repoTriggers": {{
+                        "repoTriggers": {
                             "edges": [],
-                            "pageInfo": {{"hasNextPage": False}},
-                        }},
-                    }}}}}}))
+                            "pageInfo": {"hasNextPage": False},
+                        },
+                    }}}))
                     raise SystemExit(0)
                 if "ActiveDeployments" in query:
-                    print(json.dumps({{"data": {{"serviceInstance": {{"activeDeployments": []}}}}}}))
+                    print(json.dumps({"data": {"serviceInstance": {"activeDeployments": []}}}))
                     raise SystemExit(0)
                 if "TargetDomains" in query:
-                    print(json.dumps({{"data": {{"serviceInstance": {{
+                    print(json.dumps({"data": {"serviceInstance": {
                         "environmentId": environment_id,
                         "serviceId": service_id,
-                        "domains": {{
+                        "domains": {
                             "customDomains": [],
-                            "serviceDomains": [{{
+                            "serviceDomains": [{
                                 "domain": "staging.example",
                                 "environmentId": environment_id,
                                 "serviceId": service_id,
                                 "syncStatus": "ACTIVE",
-                            }}],
-                        }},
+                            }],
+                        },
                         "tcpProxies": [],
-                    }}}}}}))
+                    }}}))
                     raise SystemExit(0)
                 if "ExactDeployment" in query:
-                    if f"id={{deployment_id}}" not in args:
+                    if f"id={deployment_id}" not in args:
                         raise SystemExit("exact query did not target the candidate")
                     stopped = (state_dir / "stopped").exists()
                     message = (state_dir / "message").read_text(encoding="utf-8")
@@ -2006,7 +2022,7 @@ def _run_exact_railway_helper(
                         message = "different-ci-message"
                     else:
                         status = "UNKNOWN_NEW_STATE"
-                    print(json.dumps({{"data": {{"deployment": {{
+                    print(json.dumps({"data": {"deployment": {
                         "id": deployment_id,
                         "projectId": project_id,
                         "environmentId": environment_id,
@@ -2016,36 +2032,35 @@ def _run_exact_railway_helper(
                         "deploymentStopped": stopped,
                         "canRollback": True,
                         "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-                        "meta": {{
+                        "meta": {
                             "cliMessage": message,
                             "imageDigest": "sha256:candidate",
-                            "fileServiceManifest": {{"deploy": {{
+                            "fileServiceManifest": {"deploy": {
                                 "healthcheckPath": "/readyz",
                                 "healthcheckTimeout": 180,
                                 "restartPolicyType": "ON_FAILURE",
                                 "restartPolicyMaxRetries": 3,
-                            }}}},
+                            }},
                             "volumeMounts": ["/data"],
-                        }},
-                        "instances": [] if stopped or status != "SUCCESS" else [{{"id": "instance", "status": "RUNNING"}}],
-                    }}}}}}))
+                        },
+                        "instances": [] if stopped or status != "SUCCESS" else [{"id": "instance", "status": "RUNNING"}],
+                    }}}))
                     raise SystemExit(0)
                 raw_id = args[args.index("--raw-var") + 1] if "--raw-var" in args else ""
-                if raw_id != f"id={{deployment_id}}":
+                if raw_id != f"id={deployment_id}":
                     raise SystemExit("cleanup did not target the exact deployment id")
-                if "deploymentStop" in query and mode in {{"mismatch", "unknown"}}:
-                    print(json.dumps({{"data": {{"deploymentStop": False}}}}))
+                if "deploymentStop" in query and mode in {"mismatch", "unknown"}:
+                    print(json.dumps({"data": {"deploymentStop": False}}))
                     raise SystemExit(0)
                 (state_dir / "stopped").write_text("true", encoding="utf-8")
                 mutation = "deploymentCancel" if "deploymentCancel" in query else "deploymentStop"
-                print(json.dumps({{"data": {{mutation: True}}}}))
+                print(json.dumps({"data": {mutation: True}}))
                 raise SystemExit(0)
             raise SystemExit("unexpected fake Railway command")
             """
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     state_dir = tmp_path / "state"
     environment = {
         **os.environ,
@@ -2196,11 +2211,10 @@ def test_repository_deploy_authority_preflight_fails_closed(
     accepted: bool,
     expected_error: str | None,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
-            f"""\
-            #!{sys.executable}
+            """\
             import json
             import os
             import sys
@@ -2212,9 +2226,9 @@ def test_repository_deploy_authority_preflight_fails_closed(
             service_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
             if args[0] != "api" or "ReleaseDeployAuthority" not in args[1]:
                 raise SystemExit("unexpected Railway query")
-            if f"serviceId={{service_id}}" not in args:
+            if f"serviceId={service_id}" not in args:
                 raise SystemExit("query did not bind the exact service id")
-            trigger = {{
+            trigger = {
                 "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
                 "projectId": project_id,
                 "environmentId": environment_id,
@@ -2222,23 +2236,22 @@ def test_repository_deploy_authority_preflight_fails_closed(
                 "branch": "main",
                 "repository": "owner/repository",
                 "provider": "github",
-            }}
-            service = {{
+            }
+            service = {
                 "id": service_id,
                 "projectId": project_id,
-                "repoTriggers": {{
-                    "edges": [{{"node": trigger}}] if scenario == "trigger" else [],
-                    "pageInfo": {{"hasNextPage": scenario == "paginated"}},
-                }},
-            }}
+                "repoTriggers": {
+                    "edges": [{"node": trigger}] if scenario == "trigger" else [],
+                    "pageInfo": {"hasNextPage": scenario == "paginated"},
+                },
+            }
             if scenario == "malformed":
                 service["projectId"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-            print(json.dumps({{"data": {{"service": service}}}}))
+            print(json.dumps({"data": {"service": service}}))
             """
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     probe = textwrap.dedent(
         f"""
         import {{ verifyNoRepositoryDeployTriggers }} from "{(ROOT / 'scripts' / 'railway_release_control.mjs').as_uri()}";
@@ -2500,11 +2513,10 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
     tmp_path: Path,
     candidate_status: str,
 ) -> None:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
-            f"""\
-            #!{sys.executable}
+            """\
             import datetime
             import json
             import os
@@ -2536,7 +2548,7 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
                 cli_message=None,
                 snapshot_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
             ):
-                return {{
+                return {
                     "id": deployment_id,
                     "projectId": project_id,
                     "environmentId": environment_id,
@@ -2546,9 +2558,9 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
                     "deploymentStopped": False,
                     "canRollback": True,
                     "createdAt": now,
-                    "meta": {{"imageDigest": digest, "cliMessage": cli_message}},
-                    "instances": [{{"id": "instance", "status": "RUNNING"}}] if running else [],
-                }}
+                    "meta": {"imageDigest": digest, "cliMessage": cli_message},
+                    "instances": [{"id": "instance", "status": "RUNNING"}] if running else [],
+                }
 
             candidate = deployment(
                 candidate_id,
@@ -2576,11 +2588,11 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
 
             if args[:2] == ["deployment", "list"]:
                 rows = [
-                    {{"id": candidate_id, "status": "REMOVED" if rolled_back else candidate_status, "createdAt": now, "meta": {{"cliMessage": message, "imageDigest": "sha256:candidate"}}}},
-                    {{"id": prior_id, "status": "REMOVED", "createdAt": now, "meta": {{"cliMessage": "prior", "imageDigest": "sha256:prior"}}}},
+                    {"id": candidate_id, "status": "REMOVED" if rolled_back else candidate_status, "createdAt": now, "meta": {"cliMessage": message, "imageDigest": "sha256:candidate"}},
+                    {"id": prior_id, "status": "REMOVED", "createdAt": now, "meta": {"cliMessage": "prior", "imageDigest": "sha256:prior"}},
                 ]
                 if rolled_back:
-                    rows.insert(0, {{"id": rollback_id, "status": "SUCCESS", "createdAt": now, "meta": {{"cliMessage": "rollback", "imageDigest": "sha256:prior"}}}})
+                    rows.insert(0, {"id": rollback_id, "status": "SUCCESS", "createdAt": now, "meta": {"cliMessage": "rollback", "imageDigest": "sha256:prior"}})
                 print(json.dumps(rows))
                 raise SystemExit(0)
             if args[0] != "api":
@@ -2588,23 +2600,23 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
             query = args[1]
             if "ActiveDeployments" in query:
                 active = [rollback] if rolled_back else ([candidate] if candidate_status == "SUCCESS" else [prior])
-                print(json.dumps({{"data": {{"serviceInstance": {{"activeDeployments": active}}}}}}))
+                print(json.dumps({"data": {"serviceInstance": {"activeDeployments": active}}}))
                 raise SystemExit(0)
             if "TargetDomains" in query:
-                print(json.dumps({{"data": {{"serviceInstance": {{
+                print(json.dumps({"data": {"serviceInstance": {
                     "environmentId": environment_id,
                     "serviceId": service_id,
-                    "domains": {{
+                    "domains": {
                         "customDomains": [],
-                        "serviceDomains": [{{
+                        "serviceDomains": [{
                             "domain": "production.example",
                             "environmentId": environment_id,
                             "serviceId": service_id,
                             "syncStatus": "ACTIVE",
-                        }}],
-                    }},
+                        }],
+                    },
                     "tcpProxies": [],
-                }}}}}}))
+                }}}))
                 raise SystemExit(0)
             if "ExactDeployment" in query:
                 raw_id = next(value for index, value in enumerate(args) if args[index - 1] == "--raw-var")
@@ -2615,21 +2627,20 @@ def test_production_recovery_binds_one_new_rollback_and_is_idempotent(
                     selected = prior
                 else:
                     selected = rollback
-                print(json.dumps({{"data": {{"deployment": selected}}}}))
+                print(json.dumps({"data": {"deployment": selected}}))
                 raise SystemExit(0)
             if "deploymentRollback" in query:
                 raw_id = next(value for index, value in enumerate(args) if args[index - 1] == "--raw-var")
-                if raw_id != f"id={{prior_id}}":
+                if raw_id != f"id={prior_id}":
                     raise SystemExit("rollback did not target the recorded prior deployment")
                 (state_dir / "rolled-back").write_text("true", encoding="utf-8")
-                print(json.dumps({{"data": {{"deploymentRollback": True}}}}))
+                print(json.dumps({"data": {"deploymentRollback": True}}))
                 raise SystemExit(0)
             raise SystemExit("unexpected fake Railway API query")
             """
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
 
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
@@ -2747,11 +2758,10 @@ def _run_recovery_adversary(
     *,
     initial_recovery: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]], dict[str, object]]:
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             """\
-            #!__PYTHON__
             import datetime
             import json
             import os
@@ -3000,7 +3010,6 @@ def _run_recovery_adversary(
         ).replace("__PYTHON__", sys.executable),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
 
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
@@ -3388,11 +3397,10 @@ def test_release_acceptance_requires_the_exact_active_ready_commit(
     prior_id = "22222222-2222-4222-8222-222222222222"
     interfering_id = "44444444-4444-4444-8444-444444444444"
     message = f"bsmcp:staging:123:456:{expected_commit}"
-    fake_railway = tmp_path / "railway"
-    fake_railway.write_text(
+    _install_fake_railway(
+        tmp_path,
         textwrap.dedent(
             f"""\
-            #!{sys.executable}
             import json
             import sys
             args = sys.argv[1:]
@@ -3451,7 +3459,6 @@ def test_release_acceptance_requires_the_exact_active_ready_commit(
         ),
         encoding="utf-8",
     )
-    fake_railway.chmod(0o755)
     fetch_stub = tmp_path / "fetch-stub.mjs"
     fetch_stub.write_text(
         "globalThis.fetch = async () => ({ status: 200, async json() { "

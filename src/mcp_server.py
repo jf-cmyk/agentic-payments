@@ -31,6 +31,8 @@ from pydantic import Field
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
 from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
+from src import free_tier
+from src import live_showcase
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -43,6 +45,7 @@ from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
     DATA_CATALOG_URL,
+    FREE_TIER_OFFER_LINE,
     MAIN_WEBSITE_CONTACT_URL,
     MAIN_WEBSITE_PRICING_URL,
     MCP_MANIFEST_URL,
@@ -86,9 +89,9 @@ mcp = FastMCP(
         "across thousands of discoverable symbols. "
         "Outlier-filtered, decision-ready output. "
         "Direct public HTTP uses signed x402 (USDC on Solana or Base L2). "
-        "Starter credits are only for eligible authenticated connector users. "
-        "For sustained or higher-volume access, contact Blocksize sales about an "
-        "authenticated account plan."
+        "The free starter allowance is only for eligible authenticated connector users "
+        f"({FREE_TIER_OFFER_LINE}, free trial at /go/free-trial). "
+        "For Enterprise access, contact Blocksize sales about an authenticated account plan."
     ),
 )
 
@@ -620,9 +623,9 @@ async def list_instruments(
 @mcp.tool(
     title="Pricing Information",
     description=(
-        "Use this to inspect signed x402 prices for direct public HTTP, authenticated "
-        "connector-only starter-credit costs, settlement networks, and contact-sales "
-        "authenticated account-plan guidance."
+        "Use this to inspect signed x402 prices for direct public HTTP, the "
+        "authenticated-connector-only free allowance and credit costs, settlement "
+        "networks, subscription plans, and the Enterprise contact-sales path."
     ),
     annotations=READ_ONLY_TOOL_ANNOTATIONS,
 )
@@ -656,9 +659,10 @@ async def get_pricing_info() -> str:
         },
         "tiers": settings.pricing_summary,
         "starter_allowance": {
+            **free_tier.offer_payload(),
             "positioning": (
-                "50 live data starter credits for eligible authenticated connector "
-                "users only"
+                f"{free_tier.allowance_label()} free live data starter credits every "
+                "calendar month for eligible authenticated connector users only"
             ),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "scope": "authenticated connector users only",
@@ -666,10 +670,10 @@ async def get_pricing_info() -> str:
                 "raw VWAP, bid/ask, FX, metals, batch calls, market briefs, "
                 "pre-trade checks, audit receipts, macro snapshots, and provenance"
             ),
-            "not_free_forever": True,
             "upgrade_path": (
-                "signed x402 for direct public HTTP, or contact Blocksize sales for "
-                "sustained or higher-volume authenticated account-plan access"
+                "signed x402 for direct public HTTP; start a subscription trial at "
+                "/go/free-trial or compare plans at /go/pricing; contact Blocksize sales "
+                "for Enterprise authenticated account-plan access"
             ),
         },
         "credit_costs": CREDIT_COSTS,
@@ -699,6 +703,7 @@ async def get_pricing_info() -> str:
                 "recommended_paid_price_usdc": "0.25",
             },
         },
+        "free_live_showcase": live_showcase.showcase_handoff(),
         "coverage": {
             "live_counts": f"{PUBLIC_BASE_URL}/v1/coverage",
             "instrument_search": f"{PUBLIC_BASE_URL}/v1/search?q={{query}}",
@@ -723,12 +728,14 @@ async def get_pricing_info() -> str:
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
         f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
-        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} live "
-        "data credits for eligible authenticated connector users only (not free forever)\n"
+        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} free live "
+        "data credits every calendar month for eligible authenticated connector users only\n"
         "  Premium workflows: market brief 10 credits, pre-trade check 5, "
         "audit receipt 10, macro snapshot 25, monitor evaluate 10\n"
         "\nDirect Public HTTP: Signed x402 on Solana (primary) or Base L2 (fallback)\n"
-        "Sustained/Higher-Volume Access: Contact Blocksize sales about an authenticated "
+        f"Subscriptions: {FREE_TIER_OFFER_LINE}. Free trial: {PUBLIC_BASE_URL}/go/free-trial | "
+        f"Plans: {PUBLIC_BASE_URL}/go/pricing\n"
+        "Enterprise: Contact Blocksize sales about an authenticated "
         f"account plan at {MAIN_WEBSITE_CONTACT_URL}"
     )
 
@@ -881,9 +888,9 @@ async def server_info() -> str:
         "description": (
             "Institutional-grade multi-asset market data for AI agents. "
             "Discovery across crypto, equities, FX, and metals plus "
-            "signed x402 for direct public HTTP, authenticated-connector-only starter "
-            "credits, and contact-sales authenticated account plans for sustained or "
-            "higher-volume access."
+            "signed x402 for direct public HTTP, an authenticated-connector-only free "
+            f"starter allowance ({FREE_TIER_OFFER_LINE}), subscription trials, and "
+            "contact-sales authenticated account plans for Enterprise access."
         ),
         "data_source": "Blocksize Capital (Tier 1 Pyth Publisher)",
         "asset_classes": ["crypto", "equities", "fx", "metals"],
@@ -900,8 +907,11 @@ async def server_info() -> str:
             "authenticated_connector_starter_credits": (
                 "eligible authenticated connector users only"
             ),
+            "subscriptions": FREE_TIER_OFFER_LINE,
+            "free_trial": f"{PUBLIC_BASE_URL}/go/free-trial",
+            "pricing": f"{PUBLIC_BASE_URL}/go/pricing",
             "sustained_or_higher_volume": (
-                "contact Blocksize sales for an authenticated account plan"
+                "contact Blocksize sales for an Enterprise authenticated account plan"
             ),
         },
         "coverage": {

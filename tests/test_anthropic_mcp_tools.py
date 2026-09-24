@@ -85,7 +85,7 @@ async def test_vwap_spends_one_credit(monkeypatch, isolate_usage_event_store):
     result = await server.anthropic_get_vwap("btc-usd")
 
     assert "VWAP [btc-usd]" in result
-    assert "Credits remaining today: 1/2" in result
+    assert "Credits remaining this month: 1/2" in result
     mock_client.get_vwap_latest.assert_awaited_once_with("BTCUSD")
     assert server._entitlements.status("user-1").credits_remaining == 1
 
@@ -133,7 +133,7 @@ async def test_exhausted_credits_block_live_call(monkeypatch):
     second = await server.anthropic_get_vwap("eth-usd")
     parsed = json.loads(second)
 
-    assert "Credits remaining today: 0/1" in first
+    assert "Credits remaining this month: 0/1" in first
     assert parsed["error_code"] == "DAILY_CREDIT_LIMIT_REACHED"
     assert mock_client.get_vwap_latest.await_count == 1
 

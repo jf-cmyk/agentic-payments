@@ -1,0 +1,42 @@
+# Disposable / throwaway email domains blocked from the free tier.
+# One domain per line, lowercase; '#' starts a comment. Override per domain with
+# FREE_TIER_EMAIL_DOMAIN_ALLOWLIST, or point FREE_TIER_DISPOSABLE_EMAIL_BLOCKLIST_PATH
+# at a maintained external list (see docs/gtm/free_tier_dev_checkpoint_2026-09-23.md 4.1).
+10minutemail.com
+10minutemail.net
+20minutemail.com
+33mail.com
+anonbox.net
+burnermail.io
+dispostable.com
+emailondeck.com
+fakeinbox.com
+getairmail.com
+getnada.com
+guerrillamail.com
+guerrillamail.net
+guerrillamailblock.com
+harakirimail.com
+inboxkitten.com
+mail-temp.com
+maildrop.cc
+mailinator.com
+mailnesia.com
+mintemail.com
+mohmal.com
+moakt.com
+mytemp.email
+sharklasers.com
+spamgourmet.com
+temp-mail.io
+temp-mail.org
+tempail.com
+tempmail.com
+tempmail.net
+tempmailo.com
+tempr.email
+throwawaymail.com
+trashmail.com
+trashmail.me
+yopmail.com
+yopmail.fr

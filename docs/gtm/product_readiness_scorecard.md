@@ -3,9 +3,11 @@
 > Superseded. Historical point-in-time assessment; do not use it as current
 > product or sales guidance. A legacy bulk-credit model existing in code does
 > not mean its routes or prices are available in production. Current access is
-> signed x402 for direct public HTTP, starter credits only for eligible
-> authenticated connector users, and a contact-sales authenticated account
-> plan. Use `docs/README_EXTERNAL.md` for current public guidance.
+> signed x402 for direct public HTTP, a free starter allowance only for eligible
+> authenticated connector users (15,000 free live-data credits every month,
+> then from EUR 49/month via free trial), and a contact-sales authenticated
+> account plan for Enterprise. Use `docs/README_EXTERNAL.md` for current public
+> guidance.
 
 Assessment date: 2026-04-21
 

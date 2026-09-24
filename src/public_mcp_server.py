@@ -23,6 +23,8 @@ from src.mcp_server import (
     search_pairs as search_local_pairs,
 )
 from src.observability import record_usage_event
+from src import free_tier
+from src import live_showcase
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
@@ -287,6 +289,7 @@ async def public_recommend_account_plan(
             "status": "ok",
             **recommendation,
             "conversion": {
+                **recommendation["ctas"],
                 "catalog_url": f"{PUBLIC_BASE_URL}/v1/account-plans",
                 "recommendation_url": f"{PUBLIC_BASE_URL}/v1/account-plans/recommend",
                 "contact_path": tracked_plan_contact_path(
@@ -450,7 +453,7 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
             "pricing": {
                 "starter_credit_cost": item["credit_cost"],
                 "paid_price_usdc": item["paid_price_usdc"],
-                "starter_positioning": "Start with 50 live data credits",
+                "starter_positioning": free_tier.positioning(),
                 "upgrade_path": "x402 payment or an authenticated account plan",
             },
             **(
@@ -580,6 +583,7 @@ async def public_get_market_data_endpoint(
                 "request_binding": "Sign and retry the exact method, public URL, and request body.",
                 "safe_recovery": "Fetch a fresh challenge after any rejection; never edit or reuse a bound signature.",
             },
+            "free_live_showcase": live_showcase.showcase_handoff(),
             "links": {
                 "pricing": PRICING_GUIDE_URL,
                 "openapi": OPENAPI_URL,
@@ -651,6 +655,7 @@ async def public_info() -> str:
                 "support": SUPPORT_URL,
                 "agent_manual": AGENT_MANUAL_URL,
             },
+            "free_live_showcase": live_showcase.showcase_handoff(),
             "paid_data_access": {
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,

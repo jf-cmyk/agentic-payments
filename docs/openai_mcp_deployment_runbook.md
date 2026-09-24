@@ -15,7 +15,7 @@ search, instrument lists, credit balance, VWAP, bid/ask, FX, and metals.
 OPENAI_MCP_PUBLIC_URL=https://mcp.blocksize.info/openai/mcp
 OPENAI_AUTH_PROVIDER=clerk
 OPENAI_ENABLE_BETA_TOKENS=false
-OPENAI_DAILY_CREDITS=50
+FREE_TIER_MONTHLY_CREDITS=15000
 OPENAI_ENTITLEMENT_DB_PATH=/data/openai_entitlements.db
 OPENAI_OAUTH_REDIRECT_PATH=/auth/callback
 OPENAI_OAUTH_JWT_SIGNING_KEY=<long-random-secret>
