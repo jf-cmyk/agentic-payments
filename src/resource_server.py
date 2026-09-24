@@ -89,6 +89,7 @@ from src.entitlement_manager import (
     connector_entitlement_db_path,
     connector_entitlement_manager,
 )
+from src import free_tier
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -2109,10 +2110,8 @@ async def get_products() -> dict[str, Any]:
     return {
         "status": "ok",
         "starter_allowance": {
-            "positioning": "Authenticated connectors receive up to 50 live data credits.",
-            "eligibility": "authenticated_connector_only",
+            **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
-            "not_free_forever": True,
             "direct_public_http": "Signed x402 payment is required per live-data request.",
             "upgrade_path": "Contact sales for sustained access through an authenticated account plan.",
         },
@@ -5709,7 +5708,10 @@ async def x402_payment_middleware(request: Request, call_next):
                     ),
                     "price_usdc": str(price),
                     "starter_credits": {
-                        "positioning": "Up to 50 live data credits are for authenticated connectors only.",
+                        "positioning": (
+                            f"{free_tier.allowance_label()} free live data credits every "
+                            "calendar month are for authenticated connectors only."
+                        ),
                         "eligibility": "authenticated_connector_only",
                         "available_on_this_surface": False,
                         "allowance_credits": STARTER_CREDIT_ALLOWANCE,
@@ -9746,10 +9748,12 @@ async def get_credit_balance(request: Request, wallet: str):
         "balance_credits": balance,
         "credit_unit": "Blocksize service credit",
         "starter_allowance": {
-            "positioning": "Legacy local-QA wallets may receive up to 50 test credits.",
+            "positioning": (
+                f"Legacy local-QA wallets may receive up to {free_tier.allowance_label()} "
+                "test credits."
+            ),
             "eligibility": "local_qa_only",
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
-            "not_free_forever": True,
         },
         "upgrade_path": "Production direct HTTP uses signed x402; contact sales for an authenticated account plan.",
     }
@@ -9932,7 +9936,10 @@ async def mcp_manifest():
             "data_package_catalog": DATA_PACKAGES_JSON_URL,
             "category_hubs": CATEGORY_HUBS_JSON_URL,
             "instrument_explorer": INSTRUMENT_EXPLORER_URL,
-            "starter_allowance": "Authenticated connectors receive up to 50 live data credits; direct public HTTP uses signed x402.",
+            "starter_allowance": (
+                f"Authenticated connectors receive {free_tier.allowance_label()} free live "
+                "data credits every calendar month; direct public HTTP uses signed x402."
+            ),
             "equities": "Supported stock tickers are discoverable with asset_class=equity and fetched through /v1/bidask/{ticker}.",
         },
         "links": {
@@ -9963,8 +9970,7 @@ async def mcp_manifest():
             "swagger_url": SWAGGER_URL,
             "payment_model": "direct x402 or authenticated connector starter credits",
             "starter_allowance": {
-                "positioning": "Authenticated connectors receive up to 50 live data credits.",
-                "eligibility": "authenticated_connector_only",
+                **free_tier.offer_payload(),
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
                 "applies_to": [
                     "raw_vwap",
@@ -14305,10 +14311,9 @@ async def health_check() -> dict[str, Any]:
             "support": SUPPORT_URL,
             "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
             "beta_tokens_enabled": anthropic_auth.beta_tokens_enabled(),
-            "daily_credits": int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50")),
+            "daily_credits": free_tier.allowance_credits(),
             "starter_allowance": {
-                "positioning": "Authenticated connectors receive up to 50 live data credits.",
-                "eligibility": "authenticated_connector_only",
+                **free_tier.offer_payload(),
                 "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             },
             "tool_surface": "read-only",
@@ -14364,8 +14369,7 @@ async def health_check() -> dict[str, Any]:
             else {}
         ),
         "starter_allowance": {
-            "positioning": "Authenticated connectors receive up to 50 live data credits.",
-            "eligibility": "authenticated_connector_only",
+            **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
             "direct_public_http": "Signed x402 payment is required per live-data request.",

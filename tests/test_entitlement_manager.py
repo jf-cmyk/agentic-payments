@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from src.config import settings
 from src.entitlement_manager import (
     DEFAULT_PENDING_CHARGE_LEASE_SECONDS,
     ENTITLEMENT_SCHEMA_VERSION,
@@ -180,27 +181,41 @@ def test_connector_entitlement_manager_uses_prefix_specific_env(tmp_path, monkey
     anthropic_db = tmp_path / "anthropic.db"
     cursor_db = tmp_path / "cursor.db"
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
-    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_PENDING_LEASE_SECONDS", "600")
     monkeypatch.setenv("CURSOR_ENTITLEMENT_DB_PATH", str(cursor_db))
-    monkeypatch.setenv("CURSOR_DAILY_CREDITS", "25")
 
     anthropic = connector_entitlement_manager("ANTHROPIC")
     cursor = connector_entitlement_manager("CURSOR")
 
     assert anthropic.db_path == str(anthropic_db)
-    assert anthropic.default_daily_credits == 75
     assert anthropic.pending_charge_lease_seconds == 600
     assert cursor.db_path == str(cursor_db)
-    assert cursor.default_daily_credits == 25
+
+
+def test_connector_allowance_comes_only_from_free_tier_settings(monkeypatch):
+    """Legacy per-connector credit variables must not create separate pools."""
+    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
+    monkeypatch.setenv("CURSOR_DAILY_CREDITS", "25")
+    monkeypatch.setattr(settings.free_tier, "monthly_credits", 12_345)
+
+    anthropic = connector_entitlement_manager("ANTHROPIC", fallback_db_path=":memory:")
+    cursor = connector_entitlement_manager("CURSOR", fallback_db_path=":memory:")
+    explicit = connector_entitlement_manager(
+        "OPENAI",
+        fallback_db_path=":memory:",
+        fallback_daily_credits=7,
+    )
+
+    assert anthropic.default_daily_credits == 12_345
+    assert cursor.default_daily_credits == 12_345
+    assert explicit.default_daily_credits == 7
+    assert EntitlementManager(":memory:").default_daily_credits == 12_345
 
 
 def test_cursor_fallback_does_not_follow_anthropic_db_path(tmp_path, monkeypatch):
     anthropic_db = tmp_path / "anthropic.db"
     monkeypatch.setenv("ANTHROPIC_ENTITLEMENT_DB_PATH", str(anthropic_db))
-    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "75")
     monkeypatch.delenv("CURSOR_ENTITLEMENT_DB_PATH", raising=False)
-    monkeypatch.delenv("CURSOR_DAILY_CREDITS", raising=False)
 
     cursor = connector_entitlement_manager(
         "CURSOR",

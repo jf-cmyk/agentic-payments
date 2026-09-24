@@ -4,7 +4,8 @@ import sqlite3
 
 import pytest
 
-from src.credit_manager import MAX_CACHED_PAYMENT_RESPONSE_BYTES, CreditManager
+from src.config import settings
+from src.credit_manager import MAX_CACHED_PAYMENT_RESPONSE_BYTES, CreditManager, STARTER_CREDIT_ALLOWANCE
 
 
 def test_credit_manager_uses_env_db_path(tmp_path, monkeypatch):
@@ -559,7 +560,7 @@ def test_wallet_inflow_summary_excludes_zero_value_proofs_and_promotional_credit
 
 
 @pytest.mark.asyncio
-async def test_starter_allowance_grants_50_credits_for_user_subject(tmp_path):
+async def test_starter_allowance_grants_the_configured_free_tier_credits(tmp_path):
     db_path = tmp_path / "credits.db"
     manager = CreditManager(str(db_path))
 
@@ -571,9 +572,10 @@ async def test_starter_allowance_grants_50_credits_for_user_subject(tmp_path):
         session_id="session-12345678",
     )
 
+    expected = float(settings.free_tier.monthly_credits)
     assert result.eligible is True
-    assert result.granted_credits == 50.0
-    assert manager.get_balance("user-12345678") == 50.0
+    assert result.granted_credits == expected == STARTER_CREDIT_ALLOWANCE
+    assert manager.get_balance("user-12345678") == expected
 
 
 @pytest.mark.asyncio

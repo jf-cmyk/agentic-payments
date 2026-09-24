@@ -11,8 +11,8 @@ openapi:
 
 Blocksize Market Data gives agents accountless access to live financial market
 data through direct x402-paid HTTP calls. Eligible authenticated connector users
-can separately start with 50 live data credits. The Pay.sh HTTP routes use
-direct x402; they do not expose self-serve purchase routes.
+separately receive 15,000 free live data credits every calendar month. The
+Pay.sh HTTP routes use direct x402; they do not expose self-serve purchase routes.
 
 Use it for market-aware agent workflows that need crypto VWAP, crypto bid/ask,
 state price, 30-minute close, 24h fixed VWAP, FX, metals, market briefs,
@@ -41,8 +41,9 @@ fresh x402 authorization to the calling agent.
 
 ## Starter allowance
 
-- Position as: `Start with 50 live data credits`.
-- This is not a free-forever tier.
+- Position as: `Start with 15,000 free live-data credits every month`.
+- The allowance recurs every calendar month (UTC) under an evaluation licence
+  with required attribution; production commercial use requires a subscription.
 - Raw VWAP, bid/ask, state, 30-minute close, and 24h fixed VWAP calls cost 1 credit.
 - FX and metals calls cost 1-2 credits.
 - Market briefs cost 10 credits.

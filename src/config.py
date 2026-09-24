@@ -11,6 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 import re
+from typing import ClassVar
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -358,6 +359,123 @@ class ServerSettings(BaseSettings):
         return [origin for origin in origins if origin]
 
 
+class FreeTierSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+    """Recurring free-tier allowance for verified authenticated connector users.
+
+    This block is the single source of truth for the free tier. Every
+    user-facing allowance statement (connector instructions, /health, product
+    catalog payloads, llms.txt, README copy checks) is generated from it through
+    ``src.free_tier``. Do not hard-code the allowance anywhere else.
+
+    Unit: credits per calendar month (UTC) per verified identity. One credit is
+    one raw price call; FX and metals cost 2, analytics packs cost 5-50.
+
+    Guards (all enforced on the connector rail, see docs/gtm/free_tier_dev_checkpoint_2026-09-23.md):
+      - per-identity sustained rate limit (credits per minute)
+      - per-identity soft daily cap (credits per UTC day)
+      - free-tier batch size cap (items per multi-symbol call)
+      - global daily cap across all identities (circuit breaker)
+      - kill switch (FREE_TIER_ENABLED=false stops all free grants, never 5xx)
+      - service allow-list gated by data rights (crypto only until cleared)
+    """
+
+    KNOWN_SERVICES: ClassVar[tuple[str, ...]] = (
+        "crypto_vwap",
+        "crypto_bidask",
+        "crypto_state",
+        "crypto_vwap_30m",
+        "crypto_vwap_24h",
+        "equity_bidask",
+        "fx",
+        "metals",
+        "analytics",
+    )
+
+    enabled: bool = Field(True, alias="FREE_TIER_ENABLED")
+    monthly_credits: int = Field(15_000, ge=0, alias="FREE_TIER_MONTHLY_CREDITS")
+    per_minute_credits: int = Field(30, ge=0, alias="FREE_TIER_PER_MINUTE_CREDITS")
+    daily_soft_cap_credits: int = Field(
+        2_000,
+        ge=0,
+        alias="FREE_TIER_DAILY_SOFT_CAP_CREDITS",
+    )
+    max_batch_items: int = Field(5, ge=1, alias="FREE_TIER_MAX_BATCH_ITEMS")
+    global_daily_cap_credits: int = Field(
+        200_000,
+        ge=0,
+        alias="FREE_TIER_GLOBAL_DAILY_CAP_CREDITS",
+    )
+    # Data-rights gate: only crypto packages are cleared for free redistribution
+    # to authenticated evaluators. Widen this list (no code change) once data ops
+    # or legal confirm equities, FX, metals, or analytics in writing.
+    allowed_services: str = Field(
+        "crypto_vwap,crypto_bidask",
+        alias="FREE_TIER_ALLOWED_SERVICES",
+    )
+    # One shared grant ledger keyed by a salted hash of the normalized email, so
+    # Claude, Cursor, and OpenAI draw from one monthly pool (checkpoint D1).
+    ledger_db_path: str = Field("free_tier_ledger.db", alias="FREE_TIER_LEDGER_DB_PATH")
+    email_hash_salt: str = Field("", alias="FREE_TIER_EMAIL_HASH_SALT")
+    require_verified_email: bool = Field(True, alias="FREE_TIER_REQUIRE_VERIFIED_EMAIL")
+    disposable_email_blocklist_path: str = Field(
+        "config/disposable_email_domains.txt",
+        alias="FREE_TIER_DISPOSABLE_EMAIL_BLOCKLIST_PATH",
+    )
+    email_domain_allowlist: str = Field("", alias="FREE_TIER_EMAIL_DOMAIN_ALLOWLIST")
+    # Detect-and-suspend thresholds (checkpoint section 4.5).
+    abuse_fast_drain_ratio: float = Field(
+        0.8,
+        ge=0.0,
+        le=1.0,
+        alias="FREE_TIER_ABUSE_FAST_DRAIN_RATIO",
+    )
+    abuse_fast_drain_window_hours: int = Field(
+        24,
+        ge=1,
+        alias="FREE_TIER_ABUSE_FAST_DRAIN_WINDOW_HOURS",
+    )
+    abuse_sweep_distinct_symbols: int = Field(
+        150,
+        ge=1,
+        alias="FREE_TIER_ABUSE_SWEEP_DISTINCT_SYMBOLS",
+    )
+    abuse_sweep_window_minutes: int = Field(
+        10,
+        ge=1,
+        alias="FREE_TIER_ABUSE_SWEEP_WINDOW_MINUTES",
+    )
+    abuse_shared_fingerprint_grants: int = Field(
+        5,
+        ge=1,
+        alias="FREE_TIER_ABUSE_SHARED_FINGERPRINT_GRANTS",
+    )
+
+    @property
+    def allowed_service_set(self) -> frozenset[str]:
+        """Return the normalized, validated free-scope service allow-list."""
+        requested = {
+            item.strip().lower()
+            for item in self.allowed_services.split(",")
+            if item.strip()
+        }
+        unknown = sorted(requested - set(self.KNOWN_SERVICES))
+        if unknown:
+            raise ValueError(
+                "FREE_TIER_ALLOWED_SERVICES contains unknown services: "
+                + ", ".join(unknown)
+            )
+        return frozenset(requested)
+
+    @property
+    def email_domain_allowlist_set(self) -> frozenset[str]:
+        return frozenset(
+            item.strip().lower().lstrip("@")
+            for item in self.email_domain_allowlist.split(",")
+            if item.strip()
+        )
+
+
 class Settings:
     """Aggregate settings container — instantiated once at import time."""
 
@@ -370,6 +488,7 @@ class Settings:
         self.x402 = X402Settings(**env_kwargs)  # type: ignore[arg-type]
         self.pricing = PricingSettings(**env_kwargs)  # type: ignore[arg-type]
         self.server = ServerSettings(**env_kwargs)  # type: ignore[arg-type]
+        self.free_tier = FreeTierSettings(**env_kwargs)  # type: ignore[arg-type]
 
     def payment_requirements(self, price: Decimal) -> list[dict]:
         """

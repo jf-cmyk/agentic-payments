@@ -4,7 +4,8 @@ Blocksize Capital provides:
 
 - A public remote MCP discovery server for agent builders
 - A paid HTTP market data API for live production data
-- A 50-credit starter allowance for eligible authenticated connector users
+- A free starter allowance of 15,000 live data credits every calendar month for
+  eligible authenticated connector users
 
 ## Public discovery MCP
 
@@ -118,9 +119,11 @@ On macOS, local key files are rejected unless the caller explicitly supplies
 
 ## Pricing
 
-Eligible authenticated connector users start with 50 live data credits. This
-is a starter allowance, not a free-forever tier. Raw caller-selected identity
-headers do not grant production credits. After credits are exhausted or rate
+Eligible authenticated connector users receive 15,000 free live data credits
+every calendar month (UTC). The allowance is an evaluation and prototyping
+licence: attribution ("Data by Blocksize") is required, and production
+commercial use requires a subscription. Raw caller-selected identity headers do
+not grant production credits. After the monthly allowance is exhausted or rate
 limits are hit, agents use signed x402 v2 payment or contact Blocksize about an
 authenticated account plan.
 

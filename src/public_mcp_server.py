@@ -23,6 +23,7 @@ from src.mcp_server import (
     search_pairs as search_local_pairs,
 )
 from src.observability import record_usage_event
+from src import free_tier
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
@@ -450,7 +451,7 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
             "pricing": {
                 "starter_credit_cost": item["credit_cost"],
                 "paid_price_usdc": item["paid_price_usdc"],
-                "starter_positioning": "Start with 50 live data credits",
+                "starter_positioning": free_tier.positioning(),
                 "upgrade_path": "x402 payment or an authenticated account plan",
             },
             **(

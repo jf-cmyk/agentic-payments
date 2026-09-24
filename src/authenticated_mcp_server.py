@@ -18,6 +18,7 @@ from src.blocksize_client import BlocksizeAPIError, BlocksizeClient
 from src.commercial_plans import upgrade_recommendation
 from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
+from src import free_tier
 from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
     DISCOVERY_SEARCH_DEFAULT_LIMIT,
@@ -654,7 +655,10 @@ def create_authenticated_market_data_mcp(
     @mcp.tool(
         name="get_credit_balance",
         title="Credit Balance",
-        description="Show the authenticated user's remaining Blocksize starter live-data credits.",
+        description=(
+            "Show the authenticated user's remaining Blocksize free-tier live-data "
+            "credits for the current month."
+        ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
     async def get_credit_balance() -> str:
@@ -714,7 +718,7 @@ def create_authenticated_market_data_mcp(
         title="Crypto VWAP Snapshot",
         description=(
             "Get the latest institutional crypto VWAP for one trading pair. "
-            "This read-only live data call uses daily Blocksize credits."
+            "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -742,7 +746,7 @@ def create_authenticated_market_data_mcp(
         description=(
             "Get the latest bid, ask, and spread for one crypto pair or supported "
             "catalog-confirmed equity symbol such as AAPLXUSD for Apple/USD. This read-only live data call uses "
-            "daily Blocksize credits."
+            "the monthly Blocksize free-tier credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -769,7 +773,7 @@ def create_authenticated_market_data_mcp(
         title="FX Snapshot",
         description=(
             "Get the latest bid, ask, and mid rate for one FX pair. "
-            "This read-only live data call uses daily Blocksize credits."
+            "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -795,7 +799,7 @@ def create_authenticated_market_data_mcp(
         title="Metal Snapshot",
         description=(
             "Get the latest spot price for one supported metal ticker. "
-            "This read-only live data call uses daily Blocksize credits."
+            "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
         annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
@@ -830,16 +834,14 @@ def create_authenticated_market_data_mcp(
                     "example_symbols": ["AAPL", "MSFT", "NVDA"],
                 },
                 "starter_allowance": {
-                    "positioning": "Start with 50 live data credits",
+                    **free_tier.offer_payload(),
                     "allowance_credits": get_entitlements().default_daily_credits,
-                    "not_free_forever": True,
                 },
-                "daily_default_credits": get_entitlements().default_daily_credits,
                 "tool_costs": TOOL_COSTS,
                 "subscription_note": (
-                    "After starter credits are exhausted, production usage should "
-                    "move to x402 payment, an authenticated account plan, or Blocksize "
-                    "account entitlements outside this MCP connector."
+                    "After the monthly free allowance is exhausted, production usage "
+                    "should move to x402 payment, an authenticated account plan, or "
+                    "Blocksize account entitlements outside this MCP connector."
                 ),
                 "links": {
                     "homepage": PUBLIC_BASE_URL,

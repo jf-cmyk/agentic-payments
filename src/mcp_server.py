@@ -31,6 +31,7 @@ from pydantic import Field
 from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
 from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
+from src import free_tier
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -656,9 +657,10 @@ async def get_pricing_info() -> str:
         },
         "tiers": settings.pricing_summary,
         "starter_allowance": {
+            **free_tier.offer_payload(),
             "positioning": (
-                "50 live data starter credits for eligible authenticated connector "
-                "users only"
+                f"{free_tier.allowance_label()} free live data starter credits every "
+                "calendar month for eligible authenticated connector users only"
             ),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "scope": "authenticated connector users only",
@@ -666,7 +668,6 @@ async def get_pricing_info() -> str:
                 "raw VWAP, bid/ask, FX, metals, batch calls, market briefs, "
                 "pre-trade checks, audit receipts, macro snapshots, and provenance"
             ),
-            "not_free_forever": True,
             "upgrade_path": (
                 "signed x402 for direct public HTTP, or contact Blocksize sales for "
                 "sustained or higher-volume authenticated account-plan access"
@@ -723,8 +724,8 @@ async def get_pricing_info() -> str:
         f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
         f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
         f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
-        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} live "
-        "data credits for eligible authenticated connector users only (not free forever)\n"
+        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} free live "
+        "data credits every calendar month for eligible authenticated connector users only\n"
         "  Premium workflows: market brief 10 credits, pre-trade check 5, "
         "audit receipt 10, macro snapshot 25, monitor evaluate 10\n"
         "\nDirect Public HTTP: Signed x402 on Solana (primary) or Base L2 (fallback)\n"

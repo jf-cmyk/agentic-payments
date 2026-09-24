@@ -13,6 +13,7 @@ from src.entitlement_manager import (
     EntitlementManager,
     connector_entitlement_manager,
 )
+from src.free_tier import allowance_label
 
 TOOL_COSTS = SHARED_TOOL_COSTS
 
@@ -59,9 +60,9 @@ _bundle = create_authenticated_market_data_mcp(
     instructions=(
         "Read-only Blocksize Capital market data for Cursor across crypto VWAP, "
         "supported equity ticker bid/ask, FX, and metals. Sign in with Blocksize "
-        "through Clerk to use the 50-credit starter live-data allowance. Production "
-        "usage can continue through direct x402 or a Blocksize authenticated account "
-        "plan outside Cursor. "
+        f"through Clerk to use the free starter allowance of {allowance_label()} "
+        "live-data credits every calendar month. Production usage can continue "
+        "through direct x402 or a Blocksize authenticated account plan outside Cursor. "
         "This connector never executes wallet transactions or submits x402 payment "
         "proofs from Cursor."
     ),

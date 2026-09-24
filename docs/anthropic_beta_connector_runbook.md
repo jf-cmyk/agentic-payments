@@ -31,7 +31,8 @@ Ready now:
   - `get_bid_ask`
   - `get_fx_rate`
   - `get_metal_price`
-- Default daily limit of 50 credits per user per UTC day.
+- Free-tier allowance of 15,000 credits per verified user per calendar month
+  (UTC), configured by `FREE_TIER_MONTHLY_CREDITS` and shared across connectors.
 - Beta-token authentication for private API testing.
 - OAuth provider support for public Claude custom connectors.
 
@@ -53,7 +54,8 @@ Minimum public OAuth deployment variables:
 ```text
 ANTHROPIC_ONLY_MODE=true
 ROOT_OAUTH_CONNECTOR=anthropic
-ANTHROPIC_DAILY_CREDITS=50
+FREE_TIER_ENABLED=true
+FREE_TIER_MONTHLY_CREDITS=15000
 ANTHROPIC_ENTITLEMENT_DB_PATH=/data/anthropic_entitlements.db
 ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp
 ANTHROPIC_AUTH_PROVIDER=clerk
@@ -163,7 +165,7 @@ OAuth mode check:
    ```text
    auth_provider=clerk
    beta_tokens_enabled=false
-   daily_credits=50
+   daily_credits=15000
    tool_surface=read-only
    ```
 
@@ -221,7 +223,7 @@ Before adding more users:
 - Remove old beta tokens from `ANTHROPIC_BETA_TOKENS`.
 - Redeploy after auth changes.
 - Verify old tokens fail with `--expect-auth-fail`.
-- Keep `ANTHROPIC_DAILY_CREDITS=50`.
+- Keep `FREE_TIER_MONTHLY_CREDITS=15000`; `ANTHROPIC_DAILY_CREDITS` is ignored.
 - Attach a Railway volume at `/data` or move entitlements to a managed database.
 - Provide Anthropic reviewers with private test-account credentials.
 - Use [claude_connector_submission.md](gtm/claude_connector_submission.md) as the

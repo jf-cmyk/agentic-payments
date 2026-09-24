@@ -11,8 +11,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from src.config import settings
 
-DEFAULT_DAILY_CREDITS = int(os.environ.get("ANTHROPIC_DAILY_CREDITS", "50"))
+
+def default_allowance_credits() -> int:
+    """Return the configured free-tier allowance (FREE_TIER_MONTHLY_CREDITS)."""
+    return int(settings.free_tier.monthly_credits)
+
+
+# Kept for import compatibility with v0.6.x callers. The name predates the
+# monthly pool: ``daily_limit`` rows hold the per-identity allowance, and the
+# value now comes from ``settings.free_tier`` instead of ANTHROPIC_DAILY_CREDITS.
+DEFAULT_DAILY_CREDITS = default_allowance_credits()
 DEFAULT_ENTITLEMENT_DB_PATH = "anthropic_entitlements.db"
 DEFAULT_PENDING_CHARGE_LEASE_SECONDS = 15 * 60
 MIN_PENDING_CHARGE_LEASE_SECONDS = 5 * 60
@@ -80,14 +90,20 @@ def connector_entitlement_manager(
     fallback_db_path: str | Path | None = None,
     fallback_daily_credits: int | None = None,
 ) -> "EntitlementManager":
-    """Build a connector-specific entitlement manager from environment variables."""
+    """Build a connector-specific entitlement manager from environment variables.
+
+    The allowance is uniform across connectors and comes only from
+    ``FREE_TIER_MONTHLY_CREDITS``; the legacy ``{PREFIX}_DAILY_CREDITS``
+    variables are ignored so one person cannot hold different pools per
+    connector. ``fallback_daily_credits`` remains an explicit programmatic
+    override for tests and local tooling.
+    """
     prefix = prefix.upper()
     db_path = connector_entitlement_db_path(prefix, fallback_db_path)
     daily_credits = int(
-        os.environ.get(
-            f"{prefix}_DAILY_CREDITS",
-            str(fallback_daily_credits or DEFAULT_DAILY_CREDITS),
-        )
+        fallback_daily_credits
+        if fallback_daily_credits is not None
+        else default_allowance_credits()
     )
     pending_lease_seconds = int(
         os.environ.get(
@@ -123,14 +139,18 @@ class EntitlementManager:
         self,
         db_path: str | Path | None = None,
         *,
-        default_daily_credits: int = DEFAULT_DAILY_CREDITS,
+        default_daily_credits: int | None = None,
         pending_charge_lease_seconds: int | None = None,
     ) -> None:
         self.db_path = str(db_path or os.environ.get(
             "ANTHROPIC_ENTITLEMENT_DB_PATH",
             DEFAULT_ENTITLEMENT_DB_PATH,
         ))
-        self.default_daily_credits = default_daily_credits
+        self.default_daily_credits = int(
+            default_allowance_credits()
+            if default_daily_credits is None
+            else default_daily_credits
+        )
         configured_lease = (
             int(os.environ.get(
                 "ENTITLEMENT_PENDING_CHARGE_LEASE_SECONDS",

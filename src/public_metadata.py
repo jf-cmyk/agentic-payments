@@ -8,6 +8,7 @@ import os
 from urllib.parse import quote_plus
 
 from src.commercial_plans import account_plan_catalog
+from src.config import settings
 
 APP_VERSION = "0.6.22"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
@@ -67,6 +68,7 @@ NON_CRAWLABLE_PATHS = (
 )
 
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
+_FREE_TIER_ALLOWANCE_LABEL = f"{int(settings.free_tier.monthly_credits):,}"
 PUBLIC_REGISTRY_DESCRIPTION = (
     "Signed x402; starter credit: authenticated connector only; contact sales: "
     "authenticated account plan"
@@ -76,7 +78,8 @@ PUBLIC_DESCRIPTION = (
     "FX, metals, state prices, VWAP windows, audit receipts, market briefs, macro "
     "snapshot, and trader indicator packages. Use it to find instruments, inspect "
     "readiness, read integration docs, and build signed x402-paid HTTP API requests "
-    "for decision-ready market intelligence. A 50-credit starter allowance is available "
+    "for decision-ready market intelligence. A free starter allowance of "
+    f"{_FREE_TIER_ALLOWANCE_LABEL} live-data credits every calendar month is available "
     "only to eligible authenticated connector users. Direct public HTTP uses signed x402. "
     "Free synthetic previews show the response shape and attributed purchase path without "
     "claiming live data. "

@@ -10,8 +10,8 @@ openapi:
 ---
 
 Blocksize Market Data gives agents accountless access to live financial market
-data through free discovery endpoints, an eligible 50-credit starter allowance,
-and x402-paid HTTP calls.
+data through free discovery endpoints, an eligible free starter allowance of
+15,000 live data credits every calendar month, and x402-paid HTTP calls.
 
 The Pay.sh-facing routes use direct x402. Connector starter credits are a
 separate authenticated evaluation allowance, and self-serve purchase routes are

@@ -127,11 +127,15 @@ Payment modes:
 - starter credit drawdown through an authenticated Claude, Cursor,
   or OpenAI connector principal
 
-New eligible authenticated users can start with 50 live data credits. This is
-positioned as `Start with 50 live data credits`, not a free-forever tier. Raw
-caller-selected HTTP identity headers are disabled in production and cannot
-claim or spend credits. When authenticated credits are exhausted, agents can
-use direct x402 payment or contact Blocksize about an authenticated account plan.
+New eligible authenticated users receive 15,000 free live data credits every
+calendar month (UTC), positioned as `Start with 15,000 free live-data credits
+every month`. The allowance is an evaluation and prototyping licence with
+required attribution; production commercial use requires a subscription. The
+number is configured once in `FREE_TIER_MONTHLY_CREDITS` (`src/config.py`) and
+every surface renders it from there. Raw caller-selected HTTP identity headers
+are disabled in production and cannot claim or spend credits. When the monthly
+allowance is exhausted, agents can use direct x402 payment or contact Blocksize
+about an authenticated account plan.
 
 ### 3. Anthropic-safe MCP beta
 
@@ -146,9 +150,12 @@ read-only tools only:
 - `get_fx_rate`
 - `get_metal_price`
 
-Live market data tools use server-side starter credits keyed to authenticated
-user identity. The default allowance is 50 credits per user per UTC day and can
-be changed with `ANTHROPIC_DAILY_CREDITS` or per-user entitlement overrides.
+Live market data tools use server-side free-tier credits keyed to authenticated
+user identity. The allowance is 15,000 credits per verified identity per
+calendar month (UTC), set by `FREE_TIER_MONTHLY_CREDITS` and shared by the
+Claude, Cursor, and OpenAI connectors. The legacy `ANTHROPIC_DAILY_CREDITS`,
+`CURSOR_DAILY_CREDITS`, and `OPENAI_DAILY_CREDITS` variables are ignored;
+per-user entitlement overrides for subscribers still apply.
 
 For local beta testing, set `ANTHROPIC_ENABLE_BETA_TOKENS=true` and
 `ANTHROPIC_BETA_TOKENS` to a JSON object mapping random bearer tokens to user
