@@ -24,7 +24,6 @@ from src.mcp_server import (
 )
 from src.observability import record_usage_event
 from src import free_tier
-from src import live_showcase
 from src.public_metadata import (
     AGENT_MANUAL_URL,
     APP_VERSION,
@@ -583,7 +582,6 @@ async def public_get_market_data_endpoint(
                 "request_binding": "Sign and retry the exact method, public URL, and request body.",
                 "safe_recovery": "Fetch a fresh challenge after any rejection; never edit or reuse a bound signature.",
             },
-            "free_live_showcase": live_showcase.showcase_handoff(),
             "links": {
                 "pricing": PRICING_GUIDE_URL,
                 "openapi": OPENAPI_URL,
@@ -655,7 +653,6 @@ async def public_info() -> str:
                 "support": SUPPORT_URL,
                 "agent_manual": AGENT_MANUAL_URL,
             },
-            "free_live_showcase": live_showcase.showcase_handoff(),
             "paid_data_access": {
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,

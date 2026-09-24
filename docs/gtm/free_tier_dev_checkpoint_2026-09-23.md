@@ -518,11 +518,10 @@ approved by Johann before it leaves the repo.
   zipped deliverables, registry resubmissions, the Pay.sh upstream PR, the
   website pages, the data-terms check, and the data-rights confirmation.
 - **Registry description cap.** MCP registries (and `/readyz`) cap the
-  registry description at 100 characters. `PUBLIC_REGISTRY_DESCRIPTION` is
-  the product line agents see in registry search ("Multi-venue VWAP, bid/ask,
-  crypto FX, metals and equities with provenance receipts for AI agents",
-  96 chars, asserted at import). Every longer surface carries the full offer
-  line and access model.
+  registry description at 100 characters, so `PUBLIC_REGISTRY_DESCRIPTION`
+  is the compressed form ("Signed x402; starter credit: authenticated
+  connector only; 15,000/mo free, EUR 49+; contact sales", 97 chars, asserted
+  at import). Every longer surface carries the full offer line.
 - **Ledger path hygiene.** `free_tier_ledger.db` is gitignored; production
   must set `FREE_TIER_LEDGER_DB_PATH=/data/free_tier_ledger.db` (already in
   `.env.example`) so the shared pool lives on the Railway volume.

@@ -920,7 +920,6 @@ class UsageEventStore:
                 "mcp_tool_calls": event_counts["mcp_tool_call"],
                 "registry_requests": event_counts["registry_request"],
                 "free_discovery_calls": event_counts["free_discovery_call"],
-                "free_live_showcase_calls": event_counts["live_showcase_viewed"],
                 "first_live_price_deliveries": event_counts["first_live_price_delivered"],
                 "unsupported_symbol_requests": event_counts["unsupported_symbol_request"],
                 "instrument_resolutions": len(resolved_events),
@@ -1146,9 +1145,6 @@ class UsageEventStore:
         conversions: dict[str, list[datetime]] = {}
         exhausted: set[str] = set()
         activation_events = 0
-        # Client family (claude, cursor, chatgpt, curl, ...) of the first event
-        # seen for each identity, so conversion can be read per agent client.
-        identity_clients: dict[str, str] = {}
 
         for event in events:
             event_name = str(event.get("event") or "")
@@ -1159,10 +1155,6 @@ class UsageEventStore:
                 activation_events += 1
             if identity is None or event_time is None:
                 continue
-            if event.get("user_agent"):
-                identity_clients.setdefault(
-                    identity, cls._user_agent_family(event.get("user_agent"))
-                )
             if event_name in eligible_event_names:
                 eligible_first_seen.setdefault(identity, event_time)
             if event_name == "first_live_price_delivered":
@@ -1251,59 +1243,11 @@ class UsageEventStore:
                 else (ordered[midpoint - 1] + ordered[midpoint]) / 2
             )
 
-        # First call to paid: any activated identity (first live price, whatever
-        # paid for it) later observed with a finalized x402 settlement.
-        first_call_to_paid = {
-            identity
-            for identity, activated_at in activations.items()
-            if any(converted_at >= activated_at for converted_at in conversions.get(identity, []))
-        }
-        first_call_to_paid_rate = (
-            len(first_call_to_paid) / len(activated_identities)
-            if activated_identities
-            else None
-        )
-        by_client: dict[str, dict[str, Any]] = {}
-        for identity in eligible_identities:
-            family = identity_clients.get(identity, "unknown")
-            row = by_client.setdefault(
-                family,
-                {
-                    "eligible_identities": 0,
-                    "activated_identities": 0,
-                    "paid_identities": 0,
-                },
-            )
-            row["eligible_identities"] += 1
-            if identity in activated_identities:
-                row["activated_identities"] += 1
-            if identity in first_call_to_paid:
-                row["paid_identities"] += 1
-        for row in by_client.values():
-            row["activation_rate"] = (
-                row["activated_identities"] / row["eligible_identities"]
-                if row["eligible_identities"]
-                else None
-            )
-            row["first_call_to_paid_rate"] = (
-                row["paid_identities"] / row["activated_identities"]
-                if row["activated_identities"]
-                else None
-            )
-        by_client = dict(
-            sorted(
-                by_client.items(),
-                key=lambda item: (-item[1]["eligible_identities"], item[0]),
-            )
-        )
-
         return {
             "summary": {
                 "eligible_identities": len(eligible_identities),
                 "activated_identities": len(activated_identities),
                 "activation_rate": activation_rate,
-                "first_call_to_paid_identities": len(first_call_to_paid),
-                "first_call_to_paid_rate": first_call_to_paid_rate,
                 "activation_events": activation_events,
                 "unattributed_activation_events": max(0, activation_events - len(activated_identities)),
                 "median_time_to_first_live_price_seconds": median_time_to_value,
@@ -1322,15 +1266,12 @@ class UsageEventStore:
                 {"stage": "Repeated within 7 days", "identities": len(repeated_within_seven_days)},
                 {"stage": "Converted after starter", "identities": len(starter_converted)},
             ],
-            "by_client": by_client,
             "targets": {
                 "first_live_price_within_3m_rate": 0.5,
                 "repeat_7d_rate": 0.25,
                 "starter_to_paid_rate": 0.05,
             },
             "definitions": {
-                "first_call_to_paid": "Activated identity (first delivered live price, by any payment mode) later observed with a finalized x402 settlement in the selected window.",
-                "by_client": "The same funnel split by the user-agent family (claude, cursor, chatgpt, curl, python, node, browser, other, unknown) of the first event seen for each identity, so tool-description and listing changes can be judged per agent client.",
                 "eligible_identity": "Salted identity asserted by verified OAuth, beta-token, or x402 payer evidence; anonymous and legacy caller claims are excluded.",
                 "activation": "First successfully delivered live price, recorded once per verified identity.",
                 "repeat_7d": "At least two successful paid or starter-credit delivery events during the seven days beginning at activation; only mature seven-day cohorts enter the denominator.",
