@@ -1,0 +1,40 @@
+{
+  "packages": [
+    {
+      "filename": "blocksize-market-data-openai-plugin-0.6.0.zip",
+      "label": "openai",
+      "members": 8,
+      "sha256": "e9032f4dc0a7f7e21faaa13c0e8f58be1c8d85f29dc90bc04b4cf52ddc8882be",
+      "size_bytes": 10510,
+      "source_tree_sha256": "49549528f0e9a6ec2062961d17d7b37d4c0b750ed0edd5c0fbd5f4134ab369db"
+    },
+    {
+      "filename": "blocksize-market-data-claude-plugin-0.5.0.zip",
+      "label": "claude",
+      "members": 8,
+      "sha256": "c083724a6ae8e5a277e80f0312c042337abdc126a1ce9822d781153f0313640c",
+      "size_bytes": 10615,
+      "source_tree_sha256": "47bf4ec1aef25be059ca2ebbc4baa50119897c31869932df459d111d8eaa36dc"
+    },
+    {
+      "filename": "blocksize-market-data-cursor-plugin-1.5.0.zip",
+      "label": "cursor",
+      "members": 10,
+      "sha256": "47eac32a9e8419275d876f118ead3b030315b1634fb466ffffb2cee7b4c4db09",
+      "size_bytes": 12983,
+      "source_tree_sha256": "d36dd7354f792e89843473e49b1d9cf7eb09d728ba9b3880060e73ea4b738cef"
+    },
+    {
+      "filename": "use-blocksize-market-data-universal-skill-0.6.0.zip",
+      "label": "universal_skill",
+      "members": 4,
+      "sha256": "a5d886e1dadbca79e35696b78352d78ec79c7d83cd0fc86188f7a5cc72dcc975",
+      "size_bytes": 6662,
+      "source_tree_sha256": "7444f63821d37c31e711df32133aaecbe418f60648068c62948a8bd3913acd0a"
+    }
+  ],
+  "release": "agent-skill-0.6.0",
+  "schema_version": 1,
+  "signature": null,
+  "signature_status": "unsigned-local-build"
+}

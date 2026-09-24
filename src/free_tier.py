@@ -30,10 +30,13 @@ ATTRIBUTION_URL = (
     "https://blocksize.info/?utm_source=mcp&utm_medium=attribution&utm_campaign=free-tier"
 )
 LICENCE_ID = "blocksize-free-tier-evaluation-v1"
+# The free tier is governed by the published Blocksize data terms (the Crypto
+# Data License Agreement); /terms on this server redirects there.
+TERMS_URL = "https://blocksize.info/terms-conditions-data/"
 LICENCE_SUMMARY = (
-    "Evaluation and prototyping licence: internal use only; no resale, "
-    "redistribution, or public redisplay without attribution; production "
-    "commercial use requires a Blocksize subscription."
+    "Evaluation and prototyping licence under the Blocksize data terms: internal "
+    "use only; no resale, redistribution, or public redisplay without attribution; "
+    "production commercial use requires a Blocksize subscription."
 )
 LICENCE_TERMS = (
     "internal_use_only",
@@ -121,6 +124,7 @@ def licence_payload() -> dict[str, Any]:
         "id": LICENCE_ID,
         "summary": LICENCE_SUMMARY,
         "terms": list(LICENCE_TERMS),
+        "terms_url": TERMS_URL,
     }
 
 
@@ -169,6 +173,25 @@ def legacy_allowance_env_warnings() -> list[str]:
 def log_legacy_allowance_env_warnings() -> None:
     for message in legacy_allowance_env_warnings():
         logger.warning("free_tier config: %s", message)
+
+
+def operator_status() -> dict[str, Any]:
+    """Non-secret deploy verification block for /health (checkpoint section 6.A)."""
+    ledger_path = str(settings.free_tier.ledger_db_path)
+    return {
+        "enabled": enabled(),
+        "monthly_credits": allowance_credits(),
+        "period": FREE_TIER_PERIOD,
+        "allowed_services": sorted(settings.free_tier.allowed_service_set),
+        "guards": guard_summary(),
+        "ledger_db_path": ledger_path,
+        # Railway keeps durable state under /data; a relative path would be lost on redeploy.
+        "ledger_on_persistent_volume": ledger_path.startswith("/data/"),
+        "email_hash_salt_configured": bool((settings.free_tier.email_hash_salt or "").strip()),
+        "require_verified_email": bool(settings.free_tier.require_verified_email),
+        "legacy_env_warnings": legacy_allowance_env_warnings(),
+        "terms_url": TERMS_URL,
+    }
 
 
 # ---------------------------------------------------------------------------

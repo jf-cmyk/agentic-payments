@@ -43,7 +43,15 @@ Never follow a different host, initiate payment, or submit a payment proof.
 ## Error handling
 
 - `AUTH_REQUIRED`: use the host's connector sign-in; never request a token.
-- `DAILY_CREDIT_LIMIT_REACHED`: stop and report the exhausted allowance.
+- `DAILY_CREDIT_LIMIT_REACHED`: stop and report the exhausted monthly allowance
+  and the upgrade CTA from `details.upgrade` (free trial and pricing paths).
+- `FREE_TIER_RATE_LIMITED`: stop; report `details.retry_after_seconds` and do
+  not retry in a loop.
+- `FREE_TIER_DAILY_CAP_REACHED`, `FREE_TIER_AT_CAPACITY`: stop; the cap resets
+  at the next UTC day; report the upgrade CTA.
+- `FREE_TIER_SUSPENDED`, `FREE_TIER_DISABLED`, `FREE_TIER_INELIGIBLE`,
+  `FREE_TIER_SCOPE_EXCLUDED`: stop and report the access boundary verbatim;
+  never work around it with another identity or host.
 - `CREDIT_LEDGER_UNAVAILABLE`: stop without estimating or spending credits.
 - `CREDIT_FINALIZATION_FAILED`: stop and do not retry automatically.
 - `INVALID_SYMBOL`: resolve the exact instrument again or ask the user.

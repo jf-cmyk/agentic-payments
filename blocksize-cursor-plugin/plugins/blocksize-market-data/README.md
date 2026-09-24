@@ -11,10 +11,12 @@ https://mcp.blocksize.info/cursor/mcp/
 ```
 
 After sign-in, Cursor can call Blocksize tools directly from an agent workflow.
-The integration is read-only and gives eligible users the starter allowance
-reported by the server. This is not a free-forever tier; production
-usage can continue through direct Blocksize x402 outside Cursor or an
-authenticated account plan arranged with Blocksize.
+The integration is read-only and gives eligible users the free monthly
+allowance reported by the server (15,000 live-data credits every calendar
+month, attribution required). The allowance renews every month; production
+usage continues through a subscription (free trial at /go/free-trial), direct
+Blocksize x402 outside Cursor, or an authenticated account plan arranged with
+Blocksize.
 
 The plugin also installs the `/use-blocksize-market-data` Agent Skill. Invoke it
 directly or ask Cursor for a Blocksize VWAP, bid/ask, FX, metal,

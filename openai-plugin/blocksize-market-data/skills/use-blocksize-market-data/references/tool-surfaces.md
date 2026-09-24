@@ -67,7 +67,9 @@ authenticated connector unless the user separately configures the public server.
 
 - Instrument discovery is not proof that a live feed is ready.
 - A returned HTTP endpoint is not a returned market-data observation.
-- Starter credits are an evaluation allowance, not a free-forever production tier.
+- The free tier is a recurring monthly evaluation allowance (15,000 live-data
+  credits) with required "Data by Blocksize" attribution; production commercial
+  use needs a subscription (free trial at /go/free-trial, plans at /go/pricing).
 - Production usage can use direct x402 outside the connector or an authenticated
   account plan arranged with Blocksize.
 - Preserve distinctions among VWAP, spot/mid, bid/ask, state price, and

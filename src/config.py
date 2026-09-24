@@ -406,11 +406,13 @@ class FreeTierSettings(BaseSettings):
         ge=0,
         alias="FREE_TIER_GLOBAL_DAILY_CAP_CREDITS",
     )
-    # Data-rights gate: only crypto packages are cleared for free redistribution
-    # to authenticated evaluators. Widen this list (no code change) once data ops
-    # or legal confirm equities, FX, metals, or analytics in writing.
+    # Data-rights gate. All production-promoted packages were cleared for free
+    # redistribution to authenticated evaluators on 2026-09-23 (legal approval
+    # recorded in docs/gtm/free_tier_dev_checkpoint_2026-09-23.md). RWA pilot
+    # feeds are not a service here and stay out of free scope. Narrow this list
+    # (no code change) if a package's rights change.
     allowed_services: str = Field(
-        "crypto_vwap,crypto_bidask",
+        "crypto_vwap,crypto_bidask,crypto_state,crypto_vwap_30m,crypto_vwap_24h,equity_bidask,fx,metals,analytics",
         alias="FREE_TIER_ALLOWED_SERVICES",
     )
     # One shared grant ledger keyed by a salted hash of the normalized email, so

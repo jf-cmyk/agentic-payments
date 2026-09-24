@@ -219,7 +219,7 @@ def test_pay_skill_sidecars_are_direct_x402_only() -> None:
 
 def test_latest_universal_skill_archive_matches_truthful_source() -> None:
     archive_path = (
-        ROOT / "deliverables/use-blocksize-market-data-universal-skill-0.5.0.zip"
+        ROOT / "deliverables/use-blocksize-market-data-universal-skill-0.6.0.zip"
     )
     source_root = (
         ROOT
@@ -243,9 +243,9 @@ def test_latest_universal_skill_archive_matches_truthful_source() -> None:
 
 def test_latest_plugin_archives_do_not_reintroduce_false_credit_claims() -> None:
     archives = (
-        ROOT / "deliverables/blocksize-market-data-claude-plugin-0.4.0.zip",
-        ROOT / "deliverables/blocksize-market-data-cursor-plugin-1.4.0.zip",
-        ROOT / "deliverables/blocksize-market-data-openai-plugin-0.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-claude-plugin-0.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-cursor-plugin-1.5.0.zip",
+        ROOT / "deliverables/blocksize-market-data-openai-plugin-0.6.0.zip",
     )
 
     for archive_path in archives:

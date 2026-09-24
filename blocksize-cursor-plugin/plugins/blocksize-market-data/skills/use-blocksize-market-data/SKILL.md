@@ -74,7 +74,8 @@ When a live MCP tool is unavailable:
 ## Failure policy
 
 - `AUTH_REQUIRED`: use the host's connector sign-in; never ask for a token.
-- `DAILY_CREDIT_LIMIT_REACHED`: stop and report the access boundary.
+- `DAILY_CREDIT_LIMIT_REACHED` and every `FREE_TIER_*` code: stop and report the
+  access boundary and any upgrade CTA; never retry in a loop.
 - `CREDIT_LEDGER_UNAVAILABLE`: stop; do not spend or estimate a balance.
 - `CREDIT_FINALIZATION_FAILED`: stop and report that delivery could not be
   accounted for safely; do not retry automatically.

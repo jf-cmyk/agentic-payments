@@ -59,8 +59,8 @@ def test_free_tier_defaults_match_the_checkpoint_decisions() -> None:
     assert defaults.daily_soft_cap_credits == 2_000
     assert defaults.max_batch_items == 5
     assert defaults.global_daily_cap_credits == 200_000
-    # Data-rights gate: crypto only until data ops or legal clear the rest.
-    assert defaults.allowed_service_set == frozenset({"crypto_vwap", "crypto_bidask"})
+    # Data-rights gate: every production package was cleared on 2026-09-23.
+    assert defaults.allowed_service_set == frozenset(FreeTierSettings.KNOWN_SERVICES)
     assert defaults.require_verified_email is True
     assert defaults.max_batch_items < settings.server.max_batch_size
 
@@ -116,7 +116,7 @@ def test_offer_payload_is_generated_from_settings(monkeypatch) -> None:
     }
     assert offer["licence"]["id"] == free_tier.LICENCE_ID
     assert "production_use_requires_subscription" in offer["licence"]["terms"]
-    assert offer["guards"]["allowed_services"] == ["crypto_bidask", "crypto_vwap"]
+    assert offer["guards"]["allowed_services"] == sorted(settings.free_tier.allowed_service_set)
     assert "signed x402" in offer["upgrade_path"]
     json.dumps(offer)
 

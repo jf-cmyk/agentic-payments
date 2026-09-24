@@ -1348,6 +1348,14 @@ async def lifespan(app: FastAPI):
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
+    logger.info(
+        "Free tier: enabled=%s monthly_credits=%s scope=%s ledger=%s",
+        free_tier.enabled(),
+        free_tier.allowance_credits(),
+        ",".join(sorted(settings.free_tier.allowed_service_set)),
+        settings.free_tier.ledger_db_path,
+    )
+    free_tier.log_legacy_allowance_env_warnings()
     logger.info("Solana wallet configured: %s", bool(settings.x402.solana_wallet_address))
     logger.info("Base wallet configured: %s", bool(settings.x402.evm_wallet_address))
     await app.state.stream_cache.start()
@@ -10673,6 +10681,77 @@ def _build_operational_alerts(summary: dict[str, Any]) -> dict[str, Any]:
             "> 0% after 30 views",
             "Check the preview paid_endpoint, listing CTA, and buyer-client guidance before changing price.",
         )
+    free_tier_panel = summary.get("free_tier") if isinstance(summary.get("free_tier"), dict) else {}
+    free_tier_summary = free_tier_panel.get("summary") if isinstance(free_tier_panel.get("summary"), dict) else {}
+    free_tier_ledger = free_tier_panel.get("ledger") if isinstance(free_tier_panel.get("ledger"), dict) else {}
+    free_tier_config = free_tier_panel.get("config") if isinstance(free_tier_panel.get("config"), dict) else {}
+    if free_tier_config.get("enabled") is False:
+        add(
+            "free-tier-disabled",
+            "P1",
+            "The free tier kill switch is engaged",
+            "Every free-tier call returns FREE_TIER_DISABLED; only x402 and subscriptions serve live data.",
+            "Growth engineering",
+            "free_tier_enabled",
+            "false",
+            "true",
+            "Re-enable FREE_TIER_ENABLED once the capacity or abuse incident is resolved.",
+        )
+    global_cap = int(free_tier_ledger.get("global_daily_cap_credits") or 0)
+    global_today = int(free_tier_ledger.get("global_credits_today") or 0)
+    if global_cap > 0 and global_today >= 0.8 * global_cap:
+        add(
+            "free-tier-global-cap-pressure",
+            "P1",
+            "Free-tier global daily cap is nearly consumed",
+            f"{global_today} of {global_cap} credits used today across all identities.",
+            "Growth + API engineering",
+            "free_tier_global_cap_used_share",
+            _brief_pct(global_today / global_cap),
+            "< 80%",
+            "Check upstream request limits and cache hit rate before raising FREE_TIER_GLOBAL_DAILY_CAP_CREDITS.",
+        )
+    abuse_flags = sum(int(value) for value in (free_tier_summary.get("abuse_flags_by_reason") or {}).values())
+    if abuse_flags > 0:
+        add(
+            "free-tier-abuse-flags",
+            "P1",
+            "Free-tier grants were auto-suspended for abuse patterns",
+            f"{abuse_flags} flag(s): {', '.join(sorted((free_tier_summary.get('abuse_flags_by_reason') or {}).keys()))}.",
+            "Trust and safety",
+            "free_tier_abuse_flags",
+            str(abuse_flags),
+            "0",
+            "Review the suspended grants; reinstate with FreeTierLedger.set_status or keep suspended.",
+        )
+    grants = int(free_tier_summary.get("grants_created") or 0)
+    exhaustion_rate = free_tier_summary.get("exhaustion_rate")
+    if grants >= 10 and exhaustion_rate is not None and float(exhaustion_rate) >= 0.3:
+        add(
+            "free-tier-exhaustion-high",
+            "P2",
+            "A large share of free-tier grants exhaust the monthly pool",
+            f"{_brief_pct(float(exhaustion_rate))} of {grants} grants hit 100% this window.",
+            "Product + sales",
+            "free_tier_exhaustion_rate",
+            _brief_pct(float(exhaustion_rate)),
+            "< 30% or converting",
+            "Confirm the CTA click-through and trial starts; these identities are the subscription pipeline.",
+        )
+    cta_impressions = int(free_tier_summary.get("cta_impressions") or 0)
+    go_clicks = int(free_tier_summary.get("go_clicks") or 0)
+    if cta_impressions >= 50 and go_clicks == 0:
+        add(
+            "free-tier-cta-not-converting",
+            "P2",
+            "Upgrade CTAs are shown but never clicked",
+            f"{cta_impressions} impressions produced no tracked /go clicks.",
+            "Growth engineering",
+            "free_tier_cta_click_through_rate",
+            "0%",
+            "> 0% after 50 impressions",
+            "Check that agent clients surface the CTA links and that /go/free-trial resolves.",
+        )
     severity_rank = {"P0": 0, "P1": 1, "P2": 2}
     alerts.sort(key=lambda alert: (severity_rank.get(alert["severity"], 9), alert["id"]))
     return {
@@ -11208,12 +11287,6 @@ async def observability_stats(
             "latest_timestamp": None,
             "rows": [],
         }
-    content["revenue_reconciliation"] = _build_revenue_reconciliation(content)
-    content["revenue_operating_scorecard"] = _build_revenue_operating_scorecard(content)
-    content["conversion_experiment"] = _build_conversion_experiment(content)
-    content["operational_alerts"] = _build_operational_alerts(content)
-    content["daily_interpretation"] = _build_daily_observability_interpretation(content)
-    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     free_tier_panel = content.get("free_tier") if isinstance(content.get("free_tier"), dict) else {}
     try:
         free_tier_panel["ledger"] = get_free_tier_ledger().summary()
@@ -11225,6 +11298,12 @@ async def observability_stats(
         **free_tier.guard_summary(),
     }
     content["free_tier"] = free_tier_panel
+    content["revenue_reconciliation"] = _build_revenue_reconciliation(content)
+    content["revenue_operating_scorecard"] = _build_revenue_operating_scorecard(content)
+    content["conversion_experiment"] = _build_conversion_experiment(content)
+    content["operational_alerts"] = _build_operational_alerts(content)
+    content["daily_interpretation"] = _build_daily_observability_interpretation(content)
+    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
@@ -14480,6 +14559,7 @@ async def health_check() -> dict[str, Any]:
             "readiness": f"{PUBLIC_BASE_URL.rstrip('/')}/readyz",
         },
         "pricing": settings.pricing_summary,
+        "free_tier": free_tier.operator_status(),
         **(
             {"legacy_local_qa_bulk_pricing": BULK_TIERS}
             if settings.server.unverified_http_credits_enabled

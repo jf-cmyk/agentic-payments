@@ -202,3 +202,57 @@ def test_402_and_go_redirect_record_cta_impression_and_click(dashboard_client):
     summary = stats["free_tier"]["summary"]
     assert summary["cta_impressions_by_trigger"].get("payment_required", 0) >= 1
     assert summary["trial_starts"] >= 1
+
+
+def test_licence_points_at_the_published_blocksize_data_terms():
+    from src import free_tier
+
+    licence = free_tier.licence_payload()
+    assert licence["terms_url"] == "https://blocksize.info/terms-conditions-data/"
+    assert "Blocksize data terms" in licence["summary"]
+    assert free_tier.offer_payload()["licence"]["terms_url"] == licence["terms_url"]
+
+
+def test_operational_alerts_cover_the_free_tier(dashboard_client, monkeypatch):
+    from src.resource_server import _build_operational_alerts
+
+    baseline = dashboard_client.get("/internal/observability/stats?days=1&include_synthetic=true").json()
+    ids = {alert["id"] for alert in baseline["operational_alerts"]["alerts"]}
+    assert not {alert_id for alert_id in ids if alert_id.startswith("free-tier-")}
+
+    summary = dict(baseline)
+    summary["free_tier"] = {
+        "summary": {
+            "grants_created": 20,
+            "exhaustion_rate": 0.5,
+            "abuse_flags_by_reason": {"symbol_sweep": 2},
+            "cta_impressions": 80,
+            "go_clicks": 0,
+        },
+        "ledger": {"global_daily_cap_credits": 1000, "global_credits_today": 850},
+        "config": {"enabled": False},
+    }
+    alerts = _build_operational_alerts(summary)["alerts"]
+    by_id = {alert["id"]: alert for alert in alerts}
+    assert by_id["free-tier-disabled"]["severity"] == "P1"
+    assert by_id["free-tier-global-cap-pressure"]["value"] == "85.0%"
+    assert by_id["free-tier-abuse-flags"]["value"] == "2"
+    assert by_id["free-tier-exhaustion-high"]["severity"] == "P2"
+    assert by_id["free-tier-cta-not-converting"]["severity"] == "P2"
+
+
+def test_health_reports_free_tier_deploy_status_and_legacy_env(dashboard_client, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_DAILY_CREDITS", "50")
+    monkeypatch.setattr(settings.free_tier, "ledger_db_path", "/data/free_tier_ledger.db")
+
+    health = dashboard_client.get("/health").json()["free_tier"]
+
+    assert health["enabled"] is True
+    assert health["monthly_credits"] == settings.free_tier.monthly_credits
+    assert health["allowed_services"] == sorted(settings.free_tier.allowed_service_set)
+    assert health["ledger_on_persistent_volume"] is True
+    assert health["terms_url"] == "https://blocksize.info/terms-conditions-data/"
+    assert health["legacy_env_warnings"] == [
+        f"ANTHROPIC_DAILY_CREDITS is set but ignored; the free allowance is FREE_TIER_MONTHLY_CREDITS={settings.free_tier.monthly_credits}"
+    ]
+    assert "salt" not in str(health).lower().replace("email_hash_salt_configured", "")
