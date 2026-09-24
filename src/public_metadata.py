@@ -8,7 +8,6 @@ import os
 from urllib.parse import quote_plus
 
 from src.commercial_plans import CURRENCY as PLAN_CURRENCY, account_plan_catalog, plan_by_id
-from src.config import settings
 
 APP_VERSION = "0.6.22"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
@@ -68,7 +67,25 @@ NON_CRAWLABLE_PATHS = (
 )
 
 PUBLIC_DISPLAY_NAME = "Blocksize Agentic Market Intelligence"
-_FREE_TIER_ALLOWANCE_LABEL = f"{int(settings.free_tier.monthly_credits):,}"
+
+
+def _free_tier_monthly_credits() -> int:
+    """Return the configured monthly allowance without requiring a full server config.
+
+    Release tooling (scripts/check_release_contracts.py) imports this module in
+    environments that have no BLOCKSIZE_API_KEY, where ``src.config`` cannot
+    build its settings object. The value still has one source: the
+    FREE_TIER_MONTHLY_CREDITS setting (its default is mirrored here).
+    """
+    try:
+        from src.config import settings
+
+        return int(settings.free_tier.monthly_credits)
+    except Exception:  # settings unavailable outside a configured server
+        return int(os.getenv("FREE_TIER_MONTHLY_CREDITS", "").strip() or 15_000)
+
+
+_FREE_TIER_ALLOWANCE_LABEL = f"{_free_tier_monthly_credits():,}"
 _DEVELOPER_PLAN_PRICE = f"{PLAN_CURRENCY} {plan_by_id('developer')['indicative_monthly_price_eur']}"
 # The one-line offer every public surface repeats (checkpoint section 6.E).
 FREE_TIER_OFFER_LINE = (
