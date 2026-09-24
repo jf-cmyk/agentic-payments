@@ -81,11 +81,14 @@ def test_free_tier_settings_read_environment_overrides(monkeypatch) -> None:
     )
 
 
-def test_unknown_free_scope_service_is_rejected(monkeypatch) -> None:
+def test_unknown_free_scope_service_is_dropped_not_fatal(monkeypatch, caplog) -> None:
     monkeypatch.setenv("FREE_TIER_ALLOWED_SERVICES", "crypto_vwap,history_export")
 
-    with pytest.raises(ValueError, match="history_export"):
-        FreeTierSettings(_env_file=None).allowed_service_set
+    with caplog.at_level("WARNING", logger="src.config"):
+        allowed = FreeTierSettings(_env_file=None).allowed_service_set
+
+    assert allowed == frozenset({"crypto_vwap"})
+    assert "history_export" in caplog.text
 
 
 def test_free_tier_settings_reject_negative_or_zero_batch(monkeypatch) -> None:

@@ -9,6 +9,7 @@ Dual-network payment: Solana (priority) + Base (fallback).
 from __future__ import annotations
 
 from decimal import Decimal
+import logging
 from pathlib import Path
 import re
 from typing import ClassVar
@@ -18,6 +19,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.payment_limits import MAX_PAYMENT_REPLAY_ENTRIES, MAX_PAYMENT_REPLAY_TTL_SECONDS
 
+
+logger = logging.getLogger(__name__)
+_WARNED_UNKNOWN_FREE_SERVICES: set[str] = set()
 
 _EVM_ADDRESS_RE = re.compile(r"^0x[0-9A-Fa-f]{40}$")
 _SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -471,10 +475,16 @@ class FreeTierSettings(BaseSettings):
         }
         unknown = sorted(requested - set(self.KNOWN_SERVICES))
         if unknown:
-            raise ValueError(
-                "FREE_TIER_ALLOWED_SERVICES contains unknown services: "
-                + ", ".join(unknown)
-            )
+            # Fail closed: a typo narrows the free scope instead of crashing
+            # startup or /health, which would take the whole service down.
+            key = ",".join(unknown)
+            if key not in _WARNED_UNKNOWN_FREE_SERVICES:
+                _WARNED_UNKNOWN_FREE_SERVICES.add(key)
+                logger.warning(
+                    "FREE_TIER_ALLOWED_SERVICES contains unknown services, ignoring: %s",
+                    key,
+                )
+            requested -= set(unknown)
         return frozenset(requested)
 
     @property

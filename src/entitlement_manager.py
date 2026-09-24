@@ -1208,6 +1208,15 @@ class EntitlementManager:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def allowance_override(self, user_id: str) -> int | None:
+        """Return the user's explicit allowance override, or None if on the default."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT allowance FROM allowance_overrides WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return int(row[0]) if row is not None else None
+
     def set_daily_limit(
         self,
         user_id: str,

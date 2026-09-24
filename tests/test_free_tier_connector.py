@@ -259,3 +259,63 @@ async def test_catalog_listed_long_tail_crypto_is_in_free_scope(monkeypatch):
     assert "Credits remaining this month: 2/3" in crypto
     assert equity["error_code"] == "FREE_TIER_SCOPE_EXCLUDED"
     assert json.loads(equity["details"])["service"] == "equity_bidask"
+
+
+def _grant_override(server_module, identity: ConnectorIdentity, allowance: int) -> str:
+    entitlements = server_module._entitlements
+    user_id = entitlements.bind_identity(
+        identity.ledger_subject,
+        identity.legacy_ledger_subject,
+        email=identity.email,
+    )
+    entitlements.set_daily_limit(user_id, allowance, email=identity.email, reason="subscriber")
+    return user_id
+
+
+@pytest.mark.asyncio
+async def test_allowance_override_bypasses_free_tier_gate_and_shared_pool(monkeypatch):
+    # A subscriber with the kill switch off
+    # and the service out of free scope, is still served from their own allowance.
+    identity = _identity("sub-1", "subscriber@example.org")
+    _use(monkeypatch, claude, identity)
+    _grant_override(claude, identity, 10)
+    monkeypatch.setattr(settings.free_tier, "enabled", False)
+    monkeypatch.setattr(settings.free_tier, "allowed_services", "fx")
+
+    results = [await claude.anthropic_get_vwap("btc-usd") for _ in range(5)]
+
+    assert all("VWAP [btc-usd]" in result for result in results)
+    assert "Credits remaining this month: 5/10" in results[-1]
+    grant_key = free_tier.grant_key_for_email("subscriber@example.org")
+    assert get_free_tier_ledger().status(grant_key).credits_spent == 0
+
+
+@pytest.mark.asyncio
+async def test_balance_for_override_user_omits_shared_pool(monkeypatch):
+    identity = _identity("sub-2", "subscriber2@example.org")
+    _use(monkeypatch, claude, identity)
+    _grant_override(claude, identity, 50)
+
+    balance = json.loads(await claude.anthropic_get_credit_balance())["credits"]
+
+    assert balance["credits_remaining"] == 50
+    assert "shared_pool" not in balance
+    assert "free_tier_eligibility" not in balance
+
+
+@pytest.mark.asyncio
+async def test_shared_pool_released_when_connector_ledger_errors(monkeypatch):
+    import sqlite3
+
+    _use(monkeypatch, claude, _identity("u-err", "err@example.org"))
+
+    def broken_spend(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(claude._entitlements, "spend", broken_spend)
+
+    result = json.loads(await claude.anthropic_get_vwap("btc-usd"))
+
+    assert result["error_code"] == "CREDIT_LEDGER_UNAVAILABLE"
+    grant_key = free_tier.grant_key_for_email("err@example.org")
+    assert get_free_tier_ledger().status(grant_key).credits_spent == 0
