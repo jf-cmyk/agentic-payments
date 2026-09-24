@@ -1,6 +1,6 @@
 {
   "name": "Blocksize Live Market Data for AI Agents",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "description": "Read-only MCP discovery for Blocksize real-time market data, with free synthetic value previews and attributed x402 purchase handoffs. The free starter allowance (15,000 free live-data credits every month, then from EUR 49/month via free trial) is for eligible authenticated connector users only; Enterprise access requires contacting Blocksize sales for an authenticated account plan.",
   "author": "Blocksize Capital GmbH",
   "homepage": "https://mcp.blocksize.info/",

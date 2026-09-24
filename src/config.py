@@ -98,7 +98,7 @@ class BlocksizeSettings(BaseSettings):
         alias="BLOCKSIZE_STATE_CACHE_TICKERS",
     )
     state_cache_mode: str = Field("configured", alias="BLOCKSIZE_STATE_CACHE_MODE")
-    state_cache_max_tickers: int = Field(250, alias="BLOCKSIZE_STATE_CACHE_MAX_TICKERS")
+    state_cache_max_tickers: int = Field(500, alias="BLOCKSIZE_STATE_CACHE_MAX_TICKERS")
 
     @property
     def rest_url(self) -> str:
@@ -347,6 +347,10 @@ class ServerSettings(BaseSettings):
     showcase_live_enabled: bool = Field(True, alias="SHOWCASE_LIVE_ENABLED")
     showcase_live_symbols: str = Field("BTCUSD", alias="SHOWCASE_LIVE_SYMBOLS")
     showcase_live_cache_seconds: int = Field(5, alias="SHOWCASE_LIVE_CACHE_SECONDS")
+    # Audit-derived VWAP coverage gate (see src/vwap_coverage.py). Removes catalog
+    # tickers the VWAP engine does not serve and labels quiet pairs low_activity.
+    vwap_coverage_gate_enabled: bool = Field(True, alias="VWAP_COVERAGE_GATE_ENABLED")
+    vwap_coverage_path: str = Field("", alias="VWAP_COVERAGE_PATH")
     observability_enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
     observability_db_path: str = Field("usage_events.db", alias="OBSERVABILITY_DB_PATH")
     observability_dashboard_token: str = Field("", alias="OBSERVABILITY_DASHBOARD_TOKEN")
