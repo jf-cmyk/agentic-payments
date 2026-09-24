@@ -33,6 +33,7 @@ from src.config import settings
 from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
 from src import free_tier
 from src import live_showcase
+from src import vwap_coverage
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -575,6 +576,17 @@ async def list_instruments(
         page = instruments[offset : offset + limit]
         next_offset = offset + len(page)
         has_more = next_offset < total
+        meta: dict[str, object] = {
+            **build_catalog_snapshot_metadata(
+                source=f"Blocksize {service} instrument catalog",
+                records=instruments,
+                grain="instrument",
+                snapshot_scope="full_upstream_catalog",
+            ),
+            "ordering": "lexicographic_ascending",
+        }
+        if service == "vwap":
+            meta["live_coverage_gate"] = vwap_coverage.gate_metadata()
         response = InstrumentListResponse(
             service=service,
             total_instruments=total,
@@ -584,15 +596,7 @@ async def list_instruments(
             has_more=has_more,
             next_offset=next_offset if has_more else None,
             instruments=page,
-            meta={
-                **build_catalog_snapshot_metadata(
-                    source=f"Blocksize {service} instrument catalog",
-                    records=instruments,
-                    grain="instrument",
-                    snapshot_scope="full_upstream_catalog",
-                ),
-                "ordering": "lexicographic_ascending",
-            },
+            meta=meta,
         )
 
         sample = ", ".join(page[:10])

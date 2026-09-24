@@ -286,7 +286,21 @@ class PairInfo(BaseModel):
     )
     readiness: str = Field(
         "catalog_confirmed",
-        description="Commercial readiness state for this search result",
+        description=(
+            "Commercial readiness state for this search result: catalog_confirmed, "
+            "low_activity (VWAP served but no recent trade), or metadata_only"
+        ),
+    )
+    vwap_activity: Optional[str] = Field(
+        None,
+        description=(
+            "Audited real-time VWAP activity for crypto pairs: live or low_activity. "
+            "Absent when the pair has not been audited."
+        ),
+    )
+    vwap_last_trade_age_seconds: Optional[float] = Field(
+        None,
+        description="Age of the last VWAP print at audit time for low_activity pairs",
     )
     match_type: Optional[str] = Field(None, description="Why the result matched")
     relevance_score: int = Field(0, description="Deterministic search relevance score")

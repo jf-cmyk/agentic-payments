@@ -6,6 +6,7 @@ import re
 from collections import defaultdict, deque
 from typing import Any, Iterable
 
+from src import vwap_coverage
 from src.models import PairInfo
 
 
@@ -132,17 +133,43 @@ def _match_instrument(
 
 
 def recommended_service(pair: PairInfo) -> str | None:
-    """Choose a general-use service without inventing unverified coverage."""
+    """Choose a general-use service without inventing unverified coverage.
+
+    Crypto prefers VWAP, except when the audit-derived coverage gate says the
+    pair's VWAP is low-activity (last trade older than the stale threshold) and
+    a live bid/ask quote exists; then bid/ask is the honest recommendation.
+    """
     preferred = {
         "equity": ("bidask",),
         "fx": ("fx",),
         "metal": ("metal",),
         "crypto": ("vwap", "bidask", "state"),
     }.get(pair.asset_class, tuple(pair.services))
+    if (
+        pair.asset_class == "crypto"
+        and "vwap" in pair.services
+        and "bidask" in pair.services
+        and vwap_coverage.vwap_status(pair.pair) == vwap_coverage.STATUS_LOW_ACTIVITY
+    ):
+        preferred = ("bidask", "vwap", "state")
     for service in preferred:
         if service in pair.services:
             return service
     return pair.services[0] if pair.services else None
+
+
+def vwap_activity_fields(pair: PairInfo) -> dict[str, Any]:
+    """Attach the audited VWAP activity status to a crypto result when known."""
+    if pair.asset_class != "crypto" or "vwap" not in pair.services:
+        return {}
+    status = vwap_coverage.vwap_status(pair.pair)
+    if status == vwap_coverage.STATUS_UNAUDITED:
+        return {}
+    fields: dict[str, Any] = {"vwap_activity": status}
+    age = vwap_coverage.last_trade_age_seconds(pair.pair)
+    if age is not None:
+        fields["vwap_last_trade_age_seconds"] = age
+    return fields
 
 
 def commercialize_pair(pair: PairInfo, pricing: Any) -> PairInfo:
@@ -158,6 +185,14 @@ def commercialize_pair(pair: PairInfo, pricing: Any) -> PairInfo:
         price = pricing.core_crypto
     endpoint = SERVICE_TO_ENDPOINT.get(service or "")
     canonical = pair.canonical_symbol or normalize_instrument_text(pair.pair)
+    activity = vwap_activity_fields(pair)
+    if not service:
+        readiness = "metadata_only"
+    elif service == "vwap" and activity.get("vwap_activity") == vwap_coverage.STATUS_LOW_ACTIVITY:
+        # VWAP is the only service and it has not traded recently: say so.
+        readiness = "low_activity"
+    else:
+        readiness = "catalog_confirmed"
     return pair.model_copy(
         update={
             "canonical_symbol": canonical,
@@ -165,7 +200,8 @@ def commercialize_pair(pair: PairInfo, pricing: Any) -> PairInfo:
             "recommended_tool": SERVICE_TO_TOOL.get(service or ""),
             "endpoint_path": endpoint.format(symbol=canonical) if endpoint else None,
             "price_usdc": str(price) if service else None,
-            "readiness": "catalog_confirmed" if service else "metadata_only",
+            "readiness": readiness,
+            **activity,
         }
     )
 

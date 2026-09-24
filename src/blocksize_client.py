@@ -41,6 +41,7 @@ from src.models import (
     VWAPData,
 )
 from src.instrument_discovery import commercialize_pair, rank_pair_candidates
+from src import vwap_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -195,9 +196,15 @@ class BlocksizeClient:
         raise BlocksizeAPIError(-1, f"Unexpected response format for vwap_latest: {result}")
 
     async def list_vwap_instruments(self) -> list[str]:
-        """List all instruments available for real-time VWAP data."""
+        """List real-time VWAP instruments the engine actually serves.
+
+        Upstream `vwap_instruments` lists every pair with any venue or pool. The
+        audit-derived coverage gate removes tickers the VWAP engine reports as
+        not found, so search, listing, and payment preflight never advertise a
+        pair that cannot return a price. See src/vwap_coverage.py.
+        """
         result = await self._rpc_call("vwap_instruments")
-        return self._extract_instrument_tickers(result)
+        return vwap_coverage.filter_vwap_instruments(self._extract_instrument_tickers(result))
 
     # -----------------------------------------------------------------------
     # 30-Minute VWAP (Crypto)

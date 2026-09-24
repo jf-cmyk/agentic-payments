@@ -91,6 +91,7 @@ from src.entitlement_manager import (
 )
 from src import free_tier
 from src import live_showcase
+from src import vwap_coverage
 from src.free_tier_ledger import get_free_tier_ledger
 from src.models import (
     BidAskResponse,
@@ -8350,6 +8351,8 @@ async def unified_coverage(request: Request) -> dict[str, Any]:
                 "enabled_instrument_count": len(result),
                 "discovery_endpoint": f"/v1/instruments/{name}",
             }
+    if "vwap" in live_namespaces:
+        live_namespaces["vwap"]["live_coverage_gate"] = vwap_coverage.gate_metadata()
 
     registry = build_rwa_registry_overview(
         include_aliases=False,
@@ -8536,6 +8539,17 @@ async def list_instruments(
         page = instruments[offset : offset + limit]
         next_offset = offset + len(page)
         has_more = next_offset < total
+        meta: dict[str, Any] = {
+            **build_catalog_snapshot_metadata(
+                source=f"Blocksize {service} instrument catalog",
+                records=instruments,
+                grain="instrument",
+                snapshot_scope="full_upstream_catalog",
+            ),
+            "ordering": "lexicographic_ascending",
+        }
+        if service == "vwap":
+            meta["live_coverage_gate"] = vwap_coverage.gate_metadata()
         return InstrumentListResponse(
             service=service,
             total_instruments=total,
@@ -8545,15 +8559,7 @@ async def list_instruments(
             has_more=has_more,
             next_offset=next_offset if has_more else None,
             instruments=page,
-            meta={
-                **build_catalog_snapshot_metadata(
-                    source=f"Blocksize {service} instrument catalog",
-                    records=instruments,
-                    grain="instrument",
-                    snapshot_scope="full_upstream_catalog",
-                ),
-                "ordering": "lexicographic_ascending",
-            },
+            meta=meta,
         ).model_dump()
     except BlocksizeAPIError as e:
         raise HTTPException(status_code=502, detail=ErrorResponse(

@@ -90,6 +90,10 @@ Free discovery endpoints:
   per-call price, free value previews, and copyable purchase requests
 - `GET /v1/search`, including `GET /v1/search?q=AAPL&asset_class=equity`
 - `GET /v1/instruments/{service}`; use `bidask` for the shared bid/ask namespace
+- The VWAP catalog is gated by a periodic live audit: tickers the VWAP engine
+  does not serve are removed, and quiet pairs carry `vwap_activity:
+  low_activity` with the recommendation steered to bid/ask where a live quote
+  exists (see `live_coverage_gate` in `/v1/coverage`)
 - `GET /v1/samples/market-data?service=vwap&symbol=BTCUSD` - illustrative
   response shape plus an attributed live purchase handoff, with no payment and
   no live-data claim
