@@ -337,6 +337,12 @@ class ServerSettings(BaseSettings):
     discovery_rate_limit_enabled: bool = Field(True, alias="DISCOVERY_RATE_LIMIT_ENABLED")
     discovery_rate_limit_per_minute: int = Field(60, alias="DISCOVERY_RATE_LIMIT_PER_MINUTE")
     discovery_rate_limit_per_day: int = Field(1000, alias="DISCOVERY_RATE_LIMIT_PER_DAY")
+    # Free live showcase: one real, attributed price an agent can inspect before
+    # paying. Bounded to an allowlist and served from a short cache so it can
+    # never become a free production feed.
+    showcase_live_enabled: bool = Field(True, alias="SHOWCASE_LIVE_ENABLED")
+    showcase_live_symbols: str = Field("BTCUSD", alias="SHOWCASE_LIVE_SYMBOLS")
+    showcase_live_cache_seconds: int = Field(5, alias="SHOWCASE_LIVE_CACHE_SECONDS")
     observability_enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
     observability_db_path: str = Field("usage_events.db", alias="OBSERVABILITY_DB_PATH")
     observability_dashboard_token: str = Field("", alias="OBSERVABILITY_DASHBOARD_TOKEN")
@@ -420,8 +426,10 @@ class FreeTierSettings(BaseSettings):
     ledger_db_path: str = Field("free_tier_ledger.db", alias="FREE_TIER_LEDGER_DB_PATH")
     email_hash_salt: str = Field("", alias="FREE_TIER_EMAIL_HASH_SALT")
     require_verified_email: bool = Field(True, alias="FREE_TIER_REQUIRE_VERIFIED_EMAIL")
+    # Empty means the list shipped inside the package (src/data/); set a path to
+    # use a maintained external list instead.
     disposable_email_blocklist_path: str = Field(
-        "config/disposable_email_domains.txt",
+        "",
         alias="FREE_TIER_DISPOSABLE_EMAIL_BLOCKLIST_PATH",
     )
     email_domain_allowlist: str = Field("", alias="FREE_TIER_EMAIL_DOMAIN_ALLOWLIST")

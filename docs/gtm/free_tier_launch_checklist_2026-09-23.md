@@ -57,7 +57,7 @@ first staging deploy of this branch:
 ### 2.1 MCP Registry (`server.json`, 100-character cap)
 
 ```
-Signed x402; starter credit: authenticated connector only; 15,000/mo free, EUR 49+; contact sales
+Multi-venue VWAP, bid/ask, crypto FX, metals and equities with provenance receipts for AI agents
 ```
 
 ### 2.2 Smithery, Glama, Claude connector directory (long description)

@@ -75,11 +75,12 @@ FREE_TIER_OFFER_LINE = (
     f"{_FREE_TIER_ALLOWANCE_LABEL} free live-data credits every month, then from "
     f"{_DEVELOPER_PLAN_PRICE}/month"
 )
-# MCP registries cap this at 100 characters, so it is the compressed form of
-# FREE_TIER_OFFER_LINE; every longer surface states the full access model.
+# MCP registries cap this at 100 characters. It is the one line an agent or a
+# human sees in registry search, so it states what the data is and why it is
+# worth choosing; every longer surface states the full access model.
 PUBLIC_REGISTRY_DESCRIPTION = (
-    f"Signed x402; starter credit: authenticated connector only; "
-    f"{_FREE_TIER_ALLOWANCE_LABEL}/mo free, {_DEVELOPER_PLAN_PRICE}+; contact sales"
+    "Multi-venue VWAP, bid/ask, crypto FX, metals and equities with provenance "
+    "receipts for AI agents"
 )
 assert len(PUBLIC_REGISTRY_DESCRIPTION) <= 100, "registry description exceeds 100 characters"
 PUBLIC_DESCRIPTION = (
@@ -91,7 +92,9 @@ PUBLIC_DESCRIPTION = (
     f"{_FREE_TIER_ALLOWANCE_LABEL} live-data credits every calendar month is available "
     "only to eligible authenticated connector users. Direct public HTTP uses signed x402. "
     "Free synthetic previews show the response shape and attributed purchase path without "
-    "claiming live data. "
+    "claiming live data, and one free live showcase call returns a real, attributed "
+    "BTCUSD price with a recomputable provenance digest so agents can inspect data "
+    "quality before paying. "
     f"Subscriptions start from {_DEVELOPER_PLAN_PRICE}/month with a free trial; "
     "Enterprise terms require contacting Blocksize sales about an authenticated "
     "account plan."
@@ -1851,7 +1854,7 @@ def build_llms_txt() -> str:
         "2. Check `/v1/cache/status` for stream-backed 24h VWAP and state-cache readiness.\n"
         "3. Use `/v1/capabilities/check` before optional state or VWAP-window products.\n"
         "4. Build the exact paid endpoint with `get_market_data_endpoint` or the OpenAPI schema.\n"
-        "5. Preview the non-live response contract through `/v1/samples/market-data` when the buyer needs proof of value before paying.\n"
+        "5. Preview the non-live response contract through `/v1/samples/market-data`, or call `/v1/samples/live-showcase` for one free, real, attributed BTCUSD VWAP and bid/ask with a recomputable provenance digest, when the buyer needs proof of value before paying.\n"
         "6. Fetch live data through signed x402 for direct public HTTP, or use the free "
         "starter allowance only as an eligible authenticated connector user "
         f"({FREE_TIER_OFFER_LINE}). Start a subscription trial at `/go/free-trial`, "

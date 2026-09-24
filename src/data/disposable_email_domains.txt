@@ -1,7 +1,7 @@
 # Disposable / throwaway email domains blocked from the free tier.
 # One domain per line, lowercase; '#' starts a comment. Override per domain with
-# FREE_TIER_EMAIL_DOMAIN_ALLOWLIST. Extend from a maintained public list before
-# launch (see docs/gtm/free_tier_dev_checkpoint_2026-09-23.md section 4.1).
+# FREE_TIER_EMAIL_DOMAIN_ALLOWLIST, or point FREE_TIER_DISPOSABLE_EMAIL_BLOCKLIST_PATH
+# at a maintained external list (see docs/gtm/free_tier_dev_checkpoint_2026-09-23.md 4.1).
 10minutemail.com
 10minutemail.net
 20minutemail.com

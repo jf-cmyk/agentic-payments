@@ -259,9 +259,18 @@ def _load_domain_list(path_text: str, mtime: float) -> frozenset[str]:
     return frozenset(domains)
 
 
+PACKAGED_DISPOSABLE_DOMAINS_PATH = Path(__file__).parent / "data" / "disposable_email_domains.txt"
+
+
+def disposable_email_blocklist_path() -> Path:
+    """Return the configured blocklist path, or the list shipped in the package."""
+    configured = (settings.free_tier.disposable_email_blocklist_path or "").strip()
+    return Path(configured) if configured else PACKAGED_DISPOSABLE_DOMAINS_PATH
+
+
 def disposable_email_domains() -> frozenset[str]:
     """Return the maintained disposable-domain blocklist (empty when missing)."""
-    path = Path(settings.free_tier.disposable_email_blocklist_path)
+    path = disposable_email_blocklist_path()
     try:
         mtime = path.stat().st_mtime
     except OSError:

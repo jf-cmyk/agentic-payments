@@ -32,6 +32,7 @@ from src.blocksize_client import BlocksizeClient, BlocksizeAPIError
 from src.config import settings
 from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
 from src import free_tier
+from src import live_showcase
 from src.models import (
     BidAskResponse,
     ErrorResponse,
@@ -702,6 +703,7 @@ async def get_pricing_info() -> str:
                 "recommended_paid_price_usdc": "0.25",
             },
         },
+        "free_live_showcase": live_showcase.showcase_handoff(),
         "coverage": {
             "live_counts": f"{PUBLIC_BASE_URL}/v1/coverage",
             "instrument_search": f"{PUBLIC_BASE_URL}/v1/search?q={{query}}",

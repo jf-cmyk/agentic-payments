@@ -305,6 +305,14 @@ class TestPublicRemoteDiscoveryTools:
         assert "utm_campaign=resolver_handoff" in parsed["request"]["url"]
         assert parsed["behavior"]["returns_live_data"] is False
         assert parsed["behavior"]["starts_payment"] is False
+        showcase = parsed["free_live_showcase"]
+        assert showcase["url"] == (
+            "https://mcp.blocksize.info/v1/samples/live-showcase?symbol=BTCUSD"
+        )
+        assert showcase["symbols"] == ["BTCUSD"]
+        assert showcase["returns_live_data"] is True
+        assert showcase["starts_payment"] is False
+        assert "provenance digest" in showcase["purpose"]
 
     @pytest.mark.asyncio
     async def test_workflow_builder_preserves_revenue_attribution_and_spend_controls(self):

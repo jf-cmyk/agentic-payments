@@ -6,6 +6,7 @@ section 4 has a test here.
 
 from __future__ import annotations
 
+from pathlib import Path
 import sqlite3
 
 import pytest
@@ -87,7 +88,10 @@ def test_disposable_domains_are_blocked_unless_allowlisted(monkeypatch, tmp_path
     assert free_tier.is_disposable_email("agent@mailinator.com") is False
 
 
-def test_shipped_blocklist_loads_and_contains_common_providers():
+def test_shipped_blocklist_loads_and_contains_common_providers(monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "disposable_email_blocklist_path", "")
+    assert free_tier.disposable_email_blocklist_path() == free_tier.PACKAGED_DISPOSABLE_DOMAINS_PATH
+    assert free_tier.PACKAGED_DISPOSABLE_DOMAINS_PATH.is_relative_to(Path(free_tier.__file__).parent)
     domains = free_tier.disposable_email_domains()
     assert {"mailinator.com", "guerrillamail.com", "yopmail.com"} <= domains
     assert all(domain == domain.lower() and " " not in domain for domain in domains)
