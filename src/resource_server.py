@@ -12733,6 +12733,8 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         summaryItem("CTA impressions", fmt.format(summary.cta_impressions || 0)),
         summaryItem("/go clicks", fmt.format(summary.go_clicks || 0)),
         summaryItem("Trial starts", fmt.format(summary.trial_starts || 0)),
+        summaryItem("Agent registrations", fmt.format(summary.agent_registrations || 0)),
+        summaryItem("Agents approved", fmt.format(summary.agents_approved || 0)),
         summaryItem("Worst-case exposure", `${fmt.format(ledger.worst_case_exposure_credits || 0)} cr`),
       ].join("");
       bars("free-tier-thresholds", summary.threshold_crossings || {}, "blue");

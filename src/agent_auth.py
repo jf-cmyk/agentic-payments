@@ -29,6 +29,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from src.connector_auth import identity_from_access_token
+from src.observability import fingerprint, record_usage_event
 
 CLAIM_GRANT = "urn:workos:agent-auth:grant-type:claim"
 ASSERTION_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
@@ -107,6 +108,8 @@ class Store:
         now = int(time.time())
         self.put(db, "audit", random_token(), {"event": event, "registration": registration,
                  "at": now}, now + 30 * 86400)
+        record_usage_event("agent_auth_" + event, surface="agent_auth", reason=event,
+                           metadata={"registration_hash": fingerprint(registration)})
 
     def rate(self, db, key, limit, seconds=3600):
         now = int(time.time())

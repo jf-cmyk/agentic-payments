@@ -1350,6 +1350,9 @@ class UsageEventStore:
         cta_by_trigger: Counter[str] = Counter()
         cta_by_plan: Counter[str] = Counter()
         go_clicks: Counter[str] = Counter()
+        agent_lifecycle: Counter[str] = Counter()
+        agents_registered: set[str] = set()
+        agents_approved: set[str] = set()
         grant_events = 0
         for event in events:
             name = str(event.get("event") or "")
@@ -1376,6 +1379,14 @@ class UsageEventStore:
             elif name == "upgrade_cta_shown":
                 cta_by_trigger[str(metadata.get("trigger") or "unknown")] += 1
                 cta_by_plan[str(metadata.get("plan_id") or "unknown")] += 1
+            elif name.startswith("agent_auth_"):
+                step = name.removeprefix("agent_auth_")
+                agent_lifecycle[step] += 1
+                registration_hash = str(metadata.get("registration_hash") or "")
+                if registration_hash and step == "registered":
+                    agents_registered.add(registration_hash)
+                elif registration_hash and step == "approved":
+                    agents_approved.add(registration_hash)
             elif name == "outbound_conversion_click":
                 destination = str(metadata.get("destination") or event.get("subject") or "")
                 if destination:
@@ -1398,11 +1409,15 @@ class UsageEventStore:
                 "go_clicks_by_destination": dict(go_clicks.most_common()),
                 "trial_starts": trial_starts,
                 "cta_click_through_rate": (total_clicks / cta_impressions) if cta_impressions else None,
+                "agent_registrations": len(agents_registered) or agent_lifecycle.get("registered", 0),
+                "agents_approved": len(agents_approved) or agent_lifecycle.get("approved", 0),
+                "agent_auth_lifecycle": dict(agent_lifecycle.most_common()),
             },
             "definitions": {
                 "grant": "First free-tier reservation for a salted email grant key (one per person across connectors).",
                 "exhaustion": "Grant whose monthly pool reached 100% or was denied for an exhausted pool.",
                 "cta_impression": "Upgrade CTA rendered once per identity, trigger, and UTC day on connectors; every 402 on HTTP.",
+                "agent_registration": "Agent service_auth registration started through /agent/identity; approval requires the owner's emailed code and consent.",
                 "trial_start": "Tracked /go/free-trial click; matrix.blocksize.capital signups tagged utm_campaign=free-tier-upgrade are reconciled outside this dashboard.",
             },
         }
