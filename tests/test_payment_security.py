@@ -684,11 +684,13 @@ async def test_facilitator_errors_and_malformed_responses_are_sanitized():
     assert verify_result == {
         "isValid": False,
         "invalidReason": "facilitator_unavailable",
+        "facilitatorErrorKind": "other",
     }
     assert settle_result == {
         "success": False,
         "errorReason": "facilitator_unavailable",
         "outcomeUnknown": True,
+        "facilitatorErrorKind": "other",
     }
     assert secret not in json.dumps(verify_result)
     assert secret not in json.dumps(settle_result)
@@ -993,3 +995,73 @@ async def test_facilitator_invalid_reasons_and_public_ids_cannot_carry_secrets()
     assert settled == {"success": False, "errorReason": "settlement_failed"}
     assert secret not in json.dumps(verified)
     assert secret not in json.dumps(settled)
+
+
+@pytest.mark.asyncio
+async def test_facilitator_verify_retries_once_on_transient_errors_and_logs_without_secrets(monkeypatch, caplog):
+    import httpx
+    import src.payment_security as payment_security
+
+    monkeypatch.setattr(payment_security, "VERIFY_RETRY_DELAY_SECONDS", 0)
+    parsed = _parse()
+    secret = "bearer-secret-that-must-not-escape"
+    calls: list[str] = []
+
+    async def flaky_post(url: str, **_kwargs):
+        calls.append(url)
+        raise httpx.ReadTimeout(secret)
+
+    adapter = FacilitatorAdapter("https://facilitator.example", bearer_token=secret, post=flaky_post)
+    with caplog.at_level("WARNING"):
+        result = await adapter.verify(parsed, _requirement())
+    assert result["invalidReason"] == "facilitator_unavailable"
+    assert result["facilitatorErrorKind"] == "timeout"
+    assert len(calls) == 2, "a timeout on /verify is retried exactly once"
+    assert "kind=timeout" in caplog.text
+    assert secret not in caplog.text
+
+    settle_calls: list[str] = []
+
+    async def failing_settle(url: str, **_kwargs):
+        settle_calls.append(url)
+        raise httpx.ReadTimeout(secret)
+
+    settle_adapter = FacilitatorAdapter("https://facilitator.example", post=failing_settle)
+    settled = await settle_adapter.settle(parsed, _requirement())
+    assert settled["outcomeUnknown"] is True
+    assert len(settle_calls) == 1, "settlement is never retried automatically"
+
+
+@pytest.mark.asyncio
+async def test_facilitator_verify_does_not_retry_client_errors(monkeypatch):
+    import httpx
+    import src.payment_security as payment_security
+
+    monkeypatch.setattr(payment_security, "VERIFY_RETRY_DELAY_SECONDS", 0)
+    parsed = _parse()
+    calls: list[str] = []
+    request = httpx.Request("POST", "https://facilitator.example/verify")
+
+    async def rejecting_post(url: str, **_kwargs):
+        calls.append(url)
+        raise httpx.HTTPStatusError("bad request", request=request, response=httpx.Response(400, request=request))
+
+    adapter = FacilitatorAdapter("https://facilitator.example", post=rejecting_post)
+    result = await adapter.verify(parsed, _requirement())
+    assert result["facilitatorErrorKind"] == "http_4xx"
+    assert len(calls) == 1
+
+
+def test_facilitator_error_kind_classification():
+    import httpx
+    from src.payment_security import facilitator_error_kind
+
+    request = httpx.Request("POST", "https://facilitator.example/verify")
+    assert facilitator_error_kind(httpx.ConnectError("x", request=request)) == "network"
+    assert facilitator_error_kind(
+        httpx.HTTPStatusError("x", request=request, response=httpx.Response(503, request=request))
+    ) == "http_5xx"
+    assert facilitator_error_kind(
+        httpx.HTTPStatusError("x", request=request, response=httpx.Response(429, request=request))
+    ) == "http_429"
+    assert facilitator_error_kind(ValueError("not json")) == "invalid_json"
