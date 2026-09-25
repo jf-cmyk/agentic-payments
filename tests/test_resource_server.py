@@ -1506,6 +1506,50 @@ class TestPaymentGate:
         assert payload["purchase_handoff"]["retry_url"] == payload["resource"]["url"]
         assert "fresh challenge" in payload["message"]
 
+    def test_rejected_payment_names_the_specific_parser_error(
+        self,
+        test_client,
+        observability_store,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings.server, "x402_allow_mock_payments", False)
+        monkeypatch.setattr(settings.server, "x402_allow_legacy_payments", False)
+        legacy_header = base64.b64encode(
+            json.dumps({"x402Version": 1, "scheme": "exact", "network": "base"}).encode()
+        ).decode()
+
+        response = test_client.get(
+            "/v1/vwap/btc-usd",
+            headers={"PAYMENT-SIGNATURE": legacy_header},
+        )
+
+        assert response.status_code == 402
+        details = response.json()["details"]
+        prefix = "Payment payload is not a valid bound x402 v2 signature: "
+        assert details.startswith(prefix)
+        assert "network does not match" not in details
+        failed = [
+            event
+            for event in observability_store.recent_events(limit=50)
+            if event["event"] == "payment_failed"
+        ]
+        assert failed and failed[0]["reason"] == details
+        assert details.removeprefix(prefix) in failed[0]["metadata"]["parse_errors"]
+
+    def test_specific_parse_error_skips_other_network_mismatches(self):
+        official = "Payment payload is not a valid bound x402 v2 signature"
+        errors = [
+            "Accepted payment requirement network does not match",
+            "Payment payload resource URL does not match the request",
+        ]
+        reason = resource_server._specific_parse_error(official, errors)
+        assert reason == f"{official}: {errors[1]}"
+        assert resource_server._payment_failure_code(reason) == "PAYMENT_RESOURCE_MISMATCH"
+        assert resource_server._specific_parse_error(official, []) == official
+        assert resource_server._payment_failure_code(
+            f"{official}: Legacy x402 payment payloads are disabled"
+        ) == "PAYMENT_X402_VERSION_UNSUPPORTED"
+
     def test_paid_packages_have_complete_selection_attribution(
         self,
         test_client,
