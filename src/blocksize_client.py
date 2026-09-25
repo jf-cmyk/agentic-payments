@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from src.config import TOP_250_CRYPTO, settings
+from src.config import KNOWN_CRYPTO_X_BASES, TOP_250_CRYPTO, settings
 from src.models import (
     BidAskData,
     EquityData,
@@ -50,6 +50,11 @@ FIAT_CURRENCIES = {
     "DKK", "CNH", "CNY", "HKD", "SGD", "MXN", "BRL", "ZAR", "TRY", "PLN",
     "CZK", "HUF", "RON", "ILS", "INR",
 }
+# Crypto venues that do not list tokenized stocks (xStocks). A base ending in
+# "X" that trades on one of them is a crypto token (AVAX, DYDX, TRX), not a
+# tokenized equity such as AAPLX.
+CRYPTO_ONLY_VENUES = {"BINANCE", "COINBASE", "OKX"}
+
 METAL_TICKERS = {
     "XAUUSD": "Gold",
     "XAGUSD": "Silver",
@@ -961,11 +966,21 @@ class BlocksizeClient:
         ticker = entry["ticker"]
         base = entry["base_currency"]
         quote = entry["quote_currency"]
+        venues = {str(venue).upper() for venue in entry.get("exchanges") or []}
+        if base.endswith("X") and len(base) >= 2 and quote in {"USD", "USDT", "USDC"}:
+            # Tokenized stock (AAPLX/USD) unless the base is a known crypto
+            # token or the pair trades on a venue without xStocks.
+            return (
+                base not in TOP_250_CRYPTO
+                and base not in KNOWN_CRYPTO_X_BASES
+                and not venues & CRYPTO_ONLY_VENUES
+            )
+        # A bare stock ticker has no separate quote currency. Pairs such as
+        # ADAU (ADA quoted in U) or SUSDT (S quoted in USDT) are crypto.
+        is_bare_ticker = not quote or base == ticker
         return (
-            base.endswith("X")
-            and quote in {"USD", "USDT", "USDC"}
-        ) or (
-            ticker.isalpha()
+            is_bare_ticker
+            and ticker.isalpha()
             and 1 <= len(ticker) <= 5
             and ticker not in TOP_250_CRYPTO
             and quote not in FIAT_CURRENCIES

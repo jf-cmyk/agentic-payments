@@ -99,6 +99,7 @@ from src.models import (
     InstrumentListResponse,
     PairInfo,
     PairSearchResponse,
+    StatePriceData,
     VWAPResponse,
 )
 from src.marketplace_health import collect_listing_health
@@ -6421,6 +6422,34 @@ async def post_bidask_compatibility(pair: str, request: Request) -> dict[str, An
     return await get_bidask(pair, request)
 
 
+STATE_PRICE_STALE_SECONDS = 300
+
+
+def _state_price_freshness(data: StatePriceData, *, from_stream: bool) -> dict[str, Any]:
+    """Describe how current a state price is, so agents never mistake an old
+    on-chain pool snapshot for a live stream value."""
+    ts = data.timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    age_seconds = max(0, int((datetime.now(UTC) - ts).total_seconds()))
+    freshness: dict[str, Any] = {
+        "source": "state_subscribe_stream" if from_stream else "onchain_pool_snapshot",
+        "is_live_stream": from_stream,
+        "observed_at": ts.isoformat(),
+        "age_seconds": age_seconds,
+        "stale_after_seconds": STATE_PRICE_STALE_SECONDS,
+        "is_stale": age_seconds > STATE_PRICE_STALE_SECONDS,
+    }
+    if freshness["is_stale"]:
+        freshness["warning"] = (
+            "This state price is older than five minutes. It comes from the last on-chain pool "
+            "update, not the live state stream; do not treat it as a current market price."
+            if not from_stream
+            else "The live state stream has not updated this pair for more than five minutes."
+        )
+    return freshness
+
+
 @app.get("/v1/state/{pair}", responses=X402_RESPONSE, openapi_extra=X402_CRYPTO_PAYMENT_INFO)
 async def get_state_price_endpoint(pair: str, request: Request) -> dict[str, Any]:
     """Get pool-derived state price for a covered crypto/protocol pair."""
@@ -6474,6 +6503,9 @@ async def get_state_price_endpoint(pair: str, request: Request) -> dict[str, Any
                 ),
             },
         }
+        resp["freshness"] = _state_price_freshness(
+            data, from_stream=source_method == "state_subscribe_cache"
+        )
         if cache_error:
             resp["meta"]["cache_note"] = cache_error
         if credit_meta := _credit_meta_for_request(request):
@@ -12684,7 +12716,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         ? ` Global cap: ${fmt.format(ledger.global_credits_today || 0)} / ${fmt.format(ledger.global_daily_cap_credits)} credits today.`
         : " Global daily cap is disabled.";
       document.getElementById("free-tier-boundary").textContent =
-        `${config.enabled === false ? "Free tier is DISABLED (kill switch)." : "Free tier is enabled."} Allowance ${fmt.format(config.monthly_credits || 0)} credits per verified identity per month; free scope: ${(config.allowed_services || []).join(", ") || "none"}.${capNote} CTA click-through: ${pct(summary.cta_click_through_rate)}. Trial starts count tracked /go/free-trial clicks; matrix signups tagged source_channel=mcp are reconciled outside this dashboard.`;
+        `${config.enabled === false ? "Free tier is DISABLED (kill switch)." : "Free tier is enabled."} Allowance ${fmt.format(config.monthly_credits || 0)} credits per verified identity per month; free scope: ${(config.allowed_services || []).join(", ") || "none"}.${capNote} CTA click-through: ${pct(summary.cta_click_through_rate)}. Trial starts count tracked /go/free-trial clicks; matrix signups tagged utm_campaign=free-tier-upgrade are reconciled outside this dashboard.`;
     }
 
     function renderRwaPilot(data) {

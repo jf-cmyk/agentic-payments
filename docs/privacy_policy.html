@@ -40,6 +40,7 @@
       <li>Basic request metadata such as timestamps, user agent, and network-level diagnostics needed to operate and secure the service.</li>
       <li>Free discovery queries, such as symbol searches and service listings, so we can monitor reliability and product usage.</li>
       <li>OAuth account identifiers and scopes needed to authenticate connector users, isolate account entitlements, and prevent abuse. Direct identifiers are not returned in connector credit responses.</li>
+      <li>For the monthly free tier, a salted one-way hash of your normalized, verified email address, so one person receives one allowance across the Claude, Cursor, and OpenAI connectors. We do not store the email address itself for this purpose, and the hash cannot be reversed to reveal it.</li>
       <li>Read-only connector tool names, requested instruments, result status, credit accounting, and reliability diagnostics needed to deliver and audit the service.</li>
       <li>Wallet identifiers, payment headers, or credit headers when you use paid or credit-based routes.</li>
       <li>Payment proof material, transaction hashes, and related verification data when x402 settlement is used.</li>
@@ -49,7 +50,7 @@
     <h2>How We Use Data</h2>
     <ul>
       <li>To deliver discovery responses, documentation access, and paid market data.</li>
-      <li>To authenticate connector users and maintain account-scoped starter-credit records.</li>
+      <li>To authenticate connector users, maintain account-scoped monthly free-tier credit records, and enforce the free tier's fair-use limits.</li>
       <li>To verify payment proofs, prevent replay attacks, and reduce fraud or abuse.</li>
       <li>To troubleshoot outages, improve latency, and understand which product surfaces are being used.</li>
       <li>To respond to support requests and maintain service quality.</li>

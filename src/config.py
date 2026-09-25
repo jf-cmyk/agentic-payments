@@ -37,6 +37,12 @@ def _csv_list(value: str) -> list[str]:
 # Update this list periodically as market caps shift.
 # ---------------------------------------------------------------------------
 
+# Crypto tokens whose symbol ends in "X" but that trade only on venues that
+# also list tokenized stocks (xStocks such as AAPLX), so symbol and venue rules
+# cannot tell them apart. Found by the 2026-09-25 catalog review; extend when
+# a new one appears.
+KNOWN_CRYPTO_X_BASES: set[str] = {"ALEX", "APEX", "HTX", "IDEX", "MYX", "USDX", "WEMIX"}
+
 TOP_250_CRYPTO: set[str] = {
     # Blue-chip (top 20)
     "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK",

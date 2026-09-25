@@ -6571,6 +6571,22 @@ class TestDataEndpoints:
         assert data["meta"]["credits"]["credit_cost"] == 1.0
         assert data["meta"]["upstream_methods"] == ["state_instruments", "state_pool"]
         assert data["meta"]["citation"]["methodology_url"].endswith("/signed-oracle-feeds")
+        # A months-old pool snapshot is labelled as such, never passed off as live.
+        freshness = data["freshness"]
+        assert freshness["source"] == "onchain_pool_snapshot"
+        assert freshness["is_live_stream"] is False
+        assert freshness["is_stale"] is True
+        assert freshness["age_seconds"] > 300
+        assert "not the live state stream" in freshness["warning"]
+
+    def test_state_freshness_marks_recent_stream_values_as_live(self):
+        from src.resource_server import _state_price_freshness
+
+        recent = StatePriceData(pair="MSOLUSD", price=91.9, timestamp=datetime.now(timezone.utc))
+        freshness = _state_price_freshness(recent, from_stream=True)
+        assert freshness["source"] == "state_subscribe_stream"
+        assert freshness["is_stale"] is False
+        assert "warning" not in freshness
 
     def test_vwap30m_endpoint_uses_closingprice_and_starter_credits(self, test_client, tmp_path):
         mock_client = AsyncMock()

@@ -107,12 +107,12 @@ and resubmit each package.
 
 - Pricing page: add a "Free" column above Developer: "15,000 free live-data
   credits every month via the MCP connectors. Evaluation licence, attribution
-  required. Start free trial." linking to matrix.blocksize.capital with
-  `source_channel=mcp` preserved.
-- The trial signup form must record `source_channel` and the forwarded
-  `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term` from
-  `/go/free-trial`, so trial starts can be reconciled with the dashboard's
-  `/go` clicks.
+  required. Start free trial." linking to `https://mcp.blocksize.info/go/free-trial`.
+- The trial signup form must record the forwarded `utm_source`, `utm_medium`,
+  `utm_campaign`, `utm_content`, `utm_term` from `/go/free-trial`, so trial
+  starts can be reconciled with the dashboard's `/go` clicks. Connector upgrade
+  links arrive with `utm_medium=product` and `utm_campaign=free-tier-upgrade`
+  (corrected 2026-09-25: `/go` forwards UTM keys only, not `source_channel`).
 - Link the Developer, Start-Up, Business rows to `/go/pricing` targets and keep
   the published prices in EUR (49 / 299 / 799, annual 15% off) in sync with
   `src/commercial_plans.py`.
@@ -131,7 +131,7 @@ and resubmit each package.
 ## 4. First-week monitoring (command center)
 
 - North star: `/go/free-trial` clicks (Free Tier panel "Trial starts") and
-  reconciled matrix signups tagged `source_channel=mcp`.
+  reconciled matrix signups tagged `utm_campaign=free-tier-upgrade`.
 - Watch: grants per day, pool consumption distribution (threshold crossings),
   exhaustion rate, CTA impressions to clicks, abuse flags per 1,000 grants,
   global cap remaining (`free_tier.ledger.global_cap_remaining_today`).
