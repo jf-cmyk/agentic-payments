@@ -19,7 +19,7 @@ import re
 from typing import Any
 
 from src.commercial_plans import conversion_ctas
-from src.config import TOP_250_CRYPTO, settings
+from src.config import KNOWN_CRYPTO_X_BASES, TOP_250_CRYPTO, settings
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,6 @@ def operator_status() -> dict[str, Any]:
         "period": FREE_TIER_PERIOD,
         "allowed_services": sorted(settings.free_tier.allowed_service_set),
         "guards": guard_summary(),
-        "ledger_db_path": ledger_path,
         # Railway keeps durable state under /data; a relative path would be lost on redeploy.
         "ledger_on_persistent_volume": ledger_path.startswith("/data/"),
         "email_hash_salt_configured": bool((settings.free_tier.email_hash_salt or "").strip()),
@@ -339,7 +338,12 @@ def looks_like_equity_symbol(symbol: str) -> bool:
     for quote in ("USDT", "USDC", "USD"):
         if clean.endswith(quote) and len(clean) > len(quote):
             base = clean[: -len(quote)]
-            return base.endswith("X") and len(base) >= 2 and base not in TOP_250_CRYPTO
+            return (
+                base.endswith("X")
+                and len(base) >= 2
+                and base not in TOP_250_CRYPTO
+                and base not in KNOWN_CRYPTO_X_BASES
+            )
     return bool(_EQUITY_LIKE_RE.fullmatch(clean)) and clean not in TOP_250_CRYPTO
 
 

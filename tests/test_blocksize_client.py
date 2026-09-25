@@ -555,3 +555,35 @@ class TestHelpers:
 
     def test_split_pair_bare_equity_ticker(self):
         assert _split_pair("AAPL") == ("AAPL", "")
+
+
+@pytest.mark.parametrize(
+    ("entry", "is_equity"),
+    [
+        ({"ticker": "AAPLXUSD", "base_currency": "AAPLX", "quote_currency": "USD", "exchanges": ["BYBIT", "KRAKEN"]}, True),
+        ({"ticker": "TSLAXUSDT", "base_currency": "TSLAX", "quote_currency": "USDT", "exchanges": ["GATEIO", "MEXC"]}, True),
+        ({"ticker": "VXUSD", "base_currency": "VX", "quote_currency": "USD", "exchanges": ["BYBIT"]}, True),
+        # Crypto tokens ending in X: top-250 asset, crypto-only venue, or known list.
+        ({"ticker": "AVAXUSD", "base_currency": "AVAX", "quote_currency": "USD", "exchanges": ["BINANCE", "COINBASE"]}, False),
+        ({"ticker": "DYDXUSDT", "base_currency": "DYDX", "quote_currency": "USDT", "exchanges": ["OKX"]}, False),
+        ({"ticker": "WEMIXUSD", "base_currency": "WEMIX", "quote_currency": "USD", "exchanges": ["MEXC"]}, False),
+        # Pairs with a separate quote currency are not bare stock tickers.
+        ({"ticker": "ADAU", "base_currency": "ADA", "quote_currency": "U", "exchanges": ["BINANCE"]}, False),
+        ({"ticker": "UBTC", "base_currency": "U", "quote_currency": "BTC", "exchanges": ["BINANCE"]}, False),
+        ({"ticker": "SUSDT", "base_currency": "S", "quote_currency": "USDT", "exchanges": ["MEXC"]}, False),
+        # Upstream asset-class metadata still wins.
+        ({"ticker": "ADAU", "base_currency": "ADA", "quote_currency": "U", "asset_class": "equity"}, True),
+    ],
+)
+def test_equity_like_entry_separates_tokenized_stocks_from_crypto(entry, is_equity):
+    from src.blocksize_client import BlocksizeClient
+
+    assert BlocksizeClient._is_equity_like_entry(entry) is is_equity
+
+
+def test_free_tier_fallback_treats_known_crypto_x_tokens_as_crypto():
+    from src.free_tier import looks_like_equity_symbol
+
+    assert looks_like_equity_symbol("AAPLXUSD") is True
+    assert looks_like_equity_symbol("WEMIXUSDT") is False
+    assert looks_like_equity_symbol("APEXUSD") is False

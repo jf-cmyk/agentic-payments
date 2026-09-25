@@ -1403,7 +1403,7 @@ class UsageEventStore:
                 "grant": "First free-tier reservation for a salted email grant key (one per person across connectors).",
                 "exhaustion": "Grant whose monthly pool reached 100% or was denied for an exhausted pool.",
                 "cta_impression": "Upgrade CTA rendered once per identity, trigger, and UTC day on connectors; every 402 on HTTP.",
-                "trial_start": "Tracked /go/free-trial click; matrix.blocksize.capital signups tagged source_channel=mcp are reconciled outside this dashboard.",
+                "trial_start": "Tracked /go/free-trial click; matrix.blocksize.capital signups tagged utm_campaign=free-tier-upgrade are reconciled outside this dashboard.",
             },
         }
 
