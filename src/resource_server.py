@@ -2484,6 +2484,23 @@ async def get_mcp_registry_auth(request: Request) -> Response:
 
 
 @app.api_route(
+    "/.well-known/openai-apps-challenge",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def get_openai_apps_challenge(request: Request) -> Response:
+    """Serve the OpenAI plugin directory domain verification token.
+
+    The token comes from the OpenAI Platform plugin submission form and is set
+    as ``OPENAI_APPS_CHALLENGE_TOKEN``. Without it the route returns 404.
+    """
+    token = os.environ.get("OPENAI_APPS_CHALLENGE_TOKEN", "").strip()
+    if not token or len(token) > 512 or not token.isprintable():
+        return PlainTextResponse("Not Found", status_code=404)
+    return _cacheable_text_metadata_response(request, token, max_age_seconds=60)
+
+
+@app.api_route(
     "/.well-known/x402",
     methods=["GET", "HEAD"],
     include_in_schema=False,

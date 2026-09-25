@@ -1191,6 +1191,19 @@ class TestPublicListingSurfaces:
         assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
         assert any(resource.endswith("/v1/bidask/AAPLXUSD") for resource in x402_data["resources"])
 
+    def test_openai_apps_challenge_serves_configured_token(self, test_client, monkeypatch):
+        monkeypatch.delenv("OPENAI_APPS_CHALLENGE_TOKEN", raising=False)
+        assert test_client.get("/.well-known/openai-apps-challenge").status_code == 404
+
+        monkeypatch.setenv("OPENAI_APPS_CHALLENGE_TOKEN", "  openai-verification-token-123  ")
+        response = test_client.get("/.well-known/openai-apps-challenge")
+        assert response.status_code == 200
+        assert response.text == "openai-verification-token-123"
+        assert response.headers["content-type"].startswith("text/plain")
+
+        monkeypatch.setenv("OPENAI_APPS_CHALLENGE_TOKEN", "bad\ntoken")
+        assert test_client.get("/.well-known/openai-apps-challenge").status_code == 404
+
     @pytest.mark.parametrize(
         "metadata_path",
         [
