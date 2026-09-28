@@ -40,10 +40,40 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import asyncio
+import logging
+
 import httpx
 
 from src.payment_limits import MAX_PAYMENT_REPLAY_ENTRIES, MAX_PAYMENT_REPLAY_TTL_SECONDS
 from src.security_config import is_production_environment
+
+logger = logging.getLogger(__name__)
+
+# Facilitator failures that are worth one retry for the read-only /verify call.
+VERIFY_RETRY_DELAY_SECONDS = 0.5
+
+
+def facilitator_error_kind(exc: BaseException) -> str:
+    """Classify a facilitator call failure without exposing payloads or headers."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code if exc.response is not None else 0
+        if status == 429:
+            return "http_429"
+        return "http_5xx" if status >= 500 else "http_4xx"
+    if isinstance(exc, (httpx.ConnectError, httpx.NetworkError)):
+        return "network"
+    if isinstance(exc, PaymentSecurityError):
+        return "oversized_response"
+    if isinstance(exc, ValueError):
+        return "invalid_json"
+    return "other"
+
+
+def _is_transient_facilitator_error(kind: str) -> bool:
+    return kind in {"timeout", "http_5xx", "http_429", "network"}
 
 try:  # The production image must install the optional x402 dependency.
     from x402.schemas import SupportedResponse as _SDK_SUPPORTED_RESPONSE
@@ -962,10 +992,28 @@ class FacilitatorAdapter:
             request_json = self._request(payment, requirement)
         except PaymentSecurityError:
             return {"isValid": False, "invalidReason": "payment_requirement_mismatch"}
-        try:
-            response = await self._call("verify", request_json)
-        except Exception:
-            return {"isValid": False, "invalidReason": "facilitator_unavailable"}
+        response: Any = None
+        for attempt in (1, 2):
+            try:
+                response = await self._call("verify", request_json)
+                break
+            except Exception as exc:  # noqa: BLE001 - every failure must fail closed
+                kind = facilitator_error_kind(exc)
+                logger.warning(
+                    "x402 facilitator verify failed: kind=%s type=%s attempt=%d network=%s",
+                    kind,
+                    type(exc).__name__,
+                    attempt,
+                    payment.accepted.get("network"),
+                )
+                if attempt == 1 and _is_transient_facilitator_error(kind):
+                    await asyncio.sleep(VERIFY_RETRY_DELAY_SECONDS)
+                    continue
+                return {
+                    "isValid": False,
+                    "invalidReason": "facilitator_unavailable",
+                    "facilitatorErrorKind": kind,
+                }
         return _sanitize_verify_response(
             response,
             expected_network=str(payment.accepted["network"]),
@@ -982,7 +1030,12 @@ class FacilitatorAdapter:
             }
         try:
             response = await self._call_supported()
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - capability probe fails closed
+            logger.warning(
+                "x402 facilitator supported probe failed: kind=%s type=%s",
+                facilitator_error_kind(exc),
+                type(exc).__name__,
+            )
             return {
                 "checked": True,
                 "available": False,
@@ -1006,11 +1059,19 @@ class FacilitatorAdapter:
             return {"success": False, "errorReason": "payment_requirement_mismatch"}
         try:
             response = await self._call("settle", request_json)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - never retry a settlement blindly
+            kind = facilitator_error_kind(exc)
+            logger.error(
+                "x402 facilitator settle failed, outcome unknown: kind=%s type=%s network=%s",
+                kind,
+                type(exc).__name__,
+                payment.accepted.get("network"),
+            )
             return {
                 "success": False,
                 "errorReason": "facilitator_unavailable",
                 "outcomeUnknown": True,
+                "facilitatorErrorKind": kind,
             }
         result = _sanitize_settle_response(
             response,
