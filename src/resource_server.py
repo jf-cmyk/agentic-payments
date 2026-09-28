@@ -35,6 +35,7 @@ import os
 import base64
 import binascii
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -76,7 +77,7 @@ from src.commercial_plans import (
 from src.search_discovery import router as search_discovery_router
 from src.blocksize_stream_cache import BlocksizeStreamCache
 from src.cex_stream_cache import CEXBookCache, KrakenV2BookStream
-from src.config import TOP_250_CRYPTO, settings
+from src.config import KNOWN_CRYPTO_X_BASES, TOP_250_CRYPTO, settings
 from src.public_mcp_http import create_public_http_app
 from src.credit_manager import (
     CREDIT_COSTS,
@@ -1155,6 +1156,24 @@ async def _probe_blocksize_dependency(client: BlocksizeClient) -> dict[str, Any]
     }
 
 
+BIDASK_CLASSIFICATION_REFRESH_SECONDS = 3600.0
+
+
+async def _run_bidask_classification_refresh_loop(app: FastAPI) -> None:
+    """Keep the catalog classification warm so x402 pricing never falls back
+    to naming rules for a listed pair."""
+    while True:
+        client = getattr(app.state, "blocksize", None)
+        refresh = getattr(client, "refresh_classification", None)
+        if callable(refresh):
+            try:
+                count = await refresh()
+                logger.info("Bid/ask classification refreshed: %d symbols", count)
+            except Exception as exc:  # noqa: BLE001 - keep the last good mapping
+                logger.warning("Bid/ask classification refresh failed: %s", type(exc).__name__)
+        await asyncio.sleep(BIDASK_CLASSIFICATION_REFRESH_SECONDS)
+
+
 async def _run_blocksize_dependency_probe_loop(app: FastAPI) -> None:
     """Refresh the cached dependency result without probing on each readiness call."""
     interval = max(15.0, _blocksize_probe_max_age_seconds() / 3)
@@ -1289,6 +1308,7 @@ async def lifespan(app: FastAPI):
     app.state.instrument_catalog_cache_lock = asyncio.Lock()
     app.state.blocksize_dependency = await _probe_blocksize_dependency(app.state.blocksize)
     app.state.blocksize_dependency_task = None
+    app.state.bidask_classification_task = None
     if (
         app.state.blocksize_dependency.get("required")
         and not app.state.blocksize_dependency.get("available")
@@ -1373,6 +1393,10 @@ async def lifespan(app: FastAPI):
             _run_blocksize_dependency_probe_loop(app),
             name="blocksize-readiness-probe",
         )
+        app.state.bidask_classification_task = asyncio.create_task(
+            _run_bidask_classification_refresh_loop(app),
+            name="bidask-classification-refresh",
+        )
     app.state.store_readiness_task = asyncio.create_task(
         _run_store_readiness_probe_loop(app),
         name="store-readiness-probe",
@@ -1400,6 +1424,11 @@ async def lifespan(app: FastAPI):
                     async with OPENAI_MCP_HTTP_APP.lifespan(OPENAI_MCP_HTTP_APP):
                         yield
     finally:
+        classification_task = getattr(app.state, "bidask_classification_task", None)
+        if classification_task is not None:
+            classification_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await classification_task
         if app.state.facilitator_support_task is not None:
             app.state.facilitator_support_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -3377,8 +3406,24 @@ def _quote_from_symbol(symbol: str) -> str:
 
 
 def _looks_like_equity_bidask_symbol(symbol: str) -> bool:
-    """Heuristically identify equity tickers routed through /v1/bidask."""
+    """Identify tokenized-equity tickers routed through /v1/bidask.
+
+    The upstream catalog classification (refreshed hourly, venue-aware) is
+    authoritative, so search, the free-tier scope and x402 pricing agree on
+    every listed pair. The naming rules below apply only before the first
+    catalog read or for symbols the catalog does not list.
+    """
     clean = symbol.upper()
+    client = getattr(app.state, "blocksize", None)
+    cached_lookup = getattr(client, "cached_classification", None)
+    if callable(cached_lookup) and not inspect.iscoroutinefunction(cached_lookup):
+        try:
+            cached = cached_lookup(clean)
+        except Exception:  # noqa: BLE001 - pricing must never fail on a cache read
+            cached = None
+        if isinstance(cached, str) and cached in {"equity", "crypto", "fx", "metal"}:
+            return cached == "equity"
+
     quote = _quote_from_symbol(clean)
     base = clean[: -len(quote)] if quote else clean
 
@@ -3386,7 +3431,17 @@ def _looks_like_equity_bidask_symbol(symbol: str) -> bool:
         return False
 
     if quote in {"USD", "USDT", "USDC"}:
-        return base.endswith("X")
+        return (
+            base.endswith("X")
+            and base not in TOP_250_CRYPTO
+            and base not in KNOWN_CRYPTO_X_BASES
+        )
+
+    # Crypto pairs quoted in, or against, the "U" stablecoin (ADAU, UBTC).
+    if (clean.endswith("U") and clean[:-1] in TOP_250_CRYPTO) or (
+        clean.startswith("U") and clean[1:] in TOP_250_CRYPTO
+    ):
+        return False
 
     return clean.isalpha() and 1 <= len(clean) <= 5 and clean not in TOP_250_CRYPTO
 

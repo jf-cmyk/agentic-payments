@@ -7406,3 +7406,41 @@ def test_growth_funnel_reports_first_call_to_paid_per_client():
     assert growth["by_client"]["curl"]["paid_identities"] == 0
     assert growth["by_client"]["curl"]["first_call_to_paid_rate"] == 0.0
     assert "by_client" in growth["definitions"]
+
+
+
+class TestBidAskPricingClassification:
+    def test_pricing_follows_the_catalog_classification(self):
+        from unittest.mock import MagicMock
+
+        from src.config import settings
+        from src.resource_server import _bidask_price_for_symbol, app
+
+        previous = getattr(app.state, "blocksize", None)
+        client = MagicMock()
+        client.cached_classification = lambda symbol: {
+            "AVAXUSD": "crypto",
+            "ADXUSD": "crypto",
+            "AAPLXUSD": "equity",
+        }.get(symbol)
+        app.state.blocksize = client
+        try:
+            assert _bidask_price_for_symbol("AAPLXUSD") == settings.pricing.equities
+            assert _bidask_price_for_symbol("ADXUSD") < settings.pricing.equities
+            assert _bidask_price_for_symbol("AVAXUSD") == settings.pricing.get_crypto_price("AVAX")
+        finally:
+            app.state.blocksize = previous
+
+    def test_pricing_fallback_without_catalog_treats_known_crypto_as_crypto(self):
+        from src.config import settings
+        from src.resource_server import _bidask_price_for_symbol, app
+
+        previous = getattr(app.state, "blocksize", None)
+        app.state.blocksize = None
+        try:
+            for crypto in ("AVAXUSD", "DYDXUSDT", "TRXUSD", "WEMIXUSD", "ADAU", "UBTC"):
+                assert _bidask_price_for_symbol(crypto) < settings.pricing.equities, crypto
+            for equity in ("AAPLXUSD", "TSLAXUSDT", "NVDAXUSD"):
+                assert _bidask_price_for_symbol(equity) == settings.pricing.equities, equity
+        finally:
+            app.state.blocksize = previous
