@@ -23,7 +23,7 @@ from src.mcp_server import (
     search_pairs as search_local_pairs,
 )
 from src.observability import record_usage_event
-from src import free_tier
+from src import agent_auth, free_tier
 from src import live_showcase
 from src.public_metadata import (
     AGENT_MANUAL_URL,
@@ -169,6 +169,31 @@ def _record_public_mcp_usage(tool_name: str, **fields: object) -> None:
     )
 
 
+def _free_tier_claim() -> dict[str, object] | None:
+    """Return the concrete steps an agent follows to claim the free monthly credits."""
+    if not free_tier.enabled():
+        return None
+    connector = f"{PUBLIC_BASE_URL}/anthropic/mcp/"
+    steps = [
+        f"Ask the user to add the authenticated connector {connector} and sign in with a verified email.",
+        "Call the same live-data tools through that connector; eligible calls draw on the free monthly pool.",
+    ]
+    claim: dict[str, object] = {
+        "positioning": free_tier.positioning(),
+        "allowance_credits": free_tier.allowance_credits(),
+        "requires": "a signed-in user with a verified email",
+        "authenticated_connector": connector,
+        "other_connectors": [f"{PUBLIC_BASE_URL}/cursor/mcp/", f"{PUBLIC_BASE_URL}/openai/mcp/"],
+        "steps": steps,
+    }
+    if agent_auth.enabled():
+        claim["agent_registration"] = {
+            "endpoint": f"{connector.rstrip('/')}/agent/identity",
+            "note": "An agent may register on the user's behalf; the user approves with an emailed code.",
+        }
+    return claim
+
+
 @public_mcp.tool(
     name="search_pairs",
     title="Instrument Search",
@@ -229,7 +254,15 @@ async def public_list_instruments(
 async def public_get_pricing_info() -> str:
     """Return pricing guidance for public discovery clients."""
     _record_public_mcp_usage("get_pricing_info")
-    return await get_local_pricing_info()
+    pricing = await get_local_pricing_info()
+    claim = _free_tier_claim()
+    if claim is None:
+        return pricing
+    steps = "\n".join(f"{index}. {step}" for index, step in enumerate(claim["steps"], 1))
+    return (
+        f"{pricing}\n\n## Free monthly credits\n\n{claim['positioning']} "
+        f"({claim['requires']}).\n\n{steps}"
+    )
 
 
 @public_mcp.tool(
@@ -584,6 +617,7 @@ async def public_get_market_data_endpoint(
                 "safe_recovery": "Fetch a fresh challenge after any rejection; never edit or reuse a bound signature.",
             },
             "free_live_showcase": live_showcase.showcase_handoff(),
+            "free_tier_claim": _free_tier_claim(),
             "links": {
                 "pricing": PRICING_GUIDE_URL,
                 "openapi": OPENAPI_URL,
@@ -660,6 +694,7 @@ async def public_info() -> str:
                 "mode": "direct-http",
                 "openapi": OPENAPI_URL,
                 "starter_allowance": "Start with authenticated connector credits, then upgrade through x402 payment or an authenticated account plan.",
+                "free_tier_claim": _free_tier_claim(),
                 "notes": (
                     "Live paid market data is exposed through the x402-protected HTTP "
                     "API and advanced local MCP setup, not this public remote server."
