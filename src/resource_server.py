@@ -120,6 +120,8 @@ from src.observability import (
     registry_name_for_path,
     surface_for_path,
 )
+from src.usage_dashboard_page import usage_dashboard_html
+from src.usage_insights import UsageInsights
 from src.public_metadata import (
     AGENT_FRAMEWORK_INTEGRATIONS_URL,
     AGENT_MANUAL_URL,
@@ -11690,6 +11692,24 @@ async def observability_stats(
     )
 
 
+@app.get("/internal/observability/usage", include_in_schema=False)
+async def observability_usage(
+    request: Request,
+    days: int = Query(30, ge=1, le=90),
+) -> JSONResponse:
+    """Return calls by avenue and ticker, users, paid calls and the assessment."""
+    if not _observability_authorized(request):
+        return _observability_unauthorized()
+    if OBSERVABILITY is None:
+        return JSONResponse(
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Observability disabled"},
+        )
+    content = await asyncio.to_thread(UsageInsights(OBSERVABILITY).build, days=days)
+    return JSONResponse(headers={"Cache-Control": "no-store"}, content=content)
+
+
 @app.get("/internal/observability/alerts", include_in_schema=False)
 async def observability_alerts(
     request: Request,
@@ -12343,6 +12363,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
               <option value="true">Include tests</option>
             </select>
           </label>
+          <a class="toolbar-link" href="/internal/observability/command-center">Usage overview</a>
           <a class="toolbar-link" href="/internal/observability/logout">Log out</a>
         </div>
       </header>
@@ -13466,7 +13487,31 @@ async def observability_login(request: Request) -> Any:
 
 @app.get("/internal/observability/command-center", include_in_schema=False, response_model=None)
 async def observability_command_center(request: Request) -> Any:
-    """Serve the protected internal product usage command center."""
+    """Serve the protected usage dashboard: KPIs, avenues, tickers, users, paid calls."""
+    if not _observability_authorized(request):
+        if not dashboard_token():
+            return _observability_unauthorized()
+        return _observability_login_page(request)
+    if OBSERVABILITY is None:
+        return JSONResponse(
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+            content={"error": "Observability disabled"},
+        )
+
+    return HTMLResponse(
+        headers={"Cache-Control": "no-store"},
+        content=usage_dashboard_html(
+            usage_path="/internal/observability/usage",
+            deep_dive_path="/internal/observability/deep-dive",
+            logout_path="/internal/observability/logout",
+        ),
+    )
+
+
+@app.get("/internal/observability/deep-dive", include_in_schema=False, response_model=None)
+async def observability_deep_dive(request: Request) -> Any:
+    """Serve the detailed command center: funnels, marketplaces, RWA pilot, event trace."""
     if not _observability_authorized(request):
         if not dashboard_token():
             return _observability_unauthorized()
