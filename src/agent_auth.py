@@ -41,6 +41,11 @@ TTL = 600
 HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache",
            "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
            "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'"}
+# HTML pages carry forms that POST back to this origin. Under a no-referrer
+# document policy browsers send "Origin: null" on such form submissions (Fetch
+# spec, "append a request Origin header"), which the CSRF check must reject.
+# same-origin keeps the referrer inside this origin and yields a real Origin.
+PAGE_HEADERS = {**HEADERS, "Referrer-Policy": "same-origin"}
 
 
 def enabled() -> bool:
@@ -176,7 +181,7 @@ class AgentAuth:
                             "<meta name=viewport content='width=device-width'>"
                             "<title>Blocksize agent access</title><main>"
                             "<h1>Blocksize agent access</h1>" + content + "</main></html>",
-                            headers=HEADERS)
+                            headers=PAGE_HEADERS)
 
     async def guarded(self, request):
         try:

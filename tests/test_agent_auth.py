@@ -310,3 +310,20 @@ def test_token_without_any_expiry_is_still_refused(rig):
     response = sign_in(rig, reg)
     assert response.status_code == 403
     assert response.json()["reason"] == ["token_without_expiry"]
+
+
+def test_consent_page_allows_same_origin_form_posts_and_rejects_null_origin(rig):
+    """A no-referrer document makes browsers send Origin: null on form POSTs."""
+    reg = register(rig)
+    assert sign_in(rig, reg).status_code == 303
+    page = rig.client.get(ISSUER + "/agent/consent")
+    assert page.status_code == 200
+    assert page.headers["referrer-policy"] == "same-origin"
+    assert "form-action 'self'" in page.headers["content-security-policy"]
+    # JSON responses keep the strict policy.
+    assert rig.client.post(ISSUER + "/agent/identity", json={}).headers["referrer-policy"] == "no-referrer"
+    # What a browser sends from a no-referrer page: must still be refused.
+    null_origin = rig.client.post(ISSUER + "/agent/consent", headers={"Origin": "null"},
+                                  data={"csrf": "x", "decision": "approve", "user_code": "000000"})
+    assert null_origin.status_code == 403
+    assert null_origin.json()["error"] == "invalid_csrf"
