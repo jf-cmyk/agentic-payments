@@ -857,11 +857,30 @@ class BlocksizeClient:
                 mapping[ticker] = "crypto"
         for instrument in vwap_instruments:
             ticker = str(instrument).upper()
-            # VWAP is a crypto-only service; it is authoritative for its symbols.
-            mapping[ticker] = "crypto"
+            # The VWAP catalog also lists tokenized stocks (AAPLXUSD), so it only
+            # fills in symbols the bid/ask catalog does not classify itself.
+            mapping.setdefault(ticker, "crypto")
         self._classification_cache = mapping
         self._classification_cached_at = now
         return mapping
+
+    def cached_classification(self, symbol: str) -> str | None:
+        """Return the catalog classification from the last refresh, without I/O.
+
+        Used where a synchronous answer is needed (x402 price selection). A
+        stale mapping is still preferred to the naming heuristic; ``None``
+        means the catalog has not been read yet or does not list the symbol.
+        """
+        mapping = self._classification_cache
+        if not mapping:
+            return None
+        clean = symbol.strip().upper().replace("-", "").replace("/", "").replace("_", "")
+        return mapping.get(clean)
+
+    async def refresh_classification(self) -> int:
+        """Re-read the instrument catalogs now and return the number of symbols."""
+        self._classification_cached_at = 0.0
+        return len(await self._classification_map())
 
     async def classify_symbol(self, symbol: str) -> str:
         """Return ``crypto``, ``equity``, ``fx``, ``metal``, or ``unknown``.
@@ -929,11 +948,20 @@ class BlocksizeClient:
                 or item.get("category")
                 or ""
             ).lower()
+            raw_exchanges = item.get("exchanges") or item.get("venues") or []
+            exchanges = (
+                [str(venue).upper() for venue in raw_exchanges if venue]
+                if isinstance(raw_exchanges, list)
+                else []
+            )
             entries.append({
                 "ticker": ticker,
                 "base_currency": base,
                 "quote_currency": quote,
                 "asset_class": asset_class,
+                # Venues let the classifier tell crypto (AVAX on Binance) from
+                # tokenized stocks (AAPLX on xStock venues).
+                "exchanges": exchanges,
             })
 
         return entries
