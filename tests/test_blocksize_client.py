@@ -587,3 +587,37 @@ def test_free_tier_fallback_treats_known_crypto_x_tokens_as_crypto():
     assert looks_like_equity_symbol("AAPLXUSD") is True
     assert looks_like_equity_symbol("WEMIXUSDT") is False
     assert looks_like_equity_symbol("APEXUSD") is False
+
+
+def test_instrument_entries_keep_venues_for_classification():
+    from src.blocksize_client import BlocksizeClient
+
+    entries = BlocksizeClient._extract_instrument_entries(
+        {"instruments": [
+            {"ticker": "ADXUSD", "base_currency": "ADX", "quote_currency": "USD", "exchanges": ["binance", "mexc"]},
+            {"ticker": "AAPLXUSD", "base_currency": "AAPLX", "quote_currency": "USD", "exchanges": ["KRAKEN"]},
+        ]}
+    )
+    assert entries[0]["exchanges"] == ["BINANCE", "MEXC"]
+    assert BlocksizeClient._is_equity_like_entry(entries[0]) is False
+    assert BlocksizeClient._is_equity_like_entry(entries[1]) is True
+
+
+@pytest.mark.asyncio
+async def test_classification_map_keeps_tokenized_stocks_listed_in_vwap_catalog():
+    from unittest.mock import AsyncMock
+
+    from src.blocksize_client import BlocksizeClient
+
+    client = BlocksizeClient()
+    client._list_bidask_entries = AsyncMock(return_value=[
+        {"ticker": "AAPLXUSD", "base_currency": "AAPLX", "quote_currency": "USD", "asset_class": "", "exchanges": ["KRAKEN"]},
+        {"ticker": "AVAXUSD", "base_currency": "AVAX", "quote_currency": "USD", "asset_class": "", "exchanges": ["BINANCE"]},
+    ])
+    client.list_vwap_instruments = AsyncMock(return_value=["AAPLXUSD", "AVAXUSD", "BTCUSD"])
+
+    assert await client.refresh_classification() == 3
+    assert client.cached_classification("AAPLXUSD") == "equity"
+    assert client.cached_classification("avax-usd") == "crypto"
+    assert client.cached_classification("BTCUSD") == "crypto"
+    assert client.cached_classification("UNLISTED") is None
