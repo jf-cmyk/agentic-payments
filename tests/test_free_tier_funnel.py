@@ -179,7 +179,7 @@ def test_stats_and_dashboard_expose_the_free_tier_panel(dashboard_client):
     assert "global_cap_remaining_today" in panel["ledger"]
     assert "cta_impressions" in panel["summary"]
 
-    page = dashboard_client.get("/internal/observability")
+    page = dashboard_client.get("/internal/observability/deep-dive")
     assert page.status_code == 200, page.text[:300]
     for element_id in ("free-tier-kpis", "free-tier-thresholds", "free-tier-cta", "free-tier-clicks", "free-tier-boundary"):
         assert f'id="{element_id}"' in page.text

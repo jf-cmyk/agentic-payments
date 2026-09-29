@@ -4609,7 +4609,7 @@ class TestObservabilityDashboard:
         awesome = next(platform for platform in platforms if platform["id"] == "awesome_mcp")
         assert awesome["release_status"] == "merged_listing_stale_wrapper"
 
-        dashboard = test_client.get("/internal/observability/command-center")
+        dashboard = test_client.get("/internal/observability/deep-dive")
         assert dashboard.status_code == 200
         assert "Release Truth" in dashboard.text
         assert "platform.release_status" in dashboard.text
@@ -5371,7 +5371,7 @@ process.stdout.write(JSON.stringify({
         observability_store,
         test_client,
     ):
-        response = test_client.get("/internal/observability/command-center")
+        response = test_client.get("/internal/observability/deep-dive")
 
         assert response.status_code == 200
         assert "Product Usage Command Center" in response.text
@@ -7488,3 +7488,69 @@ class TestBidAskPricingClassification:
                 assert _bidask_price_for_symbol(equity) == settings.pricing.equities, equity
         finally:
             app.state.blocksize = previous
+
+
+def test_usage_endpoint_requires_the_dashboard_token(observability_store, test_client):
+    response = test_client.get(
+        "/internal/observability/usage",
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert response.status_code == 401
+
+
+def test_usage_endpoint_reports_avenues_tickers_and_paid_calls(observability_store, test_client):
+    observability_store.record(
+        "http_request",
+        surface="http_api",
+        endpoint="/v1/vwap/{pair}",
+        status_code=402,
+        ip_hash="client-a",
+        user_agent="node",
+        subject="BTCUSD",
+    )
+    observability_store.record(
+        "mcp_tool_call",
+        surface="anthropic_mcp",
+        tool_name="get_vwap",
+        subject="ETHUSD",
+        user_agent="Claude-User",
+    )
+
+    response = test_client.get("/internal/observability/usage?days=7")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["window_days"] == 7
+    channels = {row["id"]: row["calls"] for row in payload["channels"]}
+    assert channels["x402_http"] == 1
+    assert channels["claude"] == 1
+    assert {row["ticker"] for row in payload["tickers"]["rows"]} == {"BTC-USD", "ETH-USD"}
+    assert payload["paid"]["x402_paid_calls"] == 0
+    assert "improvement_plan" in payload and "assessment" in payload
+
+
+def test_command_center_serves_the_usage_dashboard(observability_store, test_client):
+    response = test_client.get("/internal/observability/command-center")
+
+    assert response.status_code == 200
+    assert "Blocksize usage" in response.text
+    assert '"/internal/observability/usage"' in response.text
+    assert 'href="/internal/observability/deep-dive"' in response.text
+    assert 'href="/internal/observability/logout"' in response.text
+    for section in ("Activity over time", "Calls by avenue", "Tickers called", "Paid calls",
+                    "Assessment", "Improvement plan", "Top user agents"):
+        assert section in response.text
+    # Traffic-derived strings must never be written as HTML.
+    assert "innerHTML" not in response.text
+
+    root = test_client.get("/internal/observability")
+    assert root.status_code == 200
+    assert "Blocksize usage" in root.text
+
+
+def test_deep_dive_links_back_to_the_usage_overview(observability_store, test_client):
+    response = test_client.get("/internal/observability/deep-dive")
+
+    assert response.status_code == 200
+    assert 'href="/internal/observability/command-center">Usage overview' in response.text
