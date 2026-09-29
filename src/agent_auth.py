@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -30,6 +31,8 @@ from starlette.routing import Route
 
 from src.connector_auth import identity_from_access_token
 from src.observability import fingerprint, record_usage_event
+
+logger = logging.getLogger(__name__)
 
 CLAIM_GRANT = "urn:workos:agent-auth:grant-type:claim"
 ASSERTION_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
@@ -262,9 +265,23 @@ class AgentAuth:
         if isinstance(upstream, dict):
             claims = {**claims, **upstream}
         identity = identity_from_access_token(token, namespace="ANTHROPIC") if token else None
-        if (not identity or not identity.email or claims.get("email_verified") is not True
-                or not token.expires_at or not set(self.scopes).issubset(token.scopes)):
-            raise AuthError("verified_account_required", 403)
+        failed = []
+        if not token or not identity:
+            failed.append("no_identity")
+        else:
+            if not identity.email:
+                failed.append("email_missing")
+            verified = claims.get("email_verified")
+            if verified is not True:
+                failed.append("email_verified_missing" if verified is None else "email_not_verified")
+            if not token.expires_at:
+                failed.append("token_without_expiry")
+            if not set(self.scopes).issubset(token.scopes or []):
+                failed.append("scope_missing")
+        if failed:
+            # Names of failed checks only; never the email or token.
+            logger.warning("agent_auth callback rejected: %s", ",".join(failed))
+            return self.json({"error": "verified_account_required", "reason": failed}, 403)
         expiry = min(int(token.expires_at), int(time.time()) + 3600,
                      int(time.time()) + int(issued.expires_in or 0))
         if expiry <= time.time():

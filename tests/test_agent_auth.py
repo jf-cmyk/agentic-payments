@@ -142,6 +142,18 @@ def test_wrong_or_unverified_account_cannot_approve(rig, email, verified):
         assert consent(rig, reg).status_code == 403
     else:
         assert response.status_code == 403
+        body = response.json()
+        assert body["error"] == "verified_account_required"
+        assert body["reason"] == ["email_not_verified"]
+        assert "owner@example.com" not in response.text
+
+
+def test_missing_email_verified_claim_is_named(rig):
+    reg = register(rig)
+    rig.provider.token.claims.pop("email_verified", None)
+    response = sign_in(rig, reg)
+    assert response.status_code == 403
+    assert response.json()["reason"] == ["email_verified_missing"]
 
 
 def test_csrf_wrong_codes_and_replay(rig):
