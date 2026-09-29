@@ -8,6 +8,7 @@
     "url": "https://blocksize.info"
   },
   "homepage": "https://mcp.blocksize.info/claude-connector",
+  "privacyPolicyUrl": "https://mcp.blocksize.info/privacy",
   "repository": "https://github.com/jf-cmyk/agentic-payments",
   "license": "MIT",
   "keywords": [
