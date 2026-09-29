@@ -228,6 +228,14 @@ class UsageEventStore:
             conn.execute("DELETE FROM marketplace_metric_snapshots")
             conn.execute("DELETE FROM event_milestones")
 
+    def release_milestone(self, event: str, identity_hash: str) -> None:
+        """Undo a claim, so a failed side effect can be retried later."""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM event_milestones WHERE event = ? AND identity_hash = ?",
+                (event, identity_hash),
+            )
+
     def claim_milestone(self, event: str, identity_hash: str) -> bool:
         """Atomically claim a once-per-identity event milestone."""
         if not event or not identity_hash:

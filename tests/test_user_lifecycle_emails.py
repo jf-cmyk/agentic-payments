@@ -96,3 +96,30 @@ def test_background_threshold_hook_never_raises_without_a_loop(lifecycle_env):
     signup_alerts.notify_threshold_background("ft_x", 80, {"period": "2026-09"})
     signup_alerts.notify_threshold_background(None, 80, {})
     signup_alerts.notify_threshold_background("ft_x", 95, {})
+
+
+def test_failed_send_releases_the_milestone_for_retry(lifecycle_env, monkeypatch):
+    store = lifecycle_env
+    h = _signup("retry@example.com", "2026-09-20T10:00:00+00:00")
+    real = signup_alerts.send_email
+    attempts = []
+
+    async def failing_then_ok(message, **kwargs):
+        attempts.append(message["subject"])
+        if len(attempts) == 1:
+            raise signup_alerts.SignupAlertError("email_send_failed", 502)
+
+        async def ok_post(url, *, json, headers, timeout):
+            class Response:
+                status_code = 200
+            return Response()
+        kwargs["post"] = ok_post
+        return await real(message, **kwargs)
+
+    monkeypatch.setattr(signup_alerts, "send_email", failing_then_ok)
+    snap = {"period": "2026-09", "monthly_limit": 15000, "credits_remaining": 3000, "resets_at": "2026-10-01"}
+    with pytest.raises(signup_alerts.SignupAlertError):
+        asyncio.run(signup_alerts.notify_threshold(store, h, 80, snap))
+    # The failed attempt did not consume the once-per-month claim.
+    assert asyncio.run(signup_alerts.notify_threshold(store, h, 80, snap)) == "sent"
+    assert len(attempts) == 2

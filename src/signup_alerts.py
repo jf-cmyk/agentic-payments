@@ -573,10 +573,16 @@ async def notify_threshold(store, grant_hash: str, pct: int, snapshot: dict[str,
     if not user or "@" not in str(user.get("email", "")):
         return "unknown_user"
     period = str(snapshot.get("period") or datetime.now(UTC).strftime("%Y-%m"))
-    if not store.claim_milestone(f"user_email_threshold_{pct}_{period}", grant_hash):
+    milestone = f"user_email_threshold_{pct}_{period}"
+    if not store.claim_milestone(milestone, grant_hash):
         return "already_sent"
-    await send_email(build_threshold_email(user, pct, snapshot), to=str(user["email"]),
-                     sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+    try:
+        await send_email(build_threshold_email(user, pct, snapshot), to=str(user["email"]),
+                         sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+    except SignupAlertError:
+        # Give the claim back so the email is retried on the next crossing or run.
+        store.release_milestone(milestone, grant_hash)
+        raise
     record_usage_event("user_email_sent", surface="email", reason=f"threshold_{pct}",
                        metadata={"grant_hash": grant_hash, "campaign": f"free-tier-{pct}"})
     return "sent"
@@ -619,8 +625,13 @@ async def send_nudges(store, *, now: datetime | None = None, post=None) -> int:
             continue
         if not store.claim_milestone("user_email_nudge", grant_hash):
             continue
-        await send_email(build_nudge_email(signup), to=str(signup["email"]),
-                         sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+        try:
+            await send_email(build_nudge_email(signup), to=str(signup["email"]),
+                             sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+        except SignupAlertError:
+            store.release_milestone("user_email_nudge", grant_hash)
+            logger.warning("nudge email failed; will retry on the next run")
+            continue
         record_usage_event("user_email_sent", surface="email", reason="nudge",
                            metadata={"grant_hash": grant_hash, "campaign": "free-tier-nudge"})
         sent += 1
