@@ -784,6 +784,12 @@ async def _run_signup_digest_loop() -> None:
             target += timedelta(days=1)
         await asyncio.sleep(max(60.0, (target - now).total_seconds()))
         try:
+            nudged = await signup_alerts.send_nudges(OBSERVABILITY)
+            if nudged:
+                logger.info("signup nudges sent: %d", nudged)
+        except Exception as exc:  # noqa: BLE001 - nudges must not stop the digest
+            logger.warning("signup nudges failed: %s", type(exc).__name__)
+        try:
             await signup_alerts.send_digest(OBSERVABILITY)
         except Exception as exc:  # noqa: BLE001 - a failed digest must not stop the loop
             logger.warning("signup digest failed: %s", type(exc).__name__)
