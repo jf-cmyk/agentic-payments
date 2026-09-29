@@ -205,7 +205,12 @@ def _classify(
 async def _enumerate(client: AuditClient, service: str) -> Catalog:
     try:
         if service == "vwap":
-            symbols = await client.list_vwap_instruments()
+            # Read the raw upstream catalog, not list_vwap_instruments(): that
+            # method applies the coverage gate this audit regenerates, so the
+            # hidden tickers would never be re-probed and would silently drop
+            # out of the gate on the next run.
+            raw = await client._rpc_call("vwap_instruments")
+            symbols = client._extract_instrument_tickers(raw)
             return Catalog(service, sorted(set(symbols)), {s: "crypto" for s in symbols})
         if service == "bidask":
             entries = await client._list_bidask_entries()
