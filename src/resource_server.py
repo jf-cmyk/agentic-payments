@@ -108,6 +108,7 @@ from src.marketplace_performance import (
     collect_marketplace_performance,
     performance_collection_configured,
 )
+from src import signup_alerts
 from src.observability import (
     PRODUCT_ROUTE_IDS,
     UsageEventStore,
@@ -11521,6 +11522,21 @@ def _build_daily_observability_interpretation(summary: dict[str, Any]) -> dict[s
         "improvement_steps": improvement_steps[:6],
         "checks": checks,
     }
+
+
+@app.post("/internal/clerk/webhook", include_in_schema=False)
+async def clerk_signup_webhook(request: Request) -> JSONResponse:
+    """Clerk (Svix) webhook: email the operator about each new user signup."""
+    body = await request.body()
+    try:
+        result = await signup_alerts.handle_webhook(dict(request.headers), body)
+    except signup_alerts.SignupAlertError as exc:
+        return JSONResponse(
+            status_code=exc.status,
+            headers={"Cache-Control": "no-store"},
+            content={"error": exc.error},
+        )
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/internal/observability/marketplace-metrics", include_in_schema=False)
