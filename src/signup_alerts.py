@@ -14,6 +14,7 @@ activations, free-tier thresholds and upgrade clicks for the operator.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -30,7 +31,7 @@ import httpx
 
 from src import signup_store
 from src.free_tier import grant_key_for_email
-from src.observability import fingerprint, record_usage_event
+from src.observability import fingerprint, get_global_store, record_usage_event
 
 logger = logging.getLogger(__name__)
 
@@ -466,3 +467,161 @@ async def send_digest(store, *, hours: int = 24, now: datetime | None = None, po
     await send_email(render_digest(digest), post=post)
     logger.info("signup digest sent: %d signups, %d grants", digest["signups_count"], len(digest["free_tier_grants"]))
     return digest
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle emails to users: pool thresholds and the no-activity nudge
+# ---------------------------------------------------------------------------
+
+NUDGE_AFTER_HOURS = 48
+NUDGE_WINDOW_HOURS = 24
+LIFECYCLE_THRESHOLDS = (80, 100)
+
+
+def _campaign_links(campaign: str) -> tuple[str, str]:
+    tags = f"utm_source=email&utm_medium=email&utm_campaign={campaign}"
+    return f"{PUBLIC_BASE}/go/free-trial?{tags}", f"{PUBLIC_BASE}/go/pricing?{tags}"
+
+
+def _footer_text() -> str:
+    return ("\nReply to this email if anything is unclear.\n\nBlocksize Capital GmbH\n"
+            f"Data terms: {TERMS_URL}\n"
+            "You receive this because you created a Blocksize connector account.\n")
+
+
+def _footer_html(trial: str, pricing: str) -> str:
+    return (
+        f"<p>Start a <a href='{trial}'>free trial</a> or <a href='{pricing}'>compare plans</a>. "
+        "Reply to this email if anything is unclear.</p>"
+        f"<p style='color:#777;font-size:12px'>Blocksize Capital GmbH · <a href='{TERMS_URL}'>Data terms</a> · "
+        "You receive this because you created a Blocksize connector account.</p>"
+    )
+
+
+def build_threshold_email(user: dict[str, Any], pct: int, snapshot: dict[str, Any]) -> dict[str, str]:
+    first = str(user.get("name", "")).split(" ")[0] if user.get("name") not in (None, "not given") else ""
+    greeting = f"Hi {first}," if first else "Hi,"
+    limit = int(snapshot.get("monthly_limit") or 15000)
+    remaining = int(snapshot.get("credits_remaining") or 0)
+    resets = str(snapshot.get("resets_at") or "the first of next month")
+    trial, pricing = _campaign_links(f"free-tier-{pct}")
+    if pct >= 100:
+        subject = "Your free Blocksize credits are used up for this month"
+        lead = (f"You have used all {limit:,} free live-data credits for this month. "
+                f"They reset on {resets}.")
+    else:
+        subject = f"You have used {pct}% of your free Blocksize credits"
+        lead = (f"You have used {pct}% of your {limit:,} free live-data credits this month; "
+                f"{remaining:,} remain until they reset on {resets}.")
+    text = (
+        f"{greeting}\n\n{lead}\n\n"
+        "If Blocksize data is becoming part of a workflow, a subscription removes the "
+        "monthly limit and adds more feeds and history. Plans start at EUR 49 per month "
+        f"with a free trial: {trial}\nCompare plans: {pricing}\n"
+        + _footer_text()
+    )
+    body_html = (
+        f"<p>{html.escape(greeting)}</p><p>{html.escape(lead)}</p>"
+        "<p>If Blocksize data is becoming part of a workflow, a subscription removes the "
+        "monthly limit and adds more feeds and history. Plans start at EUR 49 per month.</p>"
+        + _footer_html(trial, pricing)
+    )
+    return {"subject": subject, "text": text, "html": body_html}
+
+
+def build_nudge_email(user: dict[str, Any]) -> dict[str, str]:
+    first = str(user.get("name", "")).split(" ")[0] if user.get("name") not in (None, "not given") else ""
+    greeting = f"Hi {first}," if first else "Hi,"
+    trial, pricing = _campaign_links("free-tier-nudge")
+    quickstart = f"{PUBLIC_BASE}/quickstart/first-price"
+    text = (
+        f"{greeting}\n\n"
+        "You connected Blocksize live market data two days ago but have not fetched a price yet. "
+        "Your 15,000 free credits for this month are waiting.\n\n"
+        "Try one of these in your assistant:\n"
+        '  "What is the current multi-venue VWAP for BTC/USD?"\n'
+        '  "Compare the bid/ask spread for ETH/USD and SOL/USD."\n\n'
+        f"Quickstart: {quickstart}\n\n"
+        "If something got in the way, reply and tell us. We read every message.\n"
+        f"When you need production use, plans start at EUR 49 per month with a free trial: {trial}\n"
+        f"Compare plans: {pricing}\n"
+        + _footer_text()
+    )
+    body_html = (
+        f"<p>{html.escape(greeting)}</p>"
+        "<p>You connected Blocksize live market data two days ago but have not fetched a price yet. "
+        "Your 15,000 free credits for this month are waiting.</p>"
+        "<p>Try one of these in your assistant:</p><ul>"
+        "<li>\"What is the current multi-venue VWAP for BTC/USD?\"</li>"
+        "<li>\"Compare the bid/ask spread for ETH/USD and SOL/USD.\"</li></ul>"
+        f"<p>Quickstart: <a href='{quickstart}'>{quickstart}</a></p>"
+        "<p>If something got in the way, reply and tell us. We read every message.</p>"
+        + _footer_html(trial, pricing)
+    )
+    return {"subject": "Your Blocksize credits are waiting", "text": text, "html": body_html}
+
+
+def user_emails_enabled() -> bool:
+    return bool(user_email_sender()) and email_configured() and signup_store.enabled()
+
+
+async def notify_threshold(store, grant_hash: str, pct: int, snapshot: dict[str, Any], *, post=None) -> str:
+    """Email the user once per threshold per month; returns what happened."""
+    if pct not in LIFECYCLE_THRESHOLDS or not user_emails_enabled() or store is None:
+        return "disabled"
+    user = signup_store.lookup({grant_hash}).get(grant_hash)
+    if not user or "@" not in str(user.get("email", "")):
+        return "unknown_user"
+    period = str(snapshot.get("period") or datetime.now(UTC).strftime("%Y-%m"))
+    if not store.claim_milestone(f"user_email_threshold_{pct}_{period}", grant_hash):
+        return "already_sent"
+    await send_email(build_threshold_email(user, pct, snapshot), to=str(user["email"]),
+                     sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+    record_usage_event("user_email_sent", surface="email", reason=f"threshold_{pct}",
+                       metadata={"grant_hash": grant_hash, "campaign": f"free-tier-{pct}"})
+    return "sent"
+
+
+def notify_threshold_background(grant_hash: str | None, pct: int, snapshot: dict[str, Any]) -> None:
+    """Fire-and-forget from the connector tool path; never raises."""
+    if not grant_hash or pct not in LIFECYCLE_THRESHOLDS or not user_emails_enabled():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def run() -> None:
+        try:
+            await notify_threshold(get_global_store(), grant_hash, pct, dict(snapshot))
+        except Exception as exc:  # noqa: BLE001 - lifecycle email must never affect data delivery
+            logger.warning("threshold email failed: %s", type(exc).__name__)
+
+    loop.create_task(run())
+
+
+async def send_nudges(store, *, now: datetime | None = None, post=None) -> int:
+    """Email signups that are two days old and have never made a live call."""
+    if not user_emails_enabled() or store is None:
+        return 0
+    current = now or datetime.now(UTC)
+    newest = current - timedelta(hours=NUDGE_AFTER_HOURS)
+    oldest = newest - timedelta(hours=NUDGE_WINDOW_HOURS)
+    sent = 0
+    for signup in signup_store.signups_since(oldest.isoformat()):
+        created = str(signup.get("created_at") or "")
+        if created > newest.isoformat() or "@" not in str(signup.get("email", "")):
+            continue
+        grant_hash = str(signup.get("grant_hash") or "")
+        activity = store.events_since(created)
+        if any(str(e.get("event")) == "free_tier_grant_created"
+               and str((e.get("metadata") or {}).get("grant_hash") or "") == grant_hash for e in activity):
+            continue
+        if not store.claim_milestone("user_email_nudge", grant_hash):
+            continue
+        await send_email(build_nudge_email(signup), to=str(signup["email"]),
+                         sender=user_email_sender(), reply_to=alert_recipient(), post=post)
+        record_usage_event("user_email_sent", surface="email", reason="nudge",
+                           metadata={"grant_hash": grant_hash, "campaign": "free-tier-nudge"})
+        sent += 1
+    return sent

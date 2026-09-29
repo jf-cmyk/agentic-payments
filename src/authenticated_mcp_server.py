@@ -36,6 +36,7 @@ from src.models import (
     PairSearchResponse,
     VWAPResponse,
 )
+from src import signup_alerts
 from src.observability import (
     fingerprint,
     normalize_symbol_opportunity,
@@ -595,6 +596,9 @@ def create_authenticated_market_data_mcp(
                     identity=identity,
                     threshold_pct=level,
                     **decision.snapshot.as_payload(),
+                )
+                signup_alerts.notify_threshold_background(
+                    fingerprint(grant_key), int(level), decision.snapshot.as_payload()
                 )
                 if level == 100:
                     free_tier_event(
