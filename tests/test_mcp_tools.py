@@ -292,6 +292,28 @@ class TestPublicRemoteDiscoveryTools:
         )
 
     @pytest.mark.asyncio
+    async def test_public_tools_signpost_the_free_tier_claim(self, monkeypatch):
+        monkeypatch.setattr(public_mcp_server.free_tier, "enabled", lambda: True)
+        monkeypatch.setenv("AGENT_AUTH_ENABLED", "false")
+        endpoint = json.loads(await public_get_market_data_endpoint("vwap", "BTC-USD"))
+        pricing = await public_mcp_server.public_get_pricing_info()
+        info = json.loads(await public_mcp_server.public_info())
+
+        assert "## Free monthly credits" in pricing
+        assert "https://mcp.blocksize.info/anthropic/mcp/" in pricing
+        for claim in (endpoint["free_tier_claim"], info["paid_data_access"]["free_tier_claim"]):
+            assert claim["authenticated_connector"] == "https://mcp.blocksize.info/anthropic/mcp/"
+            assert claim["allowance_credits"] > 0
+            assert "agent_registration" not in claim
+
+        monkeypatch.setenv("AGENT_AUTH_ENABLED", "true")
+        claim = public_mcp_server._free_tier_claim()
+        assert claim["agent_registration"]["endpoint"].endswith("/anthropic/mcp/agent/identity")
+
+        monkeypatch.setattr(public_mcp_server.free_tier, "enabled", lambda: False)
+        assert public_mcp_server._free_tier_claim() is None
+
+    @pytest.mark.asyncio
     async def test_market_data_endpoint_builder_returns_x402_url(self):
         result = await public_get_market_data_endpoint("bidask", "AAPL")
         parsed = json.loads(result)

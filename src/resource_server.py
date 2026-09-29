@@ -3315,6 +3315,10 @@ def _sample_url_for_paid_request(request: Request) -> str | None:
 def _payment_failure_code(reason: str) -> str:
     """Map facilitator/parser prose to a stable client recovery code."""
     normalized = reason.lower()
+    if "legacy x402" in normalized or "x402version" in normalized:
+        return "PAYMENT_X402_VERSION_UNSUPPORTED"
+    if "resource" in normalized and "does not match" in normalized:
+        return "PAYMENT_RESOURCE_MISMATCH"
     if "base64" in normalized:
         return "PAYMENT_SIGNATURE_NOT_BASE64"
     if "json" in normalized:
@@ -3324,6 +3328,20 @@ def _payment_failure_code(reason: str) -> str:
     if "signature" in normalized or "bound x402" in normalized:
         return "PAYMENT_SIGNATURE_INVALID"
     return "PAYMENT_VERIFICATION_FAILED"
+
+
+def _specific_parse_error(official_error: str, parse_errors: list[str]) -> str:
+    """Name the parser rejection that applies to the payer's chosen network.
+
+    Each accepted requirement is tried in turn, so a Base payload also fails the
+    Solana requirement with a network mismatch; that noise hides the real cause.
+    """
+    relevant = [
+        error for error in parse_errors if "network does not match" not in error
+    ] or parse_errors
+    if not relevant:
+        return official_error
+    return f"{official_error}: {relevant[0]}"
 
 
 def _normalise_symbol(value: str, field_name: str = "symbol") -> str:
@@ -5119,6 +5137,7 @@ async def _verify_payment(
     """
     effective_attempt_id = attempt_id or secrets.token_hex(16)
     official_error = "Payment payload is not a valid bound x402 v2 signature"
+    parse_errors: list[str] = []
     if resource_url:
         accepts = _x402_v2_accepts(payment_requirements, resource_url)
         for requirement in accepts:
@@ -5130,7 +5149,8 @@ async def _verify_payment(
                     resource_url=resource_url,
                     body=request_body,
                 )
-            except PaymentSecurityError:
+            except PaymentSecurityError as exc:
+                parse_errors.append(str(exc))
                 continue
             if credit_manager is not None:
                 replay = credit_manager.finalized_payment_response(
@@ -5218,7 +5238,11 @@ async def _verify_payment(
     allow_mock = settings.server.x402_allow_mock_payments
     allow_legacy = settings.server.x402_allow_legacy_payments
     if not allow_legacy and not allow_mock:
-        return {"valid": False, "reason": official_error}
+        return {
+            "valid": False,
+            "reason": _specific_parse_error(official_error, parse_errors),
+            "parse_errors": sorted(set(parse_errors))[:4],
+        }
 
     try:
         payload = _decode_payment_payload(payment_payload)
@@ -5859,12 +5883,15 @@ async def x402_payment_middleware(request: Request, call_next):
         )
         if not verification.get("valid", False):
             reason = str(verification.get("reason", "unknown"))
+            failure_metadata: dict[str, Any] = {"attempt_id": attempt_id}
+            if verification.get("parse_errors"):
+                failure_metadata["parse_errors"] = verification["parse_errors"]
             _record_product_event(
                 "payment_failed",
                 request,
                 price_usdc=price,
                 reason=reason,
-                metadata={"attempt_id": attempt_id},
+                metadata=failure_metadata,
             )
             if reason == "economic_writes_locked":
                 return _apply_x402_cors_headers(
@@ -12706,6 +12733,8 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         summaryItem("CTA impressions", fmt.format(summary.cta_impressions || 0)),
         summaryItem("/go clicks", fmt.format(summary.go_clicks || 0)),
         summaryItem("Trial starts", fmt.format(summary.trial_starts || 0)),
+        summaryItem("Agent registrations", fmt.format(summary.agent_registrations || 0)),
+        summaryItem("Agents approved", fmt.format(summary.agents_approved || 0)),
         summaryItem("Worst-case exposure", `${fmt.format(ledger.worst_case_exposure_credits || 0)} cr`),
       ].join("");
       bars("free-tier-thresholds", summary.threshold_crossings || {}, "blue");

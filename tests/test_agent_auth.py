@@ -13,6 +13,7 @@ from starlette.testclient import TestClient
 
 from src.agent_auth import AgentAuth, ASSERTION_GRANT, CLAIM_GRANT, COOKIE, TokenDispatch
 from src.connector_auth import identity_from_access_token
+from src.observability import UsageEventStore, configure_global_store
 
 ISSUER = "https://market.example/anthropic/mcp"
 
@@ -256,3 +257,19 @@ def test_auth_query_secrets_redacted():
     from src.security_config import redact_sensitive_query_values
     value = redact_sensitive_query_values("/agent/claim?claim_attempt_token=secret&state=state-secret")
     assert "secret" not in value and "[REDACTED]" in value
+
+
+def test_registration_lifecycle_reaches_dashboard_without_identifiers(rig, tmp_path):
+    store = UsageEventStore(tmp_path / "usage_events.db")
+    configure_global_store(store)
+    try:
+        reg, _issued = grant(rig)
+    finally:
+        configure_global_store(None)
+    panel = store.summarize(days=1)["free_tier"]["summary"]
+    assert panel["agent_registrations"] == 1
+    assert panel["agents_approved"] == 1
+    assert panel["agent_auth_lifecycle"]["token_exchanged"] >= 1
+    raw = (tmp_path / "usage_events.db").read_bytes()
+    for value in [b"owner@example.com", reg["registration_id"].encode()]:
+        assert value not in raw
