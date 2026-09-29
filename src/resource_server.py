@@ -44,7 +44,7 @@ import sqlite3
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Deque
@@ -775,6 +775,20 @@ def _marketplace_listing_checks_enabled() -> bool:
     return _env_enabled("MARKETPLACE_LISTING_CHECKS_ENABLED", default)
 
 
+async def _run_signup_digest_loop() -> None:
+    """Email the operator one signup digest per day at SIGNUP_DIGEST_HOUR_UTC."""
+    while True:
+        now = datetime.now(UTC)
+        target = now.replace(hour=signup_alerts.digest_hour_utc(), minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep(max(60.0, (target - now).total_seconds()))
+        try:
+            await signup_alerts.send_digest(OBSERVABILITY)
+        except Exception as exc:  # noqa: BLE001 - a failed digest must not stop the loop
+            logger.warning("signup digest failed: %s", type(exc).__name__)
+
+
 async def _run_marketplace_listing_health_loop() -> None:
     """Persist daily public listing reachability without claiming marketplace demand."""
     initial_delay = max(
@@ -1310,6 +1324,7 @@ async def lifespan(app: FastAPI):
     app.state.blocksize_dependency = await _probe_blocksize_dependency(app.state.blocksize)
     app.state.blocksize_dependency_task = None
     app.state.bidask_classification_task = None
+    app.state.signup_digest_task = None
     if (
         app.state.blocksize_dependency.get("required")
         and not app.state.blocksize_dependency.get("available")
@@ -1402,6 +1417,11 @@ async def lifespan(app: FastAPI):
         _run_store_readiness_probe_loop(app),
         name="store-readiness-probe",
     )
+    if signup_alerts.email_configured():
+        app.state.signup_digest_task = asyncio.create_task(
+            _run_signup_digest_loop(),
+            name="signup-digest",
+        )
     if _marketplace_listing_checks_enabled():
         app.state.marketplace_listing_task = asyncio.create_task(
             _run_marketplace_listing_health_loop(),
@@ -1425,6 +1445,11 @@ async def lifespan(app: FastAPI):
                     async with OPENAI_MCP_HTTP_APP.lifespan(OPENAI_MCP_HTTP_APP):
                         yield
     finally:
+        digest_task = getattr(app.state, "signup_digest_task", None)
+        if digest_task is not None:
+            digest_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await digest_task
         classification_task = getattr(app.state, "bidask_classification_task", None)
         if classification_task is not None:
             classification_task.cancel()
@@ -11537,6 +11562,22 @@ async def clerk_signup_webhook(request: Request) -> JSONResponse:
             content={"error": exc.error},
         )
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/internal/observability/signup-digest", include_in_schema=False)
+async def send_signup_digest_now(request: Request, hours: int = Query(24, ge=1, le=720)) -> JSONResponse:
+    """Send the signup digest for the trailing window now (operator token required)."""
+    if not _observability_authorized(request):
+        return _observability_unauthorized()
+    if not signup_alerts.email_configured():
+        return JSONResponse(status_code=503, content={"error": "RESEND_API_KEY is not configured"})
+    try:
+        digest = await signup_alerts.send_digest(OBSERVABILITY, hours=hours)
+    except signup_alerts.SignupAlertError as exc:
+        return JSONResponse(status_code=exc.status, content={"error": exc.error})
+    return JSONResponse({"status": "sent", "signups": digest["signups_count"],
+                         "free_tier_grants": len(digest["free_tier_grants"])},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.post("/internal/observability/marketplace-metrics", include_in_schema=False)

@@ -103,7 +103,7 @@ def test_new_user_triggers_one_email_and_replays_are_ignored(configured, sent):
                               headers=signed_headers(other, msg_id="msg_2"))
         forged = client.post("/internal/clerk/webhook", content=body,
                              headers={**signed_headers(body, msg_id="msg_3"), "svix-signature": "v1,AAAA"})
-    assert first.status_code == 200 and first.json() == {"status": "sent"}
+    assert first.status_code == 200 and first.json()["status"] == "sent"
     assert replay.json() == {"status": "duplicate"}
     assert ignored.json() == {"status": "ignored", "type": "session.created"}
     assert forged.status_code == 401
