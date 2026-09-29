@@ -11,10 +11,10 @@
     {
       "filename": "blocksize-market-data-claude-plugin-0.5.0.zip",
       "label": "claude",
-      "members": 8,
-      "sha256": "c083724a6ae8e5a277e80f0312c042337abdc126a1ce9822d781153f0313640c",
-      "size_bytes": 10615,
-      "source_tree_sha256": "47bf4ec1aef25be059ca2ebbc4baa50119897c31869932df459d111d8eaa36dc"
+      "members": 9,
+      "sha256": "270bc4ae93c6d0b97d77f34ad3b687776b20c493bcc14308765b67dea920bc5c",
+      "size_bytes": 11034,
+      "source_tree_sha256": "7543599b6ec79b15211ac2409d5ed28ce6c79684f2b4afe4a1b3f26eb343824d"
     },
     {
       "filename": "blocksize-market-data-cursor-plugin-1.5.0.zip",

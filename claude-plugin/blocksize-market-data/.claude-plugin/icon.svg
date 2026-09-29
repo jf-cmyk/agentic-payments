@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 400 400" role="img" aria-label="Blocksize">
+  <title>Blocksize</title>
+  <circle cx="200" cy="200" r="187" fill="#000"/>
+  <g fill="#fff">
+    <rect x="87" y="84" width="200" height="26"/>
+    <rect x="87" y="84" width="25" height="207"/>
+    <rect x="187" y="84" width="25" height="233"/>
+    <rect x="287" y="110" width="25" height="207"/>
+    <rect x="187" y="188" width="125" height="25"/>
+    <rect x="112" y="291" width="200" height="26"/>
+  </g>
+</svg>

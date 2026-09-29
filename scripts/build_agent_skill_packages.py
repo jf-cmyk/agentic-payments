@@ -81,6 +81,7 @@ def package_specs() -> tuple[PackageSpec, ...]:
             filename=f"blocksize-market-data-claude-plugin-{claude_version}.zip",
             members=(
                 ".claude-plugin/plugin.json",
+                ".claude-plugin/icon.svg",
                 ".mcp.json",
                 "LICENSE",
                 "README.md",
