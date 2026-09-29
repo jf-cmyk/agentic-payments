@@ -285,3 +285,28 @@ def test_registration_lifecycle_reaches_dashboard_without_identifiers(rig, tmp_p
     raw = (tmp_path / "usage_events.db").read_bytes()
     for value in [b"owner@example.com", reg["registration_id"].encode()]:
         assert value not in raw
+
+
+def test_clerk_token_without_expiry_is_bounded_by_issued_lifetime(rig):
+    """Clerk introspection omits exp; the issued token lifetime bounds the session."""
+    reg = register(rig)
+    rig.provider.token.expires_at = None
+    assert sign_in(rig, reg).status_code == 303
+    assert consent(rig, reg).status_code in {200, 303}
+    issued = poll(rig, reg).json()
+    assert 0 < issued["expires_in"] <= 3600
+
+
+def test_token_without_any_expiry_is_still_refused(rig):
+    reg = register(rig)
+    rig.provider.token.expires_at = None
+
+    async def no_lifetime(*_args, **_kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(access_token="private-upstream", expires_in=None)
+
+    rig.provider.exchange_authorization_code = no_lifetime
+    response = sign_in(rig, reg)
+    assert response.status_code == 403
+    assert response.json()["reason"] == ["token_without_expiry"]

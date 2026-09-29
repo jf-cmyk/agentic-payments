@@ -274,7 +274,10 @@ class AgentAuth:
             verified = claims.get("email_verified")
             if verified is not True:
                 failed.append("email_verified_missing" if verified is None else "email_not_verified")
-            if not token.expires_at:
+            # Clerk's introspection response carries no exp, so the upstream
+            # expiry is often unknown. The proxy-issued token lifetime still
+            # bounds the session; fail only when neither is known.
+            if not token.expires_at and not issued.expires_in:
                 failed.append("token_without_expiry")
             if not set(self.scopes).issubset(token.scopes or []):
                 failed.append("scope_missing")
@@ -282,8 +285,13 @@ class AgentAuth:
             # Names of failed checks only; never the email or token.
             logger.warning("agent_auth callback rejected: %s", ",".join(failed))
             return self.json({"error": "verified_account_required", "reason": failed}, 403)
-        expiry = min(int(token.expires_at), int(time.time()) + 3600,
-                     int(time.time()) + int(issued.expires_in or 0))
+        now = int(time.time())
+        bounds = [now + 3600]
+        if token.expires_at:
+            bounds.append(int(token.expires_at))
+        if issued.expires_in:
+            bounds.append(now + int(issued.expires_in))
+        expiry = min(bounds)
         if expiry <= time.time():
             raise AuthError("expired_token")
         new_sid = random_token()
