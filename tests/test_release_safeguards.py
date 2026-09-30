@@ -170,10 +170,10 @@ SECURITY_VERSION_FLOORS = {
     "joserfc": Version("1.6.8"),
     "mcp": Version("1.28.1"),
     "pydantic-settings": Version("2.14.2"),
-    "pyjwt": Version("2.14.0"),
+    "pyjwt": Version("2.15.0"),
     "python-multipart": Version("0.0.31"),
     "starlette": Version("1.3.1"),
-    "urllib3": Version("2.7.0"),
+    "urllib3": Version("2.8.0"),
 }
 
 

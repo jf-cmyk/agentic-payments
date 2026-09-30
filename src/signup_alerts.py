@@ -324,8 +324,8 @@ async def handle_webhook(headers: dict[str, str], body: bytes, *, post=None) -> 
     record_usage_event(
         "clerk_user_created",
         surface="clerk",
-        identity_hash=fingerprint(f"email:{user['email'].casefold()}"),
-        metadata={"email_verified": user["email_verified"], "grant_hash": grant_hash,
+        metadata={"identity_hash": fingerprint(f"email:{user['email'].casefold()}"),
+                  "email_verified": user["email_verified"], "grant_hash": grant_hash,
                   "welcome_email": welcome, "stored": stored},
     )
     logger.info("signup alert sent for new Clerk user (verified=%s, welcome=%s, stored=%s)",
