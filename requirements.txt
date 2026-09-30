@@ -286,7 +286,7 @@ pydantic-settings==2.14.2
     #   mcp
 pygments==2.20.0
     # via rich
-pyjwt==2.14.0
+pyjwt==2.15.0
     # via
     #   blocksize-mcp-x402
     #   cdp-sdk
@@ -415,7 +415,7 @@ typing-inspection==0.4.2
     #   pydantic-settings
 uncalled-for==0.3.1
     # via fastmcp
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   blocksize-mcp-x402
     #   cdp-sdk
