@@ -222,6 +222,7 @@ _PAGE = r"""<!doctype html>
   </header>
 
   <section class="kpis" id="kpis" aria-label="Key metrics"></section>
+  <p class="sub row-gap" id="retention-note" hidden></p>
 
   <section class="card" aria-labelledby="h-assess">
     <h2 id="h-assess">Assessment</h2>
@@ -231,7 +232,7 @@ _PAGE = r"""<!doctype html>
 
   <section class="card" aria-labelledby="h-activity">
     <h2 id="h-activity">Activity over time</h2>
-    <p class="sub">Calls per day, stacked by avenue. Monitors are shown in gray so real demand stays readable.</p>
+    <p class="sub" id="activity-sub">Calls per day, stacked by avenue. Monitors are shown in gray so real demand stays readable.</p>
     <div class="legend" id="activity-legend"></div>
     <div id="activity-chart"></div>
   </section>
@@ -548,9 +549,10 @@ _PAGE = r"""<!doctype html>
     for (const k of data.kpis.filter((k) => k.id !== "verified_identities")) {
       const value = k.unit === "rate" ? fmtPct(k.value) : k.unit === "usdc" ? fmtUsd(k.value) : fmtInt(k.value);
       let delta = el("div", { class: "delta muted" }, `no prior ${days}d data`);
-      if (k.unit === "rate" && k.value != null && k.previous != null) {
+      const basis = k.comparable_value ?? k.value;
+      if (k.unit === "rate" && basis != null && k.previous != null) {
         // Rates change in percentage points; a relative change of a rate misleads.
-        const pts = (k.value - k.previous) * 100;
+        const pts = (basis - k.previous) * 100;
         const up = pts >= 0;
         const good = (up && k.good_direction === "up") || (!up && k.good_direction === "down");
         delta = el("div", { class: `delta ${up ? "up" : "down"}-${good ? "good" : "bad"}` },
@@ -595,6 +597,18 @@ _PAGE = r"""<!doctype html>
     }
   }
 
+  function renderRetention(data) {
+    const r = data.retention || {};
+    const node = $("retention-note");
+    const parts = [];
+    if (r.comparison_excludes_claude) parts.push(`Changes vs the prior ${data.window_days} days leave out Claude connector traffic, because it is deleted after ${r.claude_days} days.`);
+    if (r.window_exceeds_claude_retention) parts.push(`Claude connector data older than ${r.claude_days} days is gone, so this window undercounts it.`);
+    node.textContent = parts.join(" ");
+    node.hidden = !parts.length;
+    $("activity-sub").textContent = "Calls per day, stacked by avenue. Monitors are shown in gray so real demand stays readable."
+      + (r.window_exceeds_claude_retention ? ` Claude connector calls appear only for the last ${r.claude_days} days.` : "");
+  }
+
   function renderActivity(data) {
     const channels = data.channel_order;
     const present = channels.filter((c) => data.activity.some((d) => d.by_channel[c.id]));
@@ -614,7 +628,8 @@ _PAGE = r"""<!doctype html>
       { label: "Avenue" }, { label: "Calls", cls: "bar-cell" }, { label: "Calls", num: true },
       { label: "Share", num: true }, { label: "Clients", num: true }, { label: "Paid calls", num: true }, { label: "Revenue", num: true },
     ], rows.map((r) => [
-      el("span", {}, el("i", { class: "key", style: `background:${chColor(r.id)};margin-right:8px` }), r.label),
+      el("span", { title: r.retention_note || null }, el("i", { class: "key", style: `background:${chColor(r.id)};margin-right:8px` }), r.label,
+        r.retention_note ? el("span", { class: "muted", style: "font-size:12px" }, ` · connector: last ${data.retention.claude_days} days`) : null),
       hbar([{ label: r.label, value: r.calls, color: chColor(r.id) }], maxV, r.label),
       fmtInt(r.calls), fmtPct(r.share), fmtInt(r.users), fmtInt(r.paid_calls), fmtUsd(r.revenue_usdc),
     ]));
@@ -756,7 +771,7 @@ _PAGE = r"""<!doctype html>
   function render(data) {
     const generated = new Date(data.generated_at);
     $("status-line").textContent = `Last ${data.window_days} days · updated ${generated.toLocaleString()} · test traffic excluded`;
-    renderKpis(data); renderIssues(data); renderActivity(data); renderAvenues(data); renderTickers(data);
+    renderKpis(data); renderRetention(data); renderIssues(data); renderActivity(data); renderAvenues(data); renderTickers(data);
     renderUsers(data); renderSearch(data); renderPaid(data); renderHealth(data); renderPlan(data);
     renderUserAgents(data); renderDefs(data);
   }
