@@ -42,14 +42,10 @@ Main production service:
 https://mcp.blocksize.info
 ```
 
-Claude beta service:
-
-```text
-https://anthropic-mcp-beta-production.up.railway.app
-```
-
-Both services have the Claude connector routes deployed. The main production
-service is the URL intended for submission.
+The standalone Claude beta service (`anthropic-mcp-beta`) was retired on
+2026-09-30: it was frozen at 0.6.4, received no real traffic, and did not run
+the 29-day Claude data retention job. The main production service is the only
+Claude connector endpoint and the URL used for submission.
 
 ## Verified Production Behavior
 
@@ -92,10 +88,6 @@ Local and remote QA:
   --expect-oauth-required
 # PASS oauth challenge required: status=401
 
-.venv/bin/python scripts/test_anthropic_mcp_connector.py \
-  --url https://anthropic-mcp-beta-production.up.railway.app/anthropic/mcp/ \
-  --expect-oauth-required
-# PASS oauth challenge required: status=401
 ```
 
 Claude-origin checks:
