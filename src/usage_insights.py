@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
+from src.claude_data_retention import CLAUDE_SURFACES, RETENTION_DAYS
 from src.observability import (
     KNOWN_MONITOR_USER_AGENT_MARKERS,
     LIVE_DATA_MCP_TOOLS,
@@ -344,7 +345,7 @@ class UsageInsights:
             ).fetchall()
             identity_rows = conn.execute(
                 f"""
-                SELECT timestamp, {_meta('identity_hash')} AS identity_hash
+                SELECT timestamp, surface, {_meta('identity_hash')} AS identity_hash
                 FROM usage_events
                 WHERE timestamp >= ?
                   AND metadata_json LIKE '%identity_hash%'
@@ -354,14 +355,27 @@ class UsageInsights:
             ).fetchall()
             p95_latency = self._p95_latency(conn, current_start_iso)
 
+        # Claude connector events are deleted after RETENTION_DAYS. When the
+        # previous window reaches past that, compare like for like: leave those
+        # surfaces out of both sides of every period-over-period figure, while
+        # the current window's own totals still include them.
+        comparison_excludes_claude = 2 * days > RETENTION_DAYS
         current, previous = _Window(), _Window()
+        current_cmp, previous_cmp = (
+            (_Window(), _Window()) if comparison_excludes_claude else (current, previous)
+        )
         for row in call_rows:
-            window = current if row["day"] >= current_start_iso[:10] else previous
+            is_current = row["day"] >= current_start_iso[:10]
             # The boundary day belongs to both windows by date; split it by the
             # exact first timestamp of the group instead.
             if row["day"] == current_start_iso[:10]:
-                window = current if row["first_ts"] >= current_start_iso else previous
-            self._accumulate(window, row)
+                is_current = row["first_ts"] >= current_start_iso
+            # The full previous window is read only when it is also the
+            # comparison window; otherwise previous_cmp takes its place.
+            if is_current or not comparison_excludes_claude:
+                self._accumulate(current if is_current else previous, row)
+            if comparison_excludes_claude and row["surface"] not in CLAUDE_SURFACES:
+                self._accumulate(current_cmp if is_current else previous_cmp, row)
 
         payments_current, payments_previous = self._payments(
             payment_rows, current_start_iso
@@ -371,24 +385,37 @@ class UsageInsights:
             for row in identity_rows
             if row["identity_hash"] and row["timestamp"] >= current_start_iso
         }
-        identities_previous = {
+        comparable_identity_rows = [
+            row for row in identity_rows
+            if not comparison_excludes_claude or row["surface"] not in CLAUDE_SURFACES
+        ]
+        identities_current_cmp = {
             row["identity_hash"]
-            for row in identity_rows
+            for row in comparable_identity_rows
+            if row["identity_hash"] and row["timestamp"] >= current_start_iso
+        }
+        identities_previous_cmp = {
+            row["identity_hash"]
+            for row in comparable_identity_rows
             if row["identity_hash"] and row["timestamp"] < current_start_iso
         }
 
         kpis = self._kpis(
             current,
-            previous,
+            current_cmp,
+            previous_cmp,
             payments_current,
             payments_previous,
             len(identities_current),
-            len(identities_previous),
+            len(identities_current_cmp),
+            len(identities_previous_cmp),
             p95_latency,
         )
-        channels = self._channels(current, payments_current)
+        channels = self._channels(current, payments_current, days)
         tickers = self._tickers(current, payments_current)
-        users = self._users(current, previous, len(identities_current), payments_current)
+        users = self._users(
+            current, current_cmp, previous_cmp, len(identities_current), payments_current
+        )
         activity = self._activity(current, payments_current, current_start, days)
         health = self._health(current)
         paid = self._paid(payments_current)
@@ -396,6 +423,12 @@ class UsageInsights:
             "generated_at": now.isoformat(),
             "window_days": days,
             "window_start": current_start_iso,
+            "retention": {
+                "claude_days": RETENTION_DAYS,
+                "claude_surfaces": list(CLAUDE_SURFACES),
+                "window_exceeds_claude_retention": days > RETENTION_DAYS,
+                "comparison_excludes_claude": comparison_excludes_claude,
+            },
             "totals": {
                 "calls": current.calls,
                 "monitor_calls": current.monitor_calls,
@@ -645,34 +678,43 @@ class UsageInsights:
     @staticmethod
     def _kpis(
         current: _Window,
+        current_cmp: _Window,
         previous: _Window,
         pay: dict[str, Any],
         pay_prev: dict[str, Any],
         identities: int,
+        identities_cmp: int,
         identities_prev: int,
         p95_latency: float | None,
     ) -> list[dict[str, Any]]:
-        def kpi(kpi_id, label, value, prev, unit="count", *, good="up", note=None):
+        # ``previous`` and ``current_cmp`` leave out Claude connector surfaces
+        # when their history is truncated; ``comparable_value`` is the current
+        # figure on that same basis, and ``delta`` compares like with like.
+        def kpi(kpi_id, label, value, prev, unit="count", *, cmp=None, good="up", note=None):
+            comparable = value if cmp is None else cmp
             return {
                 "id": kpi_id,
                 "label": label,
                 "value": value,
+                "comparable_value": comparable,
                 "previous": prev,
-                "delta": _delta(value, prev),
+                "delta": _delta(comparable, prev),
                 "unit": unit,
                 "good_direction": good,
                 "note": note,
             }
 
         organic = current.calls - current.monitor_calls
+        organic_cmp = current_cmp.calls - current_cmp.monitor_calls
         organic_prev = previous.calls - previous.monitor_calls
         proof_rate = _rate(pay["settled_attempts"], pay["proof_attempts"])
         proof_rate_prev = _rate(pay_prev["settled_attempts"], pay_prev["proof_attempts"])
         http_ok = sum(current.status.values())
         return [
-            kpi("calls", "Calls excl. monitors", organic, organic_prev,
+            kpi("calls", "Calls excl. monitors", organic, organic_prev, cmp=organic_cmp,
                 note=f"{current.calls:,} incl. monitors"),
             kpi("unique_users", "Unique clients", len(current.users), len(previous.users),
+                cmp=len(current_cmp.users),
                 note="Distinct client IP hashes, monitors excluded"),
             kpi("paid_calls", "Paid calls (x402)", pay["x402_paid_calls"],
                 pay_prev["x402_paid_calls"],
@@ -686,18 +728,22 @@ class UsageInsights:
                 "rate", note=f"{pay['settled_attempts']} of {pay['proof_attempts']} proofs settled"),
             kpi("monitor_share", "Monitor share of calls",
                 _rate(current.monitor_calls, current.calls),
-                _rate(previous.monitor_calls, previous.calls), "rate", good="down"),
+                _rate(previous.monitor_calls, previous.calls), "rate",
+                cmp=_rate(current_cmp.monitor_calls, current_cmp.calls), good="down"),
             kpi("server_error_rate", "Server error rate",
                 _rate(current.status["server_error"], http_ok),
                 _rate(previous.status["server_error"], sum(previous.status.values())),
-                "rate", good="down", note=f"p95 latency {p95_latency:,.0f} ms"
+                "rate",
+                cmp=_rate(current_cmp.status["server_error"], sum(current_cmp.status.values())),
+                good="down", note=f"p95 latency {p95_latency:,.0f} ms"
                 if p95_latency is not None else None),
         ] + [
-            kpi("verified_identities", "Verified identities", identities, identities_prev),
+            kpi("verified_identities", "Verified identities", identities, identities_prev,
+                cmp=identities_cmp),
         ]
 
     @staticmethod
-    def _channels(current: _Window, pay: dict[str, Any]) -> list[dict[str, Any]]:
+    def _channels(current: _Window, pay: dict[str, Any], days: int) -> list[dict[str, Any]]:
         paid_by_channel: Counter[str] = Counter()
         revenue_by_channel: Counter[str] = Counter()
         for row in pay["rows"]:
@@ -712,6 +758,12 @@ class UsageInsights:
                 "users": len(current.channel_users.get(cid, ())),
                 "paid_calls": paid_by_channel[cid],
                 "revenue_usdc": round(revenue_by_channel[cid], 6),
+                "retention_note": (
+                    f"Claude connector data is kept {RETENTION_DAYS} days, so connector "
+                    f"calls older than that are missing; Claude traffic on the public MCP "
+                    "endpoint keeps its full history."
+                    if cid == "claude" and days > RETENTION_DAYS else None
+                ),
             }
             for cid, label in CHANNELS
         ]
@@ -758,12 +810,15 @@ class UsageInsights:
     @staticmethod
     def _users(
         current: _Window,
+        current_cmp: _Window,
         previous: _Window,
         identities: int,
         pay: dict[str, Any],
     ) -> dict[str, Any]:
         returning = sum(1 for days in current.user_days.values() if len(days) >= 2)
-        new_users = len(current.users - previous.users)
+        # Compared on the retained basis, so deleted Claude history cannot make
+        # a long-standing connector client look new.
+        new_users = len(current_cmp.users - previous.users)
         total_requests = sum(current.client_requests.values())
         top = current.client_requests.most_common(10)
         return {
@@ -872,6 +927,12 @@ DEFINITIONS = {
         "A call whose user agent names a probe, uptime check, verifier, crawler "
         "or bot. Kept visible but excluded from demand and user counts."
     ),
+    "claude_retention": (
+        f"Events on the Claude connector surfaces ({', '.join(CLAUDE_SURFACES)}) are "
+        f"deleted after {RETENTION_DAYS} days. Windows longer than that undercount them, "
+        "and changes against the prior period leave them out whenever that period "
+        "reaches past the cutoff."
+    ),
     "burst": (
         f"A settled payment that belongs to a run of {BURST_MIN_SIZE} or more "
         f"payments, each within {BURST_GAP_SECONDS // 60} minutes of the last - "
@@ -955,7 +1016,9 @@ def build_assessment(result: dict[str, Any]) -> list[dict[str, Any]]:
         add("P1", "Growth", "The signed-in connectors are barely used",
             f"Claude, OpenAI and Cursor account for {connector_calls:,} calls "
             f"({_pct(_rate(connector_calls, organic_calls))} of non-monitor calls); "
-            f"{kpis['verified_identities']['value']} verified identities were active.",
+            f"{kpis['verified_identities']['value']} verified identities were active."
+            + (f" Claude connector figures cover only the last {RETENTION_DAYS} days."
+               if result["retention"]["window_exceeds_claude_retention"] else ""),
             "Lead listings with the free signed-in connector rather than the "
             "x402 endpoint, and add a one-click install link for each client.")
 
