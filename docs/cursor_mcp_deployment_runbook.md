@@ -220,7 +220,7 @@ Run this after `/cursor/mcp/` is deployed.
    `.cursor/mcp.json`.
 2. In Cursor settings, confirm the MCP server appears and asks for login.
 3. Complete Clerk signup/login.
-4. Confirm tools list includes the seven authenticated tools.
+4. Confirm tools list includes the 18 authenticated tools.
 5. Ask Cursor:
 
    ```text

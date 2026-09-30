@@ -1,6 +1,6 @@
 {
   "name": "blocksize-market-data",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Read-only authenticated Blocksize live market data for ChatGPT and Codex.",
   "author": {
     "name": "Blocksize Capital GmbH",
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "Blocksize Market Data",
     "shortDescription": "Discover verified market data and exact API routes.",
-    "longDescription": "Find supported crypto, equity, FX, metal, state-price, and VWAP data products. The authenticated MCP connector retrieves live observations with starter credits while preserving the distinction between discovery, live retrieval, and paid x402 HTTP access.",
+    "longDescription": "Find supported crypto, equity, FX, metal, state-price, and VWAP data products, plus workflow briefs and trader indicators. The authenticated MCP connector retrieves live observations with starter credits while preserving the distinction between discovery, live retrieval, and paid x402 HTTP access.",
     "developerName": "Blocksize Capital GmbH",
     "category": "Data & Analytics",
     "capabilities": [

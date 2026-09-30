@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0
+
+- Documents all 18 read-only connector tools: the original seven plus AMM state
+  price, 30-minute and 24-hour VWAP, four agent workflow products, and four
+  trader indicators.
+- Raises the documented monthly free tier to 30,000 live-data credits.
+- Tells agents to read each tool's cost from its description, and to keep
+  private details out of the public price-receipt `purpose` note.
+
 ## 1.5.0
 
 - Describes the monthly free tier (15,000 live-data credits, attribution
