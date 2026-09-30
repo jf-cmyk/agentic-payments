@@ -2,12 +2,14 @@ import base64
 import hashlib
 import hmac
 import json
+import sqlite3
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src import signup_alerts
+from src.observability import fingerprint
 from src.resource_server import app
 
 RAW_SECRET = base64.b64encode(b"0123456789abcdef0123456789abcdef").decode()
@@ -114,6 +116,27 @@ def test_new_user_triggers_one_email_and_replays_are_ignored(configured, sent):
     assert "Email status: verified" in mail["text"]
     assert "2026-" in mail["text"]
     assert sent[0]["headers"]["Authorization"] == "Bearer re_test_key"
+
+
+def test_new_user_records_one_clerk_user_created_event(configured, sent, isolate_usage_event_store):
+    body = user_created(email="Event.User@Example.com")
+    with TestClient(app) as client:
+        response = client.post("/internal/clerk/webhook", content=body, headers=signed_headers(body))
+        client.post("/internal/clerk/webhook", content=body, headers=signed_headers(body))
+    assert response.json()["status"] == "sent"
+
+    with sqlite3.connect(isolate_usage_event_store.db_path) as conn:
+        rows = conn.execute(
+            "SELECT surface, metadata_json FROM usage_events WHERE event = 'clerk_user_created'"
+        ).fetchall()
+    assert len(rows) == 1
+    surface, metadata_json = rows[0]
+    metadata = json.loads(metadata_json)
+    assert surface == "clerk"
+    assert metadata["identity_hash"] == fingerprint("email:event.user@example.com")
+    assert metadata["grant_hash"] == signup_alerts.grant_hash_for("Event.User@Example.com")
+    assert metadata["email_verified"] == "verified"
+    assert "Event.User@Example.com" not in metadata_json
 
 
 def test_email_failure_returns_502_so_svix_retries(configured, monkeypatch):
