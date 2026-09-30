@@ -12,15 +12,16 @@ https://mcp.blocksize.info/cursor/mcp/
 
 After sign-in, Cursor can call Blocksize tools directly from an agent workflow.
 The integration is read-only and gives eligible users the free monthly
-allowance reported by the server (15,000 live-data credits every calendar
+allowance reported by the server (30,000 live-data credits every calendar
 month, attribution required). The allowance renews every month; production
 usage continues through a subscription (free trial at /go/free-trial), direct
 Blocksize x402 outside Cursor, or an authenticated account plan arranged with
 Blocksize.
 
 The plugin also installs the `/use-blocksize-market-data` Agent Skill. Invoke it
-directly or ask Cursor for a Blocksize VWAP, bid/ask, FX, metal,
-instrument-search, or credit-status workflow.
+directly or ask Cursor for a Blocksize VWAP, bid/ask, FX, metal, state-price,
+market-brief, pre-trade-check, trader-indicator, instrument-search, or
+credit-status workflow.
 
 ## What Is Possible
 
@@ -28,16 +29,23 @@ Cursor agents can use this plugin to:
 
 - Search supported crypto, equity ticker, FX, and metals instruments.
 - List supported instrument namespaces.
-- Check the signed-in user's remaining daily Blocksize data credits.
-- Fetch live crypto VWAP snapshots.
+- Check the signed-in user's remaining monthly Blocksize data credits.
+- Fetch live crypto VWAP snapshots, including 30-minute and fixed 24-hour
+  windows.
 - Fetch live crypto and supported equity/stock ticker bid/ask snapshots.
 - Fetch live FX bid, ask, and mid-rate snapshots.
 - Fetch supported metal spot-price snapshots.
+- Fetch pool-derived AMM state prices for covered crypto pairs.
+- Build market briefs, macro snapshots, pre-trade sanity checks, and price
+  receipts.
+- Score token quality, state divergence, Solana token briefs, and trader alpha
+  packs.
 
 Eligible signed-in Cursor users receive the starter allowance reported by the
 server. Discovery tools are available for finding instruments and metadata;
 live data tools spend starter credits according to the server's active
-tool-cost configuration.
+tool-cost configuration. Workflow and indicator tools cost far more per call
+than a snapshot; each tool's description states its current cost.
 
 Typical prompts:
 
@@ -77,6 +85,10 @@ Blocksize's hosted MCP server exposes these market-data surfaces to Cursor:
 | Equities bid/ask | `search_pairs`, `get_bid_ask` | Supported stock tickers such as `AAPL`; search with `asset_class=equity`, then fetch through the shared bid/ask surface. |
 | FX | `get_fx_rate` | Bid, ask, and mid-rate snapshots for supported FX pairs such as `EURUSD`. |
 | Metals | `get_metal_price` | Spot snapshots for supported metal tickers such as `XAUUSD`. |
+| AMM state price | `get_state_price` | Pool-derived state price for covered crypto pairs such as `MSOLUSD`. |
+| VWAP windows | `get_vwap_30m`, `get_vwap_24h` | 30-minute closing VWAP and fixed 24-hour VWAP for one crypto pair. |
+| Agent workflows | `get_market_brief`, `get_macro_snapshot`, `run_pre_trade_check`, `create_price_receipt` | Multi-instrument briefs and snapshots, a pass-or-caution check before a trade, and an audit-grade price receipt. |
+| Trader indicators | `get_token_quality`, `get_state_divergence`, `get_solana_token_brief`, `get_trader_alpha_pack` | Token market-quality scores, state-versus-VWAP divergence, Solana token briefs, and combined signal packs. |
 | Credits | `get_credit_balance` | Shows the authenticated user's current starter-credit balance. |
 
 The public health endpoint at `https://mcp.blocksize.info/health` also exposes
@@ -91,13 +103,30 @@ This plugin currently exposes these read-only MCP tools:
   instruments by symbol or asset name. Use `asset_class=equity` for stocks.
 - `list_instruments`: List supported instruments for a Blocksize service
   namespace.
-- `get_credit_balance`: Show remaining daily data credits for the signed-in
+- `get_credit_balance`: Show remaining monthly data credits for the signed-in
   Cursor user.
 - `get_vwap`: Fetch a crypto VWAP snapshot for one supported pair.
 - `get_bid_ask`: Fetch bid/ask data for one supported crypto pair or equity
   ticker such as `AAPL`.
 - `get_fx_rate`: Fetch a supported FX pair snapshot.
 - `get_metal_price`: Fetch a supported metal spot-price snapshot.
+- `get_state_price`: Fetch the pool-derived AMM state price for one covered
+  crypto pair.
+- `get_vwap_30m`: Fetch the 30-minute closing VWAP for one crypto pair.
+- `get_vwap_24h`: Fetch the fixed 24-hour VWAP for one crypto pair.
+- `get_market_brief`: Build a decision-ready brief for up to 8 instruments.
+- `run_pre_trade_check`: Check freshness, spread, and price deviation for one
+  instrument before a trade. It never places the trade.
+- `create_price_receipt`: Fetch one live price with an audit-grade receipt and
+  a public lookup URL.
+- `get_macro_snapshot`: Snapshot up to 12 crypto, FX, and metal instruments.
+- `get_token_quality`: Score one crypto token's market quality.
+- `get_state_divergence`: Measure how far one token's AMM state price diverges
+  from its market VWAP.
+- `get_solana_token_brief`: Build a Solana-oriented signal brief for up to 10
+  tokens.
+- `get_trader_alpha_pack`: Combine token quality, state divergence, and VWAP
+  windows into one signal package for up to 12 symbols.
 
 All tools are read-only. The plugin cannot write orders, execute trades, move
 funds, or mutate user accounts.
@@ -185,7 +214,7 @@ Use Cursor's native plugin and MCP panels:
 1. Confirm one `blocksize-market-data` plugin and one MCP server appear.
 2. Confirm `/use-blocksize-market-data` appears in skill discovery.
 3. Open the connector and complete Clerk OAuth without copying tokens.
-4. Confirm exactly the seven read-only tools listed above appear.
+4. Confirm exactly the 18 read-only tools listed above appear.
 5. Run a free `search_pairs` request before explicitly authorizing one live call.
 
 If auth must be reset, disconnect only this connector through Cursor settings.

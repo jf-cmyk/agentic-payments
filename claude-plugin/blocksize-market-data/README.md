@@ -11,7 +11,8 @@ https://mcp.blocksize.info/anthropic/mcp/
 ```
 
 The connector is read-only. It can search supported instruments, inspect starter
-live-data credits, and retrieve market-data snapshots. It cannot place trades,
+live-data credits, retrieve market-data snapshots, and build workflow results
+and trader indicators from live data. It cannot place trades,
 execute wallet transactions, transfer funds, submit wallet signatures, or submit
 x402 payment proofs.
 
@@ -30,8 +31,9 @@ After installing the plugin, invoke:
 /blocksize-market-data:use-blocksize-market-data
 ```
 
-You can also ask Claude for a Blocksize VWAP, bid/ask, FX, metal,
-instrument-search, or credit-status workflow. The skill will prefer live tools
+You can also ask Claude for a Blocksize VWAP, bid/ask, FX, metal, state-price,
+market-brief, pre-trade-check, trader-indicator, instrument-search, or
+credit-status workflow. The skill will prefer live tools
 when the authenticated connector exposes them and will clearly label
 discovery-only or route-only results.
 
@@ -48,6 +50,20 @@ The hosted MCP endpoint exposes these read-only tools:
 | `get_bid_ask` | Fetch bid/ask data for one supported crypto pair or equity ticker. |
 | `get_fx_rate` | Fetch a supported FX pair snapshot. |
 | `get_metal_price` | Fetch a supported metal spot-price snapshot. |
+| `get_state_price` | Fetch the pool-derived AMM state price for one covered crypto pair. |
+| `get_vwap_30m` | Fetch the 30-minute closing VWAP for one crypto pair. |
+| `get_vwap_24h` | Fetch the fixed 24-hour VWAP for one crypto pair. |
+| `get_market_brief` | Build a decision-ready brief for up to 8 instruments. |
+| `run_pre_trade_check` | Check freshness, spread, and price deviation before a trade. It never places the trade. |
+| `create_price_receipt` | Fetch one live price with an audit-grade receipt and a public lookup URL. |
+| `get_macro_snapshot` | Snapshot up to 12 crypto, FX, and metal instruments. |
+| `get_token_quality` | Score one crypto token's market quality. |
+| `get_state_divergence` | Measure how far one token's AMM state price diverges from its market VWAP. |
+| `get_solana_token_brief` | Build a Solana-oriented signal brief for up to 10 tokens. |
+| `get_trader_alpha_pack` | Combine token quality, state divergence, and VWAP windows for up to 12 symbols. |
+
+Workflow and indicator tools cost far more per call than a snapshot. Each
+tool's description states its current cost.
 
 ## Authentication
 
