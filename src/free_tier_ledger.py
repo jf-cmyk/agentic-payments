@@ -539,6 +539,93 @@ class FreeTierLedger:
             "pending_reservation_credits": int(pending_reservations[1]),
         }
 
+    def purge_expired_data(
+        self,
+        cutoff: datetime,
+        *,
+        usage_date: str | None = None,
+    ) -> dict[str, int]:
+        """Delete records older than ``cutoff`` and grants idle since then.
+
+        Daily counters from before ``cutoff`` are folded into one ``YYYY-MM-00``
+        row per grant so the monthly pool is unchanged. A suspended grant is never
+        treated as idle: its ``grants`` row (salted hash, status, reason) and
+        this month's carry row survive so the block holds, while everything else
+        about it ages out like any other grant.
+        """
+        cutoff_iso = cutoff.astimezone(UTC).isoformat()
+        cutoff_date = cutoff.astimezone(UTC).date().isoformat()
+        cutoff_ts = cutoff.timestamp()
+        current_month = month_prefix(usage_date or _today())
+        now_iso = self._now_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("CREATE TEMP TABLE purge_grants (grant_key TEXT PRIMARY KEY)")
+            conn.execute(
+                """
+                INSERT INTO temp.purge_grants (grant_key)
+                SELECT grant_key FROM grants
+                WHERE status = 'active' AND updated_at < ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM grant_reservations r
+                      WHERE r.grant_key = grants.grant_key AND r.state = 'pending'
+                  )
+                """,
+                (cutoff_iso,),
+            )
+            conn.execute(
+                """
+                INSERT INTO grant_usage (grant_key, usage_date, credits_spent, updated_at)
+                SELECT grant_key, substr(usage_date, 1, 7) || '-00', SUM(credits_spent), ?
+                FROM grant_usage
+                WHERE usage_date < ?
+                  AND substr(usage_date, 1, 7) = ?
+                  AND substr(usage_date, 9, 2) != '00'
+                  AND grant_key NOT IN (SELECT grant_key FROM temp.purge_grants)
+                GROUP BY grant_key
+                ON CONFLICT(grant_key, usage_date) DO UPDATE SET
+                    credits_spent = credits_spent + excluded.credits_spent,
+                    updated_at = excluded.updated_at
+                """,
+                (now_iso, cutoff_date, current_month),
+            )
+            usage_deleted = conn.execute(
+                """
+                DELETE FROM grant_usage
+                WHERE (usage_date < ? AND substr(usage_date, 9, 2) != '00')
+                   OR (substr(usage_date, 9, 2) = '00' AND substr(usage_date, 1, 7) < ?)
+                """,
+                (cutoff_date, current_month),
+            ).rowcount
+            reservations_deleted = conn.execute(
+                "DELETE FROM grant_reservations WHERE reserved_at < ? AND state != 'pending'",
+                (cutoff_ts,),
+            ).rowcount
+            subjects_deleted = conn.execute(
+                "DELETE FROM grant_subjects WHERE created_at < ?",
+                (cutoff_iso,),
+            ).rowcount
+            for table in (
+                "grant_usage",
+                "grant_reservations",
+                "grant_subjects",
+                "grant_minute_events",
+                "grant_symbol_events",
+            ):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE grant_key IN (SELECT grant_key FROM temp.purge_grants)"
+                )
+            grants_deleted = conn.execute(
+                "DELETE FROM grants WHERE grant_key IN (SELECT grant_key FROM temp.purge_grants)"
+            ).rowcount
+            conn.execute("DROP TABLE temp.purge_grants")
+        return {
+            "grant_usage_deleted": usage_deleted,
+            "grant_reservations_deleted": reservations_deleted,
+            "grant_subjects_deleted": subjects_deleted,
+            "grants_deleted": grants_deleted,
+        }
+
     # -- internals ---------------------------------------------------------
     def _prune(self, conn: sqlite3.Connection, current: float) -> None:
         conn.execute(

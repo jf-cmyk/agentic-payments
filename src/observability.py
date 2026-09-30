@@ -236,6 +236,47 @@ class UsageEventStore:
                 (event, identity_hash),
             )
 
+    def purge_expired(
+        self,
+        cutoff: datetime,
+        *,
+        surfaces: tuple[str, ...],
+        keep_milestone_events: tuple[str, ...] = (),
+        milestone_identity_hashes: tuple[str, ...] = (),
+    ) -> dict[str, int]:
+        """Delete events on ``surfaces`` and milestone claims older than ``cutoff``.
+
+        Milestones in ``keep_milestone_events`` are once-per-identity markers that
+        outlive the cutoff while the identity is active; they are deleted only for
+        the ``milestone_identity_hashes`` whose accounts were purged.
+        """
+        cutoff_iso = cutoff.astimezone(UTC).isoformat()
+        surface_marks = ",".join("?" for _ in surfaces)
+        keep_marks = ",".join("?" for _ in keep_milestone_events) or "''"
+        with self._connect() as conn:
+            events_deleted = conn.execute(
+                "DELETE FROM usage_events WHERE timestamp < ? "
+                f"AND surface IN ({surface_marks})",
+                (cutoff_iso, *surfaces),
+            ).rowcount if surfaces else 0
+            milestones_deleted = conn.execute(
+                f"DELETE FROM event_milestones WHERE timestamp < ? AND event NOT IN ({keep_marks})",
+                (cutoff_iso, *keep_milestone_events),
+            ).rowcount
+            if keep_milestone_events and milestone_identity_hashes:
+                conn.execute("CREATE TEMP TABLE purge_identities (identity_hash TEXT PRIMARY KEY)")
+                conn.executemany(
+                    "INSERT OR IGNORE INTO temp.purge_identities VALUES (?)",
+                    [(value,) for value in milestone_identity_hashes],
+                )
+                milestones_deleted += conn.execute(
+                    f"DELETE FROM event_milestones WHERE event IN ({keep_marks}) "
+                    "AND identity_hash IN (SELECT identity_hash FROM temp.purge_identities)",
+                    keep_milestone_events,
+                ).rowcount
+                conn.execute("DROP TABLE temp.purge_identities")
+        return {"usage_events": events_deleted, "event_milestones": milestones_deleted}
+
     def claim_milestone(self, event: str, identity_hash: str) -> bool:
         """Atomically claim a once-per-identity event milestone."""
         if not event or not identity_hash:

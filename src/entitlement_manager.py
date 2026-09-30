@@ -1208,6 +1208,111 @@ class EntitlementManager:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def purge_expired_data(
+        self,
+        cutoff: datetime,
+        *,
+        usage_date: str | None = None,
+    ) -> dict[str, object]:
+        """Delete request records older than ``cutoff`` and accounts idle since then.
+
+        Daily counters from before ``cutoff`` are folded into one ``YYYY-MM-00``
+        row per user, which the monthly ``LIKE`` sum still counts, so purging
+        never hands back allowance mid-month. Users with an allowance override
+        (subscribers, beta grants) keep their row, with the email cleared once
+        they are idle. Returns counts plus the ledger subjects of deleted users.
+        """
+        if self._initialization_blocker:
+            return {"skipped": self._initialization_blocker}
+        cutoff_iso = cutoff.astimezone(UTC).isoformat()
+        cutoff_date = cutoff.astimezone(UTC).date().isoformat()
+        current_month = month_prefix(usage_date or _today())
+        now = _utc_now()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("CREATE TEMP TABLE purge_users (user_id TEXT PRIMARY KEY)")
+            conn.execute(
+                """
+                INSERT INTO temp.purge_users (user_id)
+                SELECT user_id FROM users
+                WHERE updated_at < ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM allowance_overrides o WHERE o.user_id = users.user_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM credit_charges c
+                      WHERE c.user_id = users.user_id AND c.state = 'pending'
+                  )
+                """,
+                (cutoff_iso,),
+            )
+            deleted_subjects = sorted(
+                {
+                    str(row[0])
+                    for row in conn.execute(
+                        """
+                        SELECT ledger_subject FROM identity_aliases
+                        WHERE user_id IN (SELECT user_id FROM temp.purge_users)
+                        UNION
+                        SELECT user_id FROM temp.purge_users
+                        """
+                    )
+                }
+            )
+            folded = conn.execute(
+                """
+                INSERT INTO daily_usage (user_id, usage_date, credits_spent, updated_at)
+                SELECT user_id, substr(usage_date, 1, 7) || '-00', SUM(credits_spent), ?
+                FROM daily_usage
+                WHERE usage_date < ?
+                  AND substr(usage_date, 1, 7) = ?
+                  AND substr(usage_date, 9, 2) != '00'
+                  AND user_id NOT IN (SELECT user_id FROM temp.purge_users)
+                GROUP BY user_id
+                ON CONFLICT(user_id, usage_date) DO UPDATE SET
+                    credits_spent = credits_spent + excluded.credits_spent,
+                    updated_at = excluded.updated_at
+                """,
+                (now, cutoff_date, current_month),
+            ).rowcount
+            daily_deleted = conn.execute(
+                """
+                DELETE FROM daily_usage
+                WHERE (usage_date < ? AND substr(usage_date, 9, 2) != '00')
+                   OR (substr(usage_date, 9, 2) = '00' AND substr(usage_date, 1, 7) < ?)
+                """,
+                (cutoff_date, current_month),
+            ).rowcount
+            events_deleted = conn.execute(
+                "DELETE FROM usage_events WHERE created_at < ?",
+                (cutoff_iso,),
+            ).rowcount
+            charges_deleted = conn.execute(
+                "DELETE FROM credit_charges WHERE created_at < ? AND state != 'pending'",
+                (cutoff_iso,),
+            ).rowcount
+            for table in ("daily_usage", "usage_events", "credit_charges", "identity_aliases"):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE user_id IN (SELECT user_id FROM temp.purge_users)"
+                )
+            users_deleted = conn.execute(
+                "DELETE FROM users WHERE user_id IN (SELECT user_id FROM temp.purge_users)"
+            ).rowcount
+            emails_cleared = conn.execute(
+                "UPDATE users SET email = NULL WHERE updated_at < ? AND email IS NOT NULL",
+                (cutoff_iso,),
+            ).rowcount
+            conn.execute("DROP TABLE temp.purge_users")
+        return {
+            "usage_events": events_deleted,
+            "credit_charges": charges_deleted,
+            "daily_usage_folded_users": folded,
+            "daily_usage_deleted": daily_deleted,
+            "users_deleted": users_deleted,
+            "emails_cleared": emails_cleared,
+            "deleted_subjects": deleted_subjects,
+        }
+
     def allowance_override(self, user_id: str) -> int | None:
         """Return the user's explicit allowance override, or None if on the default."""
         with self._connection() as conn:
