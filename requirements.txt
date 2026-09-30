@@ -286,7 +286,7 @@ pydantic-settings==2.14.2
     #   mcp
 pygments==2.20.0
     # via rich
-pyjwt==2.13.0
+pyjwt==2.14.0
     # via
     #   blocksize-mcp-x402
     #   cdp-sdk
