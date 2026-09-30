@@ -550,18 +550,20 @@ _PAGE = r"""<!doctype html>
       const value = k.unit === "rate" ? fmtPct(k.value) : k.unit === "usdc" ? fmtUsd(k.value) : fmtInt(k.value);
       let delta = el("div", { class: "delta muted" }, `no prior ${days}d data`);
       const basis = k.comparable_value ?? k.value;
+      // The change is measured without Claude connector traffic when its history is truncated.
+      const scope = k.comparable_value != null && k.comparable_value !== k.value ? " (excl. Claude connector)" : "";
       if (k.unit === "rate" && basis != null && k.previous != null) {
         // Rates change in percentage points; a relative change of a rate misleads.
         const pts = (basis - k.previous) * 100;
         const up = pts >= 0;
         const good = (up && k.good_direction === "up") || (!up && k.good_direction === "down");
         delta = el("div", { class: `delta ${up ? "up" : "down"}-${good ? "good" : "bad"}` },
-          `${up ? "▲" : "▼"} ${Math.abs(pts).toFixed(1)} pts vs prior ${days}d`);
+          `${up ? "▲" : "▼"} ${Math.abs(pts).toFixed(1)} pts vs prior ${days}d${scope}`);
       } else if (k.delta != null) {
         const up = k.delta >= 0;
         const good = (up && k.good_direction === "up") || (!up && k.good_direction === "down");
         delta = el("div", { class: `delta ${up ? "up" : "down"}-${good ? "good" : "bad"}` },
-          `${up ? "▲" : "▼"} ${fmtPct(Math.abs(k.delta), 0)} vs prior ${days}d`);
+          `${up ? "▲" : "▼"} ${fmtPct(Math.abs(k.delta), 0)} vs prior ${days}d${scope}`);
       } else if (k.previous != null && k.previous === 0 && k.value) {
         delta = el("div", { class: "delta muted" }, `new: 0 in prior ${days}d`);
       }
@@ -665,7 +667,8 @@ _PAGE = r"""<!doctype html>
     const node = clear($("user-stats"));
     node.append(
       stat(fmtInt(u.unique_clients), "Unique clients"),
-      stat(fmtInt(u.new_clients), "New vs prior window"),
+      stat(fmtInt(u.new_clients), data.retention?.comparison_excludes_claude
+        ? "New vs prior window (excl. Claude connector)" : "New vs prior window"),
       stat(fmtInt(u.returning_clients), `Active on 2+ days (${fmtPct(u.returning_rate, 0)})`),
       stat(fmtInt(u.verified_identities), "Verified identities"),
       stat(fmtInt(u.paying_wallets), "Paying wallets"),

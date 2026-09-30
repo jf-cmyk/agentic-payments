@@ -370,7 +370,10 @@ class UsageInsights:
             # exact first timestamp of the group instead.
             if row["day"] == current_start_iso[:10]:
                 is_current = row["first_ts"] >= current_start_iso
-            self._accumulate(current if is_current else previous, row)
+            # The full previous window is read only when it is also the
+            # comparison window; otherwise previous_cmp takes its place.
+            if is_current or not comparison_excludes_claude:
+                self._accumulate(current if is_current else previous, row)
             if comparison_excludes_claude and row["surface"] not in CLAUDE_SURFACES:
                 self._accumulate(current_cmp if is_current else previous_cmp, row)
 

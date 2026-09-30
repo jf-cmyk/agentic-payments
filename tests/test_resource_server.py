@@ -7545,6 +7545,7 @@ def test_command_center_serves_the_usage_dashboard(observability_store, test_cli
     assert "innerHTML" not in response.text
     assert 'id="retention-note"' in response.text
     assert "renderRetention" in response.text
+    assert "excl. Claude connector" in response.text
 
     root = test_client.get("/internal/observability")
     assert root.status_code == 200

@@ -283,3 +283,45 @@ def test_short_windows_keep_claude_in_the_comparison(tmp_path):
     assert result["users"]["new_clients"] == 0
     channels = {row["id"]: row for row in result["channels"]}
     assert channels["claude"]["retention_note"] is None
+
+
+def _identity(store: UsageEventStore, identity: str, surface: str) -> None:
+    # Not a call event, so it only feeds the identity counts.
+    store.record("free_tier_grant_created", surface=surface,
+                 metadata={"identity_hash": identity, "identity_trust": "verified_oauth"})
+
+
+def test_long_windows_compare_rates_and_identities_without_claude(tmp_path):
+    store = UsageEventStore(tmp_path / "usage.db")
+    # Prior window: a healthy API call, an API monitor, and Claude connector rows.
+    _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="node", ip="1.1.1.1", status=200)
+    _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="TridentStatus/1.0", ip="9.9.9.9", status=200)
+    _claude_call(store, ip="5.5.5.5")
+    _identity(store, "api-old", "http_api")
+    _identity(store, "claude-old", "claude_mcp")
+    _backdate_all(store, 40)
+    # Current window: the same API call and monitor, plus two Claude connector
+    # tool calls over a failing transport request; none may move the
+    # like-for-like rates.
+    _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="node", ip="1.1.1.1", status=200)
+    _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="TridentStatus/1.0", ip="9.9.9.9", status=200)
+    _call(store, "/anthropic/mcp", None, ua="Claude-User", ip="5.5.5.5", status=500,
+          surface="anthropic_mcp")
+    for _ in range(2):
+        store.record("mcp_tool_call", surface="claude_mcp", tool_name="get_vwap",
+                     subject="BTCUSD", user_agent="Claude-User")
+    _identity(store, "api-new", "http_api")
+    _identity(store, "claude-new", "claude_mcp")
+
+    kpis = {row["id"]: row for row in _build(store, days=30)["kpis"]}
+
+    assert kpis["monitor_share"]["value"] == pytest.approx(0.25)
+    assert kpis["monitor_share"]["comparable_value"] == pytest.approx(0.5)
+    assert kpis["monitor_share"]["previous"] == pytest.approx(0.5)
+    assert kpis["server_error_rate"]["value"] == pytest.approx(0.5)
+    assert kpis["server_error_rate"]["comparable_value"] == pytest.approx(0.0)
+    assert kpis["server_error_rate"]["previous"] == pytest.approx(0.0)
+    assert kpis["verified_identities"]["value"] == 2
+    assert kpis["verified_identities"]["comparable_value"] == 1
+    assert kpis["verified_identities"]["previous"] == 1
+    assert kpis["verified_identities"]["delta"] == pytest.approx(0.0)
