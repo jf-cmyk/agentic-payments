@@ -11,20 +11,47 @@ handling a tool that is unavailable in the current host.
 | Claude | `https://mcp.blocksize.info/anthropic/mcp/` |
 | Cursor | `https://mcp.blocksize.info/cursor/mcp/` |
 
-Each authenticated connector exposes seven read-only tools:
+Each authenticated connector exposes 18 read-only tools, in four groups.
+
+Discovery and credit status:
 
 - `search_pairs`
 - `list_instruments`
 - `get_credit_balance`
+
+Live snapshots:
+
 - `get_vwap`
 - `get_bid_ask`
 - `get_fx_rate`
 - `get_metal_price`
+- `get_state_price`
+- `get_vwap_30m`
+- `get_vwap_24h`
 
-Live calls use the signed-in account's current connector allowance. Do not
-hard-code an allowance or tool cost; use the value returned by the server.
+Agent workflow products:
+
+- `get_market_brief`
+- `run_pre_trade_check`
+- `create_price_receipt`
+- `get_macro_snapshot`
+
+Trader indicators:
+
+- `get_token_quality`
+- `get_state_divergence`
+- `get_solana_token_brief`
+- `get_trader_alpha_pack`
+
+Live calls use the signed-in account's current connector allowance. Workflow
+products and trader indicators cost far more per call than a live snapshot.
+Do not hard-code an allowance or tool cost; use the cost in the tool
+description and the balance returned by the server.
 These connectors do not expose route builders, documentation search, payment,
-wallet, trading, or account-mutation tools.
+wallet, trading, or account-mutation tools. `run_pre_trade_check` only
+evaluates a planned trade; it never places one. `create_price_receipt` stores
+the request, including any `purpose` note, behind a public lookup URL, so keep
+account identifiers and private details out of that note.
 
 ## Public discovery fallback
 
@@ -67,7 +94,7 @@ authenticated connector unless the user separately configures the public server.
 
 - Instrument discovery is not proof that a live feed is ready.
 - A returned HTTP endpoint is not a returned market-data observation.
-- The free tier is a recurring monthly evaluation allowance (15,000 live-data
+- The free tier is a recurring monthly evaluation allowance (30,000 live-data
   credits) with required "Data by Blocksize" attribution; production commercial
   use needs a subscription (free trial at /go/free-trial, plans at /go/pricing).
 - Production usage can use direct x402 outside the connector or an authenticated

@@ -1,6 +1,6 @@
 ---
 name: use-blocksize-market-data
-description: Discover, validate, and retrieve read-only Blocksize market data across crypto, supported equities, FX, metals, state prices, and VWAP windows. Use when a user asks for instrument lookup, a current market-data snapshot, VWAP, bid/ask, an exchange rate, a metal price, Blocksize credit status, provenance, or an exact Blocksize API route in ChatGPT/Codex, Claude, or Cursor. Do not use for order execution, trading, wallet signing, or personalized investment advice.
+description: Discover, validate, and retrieve read-only Blocksize market data across crypto, supported equities, FX, metals, state prices, and VWAP windows. Use when a user asks for instrument lookup, a current market-data snapshot, VWAP, bid/ask, an exchange rate, a metal price, a market brief, a pre-trade check, a price receipt, a token or trader indicator, Blocksize credit status, provenance, or an exact Blocksize API route in ChatGPT/Codex, Claude, or Cursor. Do not use for order execution, trading, wallet signing, or personalized investment advice.
 ---
 
 # Use Blocksize Market Data
@@ -42,11 +42,21 @@ discovery, live retrieval, and transaction execution as separate capabilities.
    - `get_bid_ask` for supported crypto or equity bid/ask.
    - `get_fx_rate` for supported FX pairs.
    - `get_metal_price` for supported metals.
+   - `get_state_price` for a pool-derived AMM state price.
+   - `get_vwap_30m` or `get_vwap_24h` for a fixed-window VWAP.
+   - `get_market_brief`, `run_pre_trade_check`, `create_price_receipt`, or
+     `get_macro_snapshot` for a packaged agent workflow result.
+   - `get_token_quality`, `get_state_divergence`, `get_solana_token_brief`, or
+     `get_trader_alpha_pack` for a trader indicator.
+
+   Workflow and indicator tools cost far more than a snapshot. Call one only
+   when the user asks for that packaged result, and state the cost from the
+   tool description before the first call.
 6. Run credit-spending calls sequentially. Stop on the first auth, credit,
    ledger, upstream, identity, or freshness failure instead of retrying or
    silently falling back to another instrument.
-7. For state prices, 30-minute VWAP closes, fixed 24-hour VWAP, or premium
-   workflows not exposed as live MCP tools, use `get_market_data_endpoint` or
+7. For a data product or workflow with no live MCP tool in the current host,
+   such as on the public discovery server, use `get_market_data_endpoint` or
    `get_workflow_endpoint` only when that tool is available. Otherwise report
    that this connector cannot build the route. A returned route is a paid HTTP
    integration path, not retrieved data.
