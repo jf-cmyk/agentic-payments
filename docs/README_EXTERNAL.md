@@ -4,7 +4,7 @@ Blocksize Capital provides:
 
 - A public remote MCP discovery server for agent builders
 - A paid HTTP market data API for live production data
-- A free starter allowance of 15,000 live data credits every calendar month for
+- A free starter allowance of 30,000 live data credits every calendar month for
   eligible authenticated connector users, then subscription plans from EUR 49/month
   with a free trial (`/go/free-trial`)
 
@@ -49,18 +49,18 @@ Premium workflow endpoints:
 
 - `POST /v1/capabilities/check` - free data-readiness check before spending
   credits on trader or indicator products
-- `POST /v1/briefs/market` - Agent Market Brief, 10 credits
-- `POST /v1/checks/pre-trade` - Pre-Trade Sanity Check, 5 credits
-- `POST /v1/receipts/price` - Audit-Grade Price Receipt, 10 credits
-- `POST /v1/snapshots/macro` - Multi-Asset Macro Snapshot, 25 credits
+- `POST /v1/checks/pre-trade` - Pre-Trade Sanity Check, 100 credits ($0.10)
+- `POST /v1/briefs/market` - Agent Market Brief, 250 credits ($0.25)
+- `POST /v1/receipts/price` - Audit-Grade Price Receipt, 250 credits ($0.25)
 - `POST /v1/monitors/evaluate` - Spend-Controlled Market Monitor evaluation,
-  10 credits
+  250 credits ($0.25)
 - `POST /v1/indicators/token-quality` - Token Market Quality Indicator,
-  15 credits
+  500 credits ($0.50)
 - `POST /v1/indicators/state-divergence` - Oracle / State Price Divergence
-  Indicator, 15 credits
-- `POST /v1/signals/solana-token-brief` - Solana Token Brief, 25 credits
-- `POST /v1/signals/trader-alpha-pack` - Trader Alpha Signal Pack, 50 credits
+  Indicator, 500 credits ($0.50)
+- `POST /v1/snapshots/macro` - Multi-Asset Macro Snapshot, 1,000 credits ($1.00)
+- `POST /v1/signals/solana-token-brief` - Solana Token Brief, 1,000 credits ($1.00)
+- `POST /v1/signals/trader-alpha-pack` - Trader Alpha Signal Pack, 2,500 credits ($2.50)
 - `GET /v1/provenance/{receipt_id}` - free when tied to a prior paid or
   credited call
 
@@ -128,7 +128,7 @@ On macOS, local key files are rejected unless the caller explicitly supplies
 
 ## Pricing
 
-Eligible authenticated connector users receive 15,000 free live data credits
+Eligible authenticated connector users receive 30,000 free live data credits
 every calendar month (UTC). The allowance is an evaluation and prototyping
 licence: attribution ("Data by Blocksize") is required, and production
 commercial use requires a subscription. Raw caller-selected identity headers do

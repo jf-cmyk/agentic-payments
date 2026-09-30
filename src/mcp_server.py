@@ -33,6 +33,7 @@ from src.config import settings
 from src.credit_manager import CREDIT_COSTS, STARTER_CREDIT_ALLOWANCE
 from src import free_tier
 from src import live_showcase
+from src import pricing_catalog
 from src import vwap_coverage
 from src.models import (
     BidAskResponse,
@@ -671,8 +672,9 @@ async def get_pricing_info() -> str:
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
             "scope": "authenticated connector users only",
             "applies_to": (
-                "raw VWAP, bid/ask, FX, metals, batch calls, market briefs, "
-                "pre-trade checks, audit receipts, macro snapshots, and provenance"
+                "every paid product: raw VWAP, bid/ask, state prices, 30-minute and "
+                "24-hour VWAP, FX, metals, market briefs, pre-trade checks, price "
+                "receipts, macro snapshots, and trader indicators"
             ),
             "upgrade_path": (
                 "signed x402 for direct public HTTP; start a subscription trial at "
@@ -680,31 +682,29 @@ async def get_pricing_info() -> str:
                 "for Enterprise authenticated account-plan access"
             ),
         },
+        "unit_pricing": pricing_catalog.pricing_payload(),
         "credit_costs": CREDIT_COSTS,
         "premium_workflow_products": {
-            "agent_market_brief": {
-                "credit_cost": CREDIT_COSTS["market_brief"],
-                "recommended_paid_price_usdc": "0.25-0.50",
-            },
-            "pre_trade_sanity_check": {
-                "credit_cost": CREDIT_COSTS["pre_trade_check"],
-                "recommended_paid_price_usdc": "0.10-0.25",
-            },
-            "audit_grade_price_receipt": {
-                "credit_cost": CREDIT_COSTS["audit_receipt"],
-                "recommended_paid_price_usdc": "0.25-0.75",
-            },
-            "multi_asset_macro_snapshot": {
-                "credit_cost": CREDIT_COSTS["macro_snapshot"],
-                "recommended_paid_price_usdc": "1.00-2.50",
-            },
+            name: {
+                "credit_cost": pricing_catalog.product_credits(key),
+                "price_usdc": str(pricing_catalog.product_usdc(key)),
+            }
+            for name, key in (
+                ("agent_market_brief", "market_brief"),
+                ("pre_trade_sanity_check", "pre_trade_check"),
+                ("audit_grade_price_receipt", "audit_receipt"),
+                ("multi_asset_macro_snapshot", "macro_snapshot"),
+                ("spend_controlled_market_monitor", "monitor_evaluate"),
+                ("token_market_quality_indicator", "token_quality_indicator"),
+                ("state_divergence_indicator", "state_divergence_indicator"),
+                ("solana_token_brief", "solana_token_brief"),
+                ("trader_alpha_pack", "trader_alpha_pack"),
+            )
+        }
+        | {
             "agent_data_provenance": {
                 "credit_cost": CREDIT_COSTS["provenance_lookup"],
-                "recommended_paid_price_usdc": "free with prior paid or credited call",
-            },
-            "spend_controlled_market_monitor": {
-                "credit_cost": CREDIT_COSTS["market_brief"],
-                "recommended_paid_price_usdc": "0.25",
+                "price_usdc": "free with prior paid or credited call",
             },
         },
         "free_live_showcase": live_showcase.showcase_handoff(),
@@ -725,17 +725,17 @@ async def get_pricing_info() -> str:
         ),
     }
 
+    price_lines = "".join(
+        f"  {row['product']}: {row['credits']:,} credits (${row['usdc']}) - {row['covers']}\n"
+        for row in pricing_catalog.price_table()
+    )
     summary = (
-        "Blocksize Capital Pricing (USDC per call):\n"
-        f"  🆓 Discovery:      FREE (search, list, pricing, endpoint builder)\n"
-        f"  📊 Core Crypto:    ${settings.pricing.core_crypto} (high-liquidity VWAP pairs)\n"
-        f"  📊 Extended Crypto: ${settings.pricing.extended_crypto} (shared bid/ask crypto pairs)\n"
-        f"  🏦 TradFi:         ${settings.pricing.tradfi} (FX, metals)\n"
-        f"  🏛️ Equities:       ${settings.pricing.equities} (supported tickers via bid/ask)\n"
-        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:g} free live "
+        "Blocksize Capital Pricing (one price list, credits or USDC):\n"
+        f"  {pricing_catalog.rate_sentence()}\n"
+        "  Discovery: FREE (search, list, pricing, endpoint builder)\n"
+        f"{price_lines}"
+        f"  Authenticated Connector Starter Credits: {STARTER_CREDIT_ALLOWANCE:,.0f} free live "
         "data credits every calendar month for eligible authenticated connector users only\n"
-        "  Premium workflows: market brief 10 credits, pre-trade check 5, "
-        "audit receipt 10, macro snapshot 25, monitor evaluate 10\n"
         "\nDirect Public HTTP: Signed x402 on Solana (primary) or Base L2 (fallback)\n"
         f"Subscriptions: {FREE_TIER_OFFER_LINE}. Free trial: {PUBLIC_BASE_URL}/go/free-trial | "
         f"Plans: {PUBLIC_BASE_URL}/go/pricing\n"

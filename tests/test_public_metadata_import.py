@@ -33,7 +33,7 @@ def test_public_metadata_imports_without_blocksize_api_key(tmp_path):
     )
     assert result.returncode == 0, result.stderr[-2000:]
     offer_line, description = result.stdout.strip().splitlines()[-2:]
-    assert offer_line.startswith("15,000 free live-data credits every month")
+    assert offer_line.startswith("30,000 free live-data credits every month")
     assert len(description) <= 100
 
 

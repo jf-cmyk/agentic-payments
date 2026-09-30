@@ -190,10 +190,12 @@ class TestGetPricingInfoTool:
     @pytest.mark.asyncio
     async def test_pricing_info_returns_all_tiers(self):
         result = await get_pricing_info()
-        assert "Core Crypto" in result
-        assert "Extended Crypto" in result
-        assert "TradFi" in result
-        assert "Equities" in result
+        assert "1 credit = $0.001 USDC" in result
+        assert "Core crypto: 2 credits ($0.002)" in result
+        assert "Extended crypto: 4 credits ($0.004)" in result
+        assert "FX and metals: 5 credits ($0.005)" in result
+        assert "Tokenized equities: 8 credits ($0.008)" in result
+        assert "Trader alpha pack: 2,500 credits ($2.50)" in result
         assert "rates" not in result.lower()
         assert "Analytics" not in result
         assert "FREE" in result

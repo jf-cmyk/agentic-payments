@@ -8,16 +8,22 @@ Dual-network payment: Solana (priority) + Base (fallback).
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 import logging
 from pathlib import Path
 import re
 from typing import ClassVar
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.payment_limits import MAX_PAYMENT_REPLAY_ENTRIES, MAX_PAYMENT_REPLAY_TTL_SECONDS
+from src.pricing_catalog import (
+    CREDIT_PRICE_USDC,
+    DEFAULT_TIER_CREDITS,
+    credits_to_usdc,
+    usdc_to_credits as credits_for_usdc,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -277,21 +283,51 @@ class X402Settings(BaseSettings):
 
 class PricingSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
-    """Tiered per-call pricing in USDC.
+    """Tiered per-call raw-data pricing in USDC (1 credit = $0.001).
 
-    Tiers:
+    Tiers (credits in brackets):
       - Discovery:       FREE
-      - Core Crypto:     $0.002 (top 250 by market cap)
-      - Extended Crypto: $0.004 (niche/long-tail bid/ask and VWAP)
-      - TradFi:          $0.005 (currently enabled FX and metals)
-      - Equities:        $0.008 (supported tickers via shared bid/ask)
+      - Core Crypto:     $0.002 [2] (top 250 by market cap)
+      - Extended Crypto: $0.004 [4] (long-tail VWAP, bid/ask, state, VWAP windows)
+      - TradFi:          $0.005 [5] (currently enabled FX and metals)
+      - Equities:        $0.008 [8] (supported tickers via shared bid/ask)
+
+    Workflow products and trader indicators are priced in credits in
+    ``src/pricing_catalog.py``.
     """
 
-    core_crypto: Decimal = Field(Decimal("0.002"), alias="PRICE_CORE_CRYPTO")
-    extended_crypto: Decimal = Field(Decimal("0.004"), alias="PRICE_EXTENDED_CRYPTO")
-    tradfi: Decimal = Field(Decimal("0.005"), alias="PRICE_TRADFI")
-    equities: Decimal = Field(Decimal("0.008"), alias="PRICE_EQUITIES")
+    core_crypto: Decimal = Field(
+        credits_to_usdc(DEFAULT_TIER_CREDITS["core_crypto"]), alias="PRICE_CORE_CRYPTO"
+    )
+    extended_crypto: Decimal = Field(
+        credits_to_usdc(DEFAULT_TIER_CREDITS["extended_crypto"]), alias="PRICE_EXTENDED_CRYPTO"
+    )
+    tradfi: Decimal = Field(credits_to_usdc(DEFAULT_TIER_CREDITS["tradfi"]), alias="PRICE_TRADFI")
+    equities: Decimal = Field(
+        credits_to_usdc(DEFAULT_TIER_CREDITS["equities"]), alias="PRICE_EQUITIES"
+    )
     analytics: Decimal = Field(Decimal("0.001"), alias="PRICE_ANALYTICS")
+
+    @field_validator("core_crypto", "extended_crypto", "tradfi", "equities")
+    @classmethod
+    def _whole_credits(cls, value: Decimal) -> Decimal:
+        """Round a tier price up to a whole number of credits.
+
+        Credits and USDC must buy the same call, so a configured price such as
+        0.0025 becomes 0.003 (3 credits) instead of a fractional credit.
+        """
+        value = Decimal(value)
+        if value <= 0:
+            raise ValueError("tier prices must be positive")
+        credits = (value / CREDIT_PRICE_USDC).to_integral_value(rounding=ROUND_CEILING)
+        rounded = credits * CREDIT_PRICE_USDC
+        if rounded != value:
+            logger.warning(
+                "Tier price %s is not a whole number of credits; charging %s instead",
+                value,
+                rounded,
+            )
+        return rounded
 
     def get_crypto_price(self, base_currency: str) -> Decimal:
         """Get the price for a crypto data call based on asset tier."""
@@ -389,10 +425,13 @@ class FreeTierSettings(BaseSettings):
     ``src.free_tier``. Do not hard-code the allowance anywhere else.
 
     Unit: credits per calendar month (UTC) per verified identity. One credit is
-    one raw price call; FX and metals cost 2, analytics packs cost 5-50.
+    worth $0.001 USDC and every product costs the same number of credits as its
+    x402 price (src/pricing_catalog.py): a core crypto call costs 2 credits,
+    FX and metals 5, workflow products and trader indicators 100-2,500.
 
     Guards (all enforced on the connector rail, see docs/gtm/free_tier_dev_checkpoint_2026-09-23.md):
-      - per-identity sustained rate limit (credits per minute)
+      - per-identity sustained rate limit (credits per minute; one call that
+        costs more than the limit is admitted when the minute is otherwise idle)
       - per-identity soft daily cap (credits per UTC day)
       - free-tier batch size cap (items per multi-symbol call)
       - global daily cap across all identities (circuit breaker)
@@ -413,16 +452,16 @@ class FreeTierSettings(BaseSettings):
     )
 
     enabled: bool = Field(True, alias="FREE_TIER_ENABLED")
-    monthly_credits: int = Field(15_000, ge=0, alias="FREE_TIER_MONTHLY_CREDITS")
-    per_minute_credits: int = Field(30, ge=0, alias="FREE_TIER_PER_MINUTE_CREDITS")
+    monthly_credits: int = Field(30_000, ge=0, alias="FREE_TIER_MONTHLY_CREDITS")
+    per_minute_credits: int = Field(60, ge=0, alias="FREE_TIER_PER_MINUTE_CREDITS")
     daily_soft_cap_credits: int = Field(
-        2_000,
+        4_000,
         ge=0,
         alias="FREE_TIER_DAILY_SOFT_CAP_CREDITS",
     )
     max_batch_items: int = Field(5, ge=1, alias="FREE_TIER_MAX_BATCH_ITEMS")
     global_daily_cap_credits: int = Field(
-        200_000,
+        400_000,
         ge=0,
         alias="FREE_TIER_GLOBAL_DAILY_CAP_CREDITS",
     )
@@ -580,10 +619,26 @@ class Settings:
                     "get_market_data_endpoint"
                 ),
             },
-            "core_crypto": {"price": f"${self.pricing.core_crypto}", "includes": "RT VWAP for top crypto pairs"},
-            "extended_crypto": {"price": f"${self.pricing.extended_crypto}", "includes": "Bid/ask and long-tail crypto pairs"},
-            "tradfi": {"price": f"${self.pricing.tradfi}", "includes": "FX pairs and supported metal snapshots"},
-            "equities": {"price": f"${self.pricing.equities}", "includes": "Supported equity tickers via shared bid/ask"},
+            "core_crypto": {
+                "price": f"${self.pricing.core_crypto}",
+                "credits": credits_for_usdc(self.pricing.core_crypto),
+                "includes": "VWAP, bid/ask, state price, 30m and 24h VWAP for top-250 crypto",
+            },
+            "extended_crypto": {
+                "price": f"${self.pricing.extended_crypto}",
+                "credits": credits_for_usdc(self.pricing.extended_crypto),
+                "includes": "The same routes for long-tail crypto pairs",
+            },
+            "tradfi": {
+                "price": f"${self.pricing.tradfi}",
+                "credits": credits_for_usdc(self.pricing.tradfi),
+                "includes": "FX pairs and supported metal snapshots",
+            },
+            "equities": {
+                "price": f"${self.pricing.equities}",
+                "credits": credits_for_usdc(self.pricing.equities),
+                "includes": "Supported equity tickers via shared bid/ask",
+            },
         }
 
 

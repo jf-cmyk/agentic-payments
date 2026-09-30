@@ -59,9 +59,12 @@ _bundle = create_authenticated_market_data_mcp(
     mcp_name="Blocksize Market Data for Cursor",
     instructions=(
         "Read-only Blocksize Capital market data for Cursor across crypto VWAP, "
-        "supported equity ticker bid/ask, FX, and metals. Sign in with Blocksize "
-        f"through Clerk to use the free starter allowance of {allowance_label()} "
-        "live-data credits every calendar month. Production usage can continue "
+        "supported equity ticker bid/ask, FX, metals, AMM state prices, VWAP windows, "
+        "market briefs, pre-trade checks, price receipts, macro snapshots, and trader "
+        "indicators. Sign in with Blocksize through Clerk to use the free starter "
+        f"allowance of {allowance_label()} live-data credits every calendar month; each "
+        "tool costs the same number of credits as its x402 price at $0.001 per credit. "
+        "Production usage can continue "
         "through direct x402 or a Blocksize authenticated account plan outside Cursor. "
         "This connector never executes wallet transactions or submits x402 payment "
         "proofs from Cursor."

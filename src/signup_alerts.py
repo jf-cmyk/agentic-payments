@@ -30,7 +30,12 @@ from typing import Any
 import httpx
 
 from src import signup_store
-from src.free_tier import grant_key_for_email
+from src.free_tier import (
+    allowance_credits,
+    allowance_label,
+    credit_usage_sentence,
+    grant_key_for_email,
+)
 from src.observability import fingerprint, get_global_store, record_usage_event
 
 logger = logging.getLogger(__name__)
@@ -189,7 +194,7 @@ def build_email(user: dict[str, str]) -> dict[str, str]:
         f"Email status: {user['email_verified']}\n"
         f"Signed up:    {user['created_at']}\n"
         f"Clerk user:   {user['user_id']}\n\n"
-        "They get 15,000 free live-data credits this month. Reply to this email to "
+        f"They get {allowance_label()} free live-data credits this month. Reply to this email to "
         "keep a note, or write to them directly.\n"
     )
     body_html = (
@@ -201,7 +206,7 @@ def build_email(user: dict[str, str]) -> dict[str, str]:
             ("Signed up", user["created_at"]),
             ("Clerk user", user["user_id"]),
         ])
-        + "<p>They get 15,000 free live-data credits this month.</p>"
+        + f"<p>They get {allowance_label()} free live-data credits this month.</p>"
     )
     return {"subject": subject, "text": text, "html": body_html}
 
@@ -216,11 +221,12 @@ def build_welcome_email(user: dict[str, str]) -> dict[str, str]:
     text = (
         f"{greeting}\n\n"
         "Thanks for connecting Blocksize live market data. Your account includes "
-        "15,000 free live-data credits every calendar month: one credit per price, "
-        "two for FX and metals.\n\n"
+        f"{allowance_label()} free live-data credits every calendar month. "
+        f"{credit_usage_sentence()}\n\n"
         "Try it now in your assistant:\n"
         '  "What is the current multi-venue VWAP for BTC/USD?"\n'
         '  "Compare the bid/ask spread for ETH/USD and SOL/USD."\n'
+        '  "Run a pre-trade check on SOL/USD before I buy $500."\n'
         '  "How many Blocksize credits do I have left this month?"\n\n'
         f"Quickstart and examples: {quickstart}\n\n"
         "The free tier is an evaluation licence with \"Data by Blocksize\" attribution. "
@@ -235,11 +241,12 @@ def build_welcome_email(user: dict[str, str]) -> dict[str, str]:
     body_html = (
         f"<p>{html.escape(greeting)}</p>"
         "<p>Thanks for connecting Blocksize live market data. Your account includes "
-        "<b>15,000 free live-data credits every calendar month</b>: one credit per price, "
-        "two for FX and metals.</p>"
+        f"<b>{allowance_label()} free live-data credits every calendar month</b>. "
+        f"{html.escape(credit_usage_sentence())}</p>"
         "<p>Try it now in your assistant:</p><ul>"
         "<li>\"What is the current multi-venue VWAP for BTC/USD?\"</li>"
         "<li>\"Compare the bid/ask spread for ETH/USD and SOL/USD.\"</li>"
+        "<li>\"Run a pre-trade check on SOL/USD before I buy $500.\"</li>"
         "<li>\"How many Blocksize credits do I have left this month?\"</li></ul>"
         f"<p>Quickstart and examples: <a href='{quickstart}'>{quickstart}</a></p>"
         "<p>The free tier is an evaluation licence with \"Data by Blocksize\" attribution. "
@@ -501,7 +508,7 @@ def _footer_html(trial: str, pricing: str) -> str:
 def build_threshold_email(user: dict[str, Any], pct: int, snapshot: dict[str, Any]) -> dict[str, str]:
     first = str(user.get("name", "")).split(" ")[0] if user.get("name") not in (None, "not given") else ""
     greeting = f"Hi {first}," if first else "Hi,"
-    limit = int(snapshot.get("monthly_limit") or 15000)
+    limit = int(snapshot.get("monthly_limit") or allowance_credits())
     remaining = int(snapshot.get("credits_remaining") or 0)
     resets = str(snapshot.get("resets_at") or "the first of next month")
     trial, pricing = _campaign_links(f"free-tier-{pct}")
@@ -537,7 +544,7 @@ def build_nudge_email(user: dict[str, Any]) -> dict[str, str]:
     text = (
         f"{greeting}\n\n"
         "You connected Blocksize live market data two days ago but have not fetched a price yet. "
-        "Your 15,000 free credits for this month are waiting.\n\n"
+        f"Your {allowance_label()} free credits for this month are waiting.\n\n"
         "Try one of these in your assistant:\n"
         '  "What is the current multi-venue VWAP for BTC/USD?"\n'
         '  "Compare the bid/ask spread for ETH/USD and SOL/USD."\n\n'
@@ -550,7 +557,7 @@ def build_nudge_email(user: dict[str, Any]) -> dict[str, str]:
     body_html = (
         f"<p>{html.escape(greeting)}</p>"
         "<p>You connected Blocksize live market data two days ago but have not fetched a price yet. "
-        "Your 15,000 free credits for this month are waiting.</p>"
+        f"Your {allowance_label()} free credits for this month are waiting.</p>"
         "<p>Try one of these in your assistant:</p><ul>"
         "<li>\"What is the current multi-venue VWAP for BTC/USD?\"</li>"
         "<li>\"Compare the bid/ask spread for ETH/USD and SOL/USD.\"</li></ul>"

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from src import signup_alerts, signup_store
+from src import free_tier, signup_alerts, signup_store
 from src.observability import UsageEventStore
 from src.resource_server import app
 from tests.test_signup_alerts import SECRET, signed_headers, user_created
@@ -67,7 +67,8 @@ def test_webhook_stores_signup_and_sends_welcome_when_sender_configured(store_en
     welcome = mail[1]
     assert welcome["from"] == "Blocksize <hello@blocksize.info>"
     assert welcome["reply_to"] == "owner@example.com"
-    assert "15,000 free live-data credits" in welcome["text"]
+    assert f"{free_tier.allowance_label()} free live-data credits" in welcome["text"]
+    assert "Run a pre-trade check" in welcome["text"]
     assert "utm_campaign=free-tier-welcome" in welcome["text"]
     assert "Data terms" in welcome["html"]
     stored = signup_store.signups_since("2000-01-01")

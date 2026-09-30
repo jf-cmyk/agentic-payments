@@ -3,7 +3,7 @@
 The per-connector ``EntitlementManager`` databases keep the charge lifecycle
 (pending, delivered, refunded) and rollback compatibility. This ledger sits in
 front of them and is keyed by the salted hash of the normalized email, so the
-Claude, Cursor, and OpenAI connectors all draw from the same 15,000-credit
+Claude, Cursor, and OpenAI connectors all draw from the same 30,000-credit
 monthly pool and share the per-identity guards from checkpoint section 4:
 
 - monthly pool (``FREE_TIER_MONTHLY_CREDITS``)
@@ -261,6 +261,9 @@ class FreeTierLedger:
                 return FreeTierDecision(False, "suspended", before, grant_created=created)
 
             # Per-minute sustained limit (fixed 60 s window, credit-weighted).
+            # A single product priced above the limit (a 250-credit brief
+            # against a 60-credit minute) is admitted when nothing else was
+            # spent in the window, and then fills that window by itself.
             if free_tier.per_minute_credits > 0:
                 rows = conn.execute(
                     "SELECT occurred_at, credits FROM grant_minute_events "
@@ -268,7 +271,7 @@ class FreeTierLedger:
                     (grant_key, current - _MINUTE_WINDOW_SECONDS),
                 ).fetchall()
                 minute_credits = sum(int(row[1]) for row in rows)
-                if minute_credits + credits > free_tier.per_minute_credits:
+                if minute_credits > 0 and minute_credits + credits > free_tier.per_minute_credits:
                     retry_after = (
                         max(1, int(float(rows[0][0]) + _MINUTE_WINDOW_SECONDS - current) + 1)
                         if rows

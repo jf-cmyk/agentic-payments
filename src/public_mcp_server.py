@@ -24,6 +24,7 @@ from src.mcp_server import (
 )
 from src.observability import record_usage_event
 from src import agent_auth, free_tier
+from src import pricing_catalog
 from src import live_showcase
 from src.public_metadata import (
     AGENT_MANUAL_URL,
@@ -356,14 +357,14 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
     catalog: dict[str, dict[str, object]] = {
         "agent_market_brief": {
             "path": "/v1/briefs/market",
-            "credit_cost": 10,
-            "paid_price_usdc": "0.25",
+            "credit_cost": pricing_catalog.product_credits("market_brief"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("market_brief")),
             "example_body": {"symbols": ["BTCUSD", "ETHUSD"], "intent": "portfolio_update"},
         },
         "pre_trade_sanity_check": {
             "path": "/v1/checks/pre-trade",
-            "credit_cost": 5,
-            "paid_price_usdc": "0.10",
+            "credit_cost": pricing_catalog.product_credits("pre_trade_check"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("pre_trade_check")),
             "example_body": {
                 "symbol": "BTCUSD",
                 "side": "buy",
@@ -374,8 +375,8 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
         "audit_grade_price_receipt": {
             "path": "/v1/receipts/price",
-            "credit_cost": 10,
-            "paid_price_usdc": "0.25",
+            "credit_cost": pricing_catalog.product_credits("audit_receipt"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("audit_receipt")),
             "example_body": {
                 "service": "vwap",
                 "symbol": "BTCUSD",
@@ -384,24 +385,24 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
         "multi_asset_macro_snapshot": {
             "path": "/v1/snapshots/macro",
-            "credit_cost": 25,
-            "paid_price_usdc": "1.00",
+            "credit_cost": pricing_catalog.product_credits("macro_snapshot"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("macro_snapshot")),
             "example_body": {"universe": ["BTCUSD", "ETHUSD", "EURUSD", "XAUUSD"]},
         },
         "spend_controlled_market_monitor": {
             "path": "/v1/monitors/evaluate",
-            "credit_cost": 10,
-            "paid_price_usdc": "0.25",
+            "credit_cost": pricing_catalog.product_credits("monitor_evaluate"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("monitor_evaluate")),
             "example_body": {
                 "symbols": ["BTCUSD", "ETHUSD"],
                 "rules": [{"metric": "spread_bps", "operator": ">", "value": 50}],
-                "max_credits": 20,
+                "max_credits": 500,
             },
         },
         "token_market_quality_indicator": {
             "path": "/v1/indicators/token-quality",
-            "credit_cost": 15,
-            "paid_price_usdc": "0.50",
+            "credit_cost": pricing_catalog.product_credits("token_quality_indicator"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("token_quality_indicator")),
             "example_body": {
                 "symbol": "SOLUSD",
                 "include_state_coverage": True,
@@ -413,8 +414,8 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
         "state_divergence_indicator": {
             "path": "/v1/indicators/state-divergence",
-            "credit_cost": 15,
-            "paid_price_usdc": "0.50",
+            "credit_cost": pricing_catalog.product_credits("state_divergence_indicator"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("state_divergence_indicator")),
             "example_body": {
                 "symbol": "MSOLUSD",
                 "max_divergence_bps": 75,
@@ -422,8 +423,8 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
         "solana_token_brief": {
             "path": "/v1/signals/solana-token-brief",
-            "credit_cost": 25,
-            "paid_price_usdc": "1.00",
+            "credit_cost": pricing_catalog.product_credits("solana_token_brief"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("solana_token_brief")),
             "example_body": {
                 "symbols": ["SOLUSD", "JUPUSD", "PYTHUSD", "MSOLUSD"],
                 "include_state_coverage": True,
@@ -433,8 +434,8 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         },
         "trader_alpha_pack": {
             "path": "/v1/signals/trader-alpha-pack",
-            "credit_cost": 50,
-            "paid_price_usdc": "2.50",
+            "credit_cost": pricing_catalog.product_credits("trader_alpha_pack"),
+            "paid_price_usdc": str(pricing_catalog.product_usdc("trader_alpha_pack")),
             "example_body": {
                 "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD"],
                 "include_state_coverage": True,

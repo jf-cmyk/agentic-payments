@@ -5,7 +5,7 @@ Institutional-grade market data for AI agents, with three integration surfaces:
 - Public remote MCP discovery server: free symbol discovery, pricing inspection, and document search
 - Paid HTTP API: live market data protected by direct x402 settlement
 - Authenticated Claude, Cursor, and OpenAI MCP connectors: read-only market data
-  with a free starter allowance of 15,000 live-data credits every month, then
+  with a free starter allowance of 30,000 live-data credits every month, then
   subscriptions from EUR 49/month
 
 ## Public URLs
@@ -128,8 +128,8 @@ Payment modes:
 - starter credit drawdown through an authenticated Claude, Cursor,
   or OpenAI connector principal
 
-New eligible authenticated users receive 15,000 free live data credits every
-calendar month (UTC), positioned as `Start with 15,000 free live-data credits
+New eligible authenticated users receive 30,000 free live data credits every
+calendar month (UTC), positioned as `Start with 30,000 free live-data credits
 every month`. The allowance is an evaluation and prototyping licence with
 required attribution; production commercial use requires a subscription. The
 number is configured once in `FREE_TIER_MONTHLY_CREDITS` (`src/config.py`) and
@@ -139,21 +139,48 @@ allowance is exhausted, agents can use direct x402 payment, start a subscription
 trial at `/go/free-trial` (plans from EUR 49/month, see `/go/pricing`), or
 contact Blocksize sales about an Enterprise authenticated account plan.
 
+Unit pricing is one list for both payment modes: 1 credit = $0.001 USDC, and
+every product costs the same number of credits in a connector as its x402 price
+(`src/pricing_catalog.py`):
+
+| Product | Credits | USDC (x402) |
+| --- | ---: | ---: |
+| Core crypto: VWAP, bid/ask, state price, 30m and 24h VWAP | 2 | $0.002 |
+| Extended crypto: the same routes for long-tail pairs | 4 | $0.004 |
+| FX and metals | 5 | $0.005 |
+| Tokenized equities | 8 | $0.008 |
+| Pre-trade sanity check | 100 | $0.10 |
+| Market brief, price receipt, monitor evaluation | 250 | $0.25 |
+| Token quality, state divergence | 500 | $0.50 |
+| Macro snapshot, Solana token brief | 1,000 | $1.00 |
+| Trader alpha pack | 2,500 | $2.50 |
+
 ### 3. Anthropic-safe MCP beta
 
 The Anthropic-safe MCP surface is mounted at `/anthropic/mcp/` and exposes
-read-only tools only:
+read-only tools only (the Cursor and OpenAI connectors expose the same set):
 
 - `search_pairs`
 - `list_instruments`
 - `get_credit_balance`
 - `get_vwap`
 - `get_bid_ask`
+- `get_state_price`
+- `get_vwap_30m`
+- `get_vwap_24h`
 - `get_fx_rate`
 - `get_metal_price`
+- `get_market_brief`
+- `run_pre_trade_check`
+- `create_price_receipt`
+- `get_macro_snapshot`
+- `get_token_quality`
+- `get_state_divergence`
+- `get_solana_token_brief`
+- `get_trader_alpha_pack`
 
 Live market data tools use server-side free-tier credits keyed to authenticated
-user identity. The allowance is 15,000 credits per verified identity per
+user identity. The allowance is 30,000 credits per verified identity per
 calendar month (UTC), set by `FREE_TIER_MONTHLY_CREDITS` and shared by the
 Claude, Cursor, and OpenAI connectors. The legacy `ANTHROPIC_DAILY_CREDITS`,
 `CURSOR_DAILY_CREDITS`, and `OPENAI_DAILY_CREDITS` variables are ignored;

@@ -1,5 +1,7 @@
 from fpdf import FPDF
 
+from src import pricing_catalog
+
 class BlocksizePDF(FPDF):
     def header(self):
         # self.image("docs/assets/logo.png", 10, 8, 33) 
@@ -65,7 +67,7 @@ def generate_docs():
     pdf.body_text(
         "- Direct HTTP: use an official signed x402 v2 PAYMENT-SIGNATURE.\n"
         "- Connectors: sign in through the supported OAuth flow to use the free "
-        "starter allowance of 15,000 live-data credits every month, then a "
+        "starter allowance of 30,000 live-data credits every month, then a "
         "subscription from EUR 49/month. Caller-selected identity headers do not "
         "grant production credits."
     )
@@ -114,7 +116,7 @@ def generate_flow():
         "After facilitator verification, successful settlement, and durable local "
         "finalization, the gateway returns the paid JSON payload and prevents proof "
         "replay. Authenticated connectors can separately use the free starter "
-        "allowance of 15,000 live-data credits every month."
+        "allowance of 30,000 live-data credits every month."
     )
     
     pdf.output("docs/pdf/Blocksize_User_Flow.pdf")
@@ -126,18 +128,25 @@ def generate_pricing():
     pdf.add_page()
     pdf.chapter_title("Institutional Pricing Guide")
     
-    pdf.section_title("1. Direct x402 Unit Pricing")
+    pdf.section_title("1. Unit Pricing: Credits or USDC")
     pdf.body_text(
-        "Public paid HTTP routes use direct x402 per request. Raw-data defaults range "
-        "from 0.002 USDC for core crypto to 0.008 USDC for supported equity bid/ask; "
-        "packaged workflow prices can differ. Always use the live 402 challenge as "
-        "the authoritative price and network list."
+        "One price list covers every product: 1 credit = 0.001 USDC. Authenticated "
+        "connector users spend free monthly credits; public HTTP routes charge the "
+        "same amount in USDC per request over x402. Always use the live 402 "
+        "challenge as the authoritative price and network list."
+    )
+    pdf.pricing_table(
+        [
+            (row["product"], f"{row['credits']:,}", f"{row['usdc']} USDC")
+            for row in pricing_catalog.price_table()
+        ],
+        headers=("Product", "Credits", "USDC (x402)"),
     )
 
     pdf.section_title("2. Production Access Paths")
     paths = [
         ("Direct x402", "Public HTTP", "Live route price"),
-        ("Free tier (connectors)", "Eligible users", "15,000 credits/month"),
+        ("Free tier (connectors)", "Eligible users", "30,000 credits/month"),
         ("Developer", "Free trial", "EUR 49/month"),
         ("Start-Up", "Free trial", "EUR 299/month"),
         ("Business", "Free trial", "EUR 799/month"),
@@ -169,7 +178,7 @@ def generate_agent_manual():
     pdf.body_text(
         "Direct HTTP clients use an official signed x402 v2 payment flow. Eligible "
         "OpenAI, Claude, and Cursor connector users authenticate through OAuth to use "
-        "the free starter allowance of 15,000 live-data credits every month, then a "
+        "the free starter allowance of 30,000 live-data credits every month, then a "
         "subscription from EUR 49/month. Raw wallet and caller-selected identity "
         "headers do not grant production credits."
     )

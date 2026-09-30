@@ -178,7 +178,7 @@
               "name": "How do agents access live production data?",
               "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Live production data is available through signed x402 v2 HTTP payments or authenticated connector credit drawdown documented in the OpenAPI schema. New eligible authenticated users receive 15,000 free live data credits every calendar month."
+                "text": "Live production data is available through signed x402 v2 HTTP payments or authenticated connector credit drawdown documented in the OpenAPI schema. New eligible authenticated users receive 30,000 free live data credits every calendar month."
               }
             }
           ]
@@ -925,6 +925,14 @@
       border-bottom-color: rgba(255, 255, 255, 0.15);
     }
     .price-bold { color: var(--heading); font-weight: 800; }
+    .pricing-lead { max-width: 760px; margin-top: 1rem; }
+    .table-scroll { overflow-x: auto; }
+    .pricing-table .pricing-group th {
+      padding-top: 2rem;
+      padding-bottom: 0.75rem;
+      color: var(--heading);
+      border-bottom-width: 1px;
+    }
     .credit-badge {
       display: inline-block;
       background: var(--yellow);
@@ -1474,11 +1482,11 @@
     <div class="container">
       <div class="welcome-strip">
         <div class="welcome-count">
-          15,000
+          30,000
           <span>Free credits every month</span>
         </div>
         <div class="welcome-copy">
-          <h2>Start with 15,000 free live-data credits every month.</h2>
+          <h2>Start with 30,000 free live-data credits every month.</h2>
           <p>
             Eligible authenticated connector users get a recurring evaluation
             allowance for live data, then continue with a subscription from EUR 49/month
@@ -1711,7 +1719,7 @@
         <div class="step">
           <span class="step-num">03</span>
           <h3>Settle</h3>
-          <p>Use authenticated starter credits or signed x402 v2 payments on an operational advertised network. Eligible authenticated connector users receive 15,000 free live data credits every calendar month.</p>
+          <p>Use authenticated starter credits or signed x402 v2 payments on an operational advertised network. Eligible authenticated connector users receive 30,000 free live data credits every calendar month.</p>
         </div>
         <div class="step">
           <span class="step-num">04</span>
@@ -1725,47 +1733,106 @@
   <section id="pricing">
     <div class="container">
       <h2>Unit <span>Pricing</span></h2>
-      <table class="pricing-table">
+      <p class="pricing-lead">
+        One price list for every product. <strong>1 credit = $0.001 USDC</strong>:
+        spend free monthly credits in the Claude, ChatGPT, and Cursor connectors, or
+        pay the same price in USDC per call over x402.
+      </p>
+      <div class="table-scroll">
+      <table class="pricing-table" id="unit-pricing-table">
         <thead>
           <tr>
-            <th>Asset Class</th>
-            <th>Unit Cost (USDC)</th>
-            <th>Examples</th>
+            <th>Product</th>
+            <th>Credits</th>
+            <th>USDC (x402)</th>
+            <th>Covers</th>
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>Core Crypto</td>
+          <tr class="pricing-group">
+            <th colspan="4" scope="colgroup">Raw market data</th>
+          </tr>
+          <tr data-price-row>
+            <td>Core crypto</td>
+            <td class="price-bold">2</td>
             <td class="price-bold">$0.002</td>
-            <td>BTCUSD, ETHUSD, SOLUSD</td>
+            <td>VWAP, bid/ask, state price, 30-minute and 24-hour VWAP: BTCUSD, ETHUSD, SOLUSD</td>
           </tr>
-          <tr>
-            <td>Extended Crypto</td>
+          <tr data-price-row>
+            <td>Extended crypto</td>
+            <td class="price-bold">4</td>
             <td class="price-bold">$0.004</td>
-            <td>JUPUSD, WIFUSD, AAVEUSD</td>
+            <td>VWAP, bid/ask, state price, 30-minute and 24-hour VWAP: RAYUSD, ORCAUSD, MSOLUSD</td>
           </tr>
-          <tr>
-            <td>FX and Metals</td>
+          <tr data-price-row>
+            <td>FX and metals</td>
+            <td class="price-bold">5</td>
             <td class="price-bold">$0.005</td>
-            <td>EURUSD, GBPUSD, XAUUSD</td>
+            <td>Spot FX and metal prices: EURUSD, GBPUSD, XAUUSD</td>
           </tr>
-          <tr>
-            <td>State and VWAP Windows</td>
-            <td class="price-bold">1 credit</td>
-            <td>MSOLUSD state price, SOLUSD 30m VWAP, BTCUSD 24h VWAP</td>
+          <tr data-price-row>
+            <td>Tokenized equities</td>
+            <td class="price-bold">8</td>
+            <td class="price-bold">$0.008</td>
+            <td>Bid/ask for tokenized stocks: AAPLXUSD, TSLAXUSD</td>
           </tr>
-          <tr>
-            <td>Agent Workflow Products</td>
-            <td class="price-bold">5-25 credits</td>
-            <td>market brief, pre-trade sanity check, price receipt, macro snapshot</td>
+          <tr class="pricing-group">
+            <th colspan="4" scope="colgroup">Agent workflow products</th>
           </tr>
-          <tr>
-            <td>Trader Indicators</td>
-            <td class="price-bold">10-25 credits</td>
-            <td>token quality, state divergence, Solana token brief, trader alpha pack</td>
+          <tr data-price-row>
+            <td>Pre-trade sanity check</td>
+            <td class="price-bold">100</td>
+            <td class="price-bold">$0.10</td>
+            <td>Freshness, spread, and price-deviation check before a trade</td>
+          </tr>
+          <tr data-price-row>
+            <td>Market brief</td>
+            <td class="price-bold">250</td>
+            <td class="price-bold">$0.25</td>
+            <td>Up to 8 instruments with quality flags and a provenance receipt</td>
+          </tr>
+          <tr data-price-row>
+            <td>Price receipt</td>
+            <td class="price-bold">250</td>
+            <td class="price-bold">$0.25</td>
+            <td>One live price with an audit-grade, publicly verifiable receipt</td>
+          </tr>
+          <tr data-price-row>
+            <td>Macro snapshot</td>
+            <td class="price-bold">1,000</td>
+            <td class="price-bold">$1.00</td>
+            <td>Up to 12 instruments across crypto, FX, and metals</td>
+          </tr>
+          <tr class="pricing-group">
+            <th colspan="4" scope="colgroup">Trader indicators</th>
+          </tr>
+          <tr data-price-row>
+            <td>State divergence</td>
+            <td class="price-bold">500</td>
+            <td class="price-bold">$0.50</td>
+            <td>AMM state price versus market VWAP, in basis points</td>
+          </tr>
+          <tr data-price-row>
+            <td>Token quality</td>
+            <td class="price-bold">500</td>
+            <td class="price-bold">$0.50</td>
+            <td>Market-quality score from price, bid/ask, state, and VWAP windows</td>
+          </tr>
+          <tr data-price-row>
+            <td>Solana token brief</td>
+            <td class="price-bold">1,000</td>
+            <td class="price-bold">$1.00</td>
+            <td>Signal brief for up to 10 Solana tokens</td>
+          </tr>
+          <tr data-price-row>
+            <td>Trader alpha pack</td>
+            <td class="price-bold">2,500</td>
+            <td class="price-bold">$2.50</td>
+            <td>Quality, divergence, and VWAP-window signals for up to 12 symbols</td>
           </tr>
         </tbody>
       </table>
+      </div>
 
       <div class="callout">
         <h3>Subscription Plans</h3>
@@ -1793,7 +1860,7 @@
             <tr>
               <td>Free tier (connectors)</td>
               <td>Eligible authenticated users</td>
-              <td class="price-bold" style="color: #fff;">15,000 free live-data credits every month</td>
+              <td class="price-bold" style="color: #fff;">30,000 free live-data credits every month</td>
               <td><span class="credit-badge">Sign in</span></td>
             </tr>
             <tr>

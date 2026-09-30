@@ -20,6 +20,8 @@ from src.commercial_plans import upgrade_recommendation
 from src.connector_auth import ConnectorIdentity
 from src.entitlement_manager import CreditStatus, EntitlementManager
 from src import free_tier
+from src import pricing_catalog
+from src.pricing_catalog import PRODUCT_BY_CONNECTOR_TOOL, tier_credits
 from src.free_tier_ledger import FreeTierDecision, FreeTierSnapshot, get_free_tier_ledger
 from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
@@ -72,17 +74,71 @@ PairValue = Annotated[
     Field(description="Trading pair or ticker, such as BTC-USD, AAPL, EURUSD, or XAUUSD."),
 ]
 
+SymbolList = Annotated[
+    list[str],
+    Field(
+        description="Trading pairs or tickers, such as BTCUSD, ETHUSD, EURUSD, or XAUUSD.",
+        min_length=1,
+        max_length=12,
+    ),
+]
+
 T = TypeVar("T")
 
+# Listed credit prices from the unified price list (1 credit = $0.001 USDC, the
+# same amount each call costs over x402). Raw-data tools list the core-crypto
+# price; long-tail crypto costs the extended price and tokenized equities the
+# equities price, so the charge per call comes from tool_credit_cost().
+_RAW_TOOL_TIERS = {
+    "get_vwap": "core_crypto",
+    "get_bid_ask": "core_crypto",
+    "get_state_price": "core_crypto",
+    "get_vwap_30m": "core_crypto",
+    "get_vwap_24h": "core_crypto",
+    "get_fx_rate": "tradfi",
+    "get_metal_price": "tradfi",
+}
 TOOL_COSTS = {
     "search_pairs": 0,
     "list_instruments": 0,
     "get_credit_balance": 0,
-    "get_vwap": 1,
-    "get_bid_ask": 1,
-    "get_fx_rate": 2,
-    "get_metal_price": 2,
+    **{tool: tier_credits(tier) for tool, tier in _RAW_TOOL_TIERS.items()},
+    **{tool: product.credits for tool, product in PRODUCT_BY_CONNECTOR_TOOL.items()},
 }
+
+
+def tool_credit_cost(tool_name: str, service: str, subject: str) -> int:
+    """Return the credits one call costs: its x402 USDC price at $0.001 per credit."""
+    product = PRODUCT_BY_CONNECTOR_TOOL.get(tool_name)
+    if product is not None:
+        return product.credits
+    if tool_name == "get_bid_ask" and service != "equity_bidask":
+        # /v1/bidask prices every non-equity symbol by its crypto tier.
+        return pricing_catalog.raw_credits("crypto_bidask", subject)
+    return pricing_catalog.raw_credits(service, subject)
+
+
+# State prices, VWAP windows, workflow products and trader indicators are
+# served by the HTTP API's own handlers, so a connector returns exactly what an
+# x402 buyer gets. resource_server registers the runner once those handlers
+# exist (importing it here would be circular); until then these tools answer
+# PRODUCT_UNAVAILABLE without charging.
+ProductRunner = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
+_product_runner: ProductRunner | None = None
+
+
+def register_product_runner(runner: ProductRunner | None) -> None:
+    global _product_runner
+    _product_runner = runner
+
+
+class ProductRequestError(Exception):
+    """A product rejected the request (bad input or no data); credits are refunded."""
+
+    def __init__(self, status_code: int, detail: object):
+        super().__init__(str(detail))
+        self.status_code = status_code
+        self.detail = detail
 SYMBOL_RE = re.compile(r"^[A-Z0-9.]{2,32}$")
 
 # Denial reasons from the shared ledger mapped to stable client-facing codes.
@@ -141,6 +197,8 @@ class AuthenticatedMCPBundle:
     get_fx_rate: Callable[..., Awaitable[str]]
     get_metal_price: Callable[..., Awaitable[str]]
     info: Callable[..., Awaitable[str]]
+    # State prices, VWAP windows, workflow products and trader indicators, by tool name.
+    products: dict[str, Callable[..., Awaitable[str]]]
 
 
 ClientGetter = Callable[[], Awaitable[BlocksizeClient]]
@@ -438,7 +496,6 @@ def create_authenticated_market_data_mcp(
                 "Connect with an authenticated Blocksize account to use live market data.",
             )
 
-        cost = TOOL_COSTS[tool_name]
         charge_id = uuid.uuid4().hex
 
         def ledger_unavailable() -> str:
@@ -490,8 +547,16 @@ def create_authenticated_market_data_mcp(
                 json.dumps({**details, "attribution": free_tier.attribution_payload()}),
             )
 
+        async def resolve_service() -> str:
+            try:
+                catalog_client = await get_client()
+            except Exception:  # pragma: no cover - client construction failures surface later
+                catalog_client = None
+            return await free_tier.service_for_tool_async(tool_name, subject, catalog_client)
+
         grant_key: str | None = None
         decision: FreeTierDecision | None = None
+        service: str | None = None
         # Pin the shared-pool day so a refund after midnight UTC credits the
         # day the reservation was made.
         usage_date = datetime.now(UTC).date().isoformat()
@@ -515,11 +580,7 @@ def create_authenticated_market_data_mcp(
                     {"reason": eligibility.reason, "upgrade_path": free_tier.upgrade_path_text()},
                 )
             grant_key = eligibility.grant_key
-            try:
-                catalog_client = await get_client()
-            except Exception:  # pragma: no cover - client construction failures surface later
-                catalog_client = None
-            service = await free_tier.service_for_tool_async(tool_name, subject, catalog_client)
+            service = await resolve_service()
             if not free_tier.service_in_free_scope(service):
                 return gate_failure(
                     "FREE_TIER_SCOPE_EXCLUDED",
@@ -527,6 +588,12 @@ def create_authenticated_market_data_mcp(
                     "free_scope_excluded",
                     free_tier.scope_excluded_payload(service),
                 )
+
+        # One price list: the service, and for raw data the symbol's tier, set
+        # the credits this call costs (its x402 USDC price at $0.001 per credit).
+        if service is None:
+            service = await resolve_service()
+        cost = tool_credit_cost(tool_name, service, subject)
 
         shared_reserved = False
 
@@ -757,6 +824,28 @@ def create_authenticated_market_data_mcp(
                 "BLOCKSIZE_API_ERROR",
                 f"Failed to retrieve data for '{subject}'",
                 str(e),
+            )
+        except ProductRequestError as e:
+            refund_metadata = refund_pending_charge()
+            record_usage_event(
+                "mcp_tool_error",
+                surface=observability_surface,
+                tool_name=tool_name,
+                subject=subject,
+                reason=f"product_request_{e.status_code}",
+                metadata={
+                    "attempt_id": attempt_id,
+                    "charge_id": charge_id,
+                    **refund_metadata,
+                    **identity_metadata,
+                },
+            )
+            code = "INVALID_REQUEST" if 400 <= e.status_code < 500 else "NO_MARKET_DATA"
+            detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail, default=str)
+            return error_payload(
+                code,
+                f"Blocksize could not complete {tool_name} for '{subject}'. No credit was used.",
+                detail,
             )
         except Exception as e:
             refund_metadata = refund_pending_charge()
@@ -1231,6 +1320,250 @@ def create_authenticated_market_data_mcp(
 
         return await with_credits("get_metal_price", clean_ticker, call, render)
 
+    def price_note(tool_name: str) -> str:
+        credits = TOOL_COSTS[tool_name]
+        return (
+            f" Costs {credits:,} free-tier credits (${pricing_catalog.credits_to_usdc(credits)} "
+            "USDC over x402)."
+        )
+
+    async def run_product(tool_name: str, subject: str, arguments: dict[str, object]) -> str:
+        """Charge credits and run a paid HTTP product through the registered runner."""
+        runner = _product_runner
+        if runner is None:
+            return error_payload(
+                "PRODUCT_UNAVAILABLE",
+                f"{tool_name} is not available on this deployment. No credit was used.",
+            )
+
+        async def call():
+            return await runner(tool_name, arguments)
+
+        def render(result) -> str:
+            return json.dumps(result, default=str, indent=2)
+
+        return await with_credits(tool_name, subject, call, render)
+
+    def clean_symbols(values: list[str] | None, *, limit: int) -> list[str]:
+        cleaned = [normalise_symbol(str(value)) for value in values or []]
+        if len(cleaned) > limit:
+            raise ValueError(f"Use at most {limit} symbols")
+        return cleaned
+
+    async def raw_window(tool_name: str, pair: str) -> str:
+        try:
+            clean_pair = normalise_symbol(pair, "pair")
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        return await run_product(tool_name, clean_pair, {"pair": clean_pair})
+
+    @mcp.tool(
+        name="get_state_price",
+        title="AMM State Price",
+        description=(
+            "Get the pool-derived AMM state price for one covered crypto pair, such as "
+            "MSOLUSD. Uses the monthly Blocksize free-tier credits at the pair's crypto "
+            "tier price: 2 credits for top-250 assets, 4 for long-tail pairs."
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_state_price(pair: PairValue) -> str:
+        return await raw_window("get_state_price", pair)
+
+    @mcp.tool(
+        name="get_vwap_30m",
+        title="30-Minute VWAP",
+        description=(
+            "Get the 30-minute closing VWAP for one crypto pair. Uses the monthly Blocksize "
+            "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
+            "assets, 4 for long-tail pairs."
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_vwap_30m(pair: PairValue) -> str:
+        return await raw_window("get_vwap_30m", pair)
+
+    @mcp.tool(
+        name="get_vwap_24h",
+        title="24-Hour VWAP",
+        description=(
+            "Get the fixed 24-hour VWAP for one crypto pair. Uses the monthly Blocksize "
+            "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
+            "assets, 4 for long-tail pairs."
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_vwap_24h(pair: PairValue) -> str:
+        return await raw_window("get_vwap_24h", pair)
+
+    @mcp.tool(
+        name="get_market_brief",
+        title="Market Brief",
+        description=(
+            "Build a decision-ready brief for up to 8 instruments across crypto, FX, "
+            "metals, and tokenized equities: live values, freshness, spread, quality "
+            "flags, and a provenance receipt." + price_note("get_market_brief")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_market_brief(symbols: SymbolList) -> str:
+        try:
+            clean = clean_symbols(symbols, limit=8)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        return await run_product("get_market_brief", ",".join(clean), {"symbols": clean})
+
+    @mcp.tool(
+        name="run_pre_trade_check",
+        title="Pre-Trade Sanity Check",
+        description=(
+            "Check one instrument before a trade: freshness, spread, and deviation from "
+            "an optional reference price, with a pass or caution verdict. It never "
+            "places a trade." + price_note("run_pre_trade_check")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def run_pre_trade_check(
+        symbol: PairValue,
+        side: Annotated[
+            Literal["buy", "sell", "unknown"],
+            Field(description="Intended trade side, used only to describe the check."),
+        ] = "unknown",
+        notional_usd: Annotated[
+            float, Field(ge=0, description="Intended trade size in USD, if known.")
+        ] = 0,
+        reference_price: Annotated[
+            float | None,
+            Field(gt=0, description="Price the agent plans to trade at, to measure deviation."),
+        ] = None,
+        max_spread_bps: Annotated[
+            float, Field(gt=0, le=10_000, description="Largest acceptable spread in basis points.")
+        ] = 50,
+    ) -> str:
+        try:
+            clean = normalise_symbol(symbol)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        arguments: dict[str, object] = {
+            "symbol": clean,
+            "side": side,
+            "notional_usd": notional_usd,
+            "max_spread_bps": max_spread_bps,
+        }
+        if reference_price is not None:
+            arguments["reference_price"] = reference_price
+        return await run_product("run_pre_trade_check", clean, arguments)
+
+    @mcp.tool(
+        name="create_price_receipt",
+        title="Price Receipt",
+        description=(
+            "Fetch one live price and return it with an audit-grade receipt: request and "
+            "response hashes, source endpoints, and a public lookup URL."
+            + price_note("create_price_receipt")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def create_price_receipt(
+        symbol: PairValue,
+        purpose: Annotated[
+            str | None,
+            Field(max_length=200, description="Optional note on why the price was recorded."),
+        ] = None,
+    ) -> str:
+        try:
+            clean = normalise_symbol(symbol)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        arguments: dict[str, object] = {"symbol": clean}
+        if purpose:
+            arguments["purpose"] = purpose
+        return await run_product("create_price_receipt", clean, arguments)
+
+    @mcp.tool(
+        name="get_macro_snapshot",
+        title="Macro Snapshot",
+        description=(
+            "Snapshot up to 12 instruments across crypto, FX, and metals in one call. "
+            "Defaults to BTCUSD, ETHUSD, EURUSD, and XAUUSD." + price_note("get_macro_snapshot")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_macro_snapshot(symbols: SymbolList | None = None) -> str:
+        try:
+            clean = clean_symbols(symbols, limit=12)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        arguments: dict[str, object] = {"universe": clean} if clean else {}
+        return await run_product("get_macro_snapshot", ",".join(clean) or "default", arguments)
+
+    @mcp.tool(
+        name="get_token_quality",
+        title="Token Quality Indicator",
+        description=(
+            "Score one crypto token's market quality from live price, bid/ask, state, and "
+            "VWAP-window feeds." + price_note("get_token_quality")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_token_quality(symbol: PairValue) -> str:
+        try:
+            clean = normalise_symbol(symbol)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        return await run_product("get_token_quality", clean, {"symbol": clean})
+
+    @mcp.tool(
+        name="get_state_divergence",
+        title="State Divergence Indicator",
+        description=(
+            "Measure how far one token's AMM state price diverges from its market VWAP, "
+            "in basis points." + price_note("get_state_divergence")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_state_divergence(symbol: PairValue) -> str:
+        try:
+            clean = normalise_symbol(symbol)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        return await run_product("get_state_divergence", clean, {"symbol": clean})
+
+    @mcp.tool(
+        name="get_solana_token_brief",
+        title="Solana Token Brief",
+        description=(
+            "Build a Solana-oriented signal brief for up to 10 tokens. Defaults to SOLUSD."
+            + price_note("get_solana_token_brief")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_solana_token_brief(symbols: SymbolList | None = None) -> str:
+        try:
+            clean = clean_symbols(symbols, limit=10)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        arguments: dict[str, object] = {"symbols": clean} if clean else {}
+        return await run_product("get_solana_token_brief", ",".join(clean) or "SOLUSD", arguments)
+
+    @mcp.tool(
+        name="get_trader_alpha_pack",
+        title="Trader Alpha Pack",
+        description=(
+            "Combine token quality, state divergence, and VWAP windows into one trader "
+            "signal package for up to 12 symbols. Defaults to BTCUSD, ETHUSD, and SOLUSD."
+            + price_note("get_trader_alpha_pack")
+        ),
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def get_trader_alpha_pack(symbols: SymbolList | None = None) -> str:
+        try:
+            clean = clean_symbols(symbols, limit=12)
+        except ValueError as e:
+            return error_payload("INVALID_SYMBOL", str(e))
+        arguments: dict[str, object] = {"symbols": clean} if clean else {}
+        return await run_product("get_trader_alpha_pack", ",".join(clean) or "default", arguments)
+
     @mcp.resource(resource_uri)
     async def info() -> str:
         return json.dumps(
@@ -1249,6 +1582,11 @@ def create_authenticated_market_data_mcp(
                     "allowance_credits": get_entitlements().default_daily_credits,
                 },
                 "tool_costs": TOOL_COSTS,
+                "unit_pricing": {
+                    "credit_price_usdc": str(pricing_catalog.CREDIT_PRICE_USDC),
+                    "summary": pricing_catalog.rate_sentence(),
+                    "raw_tiers": pricing_catalog.pricing_payload()["raw_tiers"],
+                },
                 "subscription_note": (
                     "After the monthly free allowance is exhausted, production usage "
                     "should move to x402 payment, an authenticated account plan, or "
@@ -1272,4 +1610,17 @@ def create_authenticated_market_data_mcp(
         get_fx_rate=get_fx_rate,
         get_metal_price=get_metal_price,
         info=info,
+        products={
+            "get_state_price": get_state_price,
+            "get_vwap_30m": get_vwap_30m,
+            "get_vwap_24h": get_vwap_24h,
+            "get_market_brief": get_market_brief,
+            "run_pre_trade_check": run_pre_trade_check,
+            "create_price_receipt": create_price_receipt,
+            "get_macro_snapshot": get_macro_snapshot,
+            "get_token_quality": get_token_quality,
+            "get_state_divergence": get_state_divergence,
+            "get_solana_token_brief": get_solana_token_brief,
+            "get_trader_alpha_pack": get_trader_alpha_pack,
+        },
     )
