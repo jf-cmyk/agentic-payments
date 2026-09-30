@@ -54,10 +54,13 @@ _bundle = create_authenticated_market_data_mcp(
     mcp_name="Blocksize Market Data",
     instructions=(
         "Read-only Blocksize Capital market data for Claude across crypto VWAP, "
-        "supported equity ticker bid/ask, FX, and metals. The connector uses a "
-        f"free starter allowance of {allowance_label()} live-data credits every "
-        "calendar month for market data access, then points production usage to "
-        "direct x402 or a Blocksize authenticated account plan. "
+        "supported equity ticker bid/ask, FX, metals, AMM state prices, 30-minute "
+        "and 24-hour VWAP, market briefs, pre-trade checks, price receipts, macro "
+        "snapshots, and trader indicators. The connector uses a free starter "
+        f"allowance of {allowance_label()} live-data credits every calendar month; "
+        "each tool costs the same number of credits as its x402 price at $0.001 per "
+        "credit. Production usage continues through direct x402 or a Blocksize "
+        "authenticated account plan. "
         "It exposes only safe, read-only data and metadata tools."
     ),
     auth_provider=anthropic_auth.build_anthropic_auth_provider(),

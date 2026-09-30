@@ -3364,13 +3364,13 @@ class TestPaymentGate:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "rwa_blocksize_benchmark"
-        assert data["credit_cost"] == 10.0
+        assert data["credit_cost"] == 250.0
         assert data["summary"]["decision"] == "pass"
         benchmark = data["benchmarks"][0]
         assert benchmark["resolved_benchmark"] == {"service": "bidask", "symbol": "AAPL"}
         assert benchmark["basis_bps"] == pytest.approx(20.0)
         assert "stored_observations" not in data
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 10.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 250.0
         mock_client.get_bidask_snapshot.assert_awaited_once_with("AAPL")
 
     def test_rwa_blocksize_benchmark_supports_blocksize_state_reference(self, test_client, tmp_path):
@@ -4132,7 +4132,7 @@ class TestPaymentGate:
         assert "/go/free-trial" in data["starter_allowance"]["upgrade_path"]
         assert data["starter_allowance"]["upgrade"]["primary"]["path"].startswith("/go/free-trial?")
         assert data["starter_allowance"]["upgrade"]["secondary"]["path"].startswith("/go/pricing?")
-        assert data["credit_costs"]["market_brief"] == 10.0
+        assert data["credit_costs"]["market_brief"] == 250.0
 
 
 class TestDiscoveryRateLimit:
@@ -4958,7 +4958,7 @@ class TestObservabilityDashboard:
         tmp_path,
         monkeypatch,
     ):
-        small_allowance = 3.0
+        small_allowance = 6.0  # three core-crypto calls at 2 credits each
         monkeypatch.setattr("src.credit_manager.STARTER_CREDIT_ALLOWANCE", small_allowance)
         monkeypatch.setattr("src.resource_server.STARTER_CREDIT_ALLOWANCE", small_allowance)
         mock_client = AsyncMock()
@@ -4980,7 +4980,7 @@ class TestObservabilityDashboard:
             discovery = test_client.get("/v1/search?q=BTC", headers=headers)
             starter_responses = [
                 test_client.get("/v1/vwap/btc-usd", headers=headers)
-                for _ in range(int(small_allowance))
+                for _ in range(3)
             ]
             exhausted = test_client.get("/v1/vwap/btc-usd", headers=headers)
             with patch(
@@ -5025,7 +5025,7 @@ class TestObservabilityDashboard:
         assert funnel["starter_to_paid_identities"] == 0
         assert funnel["starter_to_paid_rate"] is None
         assert stats["event_counts"]["payment_settled"] == 1
-        assert stats["event_counts"]["data_delivered"] == int(small_allowance) + 1
+        assert stats["event_counts"]["data_delivered"] == 3 + 1
 
     def test_zero_result_symbol_search_is_ranked_as_coverage_opportunity(
         self,
@@ -5079,7 +5079,7 @@ class TestObservabilityDashboard:
 
         assert response.status_code == 502
         assert manager.get_balance("agent-failure-12345678") == STARTER_CREDIT_ALLOWANCE
-        assert response.headers["X-Blocksize-Credits-Refunded"] == "1.0"
+        assert response.headers["X-Blocksize-Credits-Refunded"] == "2.0"
         assert response.headers["X-Blocksize-Delivery-Status"] == "failed-refunded"
         assert response.headers["X-Blocksize-Retry-Safe"] == "true"
         stats = observability_store.summarize(days=1)
@@ -6583,13 +6583,13 @@ class TestDataEndpoints:
 
         assert response.status_code == 200
         assert response.headers["X-Blocksize-Credit-Mode"] == "starter-allowance"
-        assert response.headers["X-Blocksize-Credits-Spent"] == "1.0"
+        assert response.headers["X-Blocksize-Credits-Spent"] == "2.0"
         assert response.headers["X-Blocksize-Credits-Remaining"] == str(
-            STARTER_CREDIT_ALLOWANCE - 1.0
+            STARTER_CREDIT_ALLOWANCE - 2.0
         )
         data = response.json()
-        assert data["meta"]["credits"]["credit_cost"] == 1.0
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 1.0
+        assert data["meta"]["credits"]["credit_cost"] == 2.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 2.0
 
     def test_state_endpoint_uses_state_pool_and_starter_credits(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6612,7 +6612,7 @@ class TestDataEndpoints:
         data = response.json()
         assert data["data"]["pair"] == "MSOLUSD"
         assert data["data"]["price"] == 91.9
-        assert data["meta"]["credits"]["credit_cost"] == 1.0
+        assert data["meta"]["credits"]["credit_cost"] == 4.0  # MSOLUSD is extended tier
         assert data["meta"]["upstream_methods"] == ["state_instruments", "state_pool"]
         assert data["meta"]["citation"]["methodology_url"].endswith("/signed-oracle-feeds")
         # A months-old pool snapshot is labelled as such, never passed off as live.
@@ -6655,7 +6655,7 @@ class TestDataEndpoints:
         assert data["data"]["ticker"] == "SOL"
         assert data["data"]["vwap"] == 75.27
         assert data["methodology"]["upstream_method"] == "closingprice_list"
-        assert data["meta"]["credits"]["credit_cost"] == 1.0
+        assert data["meta"]["credits"]["credit_cost"] == 2.0
 
     def test_vwap24h_endpoint_returns_stream_cache_value(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6684,7 +6684,7 @@ class TestDataEndpoints:
         assert data["data"]["vwap"] == 66800.0
         assert data["methodology"]["fallback"] is False
         assert data["methodology"]["upstream_method"] == "fixedvwap_subscribe"
-        assert data["meta"]["credits"]["credit_cost"] == 1.0
+        assert data["meta"]["credits"]["credit_cost"] == 2.0
 
     def test_agent_market_brief_uses_starter_credits(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6708,8 +6708,8 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "agent_market_brief"
-        assert data["credit_cost"] == 10.0
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 10.0
+        assert data["credit_cost"] == 250.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 250.0
         assert data["provenance"]["receipt_id"].startswith("rcpt_")
         assert data["instruments"][0]["symbol"] == "BTCUSD"
 
@@ -6743,10 +6743,10 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "pre_trade_sanity_check"
-        assert data["credit_cost"] == 5.0
+        assert data["credit_cost"] == 100.0
         assert data["decision"] in {"pass", "caution", "block"}
         assert data["market"]["service"] == "bidask"
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 5.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 100.0
 
     def test_audit_receipt_can_be_looked_up_for_free(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6821,9 +6821,9 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "multi_asset_macro_snapshot"
-        assert data["credit_cost"] == 25.0
+        assert data["credit_cost"] == 1000.0
         assert len(data["assets"]) == 3
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 25.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 1000.0
 
     def test_token_quality_indicator_uses_price_state_and_vwap_windows(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6896,12 +6896,12 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "token_market_quality_indicator"
-        assert data["credit_cost"] == 15.0
+        assert data["credit_cost"] == 500.0
         assert data["indicator"]["symbol"] == "SOLUSD"
         assert data["indicator"]["metrics"]["state_divergence_bps"] == pytest.approx(6.6711, rel=1e-3)
         assert data["indicator"]["coverage"]["status"] == "full"
         assert data["indicator"]["metrics"]["state_solana_pool_count"] == 1
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 15.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 500.0
 
     def test_state_divergence_indicator_returns_signed_basis(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -6943,10 +6943,10 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "state_divergence_indicator"
-        assert data["credit_cost"] == 15.0
+        assert data["credit_cost"] == 500.0
         assert data["state"]["label"] == "alert"
         assert data["basis"]["vwap_vs_state_bps"] == pytest.approx(67.114, rel=1e-3)
-        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 15.0
+        assert data["meta"]["credits"]["credits_remaining"] == STARTER_CREDIT_ALLOWANCE - 500.0
 
     def test_solana_token_brief_rejects_unsupported_symbols_before_charge(self, test_client, tmp_path):
         mock_client = AsyncMock()
@@ -7052,10 +7052,10 @@ class TestDataEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["product"] == "trader_alpha_pack"
-        assert data["credit_cost"] == 50.0
+        assert data["credit_cost"] == 2500.0
         assert data["summary"]["best_quality_symbol"] == "BTCUSD"
         assert data["meta"]["credits"]["credits_remaining"] == (
-            float(settings.free_tier.monthly_credits) - 50.0
+            float(settings.free_tier.monthly_credits) - 2500.0
         )
 
     def test_capability_check_reports_ready_and_optional_state_coverage(self, test_client):
@@ -7138,7 +7138,7 @@ class TestDataEndpoints:
         assert response.status_code == 402
         data = response.json()
         assert data["price_usdc"] == "0.25"
-        assert data["starter_credits"]["credit_cost"] == 10.0
+        assert data["starter_credits"]["credit_cost"] == 250.0
 
     def test_vwap_endpoint_accepts_x_payment_header(self, test_client):
         mock_vwap = VWAPData(

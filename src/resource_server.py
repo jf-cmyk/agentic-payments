@@ -92,6 +92,8 @@ from src.entitlement_manager import (
 )
 from src import free_tier
 from src import live_showcase
+from src import pricing_catalog
+from src.pricing_catalog import product_usdc
 from src import vwap_coverage
 from src.free_tier_ledger import get_free_tier_ledger
 from src.models import (
@@ -270,6 +272,7 @@ from src.transaction_bridge import (
 from src import anthropic_auth
 from src import cursor_auth
 from src import openai_auth
+from src.authenticated_mcp_server import ProductRequestError, register_product_runner
 from src.anthropic_mcp_server import TOOL_COSTS as ANTHROPIC_TOOL_COSTS
 from src.anthropic_mcp_server import anthropic_mcp
 from src.cursor_mcp_server import TOOL_COSTS as CURSOR_TOOL_COSTS
@@ -2233,6 +2236,7 @@ async def get_products() -> dict[str, Any]:
             **free_tier.upgrade_fields(source="http-products-catalog", trigger="surface"),
         },
         "credit_costs": CREDIT_COSTS,
+        "pricing": pricing_catalog.pricing_payload(),
         "catalog": catalog,
     }
 
@@ -2348,7 +2352,7 @@ async def preview_multi_asset_macro_snapshot(request: Request) -> dict[str, Any]
             "method": "POST",
             "url": live_url,
             "body": {"universe": ["BTCUSD", "ETHUSD", "EURUSD", "XAUUSD"]},
-            "price_usdc": "1.00",
+            "price_usdc": str(pricing_catalog.product_usdc("macro_snapshot")),
             "starter_credit_cost": CREDIT_COSTS["macro_snapshot"],
             "payment": "signed x402 v2 or authenticated connector credits",
         },
@@ -2392,7 +2396,7 @@ async def build_repeat_monitor_recipe(
         raise HTTPException(status_code=400, detail="cadence_seconds must be 60 to 86400")
     if not 1 <= requested_runs <= 288:
         raise HTTPException(status_code=400, detail="max_runs must be 1 to 288")
-    per_run_price = Decimal("0.25")
+    per_run_price = pricing_catalog.product_usdc("monitor_evaluate")
     if max_spend < per_run_price or max_spend > Decimal("500"):
         raise HTTPException(status_code=400, detail="max_spend_usdc must be 0.25 to 500")
 
@@ -2449,7 +2453,7 @@ async def build_repeat_monitor_recipe(
             "body": {
                 "symbols": symbols,
                 "rules": raw_rules,
-                "max_credits": CREDIT_COSTS["market_brief"],
+                "max_credits": CREDIT_COSTS["monitor_evaluate"],
             },
             "payment": "new signed x402 v2 request or authenticated connector credits per run",
         },
@@ -2960,7 +2964,8 @@ app.mount("/openai/mcp", OPENAI_MCP_HTTP_APP, name="openai-mcp")
 # x402 Payment Middleware — Tiered Pricing
 # ---------------------------------------------------------------------------
 
-# Route → price mapping (None = free)
+# Route → USDC price mapping (None = free). Product prices come from the
+# unified price list (src/pricing_catalog.py): credits × $0.001.
 ROUTE_PRICING: dict[str, Decimal | None] = {
     # Crypto — dynamic pricing based on asset tier (handled separately)
     "/v1/vwap/": None,  # set dynamically
@@ -2971,17 +2976,17 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
     # TradFi
     "/v1/fx/": settings.pricing.tradfi,
     "/v1/metal/": settings.pricing.tradfi,
-    "/v1/briefs/market": Decimal("0.25"),
-    "/v1/checks/pre-trade": Decimal("0.10"),
-    "/v1/receipts/price": Decimal("0.25"),
-    "/v1/snapshots/macro": Decimal("1.00"),
+    "/v1/briefs/market": product_usdc("market_brief"),
+    "/v1/checks/pre-trade": product_usdc("pre_trade_check"),
+    "/v1/receipts/price": product_usdc("audit_receipt"),
+    "/v1/snapshots/macro": product_usdc("macro_snapshot"),
     "/v1/monitors/recipe": None,
-    "/v1/monitors/evaluate": Decimal("0.25"),
-    "/v1/indicators/token-quality": Decimal("0.50"),
-    "/v1/indicators/state-divergence": Decimal("0.50"),
-    "/v1/signals/solana-token-brief": Decimal("1.00"),
-    "/v1/signals/trader-alpha-pack": Decimal("2.50"),
-    "/v1/rwa/benchmark/blocksize": Decimal("0.25"),
+    "/v1/monitors/evaluate": product_usdc("monitor_evaluate"),
+    "/v1/indicators/token-quality": product_usdc("token_quality_indicator"),
+    "/v1/indicators/state-divergence": product_usdc("state_divergence_indicator"),
+    "/v1/signals/solana-token-brief": product_usdc("solana_token_brief"),
+    "/v1/signals/trader-alpha-pack": product_usdc("trader_alpha_pack"),
+    "/v1/rwa/benchmark/blocksize": product_usdc("rwa_blocksize_benchmark"),
     # Free
     "/v1/coverage": None,
     "/v1/search": None,
@@ -3034,7 +3039,7 @@ ROUTE_PRICING: dict[str, Decimal | None] = {
 }
 
 SUPPORTED_BATCH_SERVICES = {"vwap", "bidask", "fx", "metal", "state", "vwap30m", "vwap24h"}
-QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "JPY", "BTC", "ETH")
+QUOTE_SUFFIXES = pricing_catalog.QUOTE_SUFFIXES
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,32}$")
 WALLET_ID_RE = re.compile(r"^[A-Za-z0-9:._-]{20,128}$")
 STARTER_ID_RE = re.compile(r"^[A-Za-z0-9:._@-]{8,160}$")
@@ -3484,10 +3489,7 @@ def _parse_batch_reqs(reqs: str) -> list[tuple[str, str, str]]:
 
 def _base_from_symbol(symbol: str) -> str:
     """Extract a likely base asset from a compact pair symbol."""
-    for quote in QUOTE_SUFFIXES:
-        if symbol.endswith(quote) and len(symbol) > len(quote):
-            return symbol[: -len(quote)]
-    return symbol[: len(symbol) // 2].upper()
+    return pricing_catalog.base_asset(symbol)
 
 
 def _quote_from_symbol(symbol: str) -> str:
@@ -3765,66 +3767,17 @@ def _get_price_for_request(request: Request) -> Decimal | None:
 
 
 def _credit_cost_for_request(request: Request) -> float | None:
-    """Return starter-credit cost for a paid request, independent of USDC price."""
-    path = request.url.path
-    if path.startswith("/v1/batch"):
-        reqs = request.query_params.get("reqs", "")
-        if not reqs:
-            return None
-        total = 0.0
-        for svc, _pair, _raw_query in _parse_batch_reqs(reqs):
-            if svc == "vwap":
-                total += CREDIT_COSTS["raw_vwap"]
-            elif svc == "bidask":
-                total += CREDIT_COSTS["raw_bidask"]
-            elif svc == "state":
-                total += CREDIT_COSTS["raw_state"]
-            elif svc == "vwap30m":
-                total += CREDIT_COSTS["raw_vwap_30m"]
-            elif svc == "vwap24h":
-                total += CREDIT_COSTS["raw_vwap_24h"]
-            elif svc == "fx":
-                total += CREDIT_COSTS["fx"]
-            elif svc == "metal":
-                total += CREDIT_COSTS["metals"]
-        return total
-    if path.startswith("/v1/vwap/"):
-        return CREDIT_COSTS["raw_vwap"]
-    if path.startswith("/v1/bidask/"):
-        return CREDIT_COSTS["raw_bidask"]
-    if path.startswith("/v1/state/"):
-        return CREDIT_COSTS["raw_state"]
-    if path.startswith("/v1/vwap30m/"):
-        return CREDIT_COSTS["raw_vwap_30m"]
-    if path.startswith("/v1/vwap24h/"):
-        return CREDIT_COSTS["raw_vwap_24h"]
-    if path.startswith("/v1/fx/"):
-        return CREDIT_COSTS["fx"]
-    if path.startswith("/v1/metal/"):
-        return CREDIT_COSTS["metals"]
-    if path.startswith("/v1/briefs/market"):
-        return CREDIT_COSTS["market_brief"]
-    if path.startswith("/v1/checks/pre-trade"):
-        return CREDIT_COSTS["pre_trade_check"]
-    if path.startswith("/v1/receipts/price"):
-        return CREDIT_COSTS["audit_receipt"]
-    if path.startswith("/v1/snapshots/macro"):
-        return CREDIT_COSTS["macro_snapshot"]
-    if path.startswith("/v1/monitors/evaluate"):
-        return CREDIT_COSTS["market_brief"]
-    if path.startswith("/v1/indicators/token-quality"):
-        return CREDIT_COSTS["token_quality_indicator"]
-    if path.startswith("/v1/indicators/state-divergence"):
-        return CREDIT_COSTS["state_divergence_indicator"]
-    if path.startswith("/v1/signals/solana-token-brief"):
-        return CREDIT_COSTS["solana_token_brief"]
-    if path.startswith("/v1/signals/trader-alpha-pack"):
-        return CREDIT_COSTS["trader_alpha_pack"]
-    if path.startswith("/v1/rwa/benchmark/blocksize"):
-        return CREDIT_COSTS["rwa_blocksize_benchmark"]
-    if path.startswith("/v1/provenance/"):
+    """Return the credit cost of a paid request: its USDC price at $0.001 per credit.
+
+    Deriving credits from the x402 price keeps both currencies on one price
+    list for every route, including mixed batches.
+    """
+    if request.url.path.startswith("/v1/provenance/"):
         return CREDIT_COSTS["provenance_lookup"]
-    return None
+    price = _get_price_for_request(request)
+    if price is None:
+        return None
+    return float(pricing_catalog.usdc_to_credits(price))
 
 
 def _starter_credit_subject(request: Request) -> tuple[str, str, bool] | None:
@@ -7185,7 +7138,7 @@ async def check_data_capabilities(request: Request, payload: dict[str, Any]) -> 
 
 @app.post("/v1/briefs/market", responses=X402_RESPONSE)
 async def agent_market_brief(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Create a decision-ready market brief. Cost: 10 credits or $0.25 USDC."""
+    """Create a decision-ready market brief. Cost: 250 credits or $0.25 USDC."""
     import asyncio
 
     symbols = payload.get("symbols") or payload.get("symbol")
@@ -7700,7 +7653,7 @@ async def macro_snapshot_sample() -> dict[str, Any]:
 
 @app.post("/v1/checks/pre-trade", responses=X402_RESPONSE)
 async def pre_trade_sanity_check(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Run a read-only pre-trade sanity check. Cost: 5 credits or $0.10 USDC."""
+    """Run a read-only pre-trade sanity check. Cost: 100 credits or $0.10 USDC."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol is required")
@@ -7786,7 +7739,7 @@ async def pre_trade_sanity_check(request: Request, payload: dict[str, Any]) -> d
 
 @app.post("/v1/receipts/price", responses=X402_RESPONSE)
 async def audit_grade_price_receipt(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Create an audit-grade receipt for one price lookup. Cost: 10 credits or $0.25 USDC."""
+    """Create an audit-grade receipt for one price lookup. Cost: 250 credits or $0.25 USDC."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol is required")
@@ -7833,7 +7786,7 @@ async def audit_grade_price_receipt(request: Request, payload: dict[str, Any]) -
 
 @app.post("/v1/snapshots/macro", responses=X402_RESPONSE)
 async def multi_asset_macro_snapshot(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Create a bounded multi-asset macro snapshot. Cost: 25 credits or $1.00 USDC."""
+    """Create a bounded multi-asset macro snapshot. Cost: 1,000 credits or $1.00 USDC."""
     import asyncio
 
     universe = payload.get("universe") or payload.get("symbols") or ["BTCUSD", "ETHUSD", "EURUSD", "XAUUSD"]
@@ -7920,7 +7873,7 @@ async def multi_asset_macro_snapshot(request: Request, payload: dict[str, Any]) 
 
 @app.post("/v1/monitors/evaluate", responses=X402_RESPONSE)
 async def spend_controlled_market_monitor(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    """Evaluate a bounded market monitor immediately. Cost: 10 credits or $0.25 USDC."""
+    """Evaluate a bounded market monitor immediately. Cost: 250 credits or $0.25 USDC."""
     brief = await agent_market_brief(request, payload)
     rules = payload.get("rules") or []
     matches: list[dict[str, Any]] = []
@@ -7943,7 +7896,7 @@ async def spend_controlled_market_monitor(request: Request, payload: dict[str, A
     return {
         "status": "ok",
         "product": "spend_controlled_market_monitor",
-        "credit_cost": CREDIT_COSTS["market_brief"],
+        "credit_cost": CREDIT_COSTS["monitor_evaluate"],
         "methodology": {
             "type": "spend_controlled_market_monitor_v1",
             "steps": [
@@ -7961,9 +7914,9 @@ async def spend_controlled_market_monitor(request: Request, payload: dict[str, A
         "brief": brief,
         "spend_control": {
             "max_credits": payload.get("max_credits"),
-            "credits_spent": CREDIT_COSTS["market_brief"],
+            "credits_spent": CREDIT_COSTS["monitor_evaluate"],
             "remaining_budget": (
-                float(payload.get("max_credits")) - CREDIT_COSTS["market_brief"]
+                float(payload.get("max_credits")) - CREDIT_COSTS["monitor_evaluate"]
                 if payload.get("max_credits") is not None
                 else None
             ),
@@ -10426,6 +10379,9 @@ async def mcp_manifest():
                     "raw_vwap",
                     "bid_ask",
                     "equity_bid_ask",
+                    "state_prices",
+                    "vwap_30m",
+                    "vwap_24h",
                     "fx",
                     "metals",
                     "batch",
@@ -10442,6 +10398,7 @@ async def mcp_manifest():
                 "direct_public_http": "Signed x402 payment is required per live-data request.",
                 **free_tier.upgrade_fields(source="http-manifest", trigger="surface"),
             },
+            "unit_pricing": pricing_catalog.pricing_payload(),
         },
     }
     if REPOSITORY_URL:
@@ -15037,7 +14994,7 @@ async def health_check() -> dict[str, Any]:
         "starter_allowance": {
             **free_tier.offer_payload(),
             "allowance_credits": STARTER_CREDIT_ALLOWANCE,
-            "applies_to": "raw data, batches, market briefs, pre-trade checks, audit receipts, macro snapshots, and provenance lookups",
+            "applies_to": "every paid product: raw data, batches, state prices, VWAP windows, market briefs, pre-trade checks, price receipts, macro snapshots, and trader indicators",
             "direct_public_http": "Signed x402 payment is required per live-data request.",
             **free_tier.upgrade_fields(source="http-health", trigger="surface"),
         },
@@ -15046,7 +15003,7 @@ async def health_check() -> dict[str, Any]:
             "discovery": "/v1/search?q=AAPL&asset_class=equity",
             "live_endpoint_template": "/v1/bidask/{ticker}",
             "example_endpoint": "/v1/bidask/AAPLXUSD",
-            "credit_cost": 1,
+            "credit_cost": pricing_catalog.tier_credits("equities"),
             "price_usdc": str(settings.pricing.equities),
         },
         "links": {
@@ -15155,6 +15112,77 @@ app.add_middleware(
     trusted_proxy_ips=settings.server.forwarded_allow_ips,
     use_x_real_ip=_hosted_environment(),
 )
+
+
+# ---------------------------------------------------------------------------
+# Connector products: free-tier credits buy the same products as x402 USDC
+# ---------------------------------------------------------------------------
+
+_CONNECTOR_WINDOW_ROUTES = {
+    "get_state_price": "/v1/state/{pair}",
+    "get_vwap_30m": "/v1/vwap30m/{pair}",
+    "get_vwap_24h": "/v1/vwap24h/{pair}",
+}
+_CONNECTOR_PRODUCT_HANDLERS = {
+    "get_market_brief": agent_market_brief,
+    "run_pre_trade_check": pre_trade_sanity_check,
+    "create_price_receipt": audit_grade_price_receipt,
+    "get_macro_snapshot": multi_asset_macro_snapshot,
+    "get_token_quality": token_market_quality_indicator,
+    "get_state_divergence": state_divergence_indicator,
+    "get_solana_token_brief": solana_token_brief,
+    "get_trader_alpha_pack": trader_alpha_pack,
+}
+
+
+def _internal_product_request(path: str, method: str) -> Request:
+    """Build the request an HTTP product handler expects, for an in-process call.
+
+    The connector has already charged credits, so no x402 or starter-credit
+    context is attached and handlers report ``meta.credits`` as null.
+    """
+    host = urlsplit(PUBLIC_BASE_URL).hostname or "mcp.blocksize.info"
+    return Request(
+        {
+            "type": "http",
+            "app": app,
+            "method": method,
+            "scheme": "https",
+            "path": path,
+            "raw_path": path.encode(),
+            "root_path": "",
+            "query_string": b"",
+            "headers": [(b"host", host.encode())],
+            "server": (host, 443),
+            "client": None,
+            "state": {},
+        }
+    )
+
+
+async def _run_connector_product(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Serve a connector tool through the handler an x402 buyer reaches."""
+    try:
+        if tool_name in _CONNECTOR_WINDOW_ROUTES:
+            pair = str(arguments["pair"])
+            request = _internal_product_request(
+                _CONNECTOR_WINDOW_ROUTES[tool_name].format(pair=pair), "GET"
+            )
+            if tool_name == "get_state_price":
+                return await get_state_price_endpoint(pair, request)
+            if tool_name == "get_vwap_30m":
+                return await get_vwap_30m_endpoint(pair, request, include_trades=False)
+            return await get_vwap_24h_endpoint(pair, request)
+        handler = _CONNECTOR_PRODUCT_HANDLERS[tool_name]
+        product = pricing_catalog.PRODUCT_BY_CONNECTOR_TOOL[tool_name]
+        return await handler(_internal_product_request(product.route, "POST"), dict(arguments))
+    except HTTPException as exc:
+        raise ProductRequestError(exc.status_code, exc.detail) from exc
+    except ValueError as exc:  # symbol validation, which the HTTP routes report as 400
+        raise ProductRequestError(400, str(exc)) from exc
+
+
+register_product_runner(_run_connector_product)
 
 
 def run_resource_server() -> None:

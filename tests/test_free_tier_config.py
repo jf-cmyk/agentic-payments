@@ -54,11 +54,13 @@ def test_free_tier_defaults_match_the_checkpoint_decisions() -> None:
     defaults = FreeTierSettings(_env_file=None)
 
     assert defaults.enabled is True
-    assert defaults.monthly_credits == 15_000
-    assert defaults.per_minute_credits == 30
-    assert defaults.daily_soft_cap_credits == 2_000
+    # Unified pricing (1 credit = $0.001) doubled the credit cost of a raw call,
+    # so the pool and guards doubled to keep the same call volume.
+    assert defaults.monthly_credits == 30_000
+    assert defaults.per_minute_credits == 60
+    assert defaults.daily_soft_cap_credits == 4_000
     assert defaults.max_batch_items == 5
-    assert defaults.global_daily_cap_credits == 200_000
+    assert defaults.global_daily_cap_credits == 400_000
     # Data-rights gate: every production package was cleared on 2026-09-23.
     assert defaults.allowed_service_set == frozenset(FreeTierSettings.KNOWN_SERVICES)
     assert defaults.require_verified_email is True

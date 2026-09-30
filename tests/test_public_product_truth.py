@@ -8,7 +8,7 @@ import re
 import tomllib
 from zipfile import ZipFile
 
-from src import public_metadata, resource_server
+from src import free_tier, public_metadata, resource_server
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,7 +57,14 @@ FORBIDDEN_PRODUCTION_CLAIMS = (
     re.compile(r"\bcredit top[- ]ups?\b", re.IGNORECASE),
     re.compile(r"\bself-serve credit purchases?\b", re.IGNORECASE),
     re.compile(r"\b(?:starter pouch|growth pack|institutional vault)\b", re.IGNORECASE),
-    re.compile(r"\b(?:1,000|10,000|100,000) credits\b", re.IGNORECASE),
+    # Credit bundles (1,000 / 10,000 / 100,000 credits for a price) are not sold
+    # in production. A product can still cost 1,000 credits, so only bundle
+    # offers are flagged; the bundle prices are caught by the next pattern.
+    re.compile(
+        r"\b(?:buy|purchase|get)\s+(?:1,000|10,000|100,000) credits\b"
+        r"|\b(?:1,000|10,000|100,000) credits\s*(?:for|=)\s*\$",
+        re.IGNORECASE,
+    ),
     re.compile(r"\$(?:0\.90|8(?:\.00)?|60(?:\.00)?)\b", re.IGNORECASE),
 )
 
@@ -92,8 +99,12 @@ def _assert_complete_access_model(text: str) -> None:
         normalized,
     )
     # The free allowance is stated as a recurring monthly number, never "50".
-    assert "15,000" in normalized or "free live data credits every month" in normalized
-    assert "per utc day" not in normalized and "50 credit" not in normalized
+    assert (
+        free_tier.allowance_label() in normalized
+        or "free live data credits every month" in normalized
+    )
+    # Word boundary: "250 credits" is a product price, "50 credit" the retired allowance.
+    assert "per utc day" not in normalized and not re.search(r"\b50 credit", normalized)
     # The upgrade path is a real subscription CTA, not only "contact sales".
     assert "eur 49" in normalized or "free trial" in normalized
     assert (

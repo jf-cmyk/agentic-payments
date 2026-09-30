@@ -11,7 +11,7 @@ openapi:
 
 Blocksize Market Data gives agents accountless access to live financial market
 data through direct x402-paid HTTP calls. Eligible authenticated connector users
-separately receive 15,000 free live data credits every calendar month. The
+separately receive 30,000 free live data credits every calendar month. The
 Pay.sh HTTP routes use direct x402; they do not expose self-serve purchase routes.
 
 Use it for market-aware agent workflows that need crypto VWAP, crypto bid/ask,
@@ -41,19 +41,19 @@ fresh x402 authorization to the calling agent.
 
 ## Starter allowance
 
-- Position as: `Start with 15,000 free live-data credits every month`.
+- Position as: `Start with 30,000 free live-data credits every month`.
 - The allowance recurs every calendar month (UTC) under an evaluation licence
   with required attribution; production commercial use requires a subscription.
-- Raw VWAP, bid/ask, state, 30-minute close, and 24h fixed VWAP calls cost 1 credit.
-- FX and metals calls cost 1-2 credits.
-- Market briefs cost 10 credits.
-- Pre-trade sanity checks cost 5 credits.
-- Audit-grade price receipts cost 10 credits.
-- Multi-asset macro snapshots cost 25 credits.
-- Token market quality indicators cost 15 credits.
-- State divergence indicators cost 15 credits.
-- Solana token briefs cost 25 credits.
-- Trader alpha signal packs cost 50 credits.
+- One price list: 1 credit = $0.001 USDC, so every route costs the same in
+  connector credits as it does in USDC over x402.
+- Core crypto VWAP, bid/ask, state, 30-minute close, and 24h fixed VWAP calls
+  cost 2 credits ($0.002); long-tail pairs cost 4 credits ($0.004).
+- FX and metals calls cost 5 credits ($0.005); tokenized equities cost 8 credits ($0.008).
+- Pre-trade sanity checks cost 100 credits ($0.10).
+- Market briefs and audit-grade price receipts cost 250 credits ($0.25).
+- Token market quality and state divergence indicators cost 500 credits ($0.50).
+- Multi-asset macro snapshots and Solana token briefs cost 1,000 credits ($1.00).
+- Trader alpha signal packs cost 2,500 credits ($2.50).
 - Provenance lookups are free when tied to a prior paid or credited call.
 - Data-readiness checks through `/v1/capabilities/check` are free.
 - When authenticated connector starter credits are exhausted, use direct x402

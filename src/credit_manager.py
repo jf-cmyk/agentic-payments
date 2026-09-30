@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
 
 from src.config import settings
+from src.pricing_catalog import credit_costs
 from src.payment_limits import (
     MAX_CACHED_PAYMENT_RESPONSE_BYTES,
     MAX_PAYMENT_REPLAY_ENTRIES,
@@ -1358,28 +1359,11 @@ class CreditManager:
         finally:
             conn.close()
 
-# Starter-credit product costs. x402 prices stay in USDC separately.
-CREDIT_COSTS = {
-    "raw_vwap": 1.0,
-    "raw_bidask": 1.0,
-    "raw_state": 1.0,
-    "raw_vwap_30m": 1.0,
-    "raw_vwap_24h": 1.0,
-    "fx": 2.0,
-    "metals": 2.0,
-    "market_brief": 10.0,
-    "pre_trade_check": 5.0,
-    "audit_receipt": 10.0,
-    "macro_snapshot": 25.0,
-    "token_quality_indicator": 15.0,
-    "state_divergence_indicator": 15.0,
-    "solana_token_brief": 25.0,
-    "trader_alpha_pack": 50.0,
-    "rwa_blocksize_benchmark": 10.0,
-    "provenance_lookup": 0.0,
-}
+# Per-product credit costs from the unified price list (1 credit = $0.001, so
+# every product costs the same in credits and in USDC over x402).
+CREDIT_COSTS = credit_costs()
 
-# Bulk Tier Credits
+# Bulk Tier Credits, discounted from the list rate of 1,000 credits per $1.
 BULK_TIERS = {
     "starter": {"price": 0.90, "credits": 1000.0},      # 10% discount
     "pro": {"price": 8.00, "credits": 10000.0},         # 20% discount

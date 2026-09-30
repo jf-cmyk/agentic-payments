@@ -16,6 +16,18 @@ from src.models import PairInfo, VWAPData
 
 
 @pytest.fixture(autouse=True)
+def one_credit_raw_calls(monkeypatch):
+    """Price every raw-data call at one credit so the small-pool arithmetic below
+    stays readable; the real unified price list is covered in test_pricing_catalog."""
+    from decimal import Decimal
+
+    from src.config import settings as _settings
+
+    for tier in ("core_crypto", "extended_crypto", "tradfi", "equities"):
+        monkeypatch.setattr(_settings.pricing, tier, Decimal("0.001"))
+
+
+@pytest.fixture(autouse=True)
 def isolated_anthropic_state(tmp_path, monkeypatch):
     server._client = None
     server._entitlements = EntitlementManager(

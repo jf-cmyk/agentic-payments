@@ -20,6 +20,7 @@ from typing import Any
 
 from src.commercial_plans import conversion_ctas
 from src.config import KNOWN_CRYPTO_X_BASES, TOP_250_CRYPTO, settings
+from src.pricing_catalog import PRODUCT_BY_CONNECTOR_TOOL
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def allowance_credits() -> int:
 
 
 def allowance_label(credits: int | None = None) -> str:
-    """Return the allowance formatted for copy, e.g. ``15,000``."""
+    """Return the allowance formatted for copy, e.g. ``30,000``."""
     value = allowance_credits() if credits is None else int(credits)
     return f"{value:,}"
 
@@ -77,6 +78,20 @@ def enabled() -> bool:
 def positioning() -> str:
     """Return the one-line offer used across connectors, catalogs, and docs."""
     return f"Start with {allowance_label()} free live-data credits every month"
+
+
+def credit_usage_sentence() -> str:
+    """Return what a credit buys, from the unified price list (1 credit = $0.001)."""
+    from src import pricing_catalog
+
+    costs = sorted(product.credits for product in pricing_catalog.PRODUCT_BY_CONNECTOR_TOOL.values())
+    return (
+        f"A crypto price costs {pricing_catalog.tier_credits('core_crypto')} credits "
+        f"({pricing_catalog.tier_credits('extended_crypto')} for long-tail pairs), FX and metals "
+        f"{pricing_catalog.tier_credits('tradfi')}, and market briefs, pre-trade checks, and "
+        f"trader indicators {costs[0]:,} to {costs[-1]:,}. Each credit is worth "
+        f"${pricing_catalog.CREDIT_PRICE_USDC} USDC, the same price agents pay per call over x402."
+    )
 
 
 def allowance_sentence() -> str:
@@ -321,8 +336,13 @@ def eligibility_for(identity: Any) -> Eligibility:
 TOOL_SERVICES = {
     "get_vwap": "crypto_vwap",
     "get_bid_ask": "crypto_bidask",
+    "get_state_price": "crypto_state",
+    "get_vwap_30m": "crypto_vwap_30m",
+    "get_vwap_24h": "crypto_vwap_24h",
     "get_fx_rate": "fx",
     "get_metal_price": "metals",
+    # Workflow products and trader indicators share the analytics scope.
+    **{tool: "analytics" for tool in PRODUCT_BY_CONNECTOR_TOOL},
 }
 
 

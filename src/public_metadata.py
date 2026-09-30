@@ -7,6 +7,7 @@ import json
 import os
 from urllib.parse import quote_plus
 
+from src import pricing_catalog
 from src.commercial_plans import CURRENCY as PLAN_CURRENCY, account_plan_catalog, plan_by_id
 
 APP_VERSION = "0.6.23"
@@ -83,7 +84,7 @@ def _free_tier_monthly_credits() -> int:
 
         return int(settings.free_tier.monthly_credits)
     except Exception:  # settings unavailable outside a configured server
-        return int(os.getenv("FREE_TIER_MONTHLY_CREDITS", "").strip() or 15_000)
+        return int(os.getenv("FREE_TIER_MONTHLY_CREDITS", "").strip() or 30_000)
 
 
 _FREE_TIER_ALLOWANCE_LABEL = f"{_free_tier_monthly_credits():,}"
@@ -194,6 +195,28 @@ OFFICIAL_REGISTRY_NAME = os.getenv(
     "info.blocksize.mcp/agentic-payments",
 )
 
+def _tier_prices(low: str, high: str) -> dict[str, str]:
+    """Raw-data package price range in credits and USDC (1 credit = $0.001)."""
+    low_credits = pricing_catalog.DEFAULT_TIER_CREDITS[low]
+    high_credits = pricing_catalog.DEFAULT_TIER_CREDITS[high]
+    return {
+        "credit_cost_min": str(low_credits),
+        "credit_cost_max": str(high_credits),
+        "price_usdc_min": str(pricing_catalog.credits_to_usdc(low_credits)),
+        "price_usdc_max": str(pricing_catalog.credits_to_usdc(high_credits)),
+    }
+
+
+def _product_prices(product_key: str) -> dict[str, str]:
+    """Packaged product price: one number of credits, the same amount in USDC."""
+    product = pricing_catalog.PRODUCTS[product_key]
+    return {
+        "credit_cost": str(product.credits),
+        "price_usdc_min": str(product.usdc),
+        "price_usdc_max": str(product.usdc),
+    }
+
+
 DATA_PACKAGES: tuple[dict[str, object], ...] = (
     {
         "id": "crypto-vwap",
@@ -213,8 +236,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "crypto market data API",
             "VWAP data for AI agents",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.004",
+        **_tier_prices("core_crypto", "extended_crypto"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap&symbol=BTCUSD",
     },
     {
@@ -235,8 +257,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "equity bid ask API",
             "crypto bid ask data",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.008",
+        **_tier_prices("core_crypto", "equities"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=bidask&symbol=BTCUSD",
     },
     {
@@ -261,8 +282,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "tokenized equities price API",
             "xStocks bid ask data",
         ],
-        "price_usdc_min": "0.008",
-        "price_usdc_max": "0.008",
+        **_tier_prices("equities", "equities"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=bidask&symbol=AAPLXUSD",
         "notes": (
             "Equities are tokenized stocks (xStocks) quoted on crypto venues, "
@@ -291,8 +311,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "oracle price data",
             "crypto pool state API",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.004",
+        **_tier_prices("core_crypto", "extended_crypto"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=state&symbol=MSOLUSD",
     },
     {
@@ -313,8 +332,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "crypto closing price API",
             "VWAP window data",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.004",
+        **_tier_prices("core_crypto", "extended_crypto"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap30m&symbol=BTCUSD",
     },
     {
@@ -334,8 +352,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "fixed crypto VWAP",
             "fixed VWAP market data",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.004",
+        **_tier_prices("core_crypto", "extended_crypto"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap24h&symbol=BTCUSD",
     },
     {
@@ -355,8 +372,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "foreign exchange price API",
             "currency rates for AI agents",
         ],
-        "price_usdc_min": "0.005",
-        "price_usdc_max": "0.005",
+        **_tier_prices("tradfi", "tradfi"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=fx&symbol=EURUSD",
     },
     {
@@ -377,8 +393,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "silver price API",
             "commodity price data",
         ],
-        "price_usdc_min": "0.005",
-        "price_usdc_max": "0.005",
+        **_tier_prices("tradfi", "tradfi"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=metal&symbol=XAUUSD",
     },
     {
@@ -398,8 +413,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "paid API for AI agents",
             "authenticated market data plans",
         ],
-        "price_usdc_min": "0.002",
-        "price_usdc_max": "0.008",
+        **_tier_prices("core_crypto", "equities"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/market-data?service=vwap&symbol=BTCUSD",
     },
     {
@@ -420,9 +434,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "market data for AI agents",
             "decision ready market data",
         ],
-        "credit_cost": "10",
-        "price_usdc_min": "0.25",
-        "price_usdc_max": "0.50",
+        **_product_prices("market_brief"),
     },
     {
         "id": "pre-trade-sanity-check",
@@ -442,9 +454,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "agent risk check",
             "market data sanity check",
         ],
-        "credit_cost": "5",
-        "price_usdc_min": "0.10",
-        "price_usdc_max": "0.25",
+        **_product_prices("pre_trade_check"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/pre-trade",
     },
     {
@@ -465,9 +475,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "market data audit trail",
             "agent data provenance",
         ],
-        "credit_cost": "10",
-        "price_usdc_min": "0.25",
-        "price_usdc_max": "0.75",
+        **_product_prices("audit_receipt"),
     },
     {
         "id": "multi-asset-macro-snapshot",
@@ -487,9 +495,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "macro data for AI agents",
             "market context API",
         ],
-        "credit_cost": "25",
-        "price_usdc_min": "1.00",
-        "price_usdc_max": "2.50",
+        **_product_prices("macro_snapshot"),
         "sample_url": f"{PUBLIC_BASE_URL}/v1/samples/macro-snapshot",
         "free_preview_url": f"{PUBLIC_BASE_URL}/v1/previews/macro",
     },
@@ -532,9 +538,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "spend controlled agent monitoring",
             "market data trigger API",
         ],
-        "credit_cost": "10",
-        "price_usdc_min": "0.25",
-        "price_usdc_max": "0.25",
+        **_product_prices("monitor_evaluate"),
     },
     {
         "id": "token-market-quality-indicator",
@@ -556,9 +560,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "Solana token price signals",
             "agent trader metrics",
         ],
-        "credit_cost": "15",
-        "price_usdc_min": "0.50",
-        "price_usdc_max": "0.50",
+        **_product_prices("token_quality_indicator"),
         "availability_status": "ready",
         "required_feeds": ["vwap_latest", "bidask_getSnapshot"],
         "optional_feeds": ["state_instruments", "state_pool", "closingprice_list", "closingprice_trades"],
@@ -583,9 +585,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "crypto basis signal",
             "trader risk check",
         ],
-        "credit_cost": "15",
-        "price_usdc_min": "0.50",
-        "price_usdc_max": "0.50",
+        **_product_prices("state_divergence_indicator"),
         "availability_status": "ready_when_state_pool_coverage_exists",
         "required_feeds": ["vwap_latest", "bidask_getSnapshot", "state_instruments", "state_pool"],
         "missing_current_feeds": [],
@@ -609,9 +609,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "DEX token signals",
             "agent crypto brief",
         ],
-        "credit_cost": "25",
-        "price_usdc_min": "1.00",
-        "price_usdc_max": "1.00",
+        **_product_prices("solana_token_brief"),
         "availability_status": "ready",
         "required_feeds": ["vwap_latest", "bidask_getSnapshot"],
         "optional_feeds": ["state_instruments", "state_pool", "closingprice_list", "closingprice_trades"],
@@ -636,9 +634,7 @@ DATA_PACKAGES: tuple[dict[str, object], ...] = (
             "agent trader metrics",
             "auditable market indicators",
         ],
-        "credit_cost": "50",
-        "price_usdc_min": "2.50",
-        "price_usdc_max": "2.50",
+        **_product_prices("trader_alpha_pack"),
         "availability_status": "ready",
         "required_feeds": ["vwap_latest", "bidask_getSnapshot"],
         "optional_feeds": ["state_instruments", "state_pool", "closingprice_list", "closingprice_trades"],
@@ -1784,6 +1780,33 @@ def build_sitemap_xml() -> str:
     )
 
 
+def _llms_price_lines() -> str:
+    """One price list for llms.txt, built from the default tier and product prices."""
+    tiers = pricing_catalog.DEFAULT_TIER_CREDITS
+    rows = [
+        ("Core crypto VWAP, bid/ask, state price, 30m and 24h VWAP", tiers["core_crypto"]),
+        ("Extended (long-tail) crypto on the same routes", tiers["extended_crypto"]),
+        ("FX and metals", tiers["tradfi"]),
+        ("Tokenized equities bid/ask", tiers["equities"]),
+        *(
+            (product.label, product.credits)
+            for product in sorted(
+                pricing_catalog.PRODUCT_BY_CONNECTOR_TOOL.values(),
+                key=lambda item: (item.credits, item.label),
+            )
+        ),
+    ]
+    lines = [
+        f"1 credit = ${pricing_catalog.CREDIT_PRICE_USDC} USDC. Every product costs the same "
+        "number of credits in the authenticated connectors as its x402 price in USDC.\n"
+    ]
+    lines += [
+        f"- {label}: {credits:,} credits (${pricing_catalog.credits_to_usdc(credits)})\n"
+        for label, credits in rows
+    ]
+    return "".join(lines)
+
+
 def build_llms_txt() -> str:
     """Build an AI-reader brief that points agents to the canonical data package."""
     repository_line = (
@@ -1852,6 +1875,8 @@ def build_llms_txt() -> str:
         "- Solana Token Brief package: watchlist ranking for supported Solana/protocol symbols.\n"
         "- Trader Alpha Signal Pack package: bounded watchlist decision-support bundle.\n"
         "- Discovery package: free instrument search, pricing inspection, docs search, and endpoint construction.\n\n"
+        "## Unit Pricing\n\n"
+        f"{_llms_price_lines()}\n"
         "## Category Authority\n\n"
         "- RWA market data: Blocksize already provides broad production market-data "
         "coverage. Separately, the 2026-07-30 RWA.xyz source snapshot contains 1,169 "
