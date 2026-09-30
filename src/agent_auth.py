@@ -38,6 +38,7 @@ CLAIM_GRANT = "urn:workos:agent-auth:grant-type:claim"
 ASSERTION_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 COOKIE = "__Host-blocksize-agent"
 TTL = 600
+AUDIT_TTL_SECONDS = 29 * 86400  # under the 30-day retention commitment
 HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache",
            "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
            "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'"}
@@ -115,9 +116,13 @@ class Store:
     def audit(self, db, event, registration):
         now = int(time.time())
         self.put(db, "audit", random_token(), {"event": event, "registration": registration,
-                 "at": now}, now + 30 * 86400)
+                 "at": now}, now + AUDIT_TTL_SECONDS)
         record_usage_event("agent_auth_" + event, surface="agent_auth", reason=event,
                            metadata={"registration_hash": fingerprint(registration)})
+
+    def purge_expired(self):
+        with self.transaction() as db:
+            return db.execute("DELETE FROM records WHERE expiry<=?", (int(time.time()),)).rowcount
 
     def rate(self, db, key, limit, seconds=3600):
         now = int(time.time())

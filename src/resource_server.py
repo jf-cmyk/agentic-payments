@@ -108,6 +108,7 @@ from src.marketplace_performance import (
     collect_marketplace_performance,
     performance_collection_configured,
 )
+from src import claude_data_retention
 from src import signup_alerts
 from src.observability import (
     PRODUCT_ROUTE_IDS,
@@ -777,6 +778,35 @@ def _marketplace_listing_checks_enabled() -> bool:
     return _env_enabled("MARKETPLACE_LISTING_CHECKS_ENABLED", default)
 
 
+def _claude_data_retention_enabled() -> bool:
+    default = "true" if (_hosted_environment() or is_production_environment()) else "false"
+    return _env_enabled("CLAUDE_DATA_RETENTION_ENABLED", default)
+
+
+def _run_claude_data_retention_pass() -> dict[str, object]:
+    agent_auth = getattr(getattr(anthropic_mcp, "auth", None), "agent_auth", None)
+    return claude_data_retention.purge_claude_data(
+        entitlements=connector_entitlement_manager("ANTHROPIC"),
+        ledger=get_free_tier_ledger(),
+        observability=OBSERVABILITY,
+        agent_auth_store=getattr(agent_auth, "store", None),
+        oauth_dir=claude_data_retention.oauth_storage_dir(),
+    )
+
+
+async def _run_claude_data_retention_loop(app: FastAPI) -> None:
+    """Delete Claude connector data past the 29-day cutoff, once an hour."""
+    await asyncio.sleep(60.0)
+    while True:
+        try:
+            report = await asyncio.to_thread(_run_claude_data_retention_pass)
+            app.state.claude_data_retention_last = report
+            logger.info("Claude data retention pass: %s", json.dumps(report, sort_keys=True))
+        except Exception as exc:  # noqa: BLE001 - a failed pass must not stop the loop
+            logger.error("Claude data retention pass failed: %s", type(exc).__name__)
+        await asyncio.sleep(3600.0)
+
+
 async def _run_signup_digest_loop() -> None:
     """Email the operator one signup digest per day at SIGNUP_DIGEST_HOUR_UTC."""
     while True:
@@ -1393,6 +1423,8 @@ async def lifespan(app: FastAPI):
     app.state.store_readiness_task = None
     app.state.marketplace_listing_task = None
     app.state.marketplace_performance_task = None
+    app.state.claude_data_retention_task = None
+    app.state.claude_data_retention_last = None
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
@@ -1429,6 +1461,11 @@ async def lifespan(app: FastAPI):
         app.state.signup_digest_task = asyncio.create_task(
             _run_signup_digest_loop(),
             name="signup-digest",
+        )
+    if _claude_data_retention_enabled():
+        app.state.claude_data_retention_task = asyncio.create_task(
+            _run_claude_data_retention_loop(app),
+            name="claude-data-retention",
         )
     if _marketplace_listing_checks_enabled():
         app.state.marketplace_listing_task = asyncio.create_task(
@@ -1475,6 +1512,10 @@ async def lifespan(app: FastAPI):
             app.state.store_readiness_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.store_readiness_task
+        if app.state.claude_data_retention_task is not None:
+            app.state.claude_data_retention_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.claude_data_retention_task
         if app.state.marketplace_listing_task is not None:
             app.state.marketplace_listing_task.cancel()
             with suppress(asyncio.CancelledError):

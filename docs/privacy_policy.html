@@ -29,6 +29,7 @@
 <body>
   <main>
     <h1>Privacy Policy</h1>
+    <p>Last updated: 29 September 2026</p>
     <p>
       This policy applies to the Blocksize Capital developer portal, public remote MCP discovery
       server, authenticated OpenAI, Claude, and Cursor MCP connectors, and paid HTTP market data API made available at
@@ -40,7 +41,8 @@
       <li>Basic request metadata such as timestamps, user agent, and network-level diagnostics needed to operate and secure the service.</li>
       <li>Free discovery queries, such as symbol searches and service listings, so we can monitor reliability and product usage.</li>
       <li>OAuth account identifiers and scopes needed to authenticate connector users, isolate account entitlements, and prevent abuse. Direct identifiers are not returned in connector credit responses.</li>
-      <li>For the monthly free tier, a salted one-way hash of your normalized, verified email address, so one person receives one allowance across the Claude, Cursor, and OpenAI connectors. We do not store the email address itself for this purpose, and the hash cannot be reversed to reveal it.</li>
+      <li>For the monthly free tier, a salted one-way hash of your normalized, verified email address, so one person receives one allowance across the Claude, Cursor, and OpenAI connectors. Free-tier usage and credit records are keyed to this hash rather than to the email address, and the hash cannot be reversed to reveal it.</li>
+      <li>When you create a connector account, the account details our sign-in provider shares with us: your email address, name (if given), account ID, email verification status, and sign-up time. We store these encrypted, separately from usage records.</li>
       <li>Read-only connector tool names, requested instruments, result status, credit accounting, and reliability diagnostics needed to deliver and audit the service.</li>
       <li>Wallet identifiers, payment headers, or credit headers when you use paid or credit-based routes.</li>
       <li>Payment proof material, transaction hashes, and related verification data when x402 settlement is used.</li>
@@ -54,6 +56,8 @@
       <li>To verify payment proofs, prevent replay attacks, and reduce fraud or abuse.</li>
       <li>To troubleshoot outages, improve latency, and understand which product surfaces are being used.</li>
       <li>To respond to support requests and maintain service quality.</li>
+      <li>To send you account emails: a welcome email when you sign up, a notice when you have used 80% and 100% of your monthly free allowance, and a one-time reminder if you have not used the connector within two days of signing up. Links in these emails carry campaign tags so we can see which email a visit came from.</li>
+      <li>To notify the Blocksize team of new sign-ups and send them a daily summary of sign-ups and free-tier activity, so we can support new users.</li>
     </ul>
 
     <h2>AI and Model Training</h2>
@@ -65,22 +69,37 @@
 
     <h2>Retention</h2>
     <p>
-      We retain operational, security, and billing-related records only for as long as they are reasonably
+      Data we receive through the Claude connector is kept for under 30 days. Records of individual requests
+      (tool calls, requested instruments, search text, hashed IP addresses, user agents, and credit charges) are
+      deleted 29 days after they are recorded. Connector account records (account ID, email address, and credit
+      counters) are kept while you use the connector and deleted once your account has been inactive for 29
+      days. Sign-in tokens that have not been used for 29 days are deleted, after which you reconnect. Two
+      exceptions: if an account is suspended for abuse, we keep a salted one-way hash of its email address and
+      its suspension status so the suspension stays in place; and for accounts with a paid or manually granted
+      allowance, we keep the account ID and allowance for as long as that arrangement lasts, with the email
+      address removed after 29 days of inactivity.
+    </p>
+    <p>
+      We retain other operational, security, and billing-related records only for as long as they are reasonably
       needed for service delivery, fraud prevention, debugging, compliance, or contractual obligations.
-      Retention periods can vary by log type and use case.
+      Retention periods can vary by log type and use case. Short-lived rate-limit records are deleted
+      automatically. The account details stored when you sign up have no fixed deletion schedule; you can ask us
+      to delete them at any time through the support page.
     </p>
 
     <h2>Sharing</h2>
     <p>
-      We may use infrastructure and analytics subprocessors to run the service, but we do not sell request
-      data or wallet activity data. We may disclose data where required by law or to protect the security of
-      the service and its users.
+      We use the following subprocessors to run the service: Clerk for sign-in and account management,
+      Resend to deliver account emails, and Railway to host the service. We do not sell request data, account
+      details, or wallet activity data. We may disclose data where required by law or to protect the security
+      of the service and its users.
     </p>
 
     <h2>Your Choices</h2>
     <p>
       If you need additional information about data handling, enterprise retention expectations, or a data access
-      request, contact us through the support channel listed on the
+      or deletion request, or if you would like to stop receiving account emails, contact us through the support
+      channel listed on the
       <a href="https://mcp.blocksize.info/support">support page</a>.
     </p>
   </main>

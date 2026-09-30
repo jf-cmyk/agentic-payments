@@ -760,12 +760,9 @@ def create_authenticated_market_data_mcp(
             )
         except Exception as e:
             refund_metadata = refund_pending_charge()
-            logger.error(
-                "Unexpected %s in %s(%s)",
-                type(e).__name__,
-                tool_name,
-                subject,
-            )
+            # The symbol stays out of logs; it is user input kept only in the
+            # 29-day event store.
+            logger.error("Unexpected %s in %s", type(e).__name__, tool_name)
             record_usage_event(
                 "mcp_tool_error",
                 surface=observability_surface,
@@ -960,7 +957,8 @@ def create_authenticated_market_data_mcp(
                 f"{json.dumps(response.model_dump(), default=str, indent=2)}\n</details>"
             )
         except Exception as e:
-            logger.error("Error in %s search_pairs(%s): %s", client_label, query, e, exc_info=True)
+            # The query is free text from the user, so it never reaches the logs.
+            logger.error("Error in %s search_pairs: %s", client_label, type(e).__name__)
             return error_payload("INTERNAL_ERROR", f"Error searching for '{query}'", str(e))
 
     @mcp.tool(
