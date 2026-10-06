@@ -194,33 +194,27 @@ Replace `PRNUMBER` with the number Claude gives you.
 
 Settled on 6 October: the paying wallets are not Johann's (no test payments in the last month), so every settlement counts as customer revenue and no internal-wallet list is needed. The pilot files were deleted with archives kept on the volume.
 
-## 5. Resend records at NS1, in detail
+## 5. Resend records at NS1, in detail (corrected 6 October, 21:05 UTC)
 
-Resend's Records tab shows three groups. Only the first two are required for verification; the third is recommended.
+Checked on the Resend dashboard: `blocksize.info` is still **Failed** ("all required records are missing"), region North Virginia, provider detected as NS1. This domain uses Resend's newer CNAME layout, not the MX and TXT records in the earlier draft. Three records make the domain verify; a fourth one must not be added.
 
-| Resend group | Resend type | Resend name | Resend value | Required |
+| # | NS1 type | Name field (short form) | Answer | Required |
 |---|---|---|---|---|
-| DKIM | TXT | `resend._domainkey` | a long string starting `p=MIGf...` | Yes |
-| SPF (also labelled Return-Path or Sending) | MX | `send` | `feedback-smtp.<region>.amazonses.com`, priority `10` | Yes |
-| SPF | TXT | `send` | `v=spf1 include:amazonses.com ~all` | Yes |
-| DMARC | TXT | `_dmarc` | `v=DMARC1; p=none;` | Recommended |
+| 1 | TXT | `resend._domainkey` | `p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3qrCUs3ErH389hyP58cqL+/xW92bi5FpVwWk08SMI9UPd/d1Bo+PtBmkMl492ElkgqY2quU1zo+EZo1wJXX7l4GDF10g5CRAfWxNxnTDUEyPmyEMAj2IMyGO/gJ+cYSw7xrZcAqjydFaEp1mF7fF8UT45hu9jnHxB/RAuVah38QIDAQAB` | Yes (DKIM) |
+| 2 | CNAME | `rsend` | `rsend.forge.rmta.net` | Yes (sending) |
+| 3 | CNAME | `send` | `send.forge.rmta.net` | Yes (sending) |
+| 4 | CNAME | `mcp` | `links2.resend-dns.com` | **Do not add.** |
 
-NS1 offers many record types (A, AAAA, CNAME, MX, TXT, and so on). You only use MX and TXT. In NS1's zone view for `blocksize.info`, click "Add Record" and fill in:
+Record 4 is the optional click-tracking record. Resend proposed the subdomain `mcp`, which is the production server `mcp.blocksize.info`. A CNAME there would take the API, the MCP server and every connector offline. Before verifying, switch **Enable Tracking** off on the domain page (the toggle at the bottom, currently on). Verification only needs records 1 to 3.
 
-| # | Type (NS1 dropdown) | Name field | Answer field | TTL |
-|---|---|---|---|---|
-| 1 | TXT | `resend._domainkey` | paste the DKIM value exactly, no added quotes | leave default |
-| 2 | MX | `send` | priority `10`, mail server exactly as Resend shows (ends in `amazonses.com`) | leave default |
-| 3 | TXT | `send` | `v=spf1 include:amazonses.com ~all` | leave default |
-| 4 | TXT | `_dmarc` | `v=DMARC1; p=none;` | leave default |
+Steps in NS1 (https://my.nsone.net, Zones, `blocksize.info`):
 
-Notes:
+1. If anything already exists at `send.blocksize.info` (a TXT or MX from the earlier draft), delete it first. A CNAME cannot share a name with other records.
+2. Add Record, type TXT, name `resend._domainkey`, answer the value in row 1 (also available from the copy button on the Resend page), TTL default. No quotes added.
+3. Add Record, type CNAME, name `rsend`, answer `rsend.forge.rmta.net`.
+4. Add Record, type CNAME, name `send`, answer `send.forge.rmta.net`.
+5. Confirm the list shows `resend._domainkey.blocksize.info`, `rsend.blocksize.info` and `send.blocksize.info`. NS1 appends the zone; if a name appears doubled, delete and re-add with the short form.
+6. Back on https://resend.com/domains, open `blocksize.info`, turn **Enable Tracking** off, then click **Restart**.
+7. Tell Claude when the status reads Verified. Claude then sends one test email from the production sender and watches the next real signup.
 
-- NS1 appends the zone to the Name field. Type only the short name (`send`, not `send.blocksize.info`). After saving, the record list must show `send.blocksize.info`, `resend._domainkey.blocksize.info`, `_dmarc.blocksize.info`. If a record shows up as `send.blocksize.info.blocksize.info`, delete that one and re-add it with the short name.
-- For the MX record, NS1 has two boxes: "Priority" (or "Preference") takes `10`, "Answer" takes the host name. Do not put the `10` inside the Answer box.
-- Copy the DKIM value with Resend's copy button. Do not add quotation marks and do not let the editor wrap or truncate it.
-- Add only; do not change or delete the existing records on the apex. The apex currently holds Google site-verification TXT records and the company mail setup, and the Resend records live on the `send` subdomain so they cannot collide.
-- Region: all of Resend's values must name the same AWS region. That is automatic if you copy from one domain page.
-- Back in Resend, click "Restart verification". NS1 publishes within seconds; Resend usually turns green within minutes, sometimes up to an hour. Tell Claude "Resend verified".
-
-If the Resend page shows a different layout from the table above (for example a CNAME-based DKIM, or a different return-path subdomain), paste the records table from the page into the chat. None of those values are secret, and Claude will map them to NS1 fields one by one.
+Nothing on the apex (`blocksize.info` itself) changes.
