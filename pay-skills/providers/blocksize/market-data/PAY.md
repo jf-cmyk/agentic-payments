@@ -1,110 +1,83 @@
 ---
 name: market-data
 title: "Blocksize Market Data"
-description: "Agent-native institutional market data and workflow products through direct x402-paid routes, with starter credits available separately in authenticated connectors."
-use_case: "Use when an AI agent needs live prices, VWAP, bid/ask snapshots, FX, metals, market briefs, pre-trade checks, audit receipts, macro snapshots, or trader signal indicators without creating a traditional API account."
+description: "Crypto, tokenized equity, FX, and metals observations, VWAP windows, market briefs, and provenance receipts through x402-paid HTTP, with free instrument discovery and readiness checks."
+use_case: "Use for market-price lookups, bid/ask comparisons, multi-asset snapshots, and read-only pre-trade checks. Resolve symbols and product readiness first, then request only the observations the user needs."
 category: finance
 service_url: https://mcp.blocksize.info
 openapi:
   path: openapi.json
 ---
 
-Blocksize Market Data gives agents accountless access to live financial market
-data through direct x402-paid HTTP calls. Eligible authenticated connector users
-separately receive 30,000 free live data credits every calendar month. The
-Pay.sh HTTP routes use direct x402; they do not expose self-serve purchase routes.
+Blocksize Market Data provides free discovery and accountless x402-paid HTTP
+access. The adjacent OpenAPI snapshot contains 17 paid operations and six free
+discovery/readiness operations. Request contracts were checked against production
+v0.6.23; each live 402 challenge remains authoritative for payment terms.
 
-Use it for market-aware agent workflows that need crypto VWAP, crypto bid/ask,
-state price, 30-minute close, 24h fixed VWAP, FX, metals, market briefs,
-pre-trade sanity checks, audit-grade receipts,
-macro snapshots, token quality indicators, state divergence checks, Solana token
-briefs, or trader signal packs. Prefer a narrow lookup or packaged workflow with explicit user
-approval for repeated paid calls.
+Use `/v1/search?q=BTC` or `/v1/instruments/{service}` to find supported identifiers.
+Both accept `limit` and `offset`; a page of results is not the full catalog.
+Use `/v1/products`, `/v1/coverage`, `/v1/capabilities/check`, and `/v1/cache/status`
+to inspect product coverage and readiness. These endpoints do not purchase data
+and their catalog entries are not live quotes.
 
-Before authorizing a first payment, preview the exact response family for free:
+The paid routes use real OpenAPI path parameters: supply the discovered `pair`
+or `ticker`, not a string substitution in a fixed BTC sample path. Coverage is
+service-specific; a symbol supported by one product may not support another.
+The seven single-symbol routes cover VWAP, bid/ask, AMM state, the latest completed
+30-minute close, fixed 24-hour VWAP, FX, and metals. The 30-minute close is not a
+rolling 30-minute VWAP. Cached observations are subject to freshness and readiness.
 
-`GET /v1/samples/market-data?service=vwap&symbol=BTCUSD`
+For an explicitly requested multi-symbol lookup, `/v1/batch` accepts a `reqs`
+query such as `vwap:BTCUSD,bidask:ETHUSD`. Nine POST operations provide market
+briefs, pre-trade checks, price receipts, macro snapshots, one-shot monitor
+evaluations, token-quality/state-divergence indicators, and signal bundles.
+The sidecar includes typed request schemas and example bodies for each. These
+are intentionally strict canonical client contracts: provide explicit uppercase
+symbols from discovery, not legacy aliases or implicit default watchlists.
+Market briefs and monitor evaluations accept 1–8 symbols; macro snapshots and
+trader signal packs accept 1–12; Solana token briefs accept 1–10. Single-symbol
+workflows require `symbol`. Free capability checks accept 1–25 symbols.
+Optional price/notional values and spread/divergence/age limits must be positive.
+Monitor rules specify `metric`, `operator`, and a numeric comparison `value`;
+zero and negative comparison values are supported (for example, `spread_bps < 0`
+can detect a crossed quote). They are not the positive limit fields above.
+Validate the body locally before authorizing a payment.
 
-The preview is explicitly synthetic and not for trading. Its `paid_endpoint`
-field carries attribution into the corresponding live x402 request. A live
-`402` response also links back to the preview and to maintained spend-capped
-Base and Solana buyer examples.
+Preserve the timestamps, provider context, methodology, and quality/error flags
+returned by the selected product. A price receipt is a provenance record, not a
+cryptographically signed attestation. No RWA research feed is advertised here as
+production-promoted, and catalog inclusion alone is not a live-delivery guarantee.
 
-Preview the premium macro workflow without live data or payment at
-`GET /v1/previews/macro`. For recurring workloads, inspect the sales-assisted
-tiers at `GET /v1/account-plans` or request a usage-based recommendation from
-`POST /v1/account-plans/recommend`; neither route creates an entitlement.
+## Access and discovery
 
-Build a bounded repeat-monitor plan with `POST /v1/monitors/recipe`. The free
-recipe fixes cadence, run count, and maximum spend while leaving scheduling and
-fresh x402 authorization to the calling agent.
-
-## Starter allowance
-
-- Position as: `Start with 30,000 free live-data credits every month`.
-- The allowance recurs every calendar month (UTC) under an evaluation licence
-  with required attribution; production commercial use requires a subscription.
-- One price list: 1 credit = $0.001 USDC, so every route costs the same in
-  connector credits as it does in USDC over x402.
-- Core crypto VWAP, bid/ask, state, 30-minute close, and 24h fixed VWAP calls
-  cost 2 credits ($0.002); long-tail pairs cost 4 credits ($0.004).
-- FX and metals calls cost 5 credits ($0.005); tokenized equities cost 8 credits ($0.008).
-- Pre-trade sanity checks cost 100 credits ($0.10).
-- Market briefs and audit-grade price receipts cost 250 credits ($0.25).
-- Token market quality and state divergence indicators cost 500 credits ($0.50).
-- Multi-asset macro snapshots and Solana token briefs cost 1,000 credits ($1.00).
-- Trader alpha signal packs cost 2,500 credits ($2.50).
-- Provenance lookups are free when tied to a prior paid or credited call.
-- Data-readiness checks through `/v1/capabilities/check` are free.
-- When authenticated connector starter credits are exhausted, use direct x402
-  or contact Blocksize about an authenticated account plan.
-
-## Premium workflow products
-
-- Agent Market Brief: decision-ready market package with live prices, freshness,
-  spread checks, provenance, and next-action context.
-- Pre-Trade Sanity Check: guardrail response before a trade, swap, conversion,
-  treasury action, or quote acceptance.
-- Audit-Grade Price Receipt: reproducible evidence package for a price used in
-  an automated workflow.
-- Multi-Asset Macro Snapshot: one-call context bundle across crypto, FX, metals,
-  and risk signals.
-- Agent Data Provenance Layer: receipt lookup and source metadata for previous
-  paid or credited calls.
-- Spend-Controlled Market Monitor: immediate bounded monitor evaluation with
-  explicit credit budget metadata.
-- Token Market Quality Indicator: transparent trader score from live VWAP,
-  bid/ask spread, optional state_pool price, freshness, and VWAP-window drift.
-- Oracle / State Price Divergence Indicator: signed market-vs-state basis for
-  detecting stale, divergent, or dislocated prices on symbols with
-  state_instruments pool coverage.
-- Solana Token Brief: Solana-oriented watchlist ranking for supported token
-  symbols, with explicit coverage misses for unsupported protocol/pool feeds.
-- Trader Alpha Signal Pack: bounded watchlist bundle of token quality rankings,
-  state divergence, spread quality, and provenance. This is decision support,
-  not investment advice or guaranteed returns.
-
-## Optional feed policy
-
-- Optional trader feeds are opt-in.
-- Do not request state coverage, state price, 30-minute close, or 24-hour VWAP
-  unless the user or agent workflow explicitly needs them.
-- Use `/v1/capabilities/check` before paid indicator calls to confirm required
-  and optional feed coverage for the requested symbols.
-- Current confirmed default trader data is live VWAP and bid/ask. State
-  instrument/pool coverage is available when requested. State price reads from
-  the `state_subscribe` stream cache when covered and falls back to documented
-  `state_instruments` + `state_pool` HTTP calls for matching protocol/pool
-  symbols such as `MSOLUSD`, `JUPSOLUSD`, and `WSTETHUSD`.
-  30-minute close is available through `/v1/vwap30m/{pair}` backed by
-  `closingprice_list`; pass `include_trades=true` for `closingprice_trades`
-  evidence. `/v1/vwap24h/{pair}` is backed by the `fixedvwap_subscribe`
-  websocket cache and no longer presents latest VWAP as 24-hour data.
+- Direct HTTP returns x402 v2 payment requirements for USDC on Solana mainnet
+  and Base mainnet. This Pay.sh entry is validated for Solana; Base support in the
+  API does not imply support in every Pay.sh client.
+- Authenticated connector users (Claude, ChatGPT, Cursor) with a verified email
+  receive 30,000 free live-data credits every calendar month under an
+  evaluation licence with required "Data by Blocksize" attribution; paid
+  subscription plans start at EUR 49/month. One price list applies everywhere:
+  1 credit = $0.001 USDC, so a route costs the same in connector credits as it
+  does in USDC over x402 (core crypto 2, long-tail crypto 4, FX and metals 5,
+  tokenized equities 8, workflows 100 to 2,500). Anonymous Pay.sh HTTP requests
+  cannot claim or spend connector credits; these routes use direct x402 only.
+- Free public MCP discovery: https://mcp.blocksize.info/mcp/server/
+- API/AI catalogs: https://mcp.blocksize.info/.well-known/api-catalog and
+  https://mcp.blocksize.info/.well-known/ai-catalog.json
+- Agent instructions: https://mcp.blocksize.info/.well-known/agent-skills/index.json
+- Authentication guide: https://mcp.blocksize.info/auth.md
+- First observation guide: https://mcp.blocksize.info/quickstart/first-price
 
 ## Spend-aware usage
 
+- Search available instruments before making a paid market-data request.
 - Prefer one-symbol calls for exploratory tasks.
-- Use the free synthetic preview to inspect value and response shape before a
-  first paid call.
-- Use the listed route examples exactly as shown in the OpenAPI sidecar.
+- Use `/v1/batch` only when the user needs several prices in the same workflow.
+- Reuse returned symbols exactly instead of guessing unsupported pair formats.
+- Treat the live 402 challenge as authoritative for price, network, asset, and
+  recipient. Obtain the user's payment authorization before signing.
+- Do not send wallet private keys or seed phrases to this API.
 - Avoid polling unless the user has explicitly approved repeated paid calls.
+- A monitor evaluation is a single request, not a subscription or background job.
+- The optional monitor `max_credits` field is reporting metadata, not a
+  server-enforced spending cap. Authorize the actual x402 cost separately.
