@@ -56,6 +56,16 @@ KNOWN_MONITOR_USER_AGENT_MARKERS = frozenset(
         "uptime",
         "statuscake",
         "pingdom",
+        # Directory crawlers and x402 indexers. They poll the paid routes every
+        # few minutes without ever paying, so counting them as demand inflates
+        # live-data requests and hides the real paid-conversion rate.
+        "agenticmarketplacepoller",
+        "402explorer",
+        "x402lens",
+        "x402watch",
+        "bazaardiscovery",
+        "contact-discovery",
+        "nohumans.directory",
     }
 )
 PRODUCT_ROUTE_IDS = {
