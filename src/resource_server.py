@@ -111,6 +111,7 @@ from src.marketplace_performance import (
     performance_collection_configured,
 )
 from src import claude_data_retention
+from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
     PRODUCT_ROUTE_IDS,
@@ -810,6 +811,24 @@ async def _run_claude_data_retention_loop(app: FastAPI) -> None:
         await asyncio.sleep(3600.0)
 
 
+def _usage_event_rollup_enabled() -> bool:
+    default = "true" if (_hosted_environment() or is_production_environment()) else "false"
+    return _env_enabled("USAGE_EVENT_ROLLUP_ENABLED", default)
+
+
+async def _run_usage_event_rollup_loop(app: FastAPI) -> None:
+    """Fold usage events past the retention window into daily rows, once a day."""
+    await asyncio.sleep(120.0)
+    while True:
+        try:
+            report = await asyncio.to_thread(usage_event_rollup.rollup_and_prune, OBSERVABILITY)
+            app.state.usage_event_rollup_last = report
+            logger.info("usage event roll-up pass: %s", json.dumps(report, sort_keys=True))
+        except Exception as exc:  # noqa: BLE001 - a failed pass must not stop the loop
+            logger.error("usage event roll-up pass failed: %s", type(exc).__name__)
+        await asyncio.sleep(86400.0)
+
+
 async def _run_signup_digest_loop() -> None:
     """Email the operator one signup digest per day at SIGNUP_DIGEST_HOUR_UTC."""
     while True:
@@ -1428,6 +1447,8 @@ async def lifespan(app: FastAPI):
     app.state.marketplace_performance_task = None
     app.state.claude_data_retention_task = None
     app.state.claude_data_retention_last = None
+    app.state.usage_event_rollup_task = None
+    app.state.usage_event_rollup_last = None
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
@@ -1469,6 +1490,11 @@ async def lifespan(app: FastAPI):
         app.state.claude_data_retention_task = asyncio.create_task(
             _run_claude_data_retention_loop(app),
             name="claude-data-retention",
+        )
+    if _usage_event_rollup_enabled() and OBSERVABILITY is not None:
+        app.state.usage_event_rollup_task = asyncio.create_task(
+            _run_usage_event_rollup_loop(app),
+            name="usage-event-rollup",
         )
     if _marketplace_listing_checks_enabled():
         app.state.marketplace_listing_task = asyncio.create_task(
@@ -1519,6 +1545,10 @@ async def lifespan(app: FastAPI):
             app.state.claude_data_retention_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.claude_data_retention_task
+        if app.state.usage_event_rollup_task is not None:
+            app.state.usage_event_rollup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.usage_event_rollup_task
         if app.state.marketplace_listing_task is not None:
             app.state.marketplace_listing_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -15041,6 +15071,11 @@ async def health_check() -> dict[str, Any]:
         },
         "pricing": settings.pricing_summary,
         "free_tier": free_tier.operator_status(),
+        "storage": {
+            **usage_event_rollup.storage_status(settings.server.observability_db_path),
+            "usage_event_retention_days": usage_event_rollup.retention_days(),
+            "usage_event_rollup_last": getattr(app.state, "usage_event_rollup_last", None),
+        },
         **(
             {"legacy_local_qa_bulk_pricing": BULK_TIERS}
             if settings.server.unverified_http_credits_enabled
