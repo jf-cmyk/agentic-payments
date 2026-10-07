@@ -5637,6 +5637,25 @@ process.stdout.write(JSON.stringify({
         assert "Secure" in set_cookie
         assert "SameSite=strict" in set_cookie
 
+    def test_rwa_pilot_has_its_own_endpoint_and_leaves_stats(
+        self,
+        observability_store,
+        test_client,
+    ):
+        stats = test_client.get("/internal/observability/stats?days=1")
+        assert stats.status_code == 200
+        assert "rwa_growth_pilot" not in stats.json()
+
+        pilot = test_client.get("/internal/observability/rwa-pilot")
+        assert pilot.status_code == 200
+        assert pilot.headers["Cache-Control"] == "no-store"
+        payload = pilot.json()
+        assert "status" in payload
+        assert "enabled" in payload
+
+        anonymous = TestClient(app, base_url="https://testserver")
+        assert anonymous.get("/internal/observability/rwa-pilot").status_code == 401
+
     def test_command_center_subpage_serves_improved_dashboard(
         self,
         observability_store,
@@ -5649,6 +5668,8 @@ process.stdout.write(JSON.stringify({
         assert "Growth Funnel" in response.text
         assert "renderGrowthFunnel" in response.text
         assert "renderRwaPilot" in response.text
+        assert "/internal/observability/rwa-pilot" in response.text
+        assert "loadRwaPilot();" in response.text
         assert 'id="growth-stages"' in response.text
         assert 'id="growth-targets"' in response.text
         assert 'id="rwa-pilot-table"' in response.text

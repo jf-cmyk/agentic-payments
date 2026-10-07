@@ -11998,11 +11998,24 @@ async def observability_stats(
     content["conversion_experiment"] = _build_conversion_experiment(content)
     content["operational_alerts"] = _build_operational_alerts(content)
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
-    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
     )
+
+
+@app.get("/internal/observability/rwa-pilot", include_in_schema=False)
+async def observability_rwa_pilot(request: Request) -> JSONResponse:
+    """Return the three-feed RWA pilot status on its own.
+
+    This block was most of the stats payload (3.0 of 3.1 MB on 28 Sep 2026)
+    and does not depend on the stats window, so the dashboard fetches it
+    separately and the alerts feed no longer computes it.
+    """
+    if not _observability_authorized(request):
+        return _observability_unauthorized()
+    content = await asyncio.to_thread(_rwa_growth_pilot_dashboard_status, request.app)
+    return JSONResponse(headers={"Cache-Control": "no-store"}, content=content)
 
 
 @app.get("/internal/observability/usage", include_in_schema=False)
@@ -12150,7 +12163,9 @@ def _observability_login_page(
     )
 
 
-def _observability_command_center_html(*, stats_path: str) -> str:
+def _observability_command_center_html(
+    *, stats_path: str, rwa_pilot_path: str = "/internal/observability/rwa-pilot"
+) -> str:
     html = """<!doctype html>
 <html lang="en">
 <head>
@@ -12953,6 +12968,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
   </div>
   <script>
     const statsPath = __STATS_PATH__;
+    const rwaPilotPath = __RWA_PILOT_PATH__;
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
     const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
     const pct = value => value == null ? "n/a" : `${Math.round(value * 1000) / 10}%`;
@@ -13582,6 +13598,20 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         </tr>`).join("") : `<tr><td colspan="9" class="empty">No matching called data in this window.</td></tr>`) + `</tbody>`;
     }
 
+    async function loadRwaPilot() {
+      // The pilot block is large and window-independent, so it loads on its
+      // own and never delays or breaks the rest of the page.
+      const kpis = document.getElementById("rwa-pilot-kpis");
+      try {
+        const res = await fetch(new URL(rwaPilotPath, window.location.origin).toString(), { cache: "no-store", credentials: "same-origin" });
+        const pilot = await res.json();
+        if (!res.ok) throw new Error(pilot.message || pilot.error || "Unable to load the RWA pilot");
+        renderRwaPilot({ rwa_growth_pilot: pilot });
+      } catch (error) {
+        if (kpis) kpis.innerHTML = metric("RWA pilot", "unavailable", String(error.message || error));
+      }
+    }
+
     async function load() {
       const days = document.getElementById("window").value;
       const includeSynthetic = document.getElementById("telemetry-scope").value;
@@ -13622,7 +13652,6 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       renderAttention(data);
       renderGrowthFunnel(data);
       renderFreeTier(data);
-      renderRwaPilot(data);
       renderDailyInterpretation(data);
       renderOperatorAlerts(data);
       renderRevenueOperatingScorecard(data);
@@ -13680,6 +13709,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       live = !live;
       scheduleLive();
       load();
+      loadRwaPilot();
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
@@ -13702,10 +13732,13 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     load().catch(err => {
       document.getElementById("freshness").textContent = err.message;
     });
+    loadRwaPilot();
   </script>
 </body>
 </html>"""
-    return html.replace("__STATS_PATH__", json.dumps(stats_path))
+    return html.replace("__STATS_PATH__", json.dumps(stats_path)).replace(
+        "__RWA_PILOT_PATH__", json.dumps(rwa_pilot_path)
+    )
 
 
 _OBSERVABILITY_COOKIE_NAME = "observability_token"
