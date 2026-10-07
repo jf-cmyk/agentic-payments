@@ -99,7 +99,8 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This plugin does not sell products or process payments; live data is covered by free monthly credits."
+        "commerce_description": "This plugin does not sell products or process payments; live data is covered by free monthly credits.",
+        "demo_recording_url": "https://mcp.blocksize.info/evidence/openai-plugin-review-walkthrough.mp4"
       },
       "publication": {
         "release_notes": "First directory release: instrument search, live multi-venue crypto VWAP and bid/ask, FX and metals prices, tokenized equity quotes, and a credit balance tool, with 30,000 free live-data credits a month for signed-in users."
