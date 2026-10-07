@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "Blocksize Market Data",
     "shortDescription": "Verified live market data",
-    "longDescription": "Blocksize Market Data gives ChatGPT and Codex read-only access to Blocksize's institutional real-time market data. Search the instrument catalog, check coverage and freshness, then fetch multi-venue crypto VWAP, bid/ask quotes, FX rates, metals prices and tokenized equities, each with timestamps and provenance. Signed-in users with a verified email receive 30,000 free live-data credits every calendar month under an evaluation licence with \"Data by Blocksize\" attribution; subscriptions start at EUR 49/month with a free trial. The plugin never trades, moves funds, signs wallet messages or gives investment advice.",
+    "longDescription": "Blocksize Market Data gives ChatGPT and Codex read-only access to Blocksize's institutional real-time market data. Search the instrument catalog, check coverage and freshness, then fetch multi-venue crypto VWAP, bid/ask quotes, FX rates, metals prices and tokenized equities, each with timestamps and provenance. Signed-in users with a verified email receive a monthly allowance of live-data credits under an evaluation licence with \"Data by Blocksize\" attribution. The plugin never trades, moves funds, signs wallet messages or gives investment advice.",
     "developerName": "Blocksize Capital GmbH",
     "category": "Data & Analytics",
     "capabilities": [
@@ -99,10 +99,11 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This plugin does not sell products or process payments; live data is covered by free monthly credits."
+        "commerce_description": "This plugin does not sell products or process payments.",
+        "demo_recording_url": "https://mcp.blocksize.info/evidence/openai-plugin-review-walkthrough.mp4"
       },
       "publication": {
-        "release_notes": "First directory release: instrument search, live multi-venue crypto VWAP and bid/ask, FX and metals prices, tokenized equity quotes, and a credit balance tool, with 30,000 free live-data credits a month for signed-in users."
+        "release_notes": "First directory release: instrument search, live multi-venue crypto VWAP and bid/ask, FX and metals prices, tokenized equity quotes, and a credit balance tool for signed-in users."
       }
     }
   }

@@ -88,6 +88,7 @@ ALLOWED_PUBLIC_DOC_FILES = PUBLIC_HTML_FILES | {
     "share/blocksize-mcp/docs/assets/swimlane_diagram.jpg",
     "share/blocksize-mcp/docs/evidence/oracle-lineage-index.html",
     "share/blocksize-mcp/docs/evidence/rwa-coverage-index.html",
+    "share/blocksize-mcp/docs/evidence/openai-plugin-review-walkthrough.mp4",
     "share/blocksize-mcp/docs/pdf/Blocksize_API_Documentation.pdf",
     "share/blocksize-mcp/docs/pdf/Blocksize_Agent_Manual.pdf",
     "share/blocksize-mcp/docs/pdf/Blocksize_Data_Catalog.pdf",
