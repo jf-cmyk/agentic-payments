@@ -20,7 +20,7 @@ import httpx
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from src import public_metadata, resource_server
+from src import public_metadata, published_examples, resource_server
 from src.blocksize_client import BlocksizeAPIError
 from src.rwa_adapters import (
     HyperliquidPAXGAdapter,
@@ -1061,6 +1061,13 @@ class TestPublicListingSurfaces:
         assert any(package["id"] == "equities-bidask" for package in data["packages"])
         assert any(package["endpoint_template"] == "/v1/bidask/{pair}" for package in data["packages"])
         assert any(package["request_examples"] for package in data["packages"])
+        example = next(
+            item for package in data["packages"] for item in package["request_examples"]
+        )
+        assert example["url"] == (
+            f"https://mcp.blocksize.info{example['path']}"
+            "?selection_source=published_example_path"
+        )
         assert data["indexing_submission"]["google_search_console"]["submit_sitemap"].endswith("/sitemap.xml")
         assert any(
             url.endswith("/mcp-market-data-server")
@@ -1189,8 +1196,10 @@ class TestPublicListingSurfaces:
         assert x402.status_code == 200
         x402_data = x402.json()
         assert x402_data["version"] == 1
-        assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
+        assert x402_data["resources"][0].endswith(published_examples.example_path("vwap"))
         assert any(resource.endswith("/v1/bidask/AAPLXUSD") for resource in x402_data["resources"])
+        assert len(x402_data["resources"]) == len(set(x402_data["resources"]))
+        assert all("?" not in resource for resource in x402_data["resources"])
 
     def test_openai_apps_challenge_serves_configured_token(self, test_client, monkeypatch):
         monkeypatch.delenv("OPENAI_APPS_CHALLENGE_TOKEN", raising=False)

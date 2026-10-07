@@ -53,7 +53,7 @@ Then request the live route:
 
 ```bash
 curl -i -sS \
-  'https://mcp.blocksize.info/v1/vwap/btc-usd'
+  'https://mcp.blocksize.info/v1/vwap/btc-usd?selection_source=published_example_path'
 ```
 
 Use an official x402 client to select one of the advertised requirements, sign
