@@ -111,6 +111,7 @@ from src.marketplace_performance import (
     performance_collection_configured,
 )
 from src import claude_data_retention
+from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
     attribution_from_params,
@@ -792,6 +793,24 @@ async def _run_claude_data_retention_loop(app: FastAPI) -> None:
         await asyncio.sleep(3600.0)
 
 
+def _usage_event_rollup_enabled() -> bool:
+    default = "true" if (_hosted_environment() or is_production_environment()) else "false"
+    return _env_enabled("USAGE_EVENT_ROLLUP_ENABLED", default)
+
+
+async def _run_usage_event_rollup_loop(app: FastAPI) -> None:
+    """Fold usage events past the retention window into daily rows, once a day."""
+    await asyncio.sleep(120.0)
+    while True:
+        try:
+            report = await asyncio.to_thread(usage_event_rollup.rollup_and_prune, OBSERVABILITY)
+            app.state.usage_event_rollup_last = report
+            logger.info("usage event roll-up pass: %s", json.dumps(report, sort_keys=True))
+        except Exception as exc:  # noqa: BLE001 - a failed pass must not stop the loop
+            logger.error("usage event roll-up pass failed: %s", type(exc).__name__)
+        await asyncio.sleep(86400.0)
+
+
 async def _run_signup_digest_loop() -> None:
     """Email the operator one signup digest per day at SIGNUP_DIGEST_HOUR_UTC."""
     while True:
@@ -1410,6 +1429,8 @@ async def lifespan(app: FastAPI):
     app.state.marketplace_performance_task = None
     app.state.claude_data_retention_task = None
     app.state.claude_data_retention_last = None
+    app.state.usage_event_rollup_task = None
+    app.state.usage_event_rollup_last = None
     await _refresh_store_readiness_snapshots(app)
     app.state.rwa_growth_pilot_task = None
     logger.info("Blocksize MCP Resource Server starting (with Credit Drawdown engine)")
@@ -1451,6 +1472,11 @@ async def lifespan(app: FastAPI):
         app.state.claude_data_retention_task = asyncio.create_task(
             _run_claude_data_retention_loop(app),
             name="claude-data-retention",
+        )
+    if _usage_event_rollup_enabled() and OBSERVABILITY is not None:
+        app.state.usage_event_rollup_task = asyncio.create_task(
+            _run_usage_event_rollup_loop(app),
+            name="usage-event-rollup",
         )
     if _marketplace_listing_checks_enabled():
         app.state.marketplace_listing_task = asyncio.create_task(
@@ -1501,6 +1527,10 @@ async def lifespan(app: FastAPI):
             app.state.claude_data_retention_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.claude_data_retention_task
+        if app.state.usage_event_rollup_task is not None:
+            app.state.usage_event_rollup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.usage_event_rollup_task
         if app.state.marketplace_listing_task is not None:
             app.state.marketplace_listing_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -3069,6 +3099,17 @@ X402_RESPONSE = {
 
 
 X402_PROTOCOLS = [{"x402": {}}]
+
+
+def _x402_fixed_payment_info(product_key: str) -> dict[str, Any]:
+    """OpenAPI payment extension for a fixed-price workflow route."""
+    return {
+        "x-payment-info": {
+            "price": {"mode": "fixed", "currency": "USD", "amount": str(product_usdc(product_key))},
+            "protocols": X402_PROTOCOLS,
+        }
+    }
+
 X402_CRYPTO_PAYMENT_INFO = {
     "x-payment-info": {
         "price": {
@@ -3411,6 +3452,42 @@ def _payment_failure_code(reason: str) -> str:
     if "signature" in normalized or "bound x402" in normalized:
         return "PAYMENT_SIGNATURE_INVALID"
     return "PAYMENT_VERIFICATION_FAILED"
+
+
+PAYMENT_FAILURE_DIAGNOSIS = {
+    "PAYMENT_REQUIREMENT_MISMATCH": (
+        "The signed `accepted` block must be exactly one of the `accepts` entries in the "
+        "challenge you received, including `extra` (name, version, resource) and "
+        "`maxAmountRequired`. Copy that entry from the 402 and sign it unchanged; do not "
+        "rebuild it from your own constants or reorder its keys."
+    ),
+    "PAYMENT_RESOURCE_MISMATCH": (
+        "The challenge is bound to the exact URL you called, including the query string. "
+        "Fetch the challenge from the URL you intend to buy and retry that same URL."
+    ),
+    "PAYMENT_SIGNATURE_INVALID": (
+        "The signature did not verify on the selected network. Sign with an official "
+        "x402 v2 client for Solana or Base, from a payer funded with USDC on that "
+        "network, inside the challenge's validity window."
+    ),
+    "PAYMENT_X402_VERSION_UNSUPPORTED": "Only x402 version 2 payment payloads are accepted.",
+    "PAYMENT_SIGNATURE_NOT_BASE64": (
+        "PAYMENT-SIGNATURE must be the base64-encoded JSON payment payload an x402 "
+        "client produces, not a transaction hash or raw JSON."
+    ),
+    "PAYMENT_SIGNATURE_NOT_JSON": (
+        "PAYMENT-SIGNATURE decoded, but not to the JSON payment payload an x402 client "
+        "produces."
+    ),
+    "PAYMENT_VERIFICATION_FAILED": (
+        "Fetch a fresh challenge and sign it with an official x402 client; the "
+        "buyer_examples in purchase_handoff show the exact calls."
+    ),
+}
+
+
+def _payment_failure_diagnosis(error_code: str) -> str:
+    return PAYMENT_FAILURE_DIAGNOSIS.get(error_code, PAYMENT_FAILURE_DIAGNOSIS["PAYMENT_VERIFICATION_FAILED"])
 
 
 def _specific_parse_error(official_error: str, parse_errors: list[str]) -> str:
@@ -5981,10 +6058,17 @@ async def x402_payment_middleware(request: Request, call_next):
                     request,
                     JSONResponse(
                         status_code=502,
+                        headers={"Retry-After": "30", "Cache-Control": "no-store"},
                         content={
                             "error": "Payment Verification Unavailable",
                             "message": "Payment verification is temporarily unavailable.",
                             "details": reason,
+                            "retry_after_seconds": 30,
+                            "retry": (
+                                "Nothing was reserved or settled. Resend the identical "
+                                "request with the same PAYMENT-SIGNATURE after the delay; "
+                                "fetch a fresh challenge only if the signature has expired."
+                            ),
                         },
                     ),
                 )
@@ -6009,6 +6093,8 @@ async def x402_payment_middleware(request: Request, call_next):
                             "challenge, then retry the identical request."
                         ),
                         "details": reason,
+                        "diagnosis": _payment_failure_diagnosis(_payment_failure_code(reason)),
+                        "parse_errors": list(verification.get("parse_errors") or []),
                         "price_usdc": str(price),
                         "purchase_handoff": _x402_purchase_handoff(
                             request,
@@ -7110,7 +7196,7 @@ async def check_data_capabilities(request: Request, payload: dict[str, Any]) -> 
     }
 
 
-@app.post("/v1/briefs/market", responses=X402_RESPONSE)
+@app.post("/v1/briefs/market", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("market_brief"))
 async def agent_market_brief(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Create a decision-ready market brief. Cost: 250 credits or $0.25 USDC."""
     import asyncio
@@ -7625,7 +7711,7 @@ async def macro_snapshot_sample() -> dict[str, Any]:
     }
 
 
-@app.post("/v1/checks/pre-trade", responses=X402_RESPONSE)
+@app.post("/v1/checks/pre-trade", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("pre_trade_check"))
 async def pre_trade_sanity_check(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Run a read-only pre-trade sanity check. Cost: 100 credits or $0.10 USDC."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
@@ -7711,7 +7797,7 @@ async def pre_trade_sanity_check(request: Request, payload: dict[str, Any]) -> d
     }
 
 
-@app.post("/v1/receipts/price", responses=X402_RESPONSE)
+@app.post("/v1/receipts/price", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("audit_receipt"))
 async def audit_grade_price_receipt(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Create an audit-grade receipt for one price lookup. Cost: 250 credits or $0.25 USDC."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
@@ -7758,7 +7844,7 @@ async def audit_grade_price_receipt(request: Request, payload: dict[str, Any]) -
     }
 
 
-@app.post("/v1/snapshots/macro", responses=X402_RESPONSE)
+@app.post("/v1/snapshots/macro", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("macro_snapshot"))
 async def multi_asset_macro_snapshot(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Create a bounded multi-asset macro snapshot. Cost: 1,000 credits or $1.00 USDC."""
     import asyncio
@@ -7845,7 +7931,7 @@ async def multi_asset_macro_snapshot(request: Request, payload: dict[str, Any]) 
     }
 
 
-@app.post("/v1/monitors/evaluate", responses=X402_RESPONSE)
+@app.post("/v1/monitors/evaluate", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("monitor_evaluate"))
 async def spend_controlled_market_monitor(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Evaluate a bounded market monitor immediately. Cost: 250 credits or $0.25 USDC."""
     brief = await agent_market_brief(request, payload)
@@ -7899,7 +7985,7 @@ async def spend_controlled_market_monitor(request: Request, payload: dict[str, A
     }
 
 
-@app.post("/v1/indicators/token-quality", responses=X402_RESPONSE)
+@app.post("/v1/indicators/token-quality", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("token_quality_indicator"))
 async def token_market_quality_indicator(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Score one token using live price, bid/ask, state, and VWAP-window feeds."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
@@ -7978,7 +8064,7 @@ async def token_market_quality_indicator(request: Request, payload: dict[str, An
     }
 
 
-@app.post("/v1/indicators/state-divergence", responses=X402_RESPONSE)
+@app.post("/v1/indicators/state-divergence", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("state_divergence_indicator"))
 async def state_divergence_indicator(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Compare Blocksize market prices with state/reference prices."""
     symbol = _normalise_symbol(str(payload.get("symbol") or ""), "symbol")
@@ -8082,7 +8168,7 @@ async def state_divergence_indicator(request: Request, payload: dict[str, Any]) 
     }
 
 
-@app.post("/v1/signals/solana-token-brief", responses=X402_RESPONSE)
+@app.post("/v1/signals/solana-token-brief", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("solana_token_brief"))
 async def solana_token_brief(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Build a Solana-oriented token signal brief for supported price symbols."""
     import asyncio
@@ -8197,7 +8283,7 @@ async def solana_token_brief(request: Request, payload: dict[str, Any]) -> dict[
     }
 
 
-@app.post("/v1/signals/trader-alpha-pack", responses=X402_RESPONSE)
+@app.post("/v1/signals/trader-alpha-pack", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("trader_alpha_pack"))
 async def trader_alpha_pack(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     """Bundle token quality indicators and macro context into a trader signal pack."""
     import asyncio
@@ -9945,7 +10031,7 @@ async def summarize_rwa_observations(request: Request) -> dict[str, Any]:
     }
 
 
-@app.post("/v1/rwa/benchmark/blocksize", responses=X402_RESPONSE)
+@app.post("/v1/rwa/benchmark/blocksize", responses=X402_RESPONSE, openapi_extra=_x402_fixed_payment_info("rwa_blocksize_benchmark"))
 async def benchmark_rwa_against_blocksize(
     request: Request,
     payload: dict[str, Any],
@@ -14959,6 +15045,11 @@ async def health_check() -> dict[str, Any]:
         },
         "pricing": settings.pricing_summary,
         "free_tier": free_tier.operator_status(),
+        "storage": {
+            **usage_event_rollup.storage_status(settings.server.observability_db_path),
+            "usage_event_retention_days": usage_event_rollup.retention_days(),
+            "usage_event_rollup_last": getattr(app.state, "usage_event_rollup_last", None),
+        },
         **(
             {"legacy_local_qa_bulk_pricing": BULK_TIERS}
             if settings.server.unverified_http_credits_enabled
