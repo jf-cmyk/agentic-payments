@@ -196,12 +196,15 @@ Do not enable or push the GitLab production pipeline until all of these are true
   3.13 is not certified by this release gate. Do not set a conflicting
   `RAILPACK_PYTHON_VERSION` override. The tracked Railway configuration also
   pins Railpack with Railway's documented bare semantic-version syntax:
-  `railpackVersion = "0.36.2"`. Railway previously honored a tracked
-  `v0.35.0` value, then silently resolved the same manifest to 0.36.2, so the
-  manifest alone is not proof of the selected engine. Each deployment job must
-  inspect the exact deployment id returned by `railway up` and require its
-  driver, prepare step, banner, and frontend log markers all to report 0.36.2.
-  Never use `railway logs --latest` in a promotion gate.
+  `railpackVersion: "0.40.1"` in `.railway/railway.ts`. The service variable
+  `RAILPACK_VERSION` must carry the same value. Railway previously honored a
+  tracked `v0.35.0` value, then silently resolved the same manifest to 0.36.2,
+  and on 7 October 2026 production builds reported 0.40.1 while the tracked
+  file said 0.38.0 and the variable said 0.36.2, so the manifest alone is not
+  proof of the selected engine. Each deployment job must inspect the exact
+  deployment id returned by `railway up` and require its driver, prepare step,
+  banner, and frontend log markers all to report the pinned version. Never use
+  `railway logs --latest` in a promotion gate.
 - Keep `requirements.txt` dependency-only and generate it with
   `uv export --no-emit-project`. Railpack installs that file in a cached layer
   before copying the application source, so a local editable project entry

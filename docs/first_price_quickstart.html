@@ -68,7 +68,7 @@
   'https://mcp.blocksize.info/v1/samples/market-data?service=vwap&amp;symbol=BTCUSD'</code></pre>
         <p>The preview is synthetic and not for trading. Follow its attributed <code>paid_endpoint</code>, then inspect the standard x402 v2 challenge:</p>
         <pre><code>curl -i -sS \
-  'https://mcp.blocksize.info/v1/vwap/btc-usd'</code></pre>
+  'https://mcp.blocksize.info/v1/vwap/btc-usd?selection_source=published_example_path'</code></pre>
         <p>Use an official x402 client to sign an advertised requirement and retry with <code>PAYMENT-SIGNATURE</code>. Raw identity headers do not grant production credits; included credits use authenticated connector identities.</p>
       </section>
     </div>

@@ -640,7 +640,7 @@ _PAGE = r"""<!doctype html>
   function renderTickers(data) {
     const t = data.tickers;
     const labels = Object.fromEntries(data.channel_order.map((c) => [c.id, c.label]));
-    $("ticker-sub").textContent = `${fmtInt(t.distinct_tickers)} distinct tickers; the top three take ${fmtPct(t.top3_share)} of non-monitor live-data requests.`;
+    $("ticker-sub").textContent = `${fmtInt(t.distinct_tickers)} distinct tickers; the top three take ${fmtPct(t.top3_share)} of non-monitor live-data requests that chose their instrument (${fmtInt(t.copied_example_calls)} copied example paths excluded).`;
     const rows = t.rows.slice(0, 20);
     const maxV = Math.max(1, ...rows.map((r) => r.calls + r.monitor_calls));
     table($("ticker-table"), [

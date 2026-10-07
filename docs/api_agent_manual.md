@@ -59,7 +59,7 @@ This API diverges from traditional, subscription-based data vendors. You do not 
 When interacting with our data endpoints, your Agent will follow a deterministic 3-step lifecycle:
 
 ### Step 1: Demand & Discovery
-Your Agent makes an unauthenticated HTTP `GET` request to a secure data endpoint (e.g., `/v1/vwap/BTC-USD`).
+Your Agent makes an unauthenticated HTTP `GET` request to a secure data endpoint (e.g., `/v1/vwap/ETH-USD`). Example URLs in this manual carry `?selection_source=published_example_path`; keep it when you copy an example as-is, and drop it when you choose your own instrument, so copied examples are not counted as demand.
 Our secure middleware intercepts this request. Because the Agent has not attached cryptographic proof of payment, the server responds with an `HTTP 402 Payment Required` status.
 
 Contained within the response body (and the `PAYMENT-REQUIRED` header) is a machine-readable JSON invoice specifying the real-time cost of the endpoint, the accepted blockchain networks, and the required destination wallets.
@@ -87,7 +87,7 @@ The agent resubmits the exact same request with the base64-encoded official
 x402 v2 payload:
 
 ```http
-GET /v1/vwap/BTC-USD HTTP/1.1
+GET /v1/vwap/BTC-USD?selection_source=published_example_path HTTP/1.1
 Host: mcp.blocksize.info
 PAYMENT-SIGNATURE: eyJhbGciOiJFZERTQ...<agent_cryptographic_signature>
 ```
@@ -126,7 +126,7 @@ Prices fluctuate based on the capitalization and liquidity indexing requirements
 
 Supported equity tickers are accessed through the same bid/ask route:
 `GET /v1/bidask/{ticker}`
-*Current Apple/USD example:* `/v1/bidask/AAPLXUSD`
+*Current Apple/USD example:* `/v1/bidask/AAPLXUSD?selection_source=published_example_path`
 *Price:* **$0.008 USDC** for supported equity tickers.
 *Discovery:* Use `/v1/search?q=AAPL&asset_class=equity` or MCP `search_pairs`
 before spending credits on a live equity bid/ask snapshot; use the exact symbol
@@ -137,12 +137,12 @@ returned by discovery because upstream catalog symbols can include quote suffixe
 **Foreign Exchange (FX)**
 `GET /v1/fx/{pair}`
 *Returns:* Spot rates for currently enabled FX pairs.
-*Example:* `/v1/fx/EURUSD`
+*Example:* `/v1/fx/GBPUSD?selection_source=published_example_path`
 
 **Metals**
 `GET /v1/metal/{ticker}`
 *Returns:* Spot rates for institutional stores of value.
-*Example:* `/v1/metal/XAUUSD` (Gold)
+*Example:* `/v1/metal/XAGUSD?selection_source=published_example_path` (Silver)
 
 ### 2.4 Advanced Local MCP
 

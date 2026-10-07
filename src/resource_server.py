@@ -93,6 +93,7 @@ from src.entitlement_manager import (
 from src import free_tier
 from src import live_showcase
 from src import pricing_catalog
+from src import published_examples
 from src.pricing_catalog import product_usdc
 from src import vwap_coverage
 from src.free_tier_ledger import get_free_tier_ledger
@@ -111,6 +112,7 @@ from src.marketplace_performance import (
     performance_collection_configured,
 )
 from src import claude_data_retention
+from src.connector_sign_in import SignInHintMiddleware
 from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
@@ -358,7 +360,7 @@ def _load_release_build() -> dict[str, Any]:
 
 
 RELEASE_BUILD = _load_release_build()
-PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp)
+PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp, quickstart_url=QUICKSTART_URL)
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
 OPENAI_MCP_HTTP_APP = openai_mcp.http_app(path="/", transport="streamable-http")
@@ -2624,7 +2626,7 @@ async def get_x402_well_known(request: Request) -> Response:
         request,
         {
             "version": 1,
-            "resources": X402_WELL_KNOWN_RESOURCES,
+            "resources": _x402_well_known_resources(),
             "instructions": (
                 "Register the listed paid HTTP endpoints individually. "
                 "Public MCP discovery remains available at /mcp/server/."
@@ -2944,6 +2946,20 @@ app.add_route(
     include_in_schema=False,
 )
 app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
+for _connector_key, _connector_app, _connector_url in (
+    ("anthropic", ANTHROPIC_MCP_HTTP_APP, _anthropic_mcp_url),
+    ("cursor", CURSOR_MCP_HTTP_APP, _cursor_mcp_url),
+    ("openai", OPENAI_MCP_HTTP_APP, _openai_mcp_url),
+):
+    # An unauthenticated call gets a sign-in hint in the 401 body; the
+    # WWW-Authenticate header the OAuth client needs stays untouched.
+    _connector_app.add_middleware(
+        SignInHintMiddleware,
+        connector=_connector_key,
+        mcp_url=_connector_url,
+        base_url=PUBLIC_BASE_URL,
+        allowance_label=free_tier.allowance_label,
+    )
 app.add_route(
     "/anthropic/mcp",
     _SlashlessMountEndpoint(ANTHROPIC_MCP_HTTP_APP, "/anthropic/mcp"),
@@ -3185,15 +3201,7 @@ X402_BATCH_PAYMENT_INFO = {
         "protocols": X402_PROTOCOLS,
     }
 }
-X402_WELL_KNOWN_RESOURCES = [
-    f"{PUBLIC_BASE_URL}/v1/vwap/BTC-USD",
-    f"{PUBLIC_BASE_URL}/v1/bidask/BTC-USD",
-    f"{PUBLIC_BASE_URL}/v1/state/MSOLUSD",
-    f"{PUBLIC_BASE_URL}/v1/vwap30m/SOLUSD",
-    f"{PUBLIC_BASE_URL}/v1/vwap24h/BTCUSD",
-    f"{PUBLIC_BASE_URL}/v1/bidask/AAPLXUSD",
-    f"{PUBLIC_BASE_URL}/v1/fx/EURUSD",
-    f"{PUBLIC_BASE_URL}/v1/metal/XAUUSD",
+X402_WELL_KNOWN_PRODUCT_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/briefs/market",
     f"{PUBLIC_BASE_URL}/v1/checks/pre-trade",
     f"{PUBLIC_BASE_URL}/v1/receipts/price",
@@ -3203,6 +3211,22 @@ X402_WELL_KNOWN_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/signals/solana-token-brief",
     f"{PUBLIC_BASE_URL}/v1/signals/trader-alpha-pack",
 ]
+
+
+def _x402_well_known_resources() -> list[str]:
+    """List one example resource per raw service, rotating weekly, then the products.
+
+    Rotating the published instrument keeps copied examples from reading as
+    demand for one ticker; the product routes have no instrument in the path.
+    """
+    raw = [
+        f"{PUBLIC_BASE_URL}{published_examples.example_path(service)}"
+        for service in ("vwap", "bidask", "state", "vwap30m", "vwap24h", "fx", "metal")
+    ]
+    equity = f"{PUBLIC_BASE_URL}/v1/bidask/{published_examples.EXAMPLE_POOLS['bidask'][0]}"
+    if equity not in raw:
+        raw.append(equity)
+    return [*raw, *X402_WELL_KNOWN_PRODUCT_RESOURCES]
 
 
 def _x402_endpoint_description(path: str) -> str:
@@ -4238,6 +4262,75 @@ def _payload_symbols(payload: dict[str, Any]) -> list[str]:
     return [_normalise_symbol(str(item), "symbol") for item in value]
 
 
+PAID_REQUEST_EXAMPLES: dict[str, dict[str, Any]] = {
+    "/v1/briefs/market": {"symbols": ["BTCUSD", "ETHUSD"]},
+    "/v1/checks/pre-trade": {
+        "symbol": "BTCUSD",
+        "side": "buy",
+        "notional_usd": 2500,
+        "reference_price": 65000,
+        "max_spread_bps": 50,
+        "max_age_ms": 60000,
+    },
+    "/v1/receipts/price": {"symbol": "BTCUSD"},
+    "/v1/snapshots/macro": {"universe": ["BTCUSD", "EURUSD", "XAUUSD"]},
+    "/v1/monitors/evaluate": {
+        "symbols": ["BTCUSD"],
+        "rules": [{"metric": "spread_bps", "operator": ">", "value": 25}],
+    },
+    "/v1/indicators/token-quality": {"symbol": "SOLUSD", "max_spread_bps": 50},
+    "/v1/indicators/state-divergence": {"symbol": "MSOLUSD"},
+    "/v1/signals/solana-token-brief": {"symbols": ["SOLUSD"]},
+    "/v1/signals/trader-alpha-pack": {"symbols": ["BTCUSD", "ETHUSD", "SOLUSD"]},
+}
+PAID_PATH_EXAMPLES: dict[str, str] = {
+    "/v1/batch": "/v1/batch?reqs=vwap:BTCUSD,fx:EURUSD",
+    "/v1/vwap/": "/v1/vwap/BTCUSD",
+    "/v1/bidask/": "/v1/bidask/AAPLXUSD",
+    "/v1/state/": "/v1/state/MSOLUSD",
+    "/v1/vwap30m/": "/v1/vwap30m/SOLUSD",
+    "/v1/vwap24h/": "/v1/vwap24h/BTCUSD",
+    "/v1/fx/": "/v1/fx/EURUSD",
+    "/v1/metal/": "/v1/metal/XAUUSD",
+}
+
+
+def _paid_bad_request(
+    request: Request,
+    *,
+    code: str,
+    message: str,
+    fix: str,
+) -> JSONResponse:
+    """Return a 400 that says what was wrong, shows a working request, and
+    states that nothing was charged."""
+    path = request.url.path
+    content: dict[str, Any] = {
+        "error": "Bad Request",
+        "error_code": code,
+        "message": f"{message}; no credits or payment were used.",
+        "fix": fix,
+        "charged": False,
+    }
+    body_example = PAID_REQUEST_EXAMPLES.get(path)
+    if body_example is not None:
+        content["example_request"] = {
+            "method": "POST",
+            "url": f"{PUBLIC_BASE_URL}{path}",
+            "json": body_example,
+        }
+    for prefix, example in PAID_PATH_EXAMPLES.items():
+        if path.startswith(prefix):
+            content["example_request"] = {
+                "method": "GET",
+                "url": f"{PUBLIC_BASE_URL}{example}",
+            }
+            break
+    content["docs"] = f"{PUBLIC_BASE_URL}/docs"
+    content["find_instruments"] = f"{PUBLIC_BASE_URL}/v1/search?q=BTC"
+    return JSONResponse(status_code=400, content=content)
+
+
 async def _validate_paid_request_before_charge(request: Request) -> JSONResponse | None:
     """Reject malformed or unsupported requests before payment is requested."""
     method = request.method.upper()
@@ -4251,9 +4344,14 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
             try:
                 queries = _parse_batch_reqs(request.query_params.get("reqs", ""))
             except ValueError as exc:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "Bad Request", "message": str(exc)},
+                return _paid_bad_request(
+                    request,
+                    code="INVALID_BATCH",
+                    message=str(exc),
+                    fix=(
+                        "Pass reqs as comma-separated service:symbol items, for example "
+                        "vwap:BTCUSD,fx:EURUSD."
+                    ),
                 )
             for service, symbol, _raw in queries:
                 catalog_service = {
@@ -4272,7 +4370,15 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
             return None
         for prefix, service in PAID_PREFLIGHT_SERVICE_PREFIXES.items():
             if path.startswith(prefix):
-                symbol = _normalise_symbol(path[len(prefix):].split("/", 1)[0], "symbol")
+                try:
+                    symbol = _normalise_symbol(path[len(prefix):].split("/", 1)[0], "symbol")
+                except ValueError as exc:
+                    return _paid_bad_request(
+                        request,
+                        code="INVALID_SYMBOL",
+                        message=str(exc),
+                        fix="Use the instrument's letters and digits only, such as EURUSD or XAUUSD.",
+                    )
                 return await _validate_catalog_support(
                     request,
                     symbol=symbol,
@@ -4286,12 +4392,11 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
     try:
         payload = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error": "Bad Request",
-                "message": "A valid JSON request body is required; no credits or payment were used.",
-            },
+        return _paid_bad_request(
+            request,
+            code="INVALID_JSON_BODY",
+            message="A valid JSON request body is required",
+            fix="Send Content-Type: application/json with a JSON object body like example_request.",
         )
     if not isinstance(payload, dict):
         return JSONResponse(
@@ -4311,34 +4416,31 @@ async def _validate_paid_request_before_charge(request: Request) -> JSONResponse
     if path in required_symbol_paths:
         symbol = str(payload.get("symbol") or "").strip()
         if not symbol:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Bad Request",
-                    "message": "symbol is required; no credits or payment were used.",
-                },
+            return _paid_bad_request(
+                request,
+                code="SYMBOL_REQUIRED",
+                message="symbol is required",
+                fix="Add a \"symbol\" field with one instrument, as in example_request.",
             )
         try:
             _normalise_symbol(symbol, "symbol")
         except ValueError as exc:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Bad Request",
-                    "message": f"{exc}; no credits or payment were used.",
-                },
+            return _paid_bad_request(
+                request,
+                code="INVALID_SYMBOL",
+                message=str(exc),
+                fix="Use the instrument's letters and digits only, such as BTCUSD or AAPLXUSD.",
             )
     mode = PAID_PRODUCT_SYMBOL_MODES.get(path)
     if mode:
         try:
             symbols = _payload_symbols(payload)
         except ValueError as exc:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Bad Request",
-                    "message": f"{exc}; no credits or payment were used.",
-                },
+            return _paid_bad_request(
+                request,
+                code="INVALID_SYMBOL",
+                message=str(exc),
+                fix="List instruments as letters and digits only, as in example_request.",
             )
         for symbol in symbols:
             if mode == "state_and_current":
@@ -5760,12 +5862,18 @@ async def x402_payment_middleware(request: Request, call_next):
     try:
         price = _get_price_for_request(request)
     except ValueError as e:
+        if request.url.path.startswith("/v1/batch"):
+            code, fix = "INVALID_BATCH", (
+                "Pass reqs as comma-separated service:symbol items, for example "
+                "vwap:BTCUSD,fx:EURUSD."
+            )
+        else:
+            code, fix = "INVALID_SYMBOL", (
+                "Use the instrument's letters and digits only, such as BTCUSD or AAPLXUSD."
+            )
         return _apply_x402_cors_headers(
             request,
-            JSONResponse(
-                status_code=400,
-                content={"error": "Bad Request", "message": str(e)},
-            ),
+            _paid_bad_request(request, code=code, message=str(e), fix=fix),
         )
 
     # Free endpoints pass through
@@ -11890,11 +11998,24 @@ async def observability_stats(
     content["conversion_experiment"] = _build_conversion_experiment(content)
     content["operational_alerts"] = _build_operational_alerts(content)
     content["daily_interpretation"] = _build_daily_observability_interpretation(content)
-    content["rwa_growth_pilot"] = _rwa_growth_pilot_dashboard_status(request.app)
     return JSONResponse(
         headers={"Cache-Control": "no-store"},
         content=content,
     )
+
+
+@app.get("/internal/observability/rwa-pilot", include_in_schema=False)
+async def observability_rwa_pilot(request: Request) -> JSONResponse:
+    """Return the three-feed RWA pilot status on its own.
+
+    This block was most of the stats payload (3.0 of 3.1 MB on 28 Sep 2026)
+    and does not depend on the stats window, so the dashboard fetches it
+    separately and the alerts feed no longer computes it.
+    """
+    if not _observability_authorized(request):
+        return _observability_unauthorized()
+    content = await asyncio.to_thread(_rwa_growth_pilot_dashboard_status, request.app)
+    return JSONResponse(headers={"Cache-Control": "no-store"}, content=content)
 
 
 @app.get("/internal/observability/usage", include_in_schema=False)
@@ -12042,7 +12163,9 @@ def _observability_login_page(
     )
 
 
-def _observability_command_center_html(*, stats_path: str) -> str:
+def _observability_command_center_html(
+    *, stats_path: str, rwa_pilot_path: str = "/internal/observability/rwa-pilot"
+) -> str:
     html = """<!doctype html>
 <html lang="en">
 <head>
@@ -12845,6 +12968,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
   </div>
   <script>
     const statsPath = __STATS_PATH__;
+    const rwaPilotPath = __RWA_PILOT_PATH__;
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
     const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
     const pct = value => value == null ? "n/a" : `${Math.round(value * 1000) / 10}%`;
@@ -13474,6 +13598,20 @@ def _observability_command_center_html(*, stats_path: str) -> str:
         </tr>`).join("") : `<tr><td colspan="9" class="empty">No matching called data in this window.</td></tr>`) + `</tbody>`;
     }
 
+    async function loadRwaPilot() {
+      // The pilot block is large and window-independent, so it loads on its
+      // own and never delays or breaks the rest of the page.
+      const kpis = document.getElementById("rwa-pilot-kpis");
+      try {
+        const res = await fetch(new URL(rwaPilotPath, window.location.origin).toString(), { cache: "no-store", credentials: "same-origin" });
+        const pilot = await res.json();
+        if (!res.ok) throw new Error(pilot.message || pilot.error || "Unable to load the RWA pilot");
+        renderRwaPilot({ rwa_growth_pilot: pilot });
+      } catch (error) {
+        if (kpis) kpis.innerHTML = metric("RWA pilot", "unavailable", String(error.message || error));
+      }
+    }
+
     async function load() {
       const days = document.getElementById("window").value;
       const includeSynthetic = document.getElementById("telemetry-scope").value;
@@ -13514,7 +13652,6 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       renderAttention(data);
       renderGrowthFunnel(data);
       renderFreeTier(data);
-      renderRwaPilot(data);
       renderDailyInterpretation(data);
       renderOperatorAlerts(data);
       renderRevenueOperatingScorecard(data);
@@ -13572,6 +13709,7 @@ def _observability_command_center_html(*, stats_path: str) -> str:
       live = !live;
       scheduleLive();
       load();
+      loadRwaPilot();
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
@@ -13594,10 +13732,13 @@ def _observability_command_center_html(*, stats_path: str) -> str:
     load().catch(err => {
       document.getElementById("freshness").textContent = err.message;
     });
+    loadRwaPilot();
   </script>
 </body>
 </html>"""
-    return html.replace("__STATS_PATH__", json.dumps(stats_path))
+    return html.replace("__STATS_PATH__", json.dumps(stats_path)).replace(
+        "__RWA_PILOT_PATH__", json.dumps(rwa_pilot_path)
+    )
 
 
 _OBSERVABILITY_COOKIE_NAME = "observability_token"

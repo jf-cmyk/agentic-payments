@@ -20,7 +20,7 @@ import httpx
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from src import public_metadata, resource_server
+from src import public_metadata, published_examples, resource_server
 from src.blocksize_client import BlocksizeAPIError
 from src.rwa_adapters import (
     HyperliquidPAXGAdapter,
@@ -51,7 +51,7 @@ from src.observability import UsageEventStore, configure_global_store
 from src.config import settings
 from src.pricing_catalog import product_usdc
 from src.credit_manager import STARTER_CREDIT_ALLOWANCE, CreditManager
-from src.public_metadata import GLAMA_MAINTAINER_EMAIL
+from src.public_metadata import GLAMA_MAINTAINER_EMAIL, QUICKSTART_URL
 from src.rwa_store import RWAObservationStore
 
 RWA_TEST_OPERATOR_TOKEN = "rwa-test-operator-token-0123456789abcdef"
@@ -563,8 +563,43 @@ class TestPublicListingSurfaces:
         )
 
     def test_public_remote_mcp_endpoint_exists(self, test_client):
+        # TestClient sends Accept: */*, which the pinned SDK would refuse with 406.
         response = test_client.get("/mcp/server")
-        assert response.status_code != 404
+        assert response.status_code == 400
+        assert response.json()["error"]["data"]["error_code"] == "MCP_SESSION_REQUIRED"
+        assert response.json()["error"]["data"]["quickstart"] == QUICKSTART_URL
+
+    def test_public_mcp_initialize_works_with_a_wildcard_accept(self, test_client):
+        response = test_client.post(
+            "/mcp/server/",
+            headers={"Accept": "*/*"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "wildcard", "version": "1"},
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert "mcp-session-id" in response.headers
+
+    def test_connector_mounts_carry_the_sign_in_hint(self):
+        from src.connector_sign_in import SignInHintMiddleware
+
+        for connector_app in (
+            resource_server.ANTHROPIC_MCP_HTTP_APP,
+            resource_server.CURSOR_MCP_HTTP_APP,
+            resource_server.OPENAI_MCP_HTTP_APP,
+        ):
+            assert any(m.cls is SignInHintMiddleware for m in connector_app.user_middleware)
+        assert not any(
+            m.cls is SignInHintMiddleware
+            for m in resource_server.PUBLIC_MCP_HTTP_APP.user_middleware
+        )
 
     def test_root_favicons_exist_for_directory_crawlers(self, test_client):
         ico_response = test_client.get("/favicon.ico")
@@ -1061,6 +1096,13 @@ class TestPublicListingSurfaces:
         assert any(package["id"] == "equities-bidask" for package in data["packages"])
         assert any(package["endpoint_template"] == "/v1/bidask/{pair}" for package in data["packages"])
         assert any(package["request_examples"] for package in data["packages"])
+        example = next(
+            item for package in data["packages"] for item in package["request_examples"]
+        )
+        assert example["url"] == (
+            f"https://mcp.blocksize.info{example['path']}"
+            "?selection_source=published_example_path"
+        )
         assert data["indexing_submission"]["google_search_console"]["submit_sitemap"].endswith("/sitemap.xml")
         assert any(
             url.endswith("/mcp-market-data-server")
@@ -1189,8 +1231,10 @@ class TestPublicListingSurfaces:
         assert x402.status_code == 200
         x402_data = x402.json()
         assert x402_data["version"] == 1
-        assert "/v1/vwap/BTC-USD" in x402_data["resources"][0]
+        assert x402_data["resources"][0].endswith(published_examples.example_path("vwap"))
         assert any(resource.endswith("/v1/bidask/AAPLXUSD") for resource in x402_data["resources"])
+        assert len(x402_data["resources"]) == len(set(x402_data["resources"]))
+        assert all("?" not in resource for resource in x402_data["resources"])
 
     def test_openai_apps_challenge_serves_configured_token(self, test_client, monkeypatch):
         monkeypatch.delenv("OPENAI_APPS_CHALLENGE_TOKEN", raising=False)
@@ -5274,6 +5318,61 @@ class TestObservabilityDashboard:
         assert failed["refunded_after_credit"] == 1
         assert failed["credits_spent"] == 0.0
 
+    def test_paid_400s_show_a_working_request_and_say_nothing_was_charged(
+        self, test_client
+    ):
+        missing = test_client.post("/v1/receipts/price", json={"side": "buy"})
+        assert missing.status_code == 400
+        body = missing.json()
+        assert body["error_code"] == "SYMBOL_REQUIRED"
+        assert body["charged"] is False
+        assert body["message"].endswith("no credits or payment were used.")
+        assert body["example_request"] == {
+            "method": "POST",
+            "url": "https://mcp.blocksize.info/v1/receipts/price",
+            "json": {"symbol": "BTCUSD"},
+        }
+        assert body["docs"].endswith("/docs")
+
+        divergence = test_client.post(
+            "/v1/indicators/state-divergence", json={"symbol": "not a symbol!"}
+        )
+        assert divergence.status_code == 400
+        assert divergence.json()["error_code"] == "INVALID_SYMBOL"
+        assert divergence.json()["example_request"]["json"] == {"symbol": "MSOLUSD"}
+
+        malformed = test_client.post(
+            "/v1/checks/pre-trade",
+            content=b"{oops",
+            headers={"Content-Type": "application/json"},
+        )
+        assert malformed.status_code == 400
+        assert malformed.json()["error_code"] == "INVALID_JSON_BODY"
+        assert malformed.json()["example_request"]["json"]["side"] == "buy"
+
+    def test_invalid_fx_and_metal_symbols_are_400s_with_an_example(self, test_client):
+        for path, example in (
+            ("/v1/fx/E%24R", "/v1/fx/EURUSD"),
+            ("/v1/metal/x", "/v1/metal/XAUUSD"),
+        ):
+            response = test_client.get(path)
+            assert response.status_code == 400, path
+            body = response.json()
+            assert body["error_code"] == "INVALID_SYMBOL"
+            assert body["charged"] is False
+            assert body["example_request"] == {
+                "method": "GET",
+                "url": f"https://mcp.blocksize.info{example}",
+            }
+
+    def test_batch_400_explains_the_reqs_format(self, test_client):
+        response = test_client.get("/v1/batch?reqs=foo")
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error_code"] == "INVALID_BATCH"
+        assert "service:symbol" in body["fix"]
+        assert body["example_request"]["url"].endswith("/v1/batch?reqs=vwap:BTCUSD,fx:EURUSD")
+
     def test_paid_post_preflight_rejects_missing_symbol_before_credit_drawdown(
         self,
         observability_store,
@@ -5538,6 +5637,25 @@ process.stdout.write(JSON.stringify({
         assert "Secure" in set_cookie
         assert "SameSite=strict" in set_cookie
 
+    def test_rwa_pilot_has_its_own_endpoint_and_leaves_stats(
+        self,
+        observability_store,
+        test_client,
+    ):
+        stats = test_client.get("/internal/observability/stats?days=1")
+        assert stats.status_code == 200
+        assert "rwa_growth_pilot" not in stats.json()
+
+        pilot = test_client.get("/internal/observability/rwa-pilot")
+        assert pilot.status_code == 200
+        assert pilot.headers["Cache-Control"] == "no-store"
+        payload = pilot.json()
+        assert "status" in payload
+        assert "enabled" in payload
+
+        anonymous = TestClient(app, base_url="https://testserver")
+        assert anonymous.get("/internal/observability/rwa-pilot").status_code == 401
+
     def test_command_center_subpage_serves_improved_dashboard(
         self,
         observability_store,
@@ -5550,6 +5668,8 @@ process.stdout.write(JSON.stringify({
         assert "Growth Funnel" in response.text
         assert "renderGrowthFunnel" in response.text
         assert "renderRwaPilot" in response.text
+        assert "/internal/observability/rwa-pilot" in response.text
+        assert "loadRwaPilot();" in response.text
         assert 'id="growth-stages"' in response.text
         assert 'id="growth-targets"' in response.text
         assert 'id="rwa-pilot-table"' in response.text

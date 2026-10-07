@@ -119,7 +119,7 @@ bounded Solana call:
 ```bash
 python scripts/run_funded_x402_canary.py \
   "/Volumes/YOUR_USB/Test.json" \
-  --url "https://mcp.blocksize.info/v1/bidask/AAPLXUSD" \
+  --url "https://mcp.blocksize.info/v1/bidask/AAPLXUSD?selection_source=published_example_path" \
   --max-usdc "0.008"
 ```
 

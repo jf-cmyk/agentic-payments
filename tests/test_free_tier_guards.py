@@ -460,6 +460,7 @@ def test_stale_shared_reservation_is_refunded_after_the_lease(guard_settings, le
     assert recovered == {
         "recovered_reservations": 1,
         "recovered_credits": 3,
+        "partial_recoveries": 0,
         "remaining_stale_reservations": 0,
     }
     assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 0
@@ -468,6 +469,55 @@ def test_stale_shared_reservation_is_refunded_after_the_lease(guard_settings, le
     assert ledger.recover_stale_reservations(now=T0 + 20 * 60)["recovered_reservations"] == 0
     ledger.reserve("g1", 1, usage_date="2026-09-23", now=T0 + 40 * 60, charge_id="charge-2")
     assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 1
+
+
+def test_balance_reads_and_the_operator_summary_recover_stale_reservations(
+    guard_settings, ledger, monkeypatch
+):
+    """A crash before delivery must not leave the shared pool debited until the
+    next reserve(); the connector ledgers already refund on every balance read."""
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    ledger.reserve("g1", 3, usage_date="2026-09-23", now=T0, charge_id="charge-1")
+
+    monkeypatch.setattr("src.free_tier_ledger.time.time", lambda: T0 + 16 * 60)
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 0
+    assert ledger.summary(usage_date="2026-09-23")["pending_reservations"] == 0
+
+    ledger.reserve("g1", 2, usage_date="2026-09-23", now=T0 + 17 * 60, charge_id="charge-2")
+    monkeypatch.setattr("src.free_tier_ledger.time.time", lambda: T0 + 18 * 60)
+    # Within the lease a balance read changes nothing.
+    assert ledger.status("g1", usage_date="2026-09-23").credits_spent == 2
+
+
+def test_stale_recovery_refunds_only_what_the_usage_row_holds(guard_settings, ledger, monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    ledger.reserve("g1", 3, usage_date="2026-09-23", now=T0, charge_id="charge-1")
+    # Simulate the retention purge folding the day into the month row.
+    with ledger._connect() as conn:
+        conn.execute(
+            "UPDATE grant_usage SET usage_date = '2026-09-00', credits_spent = 2 "
+            "WHERE grant_key = 'g1' AND usage_date = '2026-09-23'"
+        )
+
+    recovered = ledger.recover_stale_reservations(now=T0 + 16 * 60)
+    assert recovered["recovered_reservations"] == 1
+    assert recovered["recovered_credits"] == 2
+    assert recovered["partial_recoveries"] == 1
+    with ledger._connect() as conn:
+        folded = conn.execute(
+            "SELECT credits_spent FROM grant_usage WHERE grant_key = 'g1' AND usage_date = '2026-09-00'"
+        ).fetchone()[0]
+    assert folded == 0
+    # Nothing is left to recover and the reservation is closed.
+    assert ledger.recover_stale_reservations(now=T0 + 17 * 60)["recovered_reservations"] == 0
+
+
+def test_shared_pool_lease_never_drops_below_the_connector_floor(guard_settings, ledger, monkeypatch):
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    monkeypatch.setenv("ENTITLEMENT_PENDING_CHARGE_LEASE_SECONDS", "1")
+    ledger.reserve("g1", 1, usage_date="2026-09-23", now=T0, charge_id="charge-1")
+    assert ledger.recover_stale_reservations(now=T0 + 60)["recovered_reservations"] == 0
+    assert ledger.recover_stale_reservations(now=T0 + 5 * 60 + 1)["recovered_reservations"] == 1
 
 
 def test_finalized_reservation_is_never_recovered_and_release_is_idempotent(guard_settings, ledger, monkeypatch):

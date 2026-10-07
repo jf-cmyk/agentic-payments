@@ -8,6 +8,7 @@ import os
 from urllib.parse import quote_plus
 
 from src import pricing_catalog
+from src import published_examples
 from src.commercial_plans import CURRENCY as PLAN_CURRENCY, account_plan_catalog, plan_by_id
 
 APP_VERSION = "0.6.24"
@@ -852,6 +853,18 @@ PACKAGE_REQUEST_EXAMPLES: dict[str, tuple[dict[str, str], ...]] = {
         },
     ),
 }
+
+
+def package_request_examples(package_id: str) -> list[dict[str, str]]:
+    """Return a package's example requests with a tagged URL for each path.
+
+    The tag lets the usage ledger tell a copied listing example from a chosen
+    instrument; the bare ``path`` stays for readers.
+    """
+    return [
+        {**example, "url": published_examples.tag_url(f"{PUBLIC_BASE_URL}{example['path']}")}
+        for example in PACKAGE_REQUEST_EXAMPLES.get(package_id, ())
+    ]
 
 SEO_LANDING_PAGES: dict[str, dict[str, object]] = {
     "blocksize-market-data-agent-skill": {
@@ -1983,7 +1996,7 @@ def build_data_packages_json() -> dict[str, object]:
         "packages": [
             {
                 **package,
-                "request_examples": list(PACKAGE_REQUEST_EXAMPLES.get(str(package["id"]), ())),
+                "request_examples": package_request_examples(str(package["id"])),
             }
             for package in DATA_PACKAGES
         ],
@@ -2088,7 +2101,7 @@ def build_seo_landing_page(slug: str) -> str:
     examples = [str(item) for item in package["examples"]]
     asset_classes = [str(item) for item in package["asset_classes"]]
     og_image_url = f"{PUBLIC_BASE_URL}/og/{slug}.svg"
-    request_examples = PACKAGE_REQUEST_EXAMPLES.get(str(package["id"]), ())
+    request_examples = package_request_examples(str(package["id"]))
     free_trial_url = tracked_marketing_url("free-trial", slug)
     pricing_url = tracked_marketing_url("pricing", slug)
     contact_url = tracked_marketing_url("contact", slug)
@@ -2371,7 +2384,7 @@ def build_seo_landing_page(slug: str) -> str:
         ).format(
             label=escape(example["label"]),
             prompt=escape(example["prompt"]),
-            path=escape(example["path"]),
+            path=escape(example["url"].replace(PUBLIC_BASE_URL, "")),
         )
         for example in request_examples
     )
