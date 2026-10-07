@@ -331,3 +331,21 @@ def test_long_windows_compare_rates_and_identities_without_claude(tmp_path):
     assert kpis["verified_identities"]["comparable_value"] == 1
     assert kpis["verified_identities"]["previous"] == 1
     assert kpis["verified_identities"]["delta"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"utm_source": "smithery", "utm_campaign": "launch"}, {"utm_source": "smithery", "utm_campaign": "launch"}),
+        ({"utm_source": "mcp-registry"}, {"utm_source": "mcp-registry"}),
+        ({"utm_source": "<img src=x>"}, {}),
+        ({"selection_source": "live_showcase"}, {"selection_source": "live_showcase"}),
+        ({"selection_source": "made_up"}, {}),
+        ({"q": "BTC"}, {}),
+        (None, {}),
+    ],
+)
+def test_attribution_from_params_keeps_only_bounded_labels(params, expected):
+    from src.observability import attribution_from_params
+
+    assert attribution_from_params(params) == expected

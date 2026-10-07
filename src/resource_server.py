@@ -114,6 +114,7 @@ from src import claude_data_retention
 from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
+    attribution_from_params,
     PRODUCT_ROUTE_IDS,
     UsageEventStore,
     configure_global_store,
@@ -385,25 +386,6 @@ OUTBOUND_DESTINATIONS = {
     "free-trial": "https://matrix.blocksize.capital/",
     "pricing": MAIN_WEBSITE_PRICING_URL.split("?", 1)[0],
     "contact": MAIN_WEBSITE_CONTACT_URL.split("?", 1)[0],
-}
-ATTRIBUTION_QUERY_KEYS = (
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_content",
-    "utm_term",
-    "selection_source",
-)
-ATTRIBUTION_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:/+ -]{0,95}$")
-SELECTION_SOURCE_VALUES = {
-    "public_http_resolver",
-    "public_mcp_resolver",
-    "authenticated_resolver",
-    "published_example_path",
-    "direct_http",
-    "package_preview",
-    "raw_data_preview",
-    "live_showcase",
 }
 
 
@@ -1806,15 +1788,7 @@ def _request_event_fields(
 
 def _request_attribution_metadata(request: Request) -> dict[str, str]:
     """Retain bounded campaign labels without storing arbitrary query strings."""
-    metadata: dict[str, str] = {}
-    for key in ATTRIBUTION_QUERY_KEYS:
-        value = (request.query_params.get(key) or "").strip()
-        if (
-            value
-            and ATTRIBUTION_VALUE_RE.fullmatch(value)
-            and (key != "selection_source" or value in SELECTION_SOURCE_VALUES)
-        ):
-            metadata[key] = value
+    metadata = attribution_from_params(request.query_params)
     if _is_commercial_data_path(request.url.path) and "selection_source" not in metadata:
         metadata["selection_source"] = "direct_http"
     return metadata
