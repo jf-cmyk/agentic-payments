@@ -40,7 +40,7 @@ def test_public_metadata_imports_without_blocksize_api_key(tmp_path):
 def test_release_contract_check_runs_without_blocksize_api_key(tmp_path):
     env = {key: value for key, value in os.environ.items() if key != "BLOCKSIZE_API_KEY"}
     result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/check_release_contracts.py"), "--expected-version", "0.6.23"],
+        [sys.executable, str(ROOT / "scripts/check_release_contracts.py"), "--expected-version", "0.6.24"],
         cwd=ROOT,
         env={**env, "PYTHONPATH": str(ROOT)},
         capture_output=True,
