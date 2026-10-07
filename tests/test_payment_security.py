@@ -998,7 +998,7 @@ async def test_facilitator_invalid_reasons_and_public_ids_cannot_carry_secrets()
 
 
 @pytest.mark.asyncio
-async def test_facilitator_verify_retries_once_on_transient_errors_and_logs_without_secrets(monkeypatch, caplog):
+async def test_facilitator_verify_retries_transient_errors_twice_and_logs_without_secrets(monkeypatch, caplog):
     import httpx
     import src.payment_security as payment_security
 
@@ -1016,7 +1016,7 @@ async def test_facilitator_verify_retries_once_on_transient_errors_and_logs_with
         result = await adapter.verify(parsed, _requirement())
     assert result["invalidReason"] == "facilitator_unavailable"
     assert result["facilitatorErrorKind"] == "timeout"
-    assert len(calls) == 2, "a timeout on /verify is retried exactly once"
+    assert len(calls) == payment_security.VERIFY_ATTEMPTS == 3, "a timeout on /verify is retried twice"
     assert "kind=timeout" in caplog.text
     assert secret not in caplog.text
 
