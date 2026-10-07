@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import mean
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,6 +44,48 @@ PUBLIC_MCP_ENDPOINTS = frozenset({"/mcp/server"})
 AUTHENTICATED_MCP_ENDPOINTS = frozenset(
     {"/anthropic/mcp", "/cursor/mcp", "/openai/mcp"}
 )
+# Campaign labels that listings and docs may append to a URL. They are kept on
+# HTTP and MCP events so each avenue (Smithery, Glama, the MCP Registry, docs)
+# can be told apart without relying on referrers that agents never send.
+ATTRIBUTION_QUERY_KEYS = (
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "selection_source",
+)
+ATTRIBUTION_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:/+ -]{0,95}$")
+SELECTION_SOURCE_VALUES = frozenset(
+    {
+        "public_http_resolver",
+        "public_mcp_resolver",
+        "authenticated_resolver",
+        "published_example_path",
+        "direct_http",
+        "package_preview",
+        "raw_data_preview",
+        "live_showcase",
+    }
+)
+
+
+def attribution_from_params(params: Mapping[str, str] | None) -> dict[str, str]:
+    """Return the bounded campaign labels present in a query string, nothing else."""
+    metadata: dict[str, str] = {}
+    if not params:
+        return metadata
+    for key in ATTRIBUTION_QUERY_KEYS:
+        value = str(params.get(key) or "").strip()
+        if (
+            value
+            and ATTRIBUTION_VALUE_RE.fullmatch(value)
+            and (key != "selection_source" or value in SELECTION_SOURCE_VALUES)
+        ):
+            metadata[key] = value
+    return metadata
+
+
 KNOWN_MONITOR_USER_AGENT_MARKERS = frozenset(
     {
         "healthcheck",

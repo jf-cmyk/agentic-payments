@@ -7,7 +7,7 @@ from urllib.parse import quote, urlencode
 from typing import Annotated, Literal
 
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.dependencies import get_http_headers, get_http_request
 from pydantic import Field
 
 from src.commercial_plans import recommend_account_plan, tracked_plan_contact_path
@@ -22,7 +22,7 @@ from src.mcp_server import (
     search as search_catalog,
     search_pairs as search_local_pairs,
 )
-from src.observability import record_usage_event
+from src.observability import attribution_from_params, fingerprint, record_usage_event
 from src import agent_auth, free_tier
 from src import pricing_catalog
 from src import live_showcase
@@ -158,10 +158,33 @@ public_mcp = FastMCP(
 
 
 def _record_public_mcp_usage(tool_name: str, **fields: object) -> None:
-    """Record public MCP usage with only the request user-agent for test tagging."""
+    """Record public MCP usage with the request's user agent, client and campaign labels.
+
+    The transport request carries the listing's ``utm_source`` (clients keep the
+    configured URL's query string on every call) and the proxy-normalized client
+    address. Copying them onto the tool-call event lets the dashboard attribute
+    tool usage to Smithery, Glama or the MCP Registry and count distinct clients.
+    Outside an HTTP request (tests, stdio) only the user agent is recorded.
+    """
     user_agent = get_http_headers().get("user-agent", "").strip()
     if user_agent:
         fields["user_agent"] = user_agent
+    try:
+        request = get_http_request()
+    except Exception:  # noqa: BLE001 - no HTTP context means nothing to copy
+        request = None
+    if request is not None:
+        client = getattr(request, "client", None)
+        host = getattr(client, "host", None)
+        if host and "ip_hash" not in fields:
+            fields["ip_hash"] = fingerprint(str(host))
+        referrer = request.headers.get("referer") or request.headers.get("referrer")
+        if referrer and "referrer" not in fields:
+            fields["referrer"] = referrer
+        labels = attribution_from_params(request.query_params)
+        if labels:
+            existing = fields.get("metadata")
+            fields["metadata"] = {**labels, **(existing if isinstance(existing, dict) else {})}
     record_usage_event(
         "mcp_tool_call",
         surface="public_mcp",

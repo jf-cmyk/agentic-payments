@@ -293,6 +293,28 @@ class TestPublicRemoteDiscoveryTools:
             user_agent="blocksize-hosted-smoke/1.0",
         )
 
+    def test_usage_telemetry_copies_client_and_listing_label_from_the_transport_request(self):
+        class _Client:
+            host = "203.0.113.9"
+
+        class _Request:
+            client = _Client()
+            headers = {"referer": "https://smithery.ai/servers/blocksize/agentic-payments"}
+            query_params = {"utm_source": "smithery", "utm_medium": "<script>"}
+
+        with (
+            patch.object(public_mcp_server, "get_http_headers", return_value={"user-agent": "node"}),
+            patch.object(public_mcp_server, "get_http_request", return_value=_Request()),
+            patch.object(public_mcp_server, "record_usage_event") as record,
+        ):
+            public_mcp_server._record_public_mcp_usage("search_pairs", subject="BTC-USD")
+
+        kwargs = record.call_args.kwargs
+        assert kwargs["user_agent"] == "node"
+        assert kwargs["ip_hash"] and kwargs["ip_hash"] != "203.0.113.9"
+        assert kwargs["referrer"].startswith("https://smithery.ai/")
+        assert kwargs["metadata"] == {"utm_source": "smithery"}
+
     @pytest.mark.asyncio
     async def test_public_tools_signpost_the_free_tier_claim(self, monkeypatch):
         monkeypatch.setattr(public_mcp_server.free_tier, "enabled", lambda: True)

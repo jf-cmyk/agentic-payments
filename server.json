@@ -8,7 +8,7 @@
   "version": "0.6.23",
   "remotes": [
     {
-      "url": "https://mcp.blocksize.info/mcp/server/",
+      "url": "https://mcp.blocksize.info/mcp/server/?utm_source=mcp-registry",
       "type": "streamable-http"
     }
   ],

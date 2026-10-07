@@ -143,6 +143,10 @@ REPOSITORY_SOURCE = os.getenv("PUBLIC_REPOSITORY_SOURCE", "github")
 
 REMOTE_MCP_PATH = "/mcp/server"
 REMOTE_MCP_URL = f"{PUBLIC_BASE_URL}{REMOTE_MCP_PATH}/"
+# Listing-specific transport URLs. MCP clients keep the configured URL's query
+# string on every request, so the label reaches the usage log without referrers.
+REMOTE_MCP_REGISTRY_URL = f"{REMOTE_MCP_URL}?utm_source=mcp-registry"
+REMOTE_MCP_SMITHERY_URL = f"{REMOTE_MCP_URL}?utm_source=smithery"
 MCP_MANIFEST_URL = f"{PUBLIC_BASE_URL}/mcp/manifest.json"
 SERVER_JSON_URL = f"{PUBLIC_BASE_URL}/server.json"
 OPENAPI_URL = f"{PUBLIC_BASE_URL}/openapi.json"
@@ -1598,7 +1602,7 @@ def build_server_json() -> dict[str, object]:
         "version": APP_VERSION,
         "remotes": [
             {
-                "url": REMOTE_MCP_URL,
+                "url": REMOTE_MCP_REGISTRY_URL,
                 "type": "streamable-http",
             }
         ],

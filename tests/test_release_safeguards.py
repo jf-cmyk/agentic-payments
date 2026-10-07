@@ -3660,7 +3660,9 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
                     "remotes": [
                         {
                             **remote,
-                            "url": f"{self.base_url}/mcp/server/",
+                            # Keep the path and the listing label; only the origin moves.
+                            "url": self.base_url
+                            + remote["url"][remote["url"].index("/mcp/server/") :],
                         }
                         for remote in expected_manifest["remotes"]
                     ],

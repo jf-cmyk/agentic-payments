@@ -24,7 +24,7 @@
     "public_remote_server": "Read-only discovery and documentation tools"
   },
   "endpoints": {
-    "remote_mcp": "https://mcp.blocksize.info/mcp/server/",
+    "remote_mcp": "https://mcp.blocksize.info/mcp/server/?utm_source=smithery",
     "quickstart": "https://mcp.blocksize.info/quickstart/remote-mcp",
     "value_preview": "https://mcp.blocksize.info/v1/samples/market-data?service=vwap&symbol=BTCUSD",
     "openapi": "https://mcp.blocksize.info/openapi.json",

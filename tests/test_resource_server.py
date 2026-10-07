@@ -912,7 +912,7 @@ class TestPublicListingSurfaces:
             "url": "https://github.com/jf-cmyk/agentic-payments",
             "source": "github",
         }
-        assert data["remotes"][0]["url"].endswith("/mcp/server/")
+        assert data["remotes"][0]["url"].endswith("/mcp/server/?utm_source=mcp-registry")
 
     def test_manifest_exposes_market_data_display_name_and_endpoint_builder(self, test_client):
         response = test_client.get("/mcp/manifest.json")
