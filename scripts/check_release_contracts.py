@@ -53,7 +53,7 @@ def check(expected_version: str | None, require_clean: bool) -> dict[str, object
         "railway_uses_readiness": 'healthcheck: "/readyz"' in railway,
         "railway_tracks_github_main": 'branch: "main"' in railway
         and "commitSha:" not in railway,
-        "railway_pins_railpack": 'railpackVersion: "0.38.0"' in railway,
+        "railway_pins_railpack": 'railpackVersion: "0.40.1"' in railway,
         "clean_worktree_when_required": clean or not require_clean,
     }
     return {

@@ -1295,7 +1295,7 @@ def test_railway_promotes_only_dependency_ready_releases() -> None:
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 
     assert 'builder: "RAILPACK"' in railway
-    assert 'railpackVersion: "0.38.0"' in railway
+    assert 'railpackVersion: "0.40.1"' in railway
     assert "--no-emit-project" in requirements
     assert "-e ." not in requirements
     assert "--editable ." not in requirements
@@ -1310,10 +1310,10 @@ def test_railpack_build_log_audit_requires_the_exact_pinned_version() -> None:
     script = ROOT / "scripts" / "audit_railpack_build_log.mjs"
     accepted_log = "\n".join(
         [
-            "using build driver railpack-v0.38.0",
-            "[railway] prepare railpack-v0.38.0",
-            "\x1b[95m│ Railpack 0.38.0 │\x1b[0m",
-            "resolve image config for docker-image://ghcr.io/railwayapp/railpack-frontend:v0.38.0",
+            "using build driver railpack-v0.40.1",
+            "[railway] prepare railpack-v0.40.1",
+            "\x1b[95m│ Railpack 0.40.1 │\x1b[0m",
+            "resolve image config for docker-image://ghcr.io/railwayapp/railpack-frontend:v0.40.1",
         ]
     )
     accepted = subprocess.run(
@@ -1328,7 +1328,7 @@ def test_railpack_build_log_audit_requires_the_exact_pinned_version() -> None:
     drifted = subprocess.run(
         ["node", str(script)],
         cwd=ROOT,
-        input=accepted_log.replace("0.38.0", "0.38.1"),
+        input=accepted_log.replace("0.40.1", "0.40.2"),
         capture_output=True,
         text=True,
         timeout=30,
@@ -1336,9 +1336,9 @@ def test_railpack_build_log_audit_requires_the_exact_pinned_version() -> None:
     )
 
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
-    assert "pinned Railpack 0.38.0" in accepted.stdout
+    assert "pinned Railpack 0.40.1" in accepted.stdout
     assert drifted.returncode != 0
-    assert "marker observed 0.38.1" in drifted.stderr
+    assert "marker observed 0.40.2" in drifted.stderr
 
 
 def test_legacy_bridge_validator_binds_digest_domains_samples_and_fresh_readiness(
