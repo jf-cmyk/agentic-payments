@@ -73,6 +73,12 @@ def _paid(store: UsageEventStore, n: int, *, wallet: str = "0xPayer", subject: s
         ({"surface": "http_api", "user_agent": "enclave402/verifier (+https://x)"}, "monitor"),
         ({"surface": "http_api", "user_agent": "TridentStatus/1.0"}, "monitor"),
         ({"surface": "public_mcp", "user_agent": "ProofBench/0.1 probe"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "Mozilla/5.0 (compatible; AgenticMarketplacePoller/1.0; +https://agents.circle.com)"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "402explorer/0.1 (+https://discover.paygent.net/about)"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "x402lens-indexer/1.0 (+https://x402lens.com/methodology)"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "x402watch/1 (+https://x402watch.vercel.app)"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "CoinbaseBazaarDiscovery/1.0 (+https://docs.cdp.coinbase.com/x402)"}, "monitor"),
+        ({"surface": "http_api", "user_agent": "hermes-contact-discovery/1.0 (research; contact@hermes.ai)"}, "monitor"),
         ({"surface": "developer_portal", "user_agent": "curl/8"}, "other"),
     ],
 )
