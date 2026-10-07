@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Usage &amp; Revenue</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --wash: rgba(11,11,11,0.05);
+  --s1: #2a78d6; --s2: #eb6834; --good: #006300; --note-bg: #f3f1ea;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.06);
+    --s1: #3987e5; --s2: #d95926; --good: #0ca30c; --note-bg: #232321;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.06);
+  --s1: #3987e5; --s2: #d95926; --good: #0ca30c; --note-bg: #232321;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 36px 16px 72px; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; margin: 44px 0 4px; }
+h3 { font-size: 15px; margin: 0 0 2px; }
+.sub { color: var(--ink-2); margin: 0 0 16px; max-width: 760px; }
+.small { font-size: 13px; color: var(--ink-2); }
+.muted { color: var(--muted); }
+.note { background: var(--note-bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; font-size: 13.5px; color: var(--ink-2); margin: 14px 0 0; }
+.note b { color: var(--ink); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 18px 14px; }
+.grid { display: grid; gap: 14px; }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-top: 22px; }
+.kpi .label { font-size: 13px; color: var(--ink-2); }
+.kpi .value { font-size: 30px; font-weight: 600; line-height: 1.15; margin: 4px 0 4px; }
+.kpi .detail { font-size: 12.5px; color: var(--muted); }
+.two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.multiples { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.chart { width: 100%; min-height: 60px; position: relative; }
+.chart svg { display: block; overflow: visible; }
+.tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.anno { font-size: 11.5px; fill: var(--ink-2); font-weight: 600; }
+.hit { fill: transparent; cursor: default; outline: none; }
+.hit:hover, .hit:focus { fill: var(--wash); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); margin: 6px 0 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.chead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.chead .big { font-weight: 600; font-size: 18px; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); opacity: 0; transition: opacity .08s; max-width: 260px; }
+#tip .t { font-weight: 600; margin-bottom: 3px; }
+#tip .r { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+#tip .r span:first-child { color: var(--ink-2); }
+#tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.hbars { display: grid; gap: 7px; }
+.hrow { display: grid; grid-template-columns: minmax(110px, 190px) 1fr 74px; gap: 10px; align-items: center; font-size: 13.5px; }
+.hrow > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.hrow .track { height: 14px; }
+.hrow .bar { height: 14px; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hrow .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { font-weight: 600; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 600; border-top: 1px solid var(--axis); }
+details summary { cursor: pointer; color: var(--ink-2); font-size: 14px; margin: 10px 0; }
+ul.tight { margin: 8px 0 0; padding-left: 20px; }
+ul.tight li { margin: 4px 0; }
+.pill { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 560px) {
+  h1 { font-size: 23px; }
+  .kpi .value { font-size: 26px; }
+  .two, .multiples { grid-template-columns: 1fr; }
+  .hrow { grid-template-columns: 100px 1fr 62px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MCP usage &amp; revenue, last 30 days</h1>
+  <p class="sub">Blocksize on <b>mcp.blocksize.info</b>, 30 Aug to 28 Sep 2026 (UTC), test traffic excluded. Every figure comes from two production stats snapshots, not a live query. Daily series join the 30-day snapshot (to 25 Sep, 23:00) with the 7-day snapshot (to 29 Sep, 00:07). 29 and 30 Sep are not included yet.</p>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="note"><b>In short.</b> MCP tool calls rose sharply: <span id="mcpGrowth"></span> in the second half of the window than the first, peaking at 899 on 21 Sep. Revenue is still tiny. <b>All</b> of it came from direct x402 pay-per-call on the HTTP API, and 75 of the 92 paid calls fell on 14–17 Sep. None of the marketplaces (Pay.sh, Smithery, Glama, x402scan) has revenue that can be traced back to it. The MCP server is free and read-only, so MCP usage only turns into money when an agent follows the x402 link it returns.</div>
+
+  <h2>Usage over time</h2>
+  <p class="sub">Daily totals. Hover or tab onto a bar for the exact numbers. The full daily table is at the bottom.</p>
+  <div class="grid two">
+    <div class="card">
+      <div class="chead"><h3>MCP tool calls per day</h3><span class="small">every MCP client</span></div>
+      <div class="chart" id="c-mcp"></div>
+    </div>
+    <div class="card">
+      <div class="chead"><h3>HTTP requests per day</h3><span class="small">API, MCP transport, portal, registry</span></div>
+      <div class="chart" id="c-http"></div>
+    </div>
+  </div>
+
+  <h2>Revenue over time</h2>
+  <p class="sub">Recognised x402 revenue in USDC: settled payments that were submitted, verified and deduplicated, using the same rules as the command centre. Each call pays $0.002 (81 payments) or $0.005 (14 payments).</p>
+  <div class="card">
+    <div class="chead"><h3>Revenue per day by chain (USDC)</h3><span class="small" id="revTotal"></span></div>
+    <div class="legend"><span><i style="background:var(--s1)"></i>Solana</span><span><i style="background:var(--s2)"></i>Base</span></div>
+    <div class="chart" id="c-rev"></div>
+  </div>
+  <div class="grid two" style="margin-top:14px">
+    <div class="card">
+      <h3>Payment funnel</h3>
+      <p class="small" style="margin:0 0 8px">30-day snapshot, 27 Aug – 25 Sep</p>
+      <div class="tablewrap"><table>
+        <tr><th>Step</th><th class="n">Count</th><th class="n">vs. previous</th></tr>
+        <tr><td>Live-data requests answered with HTTP 402 (payment required)</td><td class="n">95,350</td><td class="n">—</td></tr>
+        <tr><td>&nbsp;&nbsp;of which from known uptime monitors</td><td class="n">37,622</td><td class="n muted">39%</td></tr>
+        <tr><td>Payment proofs submitted</td><td class="n">150</td><td class="n">0.16%</td></tr>
+        <tr><td>Verified and settled</td><td class="n">93</td><td class="n">62%</td></tr>
+        <tr><td>Data delivered</td><td class="n">93</td><td class="n">100%</td></tr>
+      </table></div>
+      <p class="small" style="margin:8px 0 0">57 proofs failed: 38 had an invalid x402 v2 signature, and 19 failed because the facilitator was unavailable.</p>
+    </div>
+    <div class="card">
+      <h3>What was bought</h3>
+      <p class="small" style="margin:0 0 8px">All 95 payments, 27 Aug – 28 Sep</p>
+      <div class="hbars" id="h-endpoints"></div>
+    </div>
+  </div>
+
+  <h2>By avenue</h2>
+  <p class="sub">The app has no single "channel" field. Each avenue is identified from the URL surface, the referrer and the user agent (see <code>_registry_source_for_event</code>). Figures cover the 30-day snapshot (27 Aug – 25 Sep) unless marked otherwise.</p>
+  <div class="card tablewrap">
+    <table id="t-avenues">
+      <tr><th>Avenue</th><th>How it reaches the server</th><th class="n">Traffic seen</th><th class="n">MCP tool calls</th><th class="n">Paid calls</th><th class="n">Revenue</th></tr>
+      <tr><td><b>x402 HTTP API</b> (direct)</td><td>Agents call <code>/v1/*</code> and pay per call in USDC on Solana or Base</td><td class="n">95,350 402 responses</td><td class="n">—</td><td class="n">93</td><td class="n"><b>$0.228</b></td></tr>
+      <tr><td><b>Public MCP server</b></td><td><code>/mcp/server</code>, where the Smithery, Glama and MCP Registry listings and remote clients all connect</td><td class="n">78,964 requests</td><td class="n">4,263</td><td class="n">0</td><td class="n">$0</td></tr>
+      <tr><td>Claude connector</td><td><code>/anthropic/mcp</code>: sign-in plus free monthly credits</td><td class="n">97 requests</td><td class="n">0</td><td class="n">0</td><td class="n">$0</td></tr>
+      <tr><td>ChatGPT / OpenAI connector</td><td><code>/openai/mcp</code></td><td class="n">11 requests</td><td class="n">0</td><td class="n">0</td><td class="n">$0</td></tr>
+      <tr><td>Cursor connector</td><td><code>/cursor/mcp</code></td><td class="n">10 requests</td><td class="n">0</td><td class="n">0</td><td class="n">$0</td></tr>
+      <tr><td>Pay.sh</td><td>Catalog listing plus pay-skills. Paid calls look the same as direct x402.</td><td class="n">507 events</td><td class="n">—</td><td class="n" colspan="2">not attributable</td></tr>
+      <tr><td>Glama</td><td>Listing and <code>glama.json</code> checks. Healthy, 99.8% uptime over 44 days, quality score 4.1/5.</td><td class="n">407 events</td><td class="n">—</td><td class="n" colspan="2">not attributable</td></tr>
+      <tr><td>Smithery</td><td>Listing (97/100 typed output). Runs hosted on <code>run.tools</code> never reach this server.</td><td class="n">75 events</td><td class="n">—</td><td class="n" colspan="2">not attributable</td></tr>
+      <tr><td>x402 Directory</td><td>x402 discovery documents</td><td class="n">4,624 fetches</td><td class="n">—</td><td class="n" colspan="2">not attributable</td></tr>
+      <tr><td>x402scan</td><td>Listing plus 43 referred visits</td><td class="n">110 events</td><td class="n">—</td><td class="n" colspan="2">not attributable</td></tr>
+      <tr><td>MCP Registry</td><td><code>server.json</code></td><td class="n">226 events</td><td class="n">—</td><td class="n" colspan="2">—</td></tr>
+      <tr><td>GitHub · GitLab · Awesome MCP</td><td>Repositories and lists</td><td class="n">6,062 · 66 · 86</td><td class="n">—</td><td class="n" colspan="2">—</td></tr>
+      <tr><td>OpenAPI crawlers</td><td><code>openapi.json</code></td><td class="n">5,302 fetches</td><td class="n">—</td><td class="n" colspan="2">—</td></tr>
+    </table>
+  </div>
+  <div class="note"><b>Revenue by avenue:</b> 100% came from x402 on the HTTP API. By selection source, <code>direct_http</code> accounts for $0.220 and the other $0.008 is unattributed. All 93 inflows were direct x402 payments, with no credit top-ups. Payment events carry no Pay.sh, Smithery or Glama marker, so a Pay.sh buyer looks the same as a direct one. Subscriptions billed through Matrix are not part of this data.</div>
+
+  <div class="grid two" style="margin-top:14px">
+    <div class="card">
+      <h3>Events attributed to each avenue</h3>
+      <p class="small" style="margin:0 0 10px">30-day snapshot. Counts listing, registry and crawler fetches, plus any request whose referrer or user agent names the platform.</p>
+      <div class="hbars" id="h-sources"></div>
+    </div>
+    <div class="card">
+      <h3>Which MCP tools were called</h3>
+      <p class="small" style="margin:0 0 10px">30-day snapshot. All 4,263 calls went through the public MCP server.</p>
+      <div class="hbars" id="h-tools"></div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:26px">Listing and registry fetches per day, by avenue</h3>
+  <p class="small" style="margin:0 0 10px">Each panel has its own scale, so compare the shapes, not the bar heights. The daily Pay.sh, Smithery, x402scan and GitLab counts are almost identical (1–4 a day each). That pattern suggests a single automated checker rather than separate users.</p>
+  <div class="grid multiples" id="multiples"></div>
+
+  <h2>Who the traffic is</h2>
+  <div class="grid two">
+    <div class="card">
+      <h3>Client type (user agent), all events</h3>
+      <p class="small" style="margin:0 0 10px">30-day snapshot. "Other" is mostly bots, monitors and agents with a custom user agent.</p>
+      <div class="hbars" id="h-clients"></div>
+    </div>
+    <div class="card">
+      <h3>Conversion and free tier</h3>
+      <p class="small" style="margin:0 0 8px">30-day snapshot</p>
+      <div class="tablewrap"><table>
+        <tr><th>Metric</th><th class="n">Value</th></tr>
+        <tr><td>Distinct client fingerprints</td><td class="n">6,725</td></tr>
+        <tr><td>Free discovery calls</td><td class="n">90,267</td></tr>
+        <tr><td>Wallets that paid</td><td class="n">14</td></tr>
+        <tr><td>Identities that repeated within 7 days</td><td class="n">6 of 13</td></tr>
+        <tr><td>Free-tier grants (connector sign-ups that used credits)</td><td class="n">0</td></tr>
+        <tr><td>Upgrade prompts shown</td><td class="n">4,329</td></tr>
+        <tr><td><code>/go</code> clicks: pricing · free trial · contact</td><td class="n">92 · 89 · 82</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h2>Last 7 days compared with the 30-day average</h2>
+  <div class="card tablewrap">
+    <table>
+      <tr><th>Metric</th><th class="n">22–28 Sep</th><th class="n">Per day</th><th class="n">30-day per day</th></tr>
+      <tr><td>HTTP requests</td><td class="n">88,536</td><td class="n">12,648</td><td class="n" id="avgHttp"></td></tr>
+      <tr><td>MCP tool calls</td><td class="n">894</td><td class="n">128</td><td class="n" id="avgMcp"></td></tr>
+      <tr><td>Listing and registry fetches</td><td class="n">4,639</td><td class="n">663</td><td class="n" id="avgReg"></td></tr>
+      <tr><td>Paid calls</td><td class="n">6</td><td class="n">0.9</td><td class="n" id="avgPaid"></td></tr>
+      <tr><td>Revenue (USDC)</td><td class="n">$0.015</td><td class="n">$0.002</td><td class="n" id="avgRev"></td></tr>
+      <tr><td>Wallets that paid</td><td class="n">4</td><td class="n">—</td><td class="n">14 (30 days)</td></tr>
+    </table>
+  </div>
+
+  <h2>Daily data</h2>
+  <details open>
+    <summary>Show or hide all 30 days</summary>
+    <div class="card tablewrap"><table id="t-daily"></table></div>
+  </details>
+
+  <h2>Caveats</h2>
+  <ul class="tight small">
+    <li><b>Not live.</b> This was built from the stored production snapshots. The auto-mode permission policy blocked a fresh read-only query over SSH in this session, so 29–30 Sep are missing.</li>
+    <li><b>Marketplace-side numbers are missing.</b> No external metrics feed is configured (<code>platforms_configured = []</code>). Smithery-hosted runs, Pay.sh catalog views and Glama install counts are not in this data, and none of their public pages shows usage counts.</li>
+    <li><b>No MCP tool calls in the authenticated connectors.</b> The Claude, Cursor and ChatGPT connectors recorded only transport requests (118 in total) and gave out no free-tier grants.</li>
+    <li><b>The spikes have no per-client breakdown.</b> The snapshot has daily totals only, so the MCP surge on 19–22 Sep and the paid cluster on 14–17 Sep can't be split by client here. Check whether the 14–17 Sep payments came from your own test wallets.</li>
+    <li>Test and smoke traffic is excluded: 5,433 events in the 30-day snapshot.</li>
+  </ul>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+// Transcribed from the production stats snapshots (timeline + wallet inflows), 30 Aug – 28 Sep 2026.
+const D = {
+  start: "2026-08-30",
+  http: [10532,12610,10553,10407,10109,7316,6035,5712,5882,7486,10398,10272,10605,10652,10054,10481,11442,16829,11795,12189,11960,13377,13655,13441,13438,12632,12282,12250,12319,12161],
+  mcp:  [24,42,46,29,35,22,6,7,13,28,34,154,26,7,46,146,211,74,82,175,692,733,899,336,143,5,122,142,131,15],
+  reg:  [537,448,420,450,432,359,381,394,423,510,470,396,408,350,287,303,302,1075,333,398,382,421,702,627,909,619,800,562,533,589],
+  paid: [1,0,0,0,0,0,0,0,0,0,4,1,0,2,2,21,14,23,17,1,0,0,0,0,1,2,1,0,1,1],
+  revSol:  [0,0,0,0,0,0,0,0,0,0,0,0.002,0,0.004,0,0.064,0.034,0.030,0.004,0.002,0,0,0,0,0.005,0.004,0,0,0,0.002],
+  revBase: [0.002,0,0,0,0,0,0,0,0,0,0.014,0,0,0,0.007,0.002,0,0.016,0.030,0,0,0,0,0,0,0,0.002,0,0.002,0],
+  paidSol:  [0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,20,14,15,2,1,0,0,0,0,1,2,0,0,0,1],
+  paidBase: [1,0,0,0,0,0,0,0,0,0,4,0,0,0,2,1,0,8,15,0,0,0,0,0,0,0,1,0,1,0],
+  sources: {
+    "x402 Directory":   [176,121,98,105,100,100,75,78,79,90,81,78,95,141,127,136,143,143,136,180,162,191,307,284,319,260,370,266,250,257],
+    "OpenAPI crawlers": [144,95,75,76,80,75,71,74,71,91,79,85,96,136,134,132,128,854,149,188,179,193,358,302,330,303,378,274,264,303],
+    "GitHub":           [196,205,221,222,220,158,194,206,240,295,276,203,194,40,2,6,2,4,2,1,6,2,1,3,220,2,3,1,1,2],
+    "Glama":            [8,9,10,15,9,10,13,18,10,11,18,14,11,7,13,14,14,23,21,17,11,19,21,14,11,26,21,11,11,10],
+    "MCP Registry":     [4,5,5,9,4,4,4,2,4,5,5,2,3,4,3,5,3,13,8,5,5,4,4,5,5,11,8,3,1,4],
+    "Pay.sh":           [1,2,1,3,3,1,4,2,3,2,1,2,1,4,1,2,2,3,2,1,3,2,2,3,2,2,3,1,1,2],
+    "Smithery":         [1,2,1,3,3,1,4,2,3,2,1,2,1,3,1,2,2,3,2,1,3,2,2,3,2,2,4,1,1,2],
+    "x402scan":         [1,2,1,3,3,1,4,2,3,2,1,2,1,5,1,2,2,3,2,1,4,2,1,3,2,2,3,1,1,2],
+    "Awesome MCP":      [2,3,2,3,3,2,4,3,4,2,1,2,1,4,2,2,2,6,6,1,3,3,2,6,2,4,5,1,1,2],
+    "GitLab":           [1,2,1,3,3,1,4,2,3,2,1,2,1,3,1,2,2,6,3,1,3,2,2,3,2,2,3,1,1,2],
+    "Unknown":          [3,2,5,8,4,6,4,5,3,8,6,4,4,3,2,0,2,17,2,2,3,1,2,1,14,5,2,2,1,3]
+  }
+};
+const SOURCE_MIX_30D = [["GitHub",6062],["OpenAPI crawlers",5302],["x402 Directory",4624],["Pay.sh",507],["Glama",407],["MCP Registry",226],["Unknown / direct",119],["x402scan",110],["Awesome MCP",86],["Smithery",75],["GitLab",66]];
+const TOOL_MIX_30D = [["search_pairs",984],["search",760],["list_instruments",702],["fetch",482],["get_market_data_endpoint",435],["get_workflow_endpoint",344],["get_pricing_info",329],["get_product_catalog",227]];
+const CLIENT_MIX_30D = [["Other / custom",351187],["Node",105850],["Python",33031],["Browser",11262],["curl",3094],["Claude",821],["ChatGPT",446],["Cursor",5]];
+const PAID_ENDPOINTS = [["vwap · BTC-USD",35],["bidask · BTC-USD",21],["vwap · ETH-USD",18],["fx · EURUSD",10],["vwap · SOL-USD",7],["metal · XAUUSD",4]];
+
+const N = D.http.length;
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const dates = Array.from({length: N}, (_, i) => { const d = new Date(D.start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + i); return d; });
+const lbl = d => `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const sum = a => a.reduce((s, v) => s + v, 0);
+const int = v => Math.round(v).toLocaleString("en-US");
+const usd = (v, dp = 3) => "$" + v.toFixed(dp);
+const revTotal = D.revSol.map((v, i) => v + D.revBase[i]);
+
+// ---------- KPIs ----------
+const tot = { http: sum(D.http), mcp: sum(D.mcp), reg: sum(D.reg), paid: sum(D.paid),
+  sol: sum(D.revSol), base: sum(D.revBase), paidSol: sum(D.paidSol), paidBase: sum(D.paidBase) };
+tot.rev = tot.sol + tot.base;
+const half = a => [sum(a.slice(0, 15)), sum(a.slice(15))];
+const [m1, m2] = half(D.mcp), [h1, h2] = half(D.http);
+const peak = D.mcp.indexOf(Math.max(...D.mcp));
+document.getElementById("kpis").innerHTML = [
+  ["Revenue (USDC)", usd(tot.rev), `${tot.paid} paid x402 calls · Solana ${usd(tot.sol)} · Base ${usd(tot.base)}`],
+  ["MCP tool calls", int(tot.mcp), `${(m2 / m1).toFixed(1)}× from the first 15 days to the last 15 · peak ${D.mcp[peak]} on ${lbl(dates[peak])}`],
+  ["HTTP requests", int(tot.http), `${int(tot.http / N)} a day · +${Math.round((h2 / h1 - 1) * 100)}% from the first 15 days to the last 15`],
+  ["Listing & registry fetches", int(tot.reg), `x402 Directory, OpenAPI, GitHub, Glama, Pay.sh…`],
+  ["Wallets that paid", "14", "27 Aug – 25 Sep snapshot · 4 in 22–28 Sep"]
+].map(([l, v, d]) => `<div class="card kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="detail">${d}</div></div>`).join("");
+document.getElementById("mcpGrowth").textContent = `${(m2 / m1).toFixed(1)}× more calls`;
+document.getElementById("revTotal").textContent = `${usd(tot.rev)} total · ${tot.paid} paid calls`;
+document.getElementById("avgHttp").textContent = int(tot.http / N);
+document.getElementById("avgMcp").textContent = int(tot.mcp / N);
+document.getElementById("avgReg").textContent = int(tot.reg / N);
+document.getElementById("avgPaid").textContent = (tot.paid / N).toFixed(1);
+document.getElementById("avgRev").textContent = usd(tot.rev / N);
+
+// ---------- tooltip ----------
+const tip = document.getElementById("tip");
+function showTip(html, x, y) {
+  tip.innerHTML = html; tip.style.opacity = 1;
+  const r = tip.getBoundingClientRect();
+  let left = x + 14, top = y - r.height - 10;
+  if (left + r.width > window.innerWidth - 8) left = x - r.width - 14;
+  if (left < 8) left = 8;
+  if (top < 8) top = y + 16;
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+}
+const hideTip = () => { tip.style.opacity = 0; };
+
+// ---------- bar chart (single or stacked), inline SVG ----------
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+}
+function topRounded(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+function barChart(el, o) {
+  const draw = () => {
+    const W = Math.max(240, el.clientWidth), H = o.height || 220;
+    const m = { t: o.mini ? 16 : 22, r: 6, b: o.mini ? 18 : 26, l: o.mini ? 6 : (o.left || 46) };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const totals = dates.map((_, i) => o.series.reduce((s, se) => s + se.values[i], 0));
+    const max = niceMax(Math.max(...totals));
+    const band = iw / N, gap = Math.max(2, Math.min(6, band * 0.28)), bw = band - gap;
+    const y = v => m.t + ih - (v / max) * ih;
+    let s = `<svg width="${W}" height="${H}" role="img" aria-label="${o.aria}">`;
+    if (!o.mini) {
+      for (let k = 0; k <= 4; k++) {
+        const v = max * k / 4, yy = Math.round(y(v)) + 0.5;
+        s += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(${k === 0 ? "--axis" : "--grid"})"/>`;
+        s += `<text class="tick" x="${m.l - 7}" y="${yy + 4}" text-anchor="end">${o.tick(v)}</text>`;
+      }
+    } else {
+      const yy = Math.round(y(0)) + 0.5;
+      s += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}" stroke="var(--axis)"/>`;
+    }
+    for (let i = 0; i < N; i++) {
+      s += `<rect class="hit" data-i="${i}" tabindex="0" x="${m.l + i * band}" y="${m.t}" width="${band}" height="${ih}" rx="3"><title>${lbl(dates[i])}</title></rect>`;
+    }
+    for (let i = 0; i < N; i++) {
+      const x = m.l + i * band + gap / 2;
+      let base = 0;
+      const vis = o.series.map((se, k) => [k, se.values[i]]).filter(([, v]) => v > 0);
+      vis.forEach(([k, v], j) => {
+        const top = j === vis.length - 1;
+        const y0 = y(base), y1 = y(base + v);
+        let h = y0 - y1 - (j > 0 ? 2 : 0);
+        if (h < 1.5) h = 1.5;
+        const yTop = (j > 0 ? y0 - 2 : y0) - h;
+        const col = o.series[k].color;
+        s += top
+          ? `<path d="${topRounded(x, yTop, bw, h, 4)}" fill="var(${col})" pointer-events="none"/>`
+          : `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="var(${col})" pointer-events="none"/>`;
+        base += v;
+      });
+    }
+    (o.annotate || []).forEach(i => {
+      const x = m.l + i * band + band / 2, yy = y(totals[i]) - 6;
+      const anchor = i > N * 0.8 ? "end" : i < N * 0.2 ? "start" : "middle";
+      s += `<text class="anno" x="${x}" y="${yy}" text-anchor="${anchor}">${o.annoText(i)}</text>`;
+    });
+    if (!o.mini) {
+      for (let i = 0; i < N; i += 7) {
+        s += `<text class="tick" x="${m.l + i * band + band / 2}" y="${H - 8}" text-anchor="middle">${lbl(dates[i])}</text>`;
+      }
+    } else {
+      s += `<text class="tick" x="${m.l}" y="${H - 3}">${lbl(dates[0])}</text><text class="tick" x="${W - m.r}" y="${H - 3}" text-anchor="end">${lbl(dates[N - 1])}</text>`;
+    }
+    el.innerHTML = s + "</svg>";
+    el.querySelectorAll(".hit").forEach(r => {
+      const i = +r.dataset.i;
+      const html = `<div class="t">${WD[dates[i].getUTCDay()]} ${lbl(dates[i])}</div>` + o.tip(i);
+      r.addEventListener("mousemove", e => showTip(html, e.clientX, e.clientY));
+      r.addEventListener("mouseleave", hideTip);
+      r.addEventListener("focus", () => { const b = r.getBoundingClientRect(); showTip(html, b.left + b.width / 2, b.top + 20); });
+      r.addEventListener("blur", hideTip);
+    });
+  };
+  draw();
+  let w = el.clientWidth;
+  new ResizeObserver(() => { if (el.clientWidth !== w) { w = el.clientWidth; draw(); } }).observe(el);
+}
+const calls = n => `${n} call${n === 1 ? "" : "s"}`;
+const row = (k, v, c) => `<div class="r"><span>${c ? `<i style="background:var(${c})"></i>` : ""}${k}</span><span>${v}</span></div>`;
+
+barChart(document.getElementById("c-mcp"), {
+  aria: "Bar chart of MCP tool calls per day", height: 230,
+  series: [{ values: D.mcp, color: "--s1" }], tick: v => int(v),
+  annotate: [peak], annoText: i => `${lbl(dates[i])} · ${D.mcp[i]}`,
+  tip: i => row("MCP tool calls", int(D.mcp[i])) + row("HTTP requests", int(D.http[i]))
+});
+barChart(document.getElementById("c-http"), {
+  aria: "Bar chart of HTTP requests per day", height: 230,
+  series: [{ values: D.http, color: "--s1" }], tick: v => v >= 1000 ? (v / 1000) + "k" : int(v),
+  annotate: [D.http.indexOf(Math.max(...D.http))], annoText: i => `${lbl(dates[i])} · ${int(D.http[i])}`,
+  tip: i => row("HTTP requests", int(D.http[i])) + row("Listing fetches", int(D.reg[i]))
+});
+barChart(document.getElementById("c-rev"), {
+  aria: "Stacked bar chart of daily x402 revenue in USDC, Solana and Base", height: 240, left: 52,
+  series: [{ values: D.revSol, color: "--s1" }, { values: D.revBase, color: "--s2" }],
+  tick: v => "$" + (+v.toFixed(3)).toString(),
+  annotate: [revTotal.indexOf(Math.max(...revTotal))], annoText: i => `${lbl(dates[i])} · ${usd(revTotal[i])}`,
+  tip: i => row("Solana", `${usd(D.revSol[i])} · ${calls(D.paidSol[i])}`, "--s1") +
+            row("Base", `${usd(D.revBase[i])} · ${calls(D.paidBase[i])}`, "--s2") +
+            row("Total", `${usd(revTotal[i])} · ${calls(D.paid[i])}`)
+});
+
+// ---------- small multiples ----------
+const MULTI = ["x402 Directory", "OpenAPI crawlers", "GitHub", "Glama", "MCP Registry", "Pay.sh", "Smithery", "x402scan"];
+const mult = document.getElementById("multiples");
+MULTI.forEach(name => {
+  const v = D.sources[name];
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<div class="chead"><h3>${name}</h3><span class="big">${int(sum(v))}</span></div>
+    <div class="small">peak ${int(Math.max(...v))} a day · average ${(sum(v) / N).toFixed(1)}</div><div class="chart"></div>`;
+  mult.appendChild(card);
+  barChart(card.querySelector(".chart"), {
+    aria: `Bar chart of daily ${name} fetches`, mini: true, height: 96,
+    series: [{ values: v, color: "--s1" }], tick: int,
+    tip: i => row(name, int(v[i]))
+  });
+});
+
+// ---------- horizontal bars ----------
+function hbars(id, items, fmt = int) {
+  const max = Math.max(...items.map(x => x[1]));
+  document.getElementById(id).innerHTML = items.map(([k, v]) =>
+    `<div class="hrow"><span>${k}</span><div class="track"><div class="bar" style="width:${Math.max(0.4, v / max * 100)}%"></div></div><span class="v">${fmt(v)}</span></div>`).join("");
+}
+hbars("h-sources", SOURCE_MIX_30D);
+hbars("h-tools", TOOL_MIX_30D);
+hbars("h-clients", CLIENT_MIX_30D);
+hbars("h-endpoints", PAID_ENDPOINTS);
+
+// ---------- daily table ----------
+let t = `<tr><th>Date</th><th class="n">HTTP requests</th><th class="n">MCP tool calls</th><th class="n">Listing fetches</th><th class="n">Paid calls</th><th class="n">Revenue Solana</th><th class="n">Revenue Base</th><th class="n">Revenue total</th></tr>`;
+for (let i = N - 1; i >= 0; i--) {
+  t += `<tr><td>${WD[dates[i].getUTCDay()]} ${lbl(dates[i])}</td><td class="n">${int(D.http[i])}</td><td class="n">${int(D.mcp[i])}</td><td class="n">${int(D.reg[i])}</td><td class="n">${D.paid[i]}</td><td class="n">${usd(D.revSol[i])}</td><td class="n">${usd(D.revBase[i])}</td><td class="n">${usd(revTotal[i])}</td></tr>`;
+}
+t += `<tr class="total"><td>30 days</td><td class="n">${int(tot.http)}</td><td class="n">${int(tot.mcp)}</td><td class="n">${int(tot.reg)}</td><td class="n">${tot.paid}</td><td class="n">${usd(tot.sol)}</td><td class="n">${usd(tot.base)}</td><td class="n">${usd(tot.rev)}</td></tr>`;
+document.getElementById("t-daily").innerHTML = t;
+</script>
+</body>
+</html>
