@@ -77,7 +77,11 @@ Runnable, spend-capped buyer examples are published in `examples/x402/`:
 Each example filters the challenge to the expected network and USDC asset and
 refuses an advertised amount above its configured cap. A rejected or expired
 signature should be rebuilt from the fresh `PAYMENT-REQUIRED` challenge returned
-by Blocksize. Every paid `402` response also includes `purchase_handoff` links
+by Blocksize. Every paid `402` response is also a landing page: `sample_value`
+shows an illustrative response, `price` states the exact cost in USDC and
+credits, `client_snippet` carries one copy-and-run command (plus a free preview
+`curl`), and `free_connector` names the authenticated connector whose monthly
+credits cover the same call without a wallet. `purchase_handoff` keeps the links
 to the free value preview and the maintained Base and Solana buyer clients.
 
 For recurring usage, inspect `GET /v1/account-plans` or call the public MCP
