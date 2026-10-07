@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import uuid
@@ -12,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def default_allowance_credits() -> int:
@@ -215,6 +218,7 @@ class EntitlementManager:
             "recovered_charges": 0,
             "recovered_credits": 0,
             "remaining_stale_charges": 0,
+            "partial_recoveries": 0,
         }
         self._init_db()
 
@@ -835,7 +839,7 @@ class EntitlementManager:
         usage_date: str | None = None,
     ) -> CreditStatus:
         """Return the user's monthly free-tier state, creating rows as needed."""
-        self.recover_stale_pending()
+        self._recover_stale_pending_safely()
         usage_date = usage_date or _today()
         with self._connection() as conn:
             self._ensure_user(conn, user_id, email)
@@ -856,7 +860,7 @@ class EntitlementManager:
         """Atomically reserve monthly free-tier credits in a durable pending charge."""
         if amount < 0:
             raise ValueError("amount must be non-negative")
-        self.recover_stale_pending()
+        self._recover_stale_pending_safely()
         usage_date = usage_date or _today()
         effective_charge_id = charge_id or f"legacy:{uuid.uuid4().hex}"
 
@@ -1000,19 +1004,40 @@ class EntitlementManager:
             - timedelta(seconds=self.pending_charge_lease_seconds)
         ).isoformat()
 
+    def _recover_stale_pending_safely(self) -> None:
+        """Run recovery as housekeeping: a failure is logged, never raised to a caller.
+
+        status() and spend() call this for every user. Before this guard, one
+        pending charge the recovery could not reconcile raised out of every
+        balance read and every free-tier call on the connector.
+        """
+        try:
+            self.recover_stale_pending()
+        except Exception as exc:  # noqa: BLE001 - recovery must never block a read
+            logger.error(
+                "stale pending-charge recovery failed and was skipped: %s", type(exc).__name__
+            )
+
     def recover_stale_pending(
         self,
         *,
         now: datetime | None = None,
         limit: int = PENDING_RECOVERY_BATCH_LIMIT,
     ) -> dict[str, int]:
-        """Refund a bounded batch of expired pending charges atomically."""
+        """Refund a bounded batch of expired pending charges atomically.
+
+        A charge whose usage row is missing or already smaller than the charge
+        (for example after the retention purge folded or dropped that day) is
+        refunded for what the row still holds, closed, logged and counted as a
+        partial recovery, so one inconsistent row cannot stall the batch.
+        """
         if limit <= 0:
             raise ValueError("limit must be positive")
         bounded_limit = min(int(limit), PENDING_RECOVERY_BATCH_LIMIT)
         cutoff = self._recovery_cutoff(now)
         recovered_charges = 0
         recovered_credits = 0
+        partial_recoveries = 0
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             charges = conn.execute(
@@ -1034,9 +1059,13 @@ class EntitlementManager:
                     """,
                     (user_id, usage_date),
                 ).fetchone()
-                if usage_row is None or int(usage_row[0]) < amount:
-                    raise sqlite3.IntegrityError(
-                        "Pending charge exceeds its authoritative entitlement balance"
+                available = max(int(usage_row[0]), 0) if usage_row is not None else 0
+                refund = min(amount, available)
+                partial = refund < amount
+                if partial:
+                    logger.warning(
+                        "pending charge %s for %s on %s exceeds its usage row: refunding %d of %d",
+                        charge_id, user_id, usage_date, refund, amount,
                     )
                 cursor = conn.execute(
                     """
@@ -1048,14 +1077,15 @@ class EntitlementManager:
                 )
                 if cursor.rowcount != 1:
                     continue
-                conn.execute(
-                    """
-                    UPDATE daily_usage
-                    SET credits_spent = credits_spent - ?, updated_at = ?
-                    WHERE user_id = ? AND usage_date = ?
-                    """,
-                    (amount, _utc_now(), user_id, usage_date),
-                )
+                if refund > 0:
+                    conn.execute(
+                        """
+                        UPDATE daily_usage
+                        SET credits_spent = credits_spent - ?, updated_at = ?
+                        WHERE user_id = ? AND usage_date = ?
+                        """,
+                        (refund, _utc_now(), user_id, usage_date),
+                    )
                 user_row = conn.execute(
                     "SELECT 1 FROM users WHERE user_id = ?",
                     (user_id,),
@@ -1075,12 +1105,13 @@ class EntitlementManager:
                     str(usage_date),
                     "system_recovery",
                     "",
-                    -amount,
+                    -refund,
                     remaining,
-                    "stale_pending_refunded",
+                    "stale_pending_partial_refund" if partial else "stale_pending_refunded",
                 )
                 recovered_charges += 1
-                recovered_credits += amount
+                recovered_credits += refund
+                partial_recoveries += int(partial)
             remaining_row = conn.execute(
                 """
                 SELECT COUNT(*) FROM credit_charges
@@ -1093,6 +1124,7 @@ class EntitlementManager:
             "recovered_charges": recovered_charges,
             "recovered_credits": recovered_credits,
             "remaining_stale_charges": remaining_stale_charges,
+            "partial_recoveries": partial_recoveries,
         }
         self._last_recovery = dict(result)
         return result
