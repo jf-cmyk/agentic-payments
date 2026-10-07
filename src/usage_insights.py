@@ -1116,8 +1116,8 @@ IMPROVEMENT_PLAN = [
         "title": "Slim the deep-dive stats payload",
         "detail": (
             "On 28 Sep 2026 /internal/observability/stats returned 3.1 MB, 3.0 MB of it "
-            "the RWA pilot block, and it loads every event of the window into memory. "
-            "Move the RWA pilot to its own endpoint."
+            "the RWA pilot block. The pilot moved to /internal/observability/rwa-pilot "
+            "on 7 Oct 2026; stats still loads every event of the window into memory."
         ),
     },
     {
