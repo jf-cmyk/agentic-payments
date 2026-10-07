@@ -22,8 +22,11 @@ from src.free_tier_ledger import FreeTierLedger
 from src.observability import UsageEventStore, fingerprint
 
 # A synthetic clock late in a month, so a current-month day is older than the cutoff.
-NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
-CUTOFF = NOW - timedelta(days=retention.RETENTION_DAYS)  # 2026-10-02T12:00Z
+# It sits far in the future on purpose: status() and spend() run pending-charge
+# recovery against the real clock, and the seeded pending rows must never look
+# expired to it (they did once the calendar passed the original October 2026 dates).
+NOW = datetime(2099, 10, 31, 12, 0, tzinfo=UTC)
+CUTOFF = NOW - timedelta(days=retention.RETENTION_DAYS)  # 2099-10-02T12:00Z
 RECENT = (NOW - timedelta(days=1)).isoformat()
 OLD = (CUTOFF - timedelta(days=1)).isoformat()
 
@@ -62,24 +65,24 @@ def _seed_entitlements(db_path: Path) -> EntitlementManager:
             "INSERT INTO daily_usage (user_id, usage_date, credits_spent, updated_at) "
             "VALUES (?, ?, ?, ?)",
             [
-                ("user-active", "2026-09-15", 7, OLD),  # past month: dropped
-                ("user-active", "2026-10-01", 4, OLD),  # this month, before cutoff: folded
-                ("user-active", "2026-10-20", 2, RECENT),  # recent: kept
-                ("user-idle", "2026-10-01", 9, OLD),
+                ("user-active", "2099-09-15", 7, OLD),  # past month: dropped
+                ("user-active", "2099-10-01", 4, OLD),  # this month, before cutoff: folded
+                ("user-active", "2099-10-20", 2, RECENT),  # recent: kept
+                ("user-idle", "2099-10-01", 9, OLD),
             ],
         )
         conn.executemany(
             "INSERT INTO usage_events (user_id, usage_date, tool_name, subject, credits_delta, "
             "credits_remaining, outcome, created_at) VALUES (?, ?, 'get_vwap', 'BTC', 1, 1, 'ok', ?)",
             [
-                ("user-active", "2026-10-01", OLD),
-                ("user-active", "2026-10-30", RECENT),
-                ("user-idle", "2026-10-01", OLD),
+                ("user-active", "2099-10-01", OLD),
+                ("user-active", "2099-10-30", RECENT),
+                ("user-idle", "2099-10-01", OLD),
             ],
         )
         conn.executemany(
             "INSERT INTO credit_charges (charge_id, user_id, usage_date, amount, state, created_at) "
-            "VALUES (?, ?, '2026-10-01', 1, ?, ?)",
+            "VALUES (?, ?, '2099-10-01', 1, ?, ?)",
             [
                 ("old-delivered", "user-active", "delivered", OLD),
                 ("new-delivered", "user-active", "delivered", RECENT),
@@ -130,11 +133,11 @@ def test_entitlement_purge_keeps_the_monthly_allowance_intact(tmp_path: Path) ->
         "ORDER BY usage_date"
     )
     manager.purge_expired_data(CUTOFF, usage_date=NOW.date().isoformat())
-    assert _rows(db_path, active_rows) == [("2026-10-00", 4), ("2026-10-20", 2)]
+    assert _rows(db_path, active_rows) == [("2099-10-00", 4), ("2099-10-20", 2)]
 
     # A second pass leaves the carry row alone instead of double counting.
     manager.purge_expired_data(CUTOFF, usage_date=NOW.date().isoformat())
-    assert _rows(db_path, active_rows) == [("2026-10-00", 4), ("2026-10-20", 2)]
+    assert _rows(db_path, active_rows) == [("2099-10-00", 4), ("2099-10-20", 2)]
 
     # The monthly allowance reads the carry row. (status() stamps the real clock,
     # so it is checked only after the synthetic-clock passes.)
@@ -146,13 +149,13 @@ def test_entitlement_carry_row_ages_out_the_next_month(tmp_path: Path) -> None:
     manager = _seed_entitlements(db_path)
     manager.purge_expired_data(CUTOFF, usage_date=NOW.date().isoformat())
 
-    next_month = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
-    manager.purge_expired_data(next_month - timedelta(days=29), usage_date="2026-11-03")
+    next_month = datetime(2099, 11, 3, 12, 0, tzinfo=UTC)
+    manager.purge_expired_data(next_month - timedelta(days=29), usage_date="2099-11-03")
 
     assert _rows(
         db_path,
         "SELECT usage_date FROM daily_usage WHERE user_id = 'user-active' ORDER BY usage_date",
-    ) == [("2026-10-20",)]
+    ) == [("2099-10-20",)]
 
 
 # --- shared free-tier ledger -------------------------------------------------------
@@ -176,11 +179,11 @@ def ledger(tmp_path: Path, monkeypatch) -> FreeTierLedger:
             "INSERT INTO grant_usage (grant_key, usage_date, credits_spent, updated_at) "
             "VALUES (?, ?, ?, ?)",
             [
-                ("grant-active", "2026-09-15", 7, OLD),
-                ("grant-active", "2026-10-01", 4, OLD),
-                ("grant-active", "2026-10-20", 2, RECENT),
-                ("grant-idle", "2026-10-01", 9, OLD),
-                ("grant-suspended", "2026-10-01", 80, OLD),
+                ("grant-active", "2099-09-15", 7, OLD),
+                ("grant-active", "2099-10-01", 4, OLD),
+                ("grant-active", "2099-10-20", 2, RECENT),
+                ("grant-idle", "2099-10-01", 9, OLD),
+                ("grant-suspended", "2099-10-01", 80, OLD),
             ],
         )
         conn.executemany(
@@ -194,7 +197,7 @@ def ledger(tmp_path: Path, monkeypatch) -> FreeTierLedger:
         old_ts = (CUTOFF - timedelta(days=1)).timestamp()
         conn.executemany(
             "INSERT INTO grant_reservations (charge_id, grant_key, usage_date, credits, state, "
-            "reserved_at, updated_at) VALUES (?, ?, '2026-10-01', 1, ?, ?, ?)",
+            "reserved_at, updated_at) VALUES (?, ?, '2099-10-01', 1, ?, ?, ?)",
             [
                 ("r-delivered", "grant-active", "delivered", old_ts, OLD),
                 ("r-pending", "grant-active", "pending", old_ts, OLD),
@@ -215,7 +218,7 @@ def test_ledger_purge_keeps_pool_and_only_the_suspended_hash(ledger: FreeTierLed
     # The idle grant is gone; the suspended one keeps only this month's total.
     assert _rows(
         db, "SELECT grant_key, usage_date FROM grant_usage WHERE grant_key != 'grant-active'"
-    ) == [("grant-suspended", "2026-10-00")]
+    ) == [("grant-suspended", "2099-10-00")]
     assert _rows(db, "SELECT grant_key, ledger_subject FROM grant_subjects") == [
         ("grant-active", "connector:aud:new-sub")
     ]
@@ -244,7 +247,7 @@ def test_observability_purge_is_scoped_to_claude_surfaces(tmp_path: Path) -> Non
             "INSERT INTO event_milestones (event, identity_hash, timestamp) VALUES (?, ?, ?)",
             [
                 ("upgrade_cta_shown", "cta-hash", OLD),
-                ("user_email_threshold_80_2026-09", "grant-hash", OLD),
+                ("user_email_threshold_80_2099-09", "grant-hash", OLD),
                 ("first_live_price_delivered", "active-user", OLD),
                 ("first_live_price_delivered", "purged-user", OLD),
                 ("upgrade_cta_shown", "cta-recent", RECENT),
