@@ -10,8 +10,9 @@ from urllib.parse import quote_plus
 from src import pricing_catalog
 from src.commercial_plans import CURRENCY as PLAN_CURRENCY, account_plan_catalog, plan_by_id
 
-APP_VERSION = "0.6.23"
+APP_VERSION = "0.6.24"
 PUBLIC_CONTENT_LAST_MODIFIED_BY_VERSION = {
+    "0.6.24": "2026-10-07",
     "0.6.23": "2026-09-24",
     "0.6.22": "2026-09-18",
     "0.6.21": "2026-09-18",
