@@ -356,6 +356,30 @@ async def test_shared_pool_is_restored_when_delivery_finalization_is_lost(monkey
 
 
 @pytest.mark.asyncio
+async def test_balance_read_alone_restores_the_shared_pool_after_a_lost_finalization(monkeypatch):
+    """September health audit: stuck-charge recovery refunded the connector ledger
+    but not the shared pool, so the binding balance stayed debited."""
+    _use(monkeypatch, claude, _identity("u1", "one@example.org"))
+    monkeypatch.setattr(claude._entitlements, "finalize_delivery", lambda *a, **k: None)
+    parsed = json.loads(await claude.anthropic_get_vwap("btc-usd"))
+    assert parsed["error_code"] == "CREDIT_FINALIZATION_FAILED"
+
+    ledger = get_free_tier_ledger()
+    grant_key = free_tier.grant_key_for_email("one@example.org")
+    assert ledger.status(grant_key).credits_spent == 1
+
+    import time as _time
+
+    later = _time.time() + 16 * 60
+    monkeypatch.setattr("src.free_tier_ledger.time.time", lambda: later)
+    balance = json.loads(await claude.anthropic_get_credit_balance())["credits"]
+
+    assert balance["shared_pool"]["credits_spent"] == 0
+    assert balance["shared_pool"]["credits_remaining"] == 3
+    assert ledger.summary()["pending_reservations"] == 0
+
+
+@pytest.mark.asyncio
 async def test_delivered_call_finalizes_the_shared_reservation(monkeypatch):
     _use(monkeypatch, claude, _identity("u1", "one@example.org"))
     await claude.anthropic_get_vwap("btc-usd")

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import logging
 import os
 from pathlib import Path
 import sqlite3
@@ -28,10 +29,13 @@ from typing import Any
 from src.config import settings
 from src.entitlement_manager import (
     DEFAULT_PENDING_CHARGE_LEASE_SECONDS,
+    MIN_PENDING_CHARGE_LEASE_SECONDS,
     PENDING_RECOVERY_BATCH_LIMIT,
     month_prefix,
     month_reset_date,
 )
+
+logger = logging.getLogger(__name__)
 
 THRESHOLDS = (50, 80, 95, 100)
 VALID_GRANT_STATUSES = frozenset({"active", "suspended"})
@@ -210,8 +214,22 @@ class FreeTierLedger:
         )
 
     # -- public API -------------------------------------------------------
+    def _recover_stale_reservations_safely(self) -> None:
+        """Housekeeping before a read: a failure is logged, never raised.
+
+        The connector ledgers refund stale pending charges on every balance
+        read; the shared pool used to do so only inside reserve(), so after a
+        crash the binding min(connector, shared) balance stayed debited until
+        the next successful call.
+        """
+        try:
+            self.recover_stale_reservations()
+        except sqlite3.Error as exc:
+            logger.error("stale shared-pool recovery failed and was skipped: %s", type(exc).__name__)
+
     def status(self, grant_key: str, *, usage_date: str | None = None) -> FreeTierSnapshot:
         usage_date = usage_date or _today()
+        self._recover_stale_reservations_safely()
         with self._connect() as conn:
             self._ensure_grant(conn, grant_key)
             return self._snapshot(conn, grant_key, usage_date)
@@ -454,10 +472,14 @@ class FreeTierLedger:
                 str(DEFAULT_PENDING_CHARGE_LEASE_SECONDS),
             ))
         )
+        # The connector ledgers refuse a lease below this floor; the shared
+        # pool must not refund a reservation a connector still treats as live.
+        lease = max(lease, MIN_PENDING_CHARGE_LEASE_SECONDS)
         cutoff = current - lease
         now_iso = self._now_iso()
         recovered = 0
         credits_recovered = 0
+        partial_recoveries = 0
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
@@ -473,18 +495,30 @@ class FreeTierLedger:
                 )
                 if cursor.rowcount != 1:
                     continue
-                conn.execute(
-                    "UPDATE grant_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
-                    "WHERE grant_key = ? AND usage_date = ?",
-                    (int(credits), now_iso, grant_key, usage_date),
-                )
-                conn.execute(
-                    "UPDATE global_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
-                    "WHERE usage_date = ?",
-                    (int(credits), now_iso, usage_date),
-                )
+                # Refund the row the debit lives in: the day's row, or the
+                # month fold row the retention purge moved it into. Never
+                # refund more than that row still holds.
+                refund_date, available = self._refundable_usage(conn, grant_key, usage_date)
+                refund = min(int(credits), available)
+                if refund < int(credits):
+                    partial_recoveries += 1
+                    logger.warning(
+                        "stale shared-pool reservation %s exceeds its usage row: refunding %d of %d",
+                        charge_id, refund, int(credits),
+                    )
+                if refund > 0:
+                    conn.execute(
+                        "UPDATE grant_usage SET credits_spent = credits_spent - ?, updated_at = ? "
+                        "WHERE grant_key = ? AND usage_date = ?",
+                        (refund, now_iso, grant_key, refund_date),
+                    )
+                    conn.execute(
+                        "UPDATE global_usage SET credits_spent = MAX(0, credits_spent - ?), updated_at = ? "
+                        "WHERE usage_date = ?",
+                        (refund, now_iso, usage_date),
+                    )
                 recovered += 1
-                credits_recovered += int(credits)
+                credits_recovered += refund
             remaining = conn.execute(
                 "SELECT COUNT(*) FROM grant_reservations WHERE state = 'pending' AND reserved_at <= ?",
                 (cutoff,),
@@ -492,8 +526,23 @@ class FreeTierLedger:
         return {
             "recovered_reservations": recovered,
             "recovered_credits": credits_recovered,
+            "partial_recoveries": partial_recoveries,
             "remaining_stale_reservations": int(remaining),
         }
+
+    @staticmethod
+    def _refundable_usage(
+        conn: sqlite3.Connection, grant_key: str, usage_date: str
+    ) -> tuple[str, int]:
+        """Return (row date, credits that row holds) for a reservation's debit."""
+        for candidate in (usage_date, f"{month_prefix(usage_date)}-00"):
+            row = conn.execute(
+                "SELECT credits_spent FROM grant_usage WHERE grant_key = ? AND usage_date = ?",
+                (grant_key, candidate),
+            ).fetchone()
+            if row is not None:
+                return candidate, max(int(row[0]), 0)
+        return usage_date, 0
 
     def set_status(self, grant_key: str, status: str, *, reason: str = "") -> FreeTierSnapshot:
         if status not in VALID_GRANT_STATUSES:
@@ -510,6 +559,7 @@ class FreeTierLedger:
     def summary(self, *, usage_date: str | None = None) -> dict[str, Any]:
         """Operator view for /health and the command center (no identifiers)."""
         usage_date = usage_date or _today()
+        self._recover_stale_reservations_safely()
         with self._connect() as conn:
             grants = conn.execute("SELECT COUNT(*) FROM grants").fetchone()[0]
             suspended = conn.execute(
