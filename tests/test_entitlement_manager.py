@@ -352,6 +352,7 @@ def test_schema_status_accepts_entitlement_schema(tmp_path):
             "recovered_charges": 0,
             "recovered_credits": 0,
             "remaining_stale_charges": 0,
+            "partial_recoveries": 0,
         },
     }
 
@@ -978,16 +979,19 @@ def test_stale_pending_recovery_is_bounded_and_preserves_active_charge(tmp_path)
         "recovered_charges": 1,
         "recovered_credits": 1,
         "remaining_stale_charges": 1,
+        "partial_recoveries": 0,
     }
     assert second == {
         "recovered_charges": 1,
         "recovered_credits": 1,
         "remaining_stale_charges": 0,
+        "partial_recoveries": 0,
     }
     assert duplicate == {
         "recovered_charges": 0,
         "recovered_credits": 0,
         "remaining_stale_charges": 0,
+        "partial_recoveries": 0,
     }
     assert states == {
         "crashed-1": "refunded",
@@ -1003,3 +1007,89 @@ def test_pending_recovery_lease_rejects_unsafe_short_configuration(tmp_path):
             tmp_path / "unsafe.db",
             pending_charge_lease_seconds=MIN_PENDING_CHARGE_LEASE_SECONDS - 1,
         )
+
+
+def _manager_with_orphan_pending_charge(db_path, *, usage_credits=None):
+    """A pending charge older than the lease whose usage row is missing or too small."""
+    manager = EntitlementManager(
+        db_path,
+        default_daily_credits=10,
+        pending_charge_lease_seconds=MIN_PENDING_CHARGE_LEASE_SECONDS,
+    )
+    ok, _ = manager.spend("healthy", 1, tool_name="get_vwap", subject="BTCUSD",
+                          usage_date="2026-10-01", charge_id="healthy-pending")
+    assert ok is True
+    old = (datetime(2026, 10, 2, tzinfo=UTC) - timedelta(hours=2)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO users (user_id, daily_limit, status, created_at, updated_at) "
+            "VALUES ('orphan', 10, 'active', ?, ?)",
+            (old, old),
+        )
+        conn.execute(
+            "INSERT INTO credit_charges (charge_id, user_id, usage_date, amount, state, created_at) "
+            "VALUES ('orphan-pending', 'orphan', '2026-09-01', 3, 'pending', ?)",
+            (old,),
+        )
+        if usage_credits is not None:
+            conn.execute(
+                "INSERT INTO daily_usage (user_id, usage_date, credits_spent, updated_at) "
+                "VALUES ('orphan', '2026-09-01', ?, ?)",
+                (usage_credits, old),
+            )
+        conn.execute(
+            "UPDATE credit_charges SET created_at = ? WHERE charge_id = 'healthy-pending'",
+            (old,),
+        )
+    return manager
+
+
+def test_pending_charge_without_usage_row_is_closed_without_blocking_the_batch(tmp_path):
+    manager = _manager_with_orphan_pending_charge(tmp_path / "orphan.db")
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+
+    report = manager.recover_stale_pending(now=now)
+
+    assert report == {
+        "recovered_charges": 2,
+        "recovered_credits": 1,
+        "remaining_stale_charges": 0,
+        "partial_recoveries": 1,
+    }
+    with sqlite3.connect(tmp_path / "orphan.db") as conn:
+        states = dict(conn.execute("SELECT charge_id, state FROM credit_charges").fetchall())
+        outcomes = [
+            row[0] for row in conn.execute(
+                "SELECT outcome FROM usage_events WHERE tool_name = 'system_recovery' ORDER BY id"
+            )
+        ]
+    assert states == {"healthy-pending": "refunded", "orphan-pending": "refunded"}
+    assert "stale_pending_partial_refund" in outcomes
+    assert "stale_pending_refunded" in outcomes
+
+
+def test_pending_charge_larger_than_its_usage_row_refunds_only_what_is_there(tmp_path):
+    manager = _manager_with_orphan_pending_charge(tmp_path / "partial.db", usage_credits=2)
+
+    report = manager.recover_stale_pending(now=datetime(2026, 10, 2, tzinfo=UTC))
+
+    assert report["partial_recoveries"] == 1
+    assert report["recovered_credits"] == 1 + 2
+    with sqlite3.connect(tmp_path / "partial.db") as conn:
+        spent = conn.execute(
+            "SELECT credits_spent FROM daily_usage WHERE user_id = 'orphan'"
+        ).fetchone()[0]
+    assert spent == 0, "the refund never drives a usage row negative"
+
+
+def test_status_keeps_working_for_other_users_while_a_bad_charge_exists(tmp_path, monkeypatch):
+    manager = _manager_with_orphan_pending_charge(tmp_path / "status.db")
+
+    def exploding_recovery(**_kwargs):
+        raise sqlite3.IntegrityError("simulated recovery failure")
+
+    monkeypatch.setattr(manager, "recover_stale_pending", exploding_recovery)
+    status = manager.status("healthy", usage_date="2026-10-02")
+    assert status.credits_spent >= 0
+    ok, _ = manager.spend("healthy", 1, tool_name="get_vwap", subject="ETHUSD", usage_date="2026-10-02")
+    assert ok is True
