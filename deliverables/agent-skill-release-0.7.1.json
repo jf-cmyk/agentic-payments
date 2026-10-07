@@ -4,9 +4,9 @@
       "filename": "blocksize-market-data-openai-plugin-0.7.1.zip",
       "label": "openai",
       "members": 10,
-      "sha256": "c22782e8f66971e4315418c16fb7cfc4203ac22286bdf9d9fdf5d7d89fca7820",
-      "size_bytes": 13522,
-      "source_tree_sha256": "fc7dc2e6baceda0f144f543e5ea1d5af159814688343db18879486a0f86e17d2"
+      "sha256": "bc7d8b7d889c261be52be9a5cbfbb1d26e3543cd5784fdc995b2d93482815a40",
+      "size_bytes": 13457,
+      "source_tree_sha256": "e539114ad000015db973d53717108d1d081f1dccc4c1cef046b7a22f5ea2e581"
     },
     {
       "filename": "blocksize-market-data-claude-plugin-0.6.0.zip",
