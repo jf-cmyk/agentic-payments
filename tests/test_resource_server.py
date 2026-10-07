@@ -49,6 +49,7 @@ from src.models import (
 )
 from src.observability import UsageEventStore, configure_global_store
 from src.config import settings
+from src.pricing_catalog import product_usdc
 from src.credit_manager import STARTER_CREDIT_ALLOWANCE, CreditManager
 from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 from src.rwa_store import RWAObservationStore
@@ -1258,6 +1259,19 @@ class TestPublicListingSurfaces:
         fx = data["paths"]["/v1/fx/{pair}"]["get"]
         assert fx["x-payment-info"]["price"]["amount"] == str(settings.pricing.tradfi)
 
+        for path, product in (
+            ("/v1/briefs/market", "market_brief"),
+            ("/v1/checks/pre-trade", "pre_trade_check"),
+            ("/v1/signals/trader-alpha-pack", "trader_alpha_pack"),
+        ):
+            info = data["paths"][path]["post"]["x-payment-info"]
+            assert info["protocols"] == [{"x402": {}}]
+            assert info["price"] == {
+                "mode": "fixed",
+                "currency": "USD",
+                "amount": str(product_usdc(product)),
+            }
+
     def test_support_and_privacy_pages_exist(self, test_client):
         assert test_client.get("/support").status_code == 200
         assert test_client.get("/privacy").status_code == 200
@@ -1505,6 +1519,42 @@ class TestPaymentGate:
         assert payload["accepts"] == challenge["accepts"]
         assert payload["purchase_handoff"]["retry_url"] == payload["resource"]["url"]
         assert "fresh challenge" in payload["message"]
+        assert "base64-encoded JSON" in payload["diagnosis"]
+        assert payload["parse_errors"] == []
+
+    def test_requirement_mismatch_explains_what_to_sign(self, test_client):
+        reason = "Accepted payment requirement extra does not match"
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={"valid": False, "reason": reason, "parse_errors": [reason]},
+        ):
+            response = test_client.get(
+                "/v1/vwap/btc-usd", headers={"PAYMENT-SIGNATURE": "signed-elsewhere"}
+            )
+
+        assert response.status_code == 402
+        payload = response.json()
+        assert payload["error_code"] == "PAYMENT_REQUIREMENT_MISMATCH"
+        assert "sign it unchanged" in payload["diagnosis"]
+        assert payload["parse_errors"] == [reason]
+        assert payload["accepts"], "the fresh challenge carries the entry to copy"
+
+    def test_facilitator_outage_tells_the_client_when_to_resend(self, test_client):
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={"valid": False, "reason": "facilitator_unavailable"},
+        ):
+            response = test_client.get(
+                "/v1/vwap/btc-usd", headers={"PAYMENT-SIGNATURE": "valid-but-unverifiable"}
+            )
+
+        assert response.status_code == 502
+        assert response.headers["Retry-After"] == "30"
+        payload = response.json()
+        assert payload["retry_after_seconds"] == 30
+        assert "same PAYMENT-SIGNATURE" in payload["retry"]
 
     def test_rejected_payment_names_the_specific_parser_error(
         self,

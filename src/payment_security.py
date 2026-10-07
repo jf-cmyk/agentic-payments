@@ -50,8 +50,11 @@ from src.security_config import is_production_environment
 
 logger = logging.getLogger(__name__)
 
-# Facilitator failures that are worth one retry for the read-only /verify call.
+# Transient facilitator failures are retried twice for the read-only /verify
+# call: once after VERIFY_RETRY_DELAY_SECONDS and once after three times that.
+# Settlement is never retried automatically.
 VERIFY_RETRY_DELAY_SECONDS = 0.5
+VERIFY_ATTEMPTS = 3
 
 
 def facilitator_error_kind(exc: BaseException) -> str:
@@ -993,7 +996,7 @@ class FacilitatorAdapter:
         except PaymentSecurityError:
             return {"isValid": False, "invalidReason": "payment_requirement_mismatch"}
         response: Any = None
-        for attempt in (1, 2):
+        for attempt in range(1, VERIFY_ATTEMPTS + 1):
             try:
                 response = await self._call("verify", request_json)
                 break
@@ -1006,8 +1009,8 @@ class FacilitatorAdapter:
                     attempt,
                     payment.accepted.get("network"),
                 )
-                if attempt == 1 and _is_transient_facilitator_error(kind):
-                    await asyncio.sleep(VERIFY_RETRY_DELAY_SECONDS)
+                if attempt < VERIFY_ATTEMPTS and _is_transient_facilitator_error(kind):
+                    await asyncio.sleep(VERIFY_RETRY_DELAY_SECONDS * (1 if attempt == 1 else 3))
                     continue
                 return {
                     "isValid": False,
