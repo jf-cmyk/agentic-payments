@@ -70,6 +70,8 @@ def package_specs() -> tuple[PackageSpec, ...]:
                 ".mcp.json",
                 "LICENSE",
                 "README.md",
+                "assets/icon.png",
+                "assets/logo.png",
                 *SHARED_SKILL_MEMBERS,
                 "skills/use-blocksize-market-data/agents/openai.yaml",
             ),

@@ -170,7 +170,7 @@ def test_openai_plugin_uses_distinct_live_and_public_mcp_identities() -> None:
     )
     dependency = skill_metadata["dependencies"]["tools"][0]
 
-    assert manifest["version"] == "0.7.0"
+    assert manifest["version"] == "0.7.1"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert bundled_mcp == {
@@ -250,7 +250,7 @@ def test_plugin_install_guidance_does_not_claim_stale_remote_availability() -> N
         assert CANONICAL_REPOSITORY in text
 
     assert "codex plugin marketplace add /absolute/path/to/agentic-payments" in openai_readme
-    assert "blocksize-market-data-openai-plugin-0.7.0.zip" in openai_readme
+    assert "blocksize-market-data-openai-plugin-0.7.1.zip" in openai_readme
     assert "Future Remote Install Gate" in openai_readme
     assert "claude --plugin-dir /absolute/path/to/claude-plugin/blocksize-market-data" in (
         claude_setup
@@ -356,7 +356,7 @@ def test_package_builder_is_reproducible_and_allowlisted(tmp_path: Path) -> None
 
 def test_versioned_release_artifacts_match_reproducible_build(tmp_path: Path) -> None:
     build_agent_skill_packages.build_all(tmp_path)
-    release_version = "0.7.0"
+    release_version = "0.7.1"
 
     for spec in build_agent_skill_packages.package_specs():
         assert (ROOT / "deliverables" / spec.filename).read_bytes() == (

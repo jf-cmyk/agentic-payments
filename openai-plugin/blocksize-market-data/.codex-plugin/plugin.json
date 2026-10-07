@@ -1,6 +1,6 @@
 {
   "name": "blocksize-market-data",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Read-only authenticated Blocksize live market data for ChatGPT and Codex.",
   "author": {
     "name": "Blocksize Capital GmbH",
@@ -22,24 +22,88 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Blocksize Market Data",
-    "shortDescription": "Discover verified market data and exact API routes.",
-    "longDescription": "Find supported crypto, equity, FX, metal, state-price, and VWAP data products, plus workflow briefs and trader indicators. The authenticated MCP connector retrieves live observations with starter credits while preserving the distinction between discovery, live retrieval, and paid x402 HTTP access.",
+    "shortDescription": "Verified live market data",
+    "longDescription": "Blocksize Market Data gives ChatGPT and Codex read-only access to Blocksize's institutional real-time market data. Search the instrument catalog, check coverage and freshness, then fetch multi-venue crypto VWAP, bid/ask quotes, FX rates, metals prices and tokenized equities, each with timestamps and provenance. Signed-in users with a verified email receive 30,000 free live-data credits every calendar month under an evaluation licence with \"Data by Blocksize\" attribution; subscriptions start at EUR 49/month with a free trial. The plugin never trades, moves funds, signs wallet messages or gives investment advice.",
     "developerName": "Blocksize Capital GmbH",
     "category": "Data & Analytics",
     "capabilities": [
-      "Read-only",
-      "Market data",
-      "MCP"
+      "Instrument search",
+      "Live crypto VWAP and bid/ask",
+      "FX and metals prices",
+      "Tokenized equity quotes",
+      "Credit balance"
     ],
     "websiteURL": "https://mcp.blocksize.info/",
+    "supportURL": "https://mcp.blocksize.info/support",
     "privacyPolicyURL": "https://mcp.blocksize.info/privacy",
-    "termsOfServiceURL": "https://mcp.blocksize.info/terms",
+    "termsOfServiceURL": "https://blocksize.info/terms-conditions-data/",
     "defaultPrompt": [
-      "Retrieve Blocksize BTC VWAP with its timestamp.",
-      "Get the live Blocksize AAPL bid/ask snapshot.",
-      "Show Blocksize pricing for an FX snapshot."
+      "What is the current multi-venue VWAP for BTC/USD?",
+      "Compare the bid/ask spreads for ETH/USD and SOL/USD.",
+      "What are the latest EUR/USD rate and gold price?"
     ],
-    "brandColor": "#4F4BFF"
+    "brandColor": "#4F4BFF",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
   },
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "extensions": {
+    "com.openai": {
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Find instruments for an asset",
+              "prompt": "Find Blocksize instruments for Solana.",
+              "tools_triggered": "search_pairs",
+              "expected_behavior": "Returns SOLUSD and related pairs with their asset class and available services; no live price and no charge."
+            },
+            {
+              "description": "Live crypto VWAP",
+              "prompt": "What is the current multi-venue VWAP for BTC/USD?",
+              "tools_triggered": "get_vwap",
+              "expected_behavior": "Returns the BTCUSD VWAP with a UTC timestamp, provider provenance and the remaining monthly credit line."
+            },
+            {
+              "description": "Live bid/ask",
+              "prompt": "Show the ETH/USD bid and ask.",
+              "tools_triggered": "get_bid_ask",
+              "expected_behavior": "Returns bid, ask and spread for ETHUSD with a timestamp."
+            },
+            {
+              "description": "FX and metals",
+              "prompt": "What are the latest EUR/USD rate and gold price?",
+              "tools_triggered": "get_fx_rate, get_metal_price",
+              "expected_behavior": "Returns the EURUSD mid rate and the XAUUSD price, each with a timestamp."
+            },
+            {
+              "description": "Credit balance",
+              "prompt": "How many free Blocksize credits do I have left this month?",
+              "tools_triggered": "get_credit_balance",
+              "expected_behavior": "Returns the monthly limit, credits spent, credits remaining and the reset date."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Trading is out of scope",
+              "prompt": "Buy 1 BTC for me."
+            },
+            {
+              "description": "Unknown instrument",
+              "prompt": "Get the VWAP for FAKECOIN/USD."
+            },
+            {
+              "description": "Investment advice is out of scope",
+              "prompt": "Should I invest in ETH right now?"
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments; live data is covered by free monthly credits."
+      },
+      "publication": {
+        "release_notes": "First directory release: instrument search, live multi-venue crypto VWAP and bid/ask, FX and metals prices, tokenized equity quotes, and a credit balance tool, with 30,000 free live-data credits a month for signed-in users."
+      }
+    }
+  }
 }
