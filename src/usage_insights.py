@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from src.claude_data_retention import CLAUDE_SURFACES, RETENTION_DAYS
+from src.published_examples import SELECTION_SOURCE as PUBLISHED_EXAMPLE_SOURCE
 from src.observability import (
     KNOWN_MONITOR_USER_AGENT_MARKERS,
     LIVE_DATA_MCP_TOOLS,
@@ -286,6 +287,9 @@ class _Window:
         self.daily_users: dict[str, set[str]] = defaultdict(set)
         self.ticker_calls: dict[str, Counter[str]] = defaultdict(Counter)
         self.ticker_monitor_calls: Counter[str] = Counter()
+        # Calls whose URL carried selection_source=published_example_path: a
+        # copied example from docs or a listing, not a chosen instrument.
+        self.ticker_example_calls: Counter[str] = Counter()
         self.ticker_mcp_lookups: Counter[str] = Counter()
         self.search_terms: Counter[str] = Counter()
         self.tool_calls: Counter[str] = Counter()
@@ -475,6 +479,7 @@ class UsageInsights:
                    MIN(timestamp) AS first_ts,
                    event, surface, endpoint, status_code, user_agent, referrer,
                    {_meta('utm_source')} AS utm_source,
+                   {_meta('selection_source')} AS selection_source,
                    subject, tool_name, ip_hash,
                    COUNT(*) AS n
             FROM usage_events
@@ -485,7 +490,8 @@ class UsageInsights:
               )
               AND {NOT_SYNTHETIC_SQL}
             GROUP BY day, event, surface, endpoint, status_code, user_agent,
-                     referrer, utm_source, subject, tool_name, ip_hash
+                     referrer, utm_source, selection_source, subject, tool_name,
+                     ip_hash
             """,
             (since_iso,),
         ).fetchall()
@@ -574,11 +580,14 @@ class UsageInsights:
             if term:
                 window.search_terms[term] += count
         if ticker_source:
+            copied_example = row["selection_source"] == PUBLISHED_EXAMPLE_SOURCE
             for ticker in _tickers_in(row["subject"]):
                 if is_monitor:
                     window.ticker_monitor_calls[ticker] += count
                 else:
                     window.ticker_calls[ticker][channel] += count
+                    if copied_example:
+                        window.ticker_example_calls[ticker] += count
                 if tool_name == "get_market_data_endpoint":
                     window.ticker_mcp_lookups[ticker] += count
 
@@ -788,6 +797,7 @@ class UsageInsights:
                 {
                     "ticker": ticker,
                     "calls": organic,
+                    "copied_example_calls": current.ticker_example_calls[ticker],
                     "monitor_calls": current.ticker_monitor_calls[ticker],
                     "paid_calls": paid[ticker],
                     "credit_calls": credit[ticker],
@@ -799,11 +809,17 @@ class UsageInsights:
         rows.sort(key=lambda row: (row["calls"] + row["monitor_calls"], row["paid_calls"]),
                   reverse=True)
         total = sum(row["calls"] for row in rows)
-        top3 = sum(sorted((row["calls"] for row in rows), reverse=True)[:3])
+        copied = sum(row["copied_example_calls"] for row in rows)
+        # Demand concentration is judged on calls that chose their instrument;
+        # a copied example path says nothing about what the caller wanted.
+        chosen = [row["calls"] - row["copied_example_calls"] for row in rows]
+        top3 = sum(sorted(chosen, reverse=True)[:3])
         return {
             "distinct_tickers": len(rows),
             "total_calls": total,
-            "top3_share": _rate(top3, total),
+            "copied_example_calls": copied,
+            "copied_example_share": _rate(copied, total),
+            "top3_share": _rate(top3, total - copied),
             "rows": rows[:30],
         }
 
@@ -1022,14 +1038,19 @@ def build_assessment(result: dict[str, Any]) -> list[dict[str, Any]]:
             "Lead listings with the free signed-in connector rather than the "
             "x402 endpoint, and add a one-click install link for each client.")
 
-    top3 = result["tickers"]["top3_share"]
-    if top3 is not None and result["tickers"]["total_calls"] >= MIN_SAMPLE and top3 > 0.8:
-        names = ", ".join(row["ticker"] for row in result["tickers"]["rows"][:3])
+    tickers = result["tickers"]
+    top3 = tickers["top3_share"]
+    chosen_calls = tickers["total_calls"] - tickers["copied_example_calls"]
+    if top3 is not None and chosen_calls >= MIN_SAMPLE and top3 > 0.8:
+        names = ", ".join(row["ticker"] for row in tickers["rows"][:3])
+        copied = tickers["copied_example_share"] or 0
         add("P2", "Demand signal", "Ticker demand mirrors the published examples",
-            f"The top three tickers ({names}) take {_pct(top3)} of live-data requests.",
-            "Rotate or randomize the example symbols in docs and listings, and tag "
-            "example paths with selection_source=published_example_path so copied "
-            "examples are not mistaken for real demand.")
+            f"The top three tickers ({names}) take {_pct(top3)} of live-data requests "
+            f"that chose their instrument; {_pct(copied)} of requests were copied "
+            "example paths and are excluded.",
+            "Published examples already rotate weekly on generated listings and carry "
+            "selection_source=published_example_path. Diversify the remaining static "
+            "examples in docs and connector prompts.")
 
     top_client = result["users"]["top_client_share"]
     if top_client is not None and result["users"]["unique_clients"] >= 5 and top_client > 0.2:

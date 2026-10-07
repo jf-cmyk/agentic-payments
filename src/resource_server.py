@@ -93,6 +93,7 @@ from src.entitlement_manager import (
 from src import free_tier
 from src import live_showcase
 from src import pricing_catalog
+from src import published_examples
 from src.pricing_catalog import product_usdc
 from src import vwap_coverage
 from src.free_tier_ledger import get_free_tier_ledger
@@ -2624,7 +2625,7 @@ async def get_x402_well_known(request: Request) -> Response:
         request,
         {
             "version": 1,
-            "resources": X402_WELL_KNOWN_RESOURCES,
+            "resources": _x402_well_known_resources(),
             "instructions": (
                 "Register the listed paid HTTP endpoints individually. "
                 "Public MCP discovery remains available at /mcp/server/."
@@ -3160,15 +3161,7 @@ X402_BATCH_PAYMENT_INFO = {
         "protocols": X402_PROTOCOLS,
     }
 }
-X402_WELL_KNOWN_RESOURCES = [
-    f"{PUBLIC_BASE_URL}/v1/vwap/BTC-USD",
-    f"{PUBLIC_BASE_URL}/v1/bidask/BTC-USD",
-    f"{PUBLIC_BASE_URL}/v1/state/MSOLUSD",
-    f"{PUBLIC_BASE_URL}/v1/vwap30m/SOLUSD",
-    f"{PUBLIC_BASE_URL}/v1/vwap24h/BTCUSD",
-    f"{PUBLIC_BASE_URL}/v1/bidask/AAPLXUSD",
-    f"{PUBLIC_BASE_URL}/v1/fx/EURUSD",
-    f"{PUBLIC_BASE_URL}/v1/metal/XAUUSD",
+X402_WELL_KNOWN_PRODUCT_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/briefs/market",
     f"{PUBLIC_BASE_URL}/v1/checks/pre-trade",
     f"{PUBLIC_BASE_URL}/v1/receipts/price",
@@ -3178,6 +3171,22 @@ X402_WELL_KNOWN_RESOURCES = [
     f"{PUBLIC_BASE_URL}/v1/signals/solana-token-brief",
     f"{PUBLIC_BASE_URL}/v1/signals/trader-alpha-pack",
 ]
+
+
+def _x402_well_known_resources() -> list[str]:
+    """List one example resource per raw service, rotating weekly, then the products.
+
+    Rotating the published instrument keeps copied examples from reading as
+    demand for one ticker; the product routes have no instrument in the path.
+    """
+    raw = [
+        f"{PUBLIC_BASE_URL}{published_examples.example_path(service)}"
+        for service in ("vwap", "bidask", "state", "vwap30m", "vwap24h", "fx", "metal")
+    ]
+    equity = f"{PUBLIC_BASE_URL}/v1/bidask/{published_examples.EXAMPLE_POOLS['bidask'][0]}"
+    if equity not in raw:
+        raw.append(equity)
+    return [*raw, *X402_WELL_KNOWN_PRODUCT_RESOURCES]
 
 
 def _x402_endpoint_description(path: str) -> str:

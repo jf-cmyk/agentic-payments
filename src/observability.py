@@ -66,6 +66,8 @@ SELECTION_SOURCE_VALUES = frozenset(
         "package_preview",
         "raw_data_preview",
         "live_showcase",
+        "product_preview",
+        "repeat_workflow_recipe",
     }
 )
 

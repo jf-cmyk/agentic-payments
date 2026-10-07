@@ -105,6 +105,29 @@ def test_canonical_ticker(raw, expected):
     assert canonical_ticker(raw) == expected
 
 
+def test_copied_example_paths_do_not_count_as_ticker_demand(tmp_path):
+    store = UsageEventStore(tmp_path / "usage.db")
+    copied = {"metadata": {"selection_source": "published_example_path"}}
+    for _ in range(6):
+        _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="python-requests/2", ip="1.1.1.1", **copied)
+    _call(store, "/v1/vwap/{pair}", "BTCUSD", ua="python-requests/2", ip="1.1.1.1")
+    for _ in range(2):
+        _call(store, "/v1/fx/{pair}", "GBPUSD", ua="node", ip="2.2.2.2",
+              metadata={"selection_source": "direct_http"})
+    _call(store, "/v1/metal/{pair}", "XAGUSD", ua="node", ip="2.2.2.2")
+
+    tickers = _build(store)["tickers"]
+    rows = {row["ticker"]: row for row in tickers["rows"]}
+    assert rows["BTC-USD"]["calls"] == 7
+    assert rows["BTC-USD"]["copied_example_calls"] == 6
+    assert rows["GBP-USD"]["copied_example_calls"] == 0
+    assert tickers["total_calls"] == 10
+    assert tickers["copied_example_calls"] == 6
+    assert tickers["copied_example_share"] == 0.6
+    # Four calls chose their instrument: one BTC, two GBP, one XAG.
+    assert tickers["top3_share"] == 1.0
+
+
 def test_calls_are_split_by_avenue_and_ticker_with_monitors_apart(tmp_path):
     store = UsageEventStore(tmp_path / "usage.db")
     for _ in range(3):
