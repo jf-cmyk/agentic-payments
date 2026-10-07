@@ -4,7 +4,7 @@ export default defineRailway(() => {
   const blocksizeRealTimeMarketDataMcpVolume = volume("blocksize-real-time-market-data-mcp-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "europe-west4-drams3a", sizeMB: 10000 });
   const BlocksizeRealTimeMarketDataMCP = service("Blocksize-Real-Time-Market-Data-MCP", {
     source: github("jf-cmyk/agentic-payments", { branch: "main", checkSuites: false }),
-    build: { builder: "RAILPACK", railpackVersion: "0.38.0" },
+    build: { builder: "RAILPACK", railpackVersion: "0.40.1" },
     healthcheck: "/readyz",
     healthcheckTimeout: 180,
     replicas: { "europe-west4-drams3a": 1 },
