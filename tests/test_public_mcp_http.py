@@ -136,3 +136,77 @@ async def test_fresh_manager_receives_policy_on_each_lifespan_entry():
     async with app.lifespan(app):
         assert manager_for(app) is not first_manager
         assert manager_for(app).session_idle_timeout == 1800
+
+
+@pytest.mark.parametrize("accept", [None, "*/*", "application/json", "text/event-stream", "application/*"])
+@pytest.mark.asyncio
+async def test_initialize_is_accepted_whatever_accept_header_the_client_sends(accept):
+    app = create_public_http_app(FastMCP("accept"))
+    async with app.lifespan(app):
+        headers = {} if accept is None else {"Accept": accept}
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://localhost", headers=headers
+        ) as client:
+            response = await client.post("/", json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                           "clientInfo": {"name": "lenient-accept", "version": "1"}},
+            })
+    assert response.status_code == 200, response.text
+    assert "mcp-session-id" in response.headers
+
+
+@pytest.mark.asyncio
+async def test_call_without_a_session_explains_how_to_start_one():
+    app = create_public_http_app(FastMCP("session-hint"), quickstart_url="https://example.test/q")
+    async with app.lifespan(app), client_for(app) as client:
+        response = await client.post("/", json={
+            "jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": {},
+        })
+        listen = await client.get("/")
+        close = await client.delete("/")
+
+    for reply in (response, listen, close):
+        assert reply.status_code == 400
+        body = reply.json()
+        assert body["error"]["message"] == "Bad Request: Missing session ID"
+        data = body["error"]["data"]
+        assert data["error_code"] == "MCP_SESSION_REQUIRED"
+        assert data["initialize_example"]["method"] == "initialize"
+        assert data["accept_header"] == "application/json, text/event-stream"
+        assert data["quickstart"] == "https://example.test/q"
+        assert any("mcp-session-id" in step for step in data["how_to_fix"])
+    assert response.json()["id"] == 7
+    assert listen.json()["id"] == "server-error"
+
+
+@pytest.mark.asyncio
+async def test_session_rule_still_applies_after_the_hint():
+    app = create_public_http_app(FastMCP("session-kept"))
+    async with app.lifespan(app), client_for(app) as client:
+        session = await initialize(client)
+        assert (await list_tools(client, session)).status_code == 200
+        stale = await client.post("/", headers={"mcp-session-id": "not-a-session"}, json={
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+        })
+    assert stale.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_without_a_session_still_reaches_the_sdk_parser():
+    app = create_public_http_app(FastMCP("parse-error"))
+    async with app.lifespan(app), client_for(app) as client:
+        response = await client.post("/", content=b"{not json", headers={"Content-Type": "application/json"})
+    assert response.status_code == 400
+    assert "Parse error" in response.json()["error"]["message"]
+
+
+def test_normalised_accept_only_adds_what_is_missing():
+    from src.public_mcp_http import normalised_accept
+
+    assert normalised_accept("application/json, text/event-stream") is None
+    assert normalised_accept("text/event-stream;q=0.9, application/json") is None
+    assert normalised_accept(None) == "application/json, text/event-stream"
+    assert normalised_accept("*/*") == "*/*, application/json, text/event-stream"
+    assert normalised_accept("application/json") == "application/json, text/event-stream"
+    assert normalised_accept("text/html") == "text/html, application/json, text/event-stream"
