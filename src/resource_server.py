@@ -3077,6 +3077,31 @@ X402_RESPONSE = {
                     "error": "Payment Required",
                     "message": "This endpoint requires a payment of $0.002 USDC.",
                     "price_usdc": "0.002",
+                    "price": {
+                        "usdc": "0.002",
+                        "credits": 2,
+                        "credit_price_usdc": "0.001",
+                        "display": "$0.002 USDC per call (2 credits)",
+                    },
+                    "sample_value": {
+                        "example_only": True,
+                        "live_data": False,
+                        "example_response": {
+                            "status": "ok",
+                            "data": {"pair": "BTC-USD", "vwap": 100.0, "currency": "USD"},
+                            "meta": {"provider": "Blocksize Capital", "example_only": True},
+                        },
+                    },
+                    "client_snippet": {
+                        "preview_curl": "curl -sS 'https://mcp.blocksize.info/v1/samples/market-data?service=vwap&symbol=BTCUSD'",
+                        "pay_python": "uv run python examples/x402/buy_with_base.py --url 'https://mcp.blocksize.info/v1/vwap/BTC-USD' --max-usdc 0.002 --pay",
+                    },
+                    "free_connector": {
+                        "url": "https://mcp.blocksize.info/anthropic/mcp/",
+                        "allowance_credits": 30000,
+                        "this_call_costs_credits": 2,
+                        "calls_per_month_at_this_price": 15000,
+                    },
                     "accepts": [
                         {
                             "scheme": "exact",
@@ -3434,6 +3459,124 @@ def _sample_url_for_paid_request(request: Request) -> str | None:
                     + urlencode({"service": service, "symbol": symbol})
                 )
     return None
+
+
+async def _sample_value_for_paid_request(request: Request) -> dict[str, Any] | None:
+    """Return an illustrative request and response for a paid route, never live data."""
+    path = request.url.path
+    if path == "/v1/checks/pre-trade":
+        sample = await pre_trade_sample()
+    elif path == "/v1/snapshots/macro":
+        sample = await macro_snapshot_sample()
+    else:
+        from src.commerce_discovery import output_contract
+
+        output_info, _ = output_contract(path)
+        example = output_info.get("example")
+        if not example:
+            return None
+        sample = {"example_response": example}
+    value: dict[str, Any] = {"example_only": True, "live_data": False}
+    if sample.get("example_request") is not None:
+        value["example_request"] = sample["example_request"]
+    value["example_response"] = sample["example_response"]
+    return value
+
+
+def _x402_price_fields(price: Decimal) -> dict[str, Any]:
+    """State one exact price in both published units."""
+    credits = pricing_catalog.usdc_to_credits(price)
+    unit = "credit" if credits == 1 else "credits"
+    return {
+        "usdc": str(price),
+        "credits": credits,
+        "credit_price_usdc": str(pricing_catalog.CREDIT_PRICE_USDC),
+        "display": f"${price} USDC per call ({credits} {unit})",
+    }
+
+
+def _x402_client_snippet(
+    request: Request,
+    price: Decimal,
+    sample_value: dict[str, Any] | None,
+    preview_url: str | None,
+) -> dict[str, Any]:
+    """Return copy-and-run commands: a free preview and one paid call."""
+    url = _public_request_url(request)
+    pay = [
+        "uv run python examples/x402/buy_with_base.py",
+        f"--url '{url}'",
+        f"--max-usdc {price}",
+        "--pay",
+    ]
+    requires = [
+        f"a checkout of {REPOSITORY_URL}",
+        "EVM_PRIVATE_KEY set in the environment for a dedicated low-balance Base wallet holding USDC",
+    ]
+    if request.method.upper() != "GET":
+        pay.append(f"--method {request.method.upper()}")
+        example_request = (sample_value or {}).get("example_request")
+        if example_request is not None:
+            body = json.dumps(example_request, separators=(",", ":"))
+            pay.append(f"--json-body '{body}'")
+        else:
+            pay.append('--json-body "$BODY"')
+            requires.append("BODY set to the JSON request body you want to send")
+    snippet: dict[str, Any] = {
+        "pay_python": " ".join(pay),
+        "requires": requires,
+        "max_usdc_note": (
+            "--max-usdc caps the signed amount at this route's price; the client "
+            "refuses any challenge above it."
+        ),
+    }
+    if preview_url:
+        snippet["preview_curl"] = f"curl -sS '{preview_url}'"
+    return snippet
+
+
+def _x402_free_connector_fields(credits: int | None) -> dict[str, Any] | None:
+    """Point wallet-less agents at the authenticated connector with free credits."""
+    if not free_tier.enabled():
+        return None
+    connector = f"{_anthropic_mcp_url()}/"
+    allowance = free_tier.allowance_credits()
+    fields: dict[str, Any] = {
+        "url": connector,
+        "allowance_credits": allowance,
+        "requires": "a signed-in user with a verified email; no wallet or payment",
+        "how": (
+            f"Add {connector} as a custom connector in Claude and sign in. The same "
+            "live-data tools then draw on the free monthly credits."
+        ),
+        "setup_page": CLAUDE_CONNECTOR_URL,
+        "other_connectors": {
+            "cursor": f"{_cursor_mcp_url()}/",
+            "openai": f"{_openai_mcp_url()}/",
+        },
+    }
+    if credits:
+        fields["this_call_costs_credits"] = credits
+        fields["calls_per_month_at_this_price"] = allowance // credits
+    return fields
+
+
+async def _x402_landing_fields(request: Request, price: Decimal) -> dict[str, Any]:
+    """Make the 402 a landing page: value, exact price, one command, free route.
+
+    An agent that lands on a priced URL without a wallet should leave with the
+    sample value, the price in USDC and credits, one copy-and-run command, and
+    the free authenticated connector, without following a single link.
+    """
+    sample_value = await _sample_value_for_paid_request(request)
+    preview_url = _sample_url_for_paid_request(request)
+    price_fields = _x402_price_fields(price)
+    return {
+        "sample_value": sample_value,
+        "price": price_fields,
+        "client_snippet": _x402_client_snippet(request, price, sample_value, preview_url),
+        "free_connector": _x402_free_connector_fields(price_fields["credits"]),
+    }
 
 
 def _payment_failure_code(reason: str) -> str:
@@ -5890,6 +6033,7 @@ async def x402_payment_middleware(request: Request, call_next):
     if not payment_header:
         payment_required = _x402_payment_required(request, payment_reqs)
         requirements_b64 = _encode_payment_required(payment_required)
+        landing = await _x402_landing_fields(request, price)
         network_labels = {
             "solana": "Solana",
             "evm": "Base L2",
@@ -5944,6 +6088,7 @@ async def x402_payment_middleware(request: Request, call_next):
                         f"Accepted networks: {accepted_network_names}."
                     ),
                     "price_usdc": str(price),
+                    **landing,
                     "starter_credits": {
                         "positioning": (
                             f"{free_tier.allowance_label()} free live data credits every "
@@ -6077,6 +6222,7 @@ async def x402_payment_middleware(request: Request, call_next):
             # a freshly bound challenge so an agent can rebuild the authorization
             # without guessing, resubmitting a transaction hash, or changing inputs.
             retry_required = _x402_payment_required(request, payment_reqs)
+            retry_landing = await _x402_landing_fields(request, price)
             return _apply_x402_cors_headers(
                 request,
                 JSONResponse(
@@ -6086,6 +6232,7 @@ async def x402_payment_middleware(request: Request, call_next):
                     },
                     content={
                         **retry_required,
+                        **retry_landing,
                         "error": "Payment Invalid",
                         "error_code": _payment_failure_code(reason),
                         "message": (

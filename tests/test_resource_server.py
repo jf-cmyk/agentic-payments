@@ -1940,6 +1940,128 @@ class TestPaymentGate:
         assert data["accepts"][0]["extra"]["resource"] == data["resource"]["url"]
         assert "legacy_requirements" in data
 
+    def test_402_is_a_landing_page_for_a_raw_route(self, test_client):
+        """A wallet-less agent gets value, price, one command and the free route."""
+        response = test_client.get("/v1/vwap/btc-usd")
+        data = response.json()
+
+        assert response.status_code == 402
+        sample = data["sample_value"]
+        assert sample["example_only"] is True
+        assert sample["live_data"] is False
+        assert sample["example_response"]["data"]["pair"] == "btc-usd"
+        assert sample["example_response"]["meta"]["example_only"] is True
+
+        price = data["price"]
+        assert price["usdc"] == data["price_usdc"]
+        assert price["credits"] == data["starter_credits"]["credit_cost"]
+        assert price["credit_price_usdc"] == "0.001"
+        assert price["display"] == f"${price['usdc']} USDC per call ({price['credits']} credits)"
+
+        snippet = data["client_snippet"]
+        assert snippet["pay_python"] == (
+            "uv run python examples/x402/buy_with_base.py "
+            "--url 'https://mcp.blocksize.info/v1/vwap/btc-usd' "
+            f"--max-usdc {price['usdc']} --pay"
+        )
+        assert snippet["preview_curl"] == (
+            "curl -sS 'https://mcp.blocksize.info/v1/samples/market-data"
+            "?service=vwap&symbol=BTCUSD'"
+        )
+        assert any("EVM_PRIVATE_KEY" in item for item in snippet["requires"])
+
+        connector = data["free_connector"]
+        assert connector["url"] == "https://mcp.blocksize.info/anthropic/mcp/"
+        assert connector["allowance_credits"] == settings.free_tier.monthly_credits
+        assert connector["this_call_costs_credits"] == price["credits"]
+        assert connector["calls_per_month_at_this_price"] == (
+            settings.free_tier.monthly_credits // price["credits"]
+        )
+        assert connector["url"] in connector["how"]
+        assert connector["other_connectors"] == {
+            "cursor": "https://mcp.blocksize.info/cursor/mcp/",
+            "openai": "https://mcp.blocksize.info/openai/mcp/",
+        }
+        assert connector["setup_page"].endswith("/claude-connector")
+
+        # The landing fields come before the long tail of the challenge.
+        keys = list(data)
+        assert keys.index("sample_value") < keys.index("starter_credits")
+        assert keys.index("free_connector") < keys.index("purchase_handoff")
+
+    def test_402_landing_page_for_a_post_product_inlines_the_example_request(
+        self, test_client
+    ):
+        response = test_client.post("/v1/checks/pre-trade", json={"symbol": "BTCUSD"})
+        data = response.json()
+
+        assert response.status_code == 402
+        sample = data["sample_value"]
+        assert sample["example_request"]["symbol"] == "BTCUSD"
+        assert sample["example_response"]["decision"] == "pass"
+        assert data["price"]["credits"] == 100
+        snippet = data["client_snippet"]["pay_python"]
+        assert "--method POST" in snippet
+        assert "--json-body '{\"symbol\":\"BTCUSD\"" in snippet
+        assert data["client_snippet"]["preview_curl"].endswith("/v1/samples/pre-trade'")
+
+    def test_402_landing_page_without_a_sample_still_states_price_and_free_route(
+        self, test_client
+    ):
+        response = test_client.post("/v1/briefs/market", json={"symbols": ["BTCUSD"]})
+        data = response.json()
+
+        assert response.status_code == 402
+        assert data["sample_value"] is None
+        assert data["price"]["usdc"] == "0.25"
+        assert data["price"]["credits"] == 250
+        snippet = data["client_snippet"]
+        assert snippet["pay_python"].endswith('--method POST --json-body "$BODY"')
+        assert any(item.startswith("BODY set to") for item in snippet["requires"])
+        assert "preview_curl" not in snippet
+        assert data["free_connector"]["calls_per_month_at_this_price"] == (
+            settings.free_tier.monthly_credits // 250
+        )
+
+    def test_rejected_payment_keeps_the_landing_page(self, test_client):
+        with patch(
+            "src.resource_server._verify_payment",
+            new_callable=AsyncMock,
+            return_value={"valid": False, "reason": "signature expired"},
+        ):
+            response = test_client.get(
+                "/v1/vwap/btc-usd",
+                headers={"PAYMENT-SIGNATURE": "malformed"},
+            )
+
+        assert response.status_code == 402
+        data = response.json()
+        assert data["error"] == "Payment Invalid"
+        assert data["price"]["usdc"] == data["price_usdc"]
+        assert data["sample_value"]["example_only"] is True
+        assert data["free_connector"]["url"].endswith("/anthropic/mcp/")
+        assert "--pay" in data["client_snippet"]["pay_python"]
+
+    def test_402_landing_page_omits_the_free_route_when_the_free_tier_is_off(
+        self, test_client, monkeypatch
+    ):
+        monkeypatch.setattr(settings.free_tier, "enabled", False)
+        response = test_client.get("/v1/vwap/btc-usd")
+        data = response.json()
+
+        assert response.status_code == 402
+        assert data["free_connector"] is None
+        assert data["price"]["credits"] == 2
+
+    def test_openapi_402_example_documents_the_landing_fields(self, test_client):
+        example = test_client.get("/openapi.json").json()["paths"]["/v1/vwap/{pair}"][
+            "get"
+        ]["responses"]["402"]["content"]["application/json"]["example"]
+
+        assert set(example) >= {"price", "sample_value", "client_snippet", "free_connector"}
+        assert example["price"]["credits"] == 2
+        assert example["free_connector"]["url"].endswith("/anthropic/mcp/")
+
     def test_search_is_free(self, test_client):
         """Search endpoint should NOT require payment."""
         # Set up mock client since search actually tries to call blocksize
