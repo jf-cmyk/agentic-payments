@@ -764,6 +764,76 @@ class TestPublicListingSurfaces:
         assert response.headers["x-mcp-listen-stream"] == "stateless"
         assert response.text.startswith(": stream open")
         assert ": ping" in response.text
+    def test_server_discover_is_answered_on_every_mcp_app(self, test_client):
+        """OpenAI's plugin scanner and Claude Code open with server/discover (MCP
+        2026-07-28) and fall back to initialize only when it fails. The pinned
+        SDK has no such method; the shim answers it before authentication."""
+        from src.mcp_transport_compat import MODERN_PROTOCOL_VERSION, discover_result
+        from src.public_metadata import APP_VERSION
+
+        modern_meta = {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "scanner", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": {},
+        }
+        discover = {
+            "jsonrpc": "2.0",
+            "id": "discover-1",
+            "method": "server/discover",
+            "params": {"_meta": modern_meta},
+        }
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": "2026-07-28",
+            "Authorization": "",
+        }
+        surfaces = (
+            ("/openai/mcp/", True),
+            ("/anthropic/mcp/", False),
+            ("/cursor/mcp/", False),
+            ("/mcp/server/", False),
+        )
+        for path, modern in surfaces:
+            response = test_client.post(path, headers=headers, json=discover)
+            assert response.status_code == 200, (path, response.text)
+            assert response.headers["x-mcp-discover"] == "shim"
+            payload = response.json()
+            assert payload["id"] == "discover-1"
+            result = payload["result"]
+            assert result["resultType"] == "complete"
+            versions = result["supportedVersions"]
+            # Only the stateless OpenAI app can serve clients that never initialize.
+            assert (MODERN_PROTOCOL_VERSION in versions) is modern, path
+            assert "2025-11-25" in versions
+            assert versions == sorted(versions, reverse=True)
+            assert "tools" in result["capabilities"]
+            info = result["_meta"]["io.modelcontextprotocol/serverInfo"]
+            assert info["name"] and info["version"] == APP_VERSION
+            assert result["instructions"]
+
+        # Without an id it is a notification: nothing to answer, so it reaches the app.
+        notification = {key: value for key, value in discover.items() if key != "id"}
+        passed = test_client.post("/openai/mcp/", headers=headers, json=notification)
+        assert "x-mcp-discover" not in passed.headers
+
+        # A modern client then lists tools without initialize, carrying its _meta.
+        tools = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": modern_meta}},
+        )
+        assert tools.status_code == 200, tools.text
+        assert "x-mcp-discover" not in tools.headers
+        assert "search_pairs" in tools.text
+
+        # The modern flag is the only difference between the two results.
+        legacy = discover_result(resource_server.openai_mcp, modern=False)
+        modern = discover_result(resource_server.openai_mcp, modern=True)
+        assert legacy["supportedVersions"] == [
+            version for version in modern["supportedVersions"] if version != MODERN_PROTOCOL_VERSION
+        ]
+        assert legacy["capabilities"] == modern["capabilities"]
+
     def test_newer_protocol_version_headers_are_accepted(self, test_client):
         """Anthropic's Toolbox scanner sent MCP-Protocol-Version 2026-07-28 and the
         pinned SDK answered 400; a newer revision maps to the latest supported."""
@@ -787,7 +857,7 @@ class TestPublicListingSurfaces:
         unknown = test_client.post(
             "/openai/mcp/",
             headers=headers,
-            json={"jsonrpc": "2.0", "id": 3, "method": "server/discover", "params": {}},
+            json={"jsonrpc": "2.0", "id": 3, "method": "server/unknown", "params": {}},
         )
         # An unknown method is a JSON-RPC error inside a 200, not a transport rejection.
         assert unknown.status_code == 200
