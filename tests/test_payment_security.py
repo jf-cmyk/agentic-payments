@@ -685,6 +685,7 @@ async def test_facilitator_errors_and_malformed_responses_are_sanitized():
         "isValid": False,
         "invalidReason": "facilitator_unavailable",
         "facilitatorErrorKind": "other",
+        "attempts": 1,
     }
     assert settle_result == {
         "success": False,
@@ -1065,3 +1066,36 @@ def test_facilitator_error_kind_classification():
         httpx.HTTPStatusError("x", request=request, response=httpx.Response(429, request=request))
     ) == "http_429"
     assert facilitator_error_kind(ValueError("not json")) == "invalid_json"
+
+
+@pytest.mark.asyncio
+async def test_facilitator_verify_honours_a_capped_retry_after_on_429(monkeypatch):
+    """A 429 with Retry-After waits that long (capped), instead of the fixed backoff."""
+    import httpx
+    import src.payment_security as payment_security
+
+    monkeypatch.setattr(payment_security, "VERIFY_RETRY_DELAY_SECONDS", 0)
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(payment_security.asyncio, "sleep", fake_sleep)
+    parsed = _parse()
+    responses = iter([
+        httpx.Response(429, headers={"Retry-After": "2"}, request=httpx.Request("POST", "https://f")),
+        httpx.Response(429, headers={"Retry-After": "999"}, request=httpx.Request("POST", "https://f")),
+        {"isValid": True, "invalidReason": None},
+    ])
+
+    async def post(url, json, headers, timeout):
+        item = next(responses)
+        if isinstance(item, httpx.Response):
+            raise httpx.HTTPStatusError("rate limited", request=item.request, response=item)
+        return item
+
+    adapter = payment_security.FacilitatorAdapter("https://facilitator.example", bearer_token="t", post=post)
+    result = await adapter.verify(parsed, _requirement())
+
+    assert result["isValid"] is True
+    assert sleeps == [2.0, payment_security.VERIFY_RETRY_AFTER_CAP_SECONDS]
