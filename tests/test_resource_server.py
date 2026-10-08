@@ -764,6 +764,14 @@ class TestPublicListingSurfaces:
         assert response.headers["x-mcp-listen-stream"] == "stateless"
         assert response.text.startswith(": stream open")
         assert ": ping" in response.text
+        from src.mcp_transport_compat import listen_stream_bounds
+
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "2")
+        assert listen_stream_bounds()[1] == 2.0
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "not-a-number")
+        assert listen_stream_bounds()[1] == 2.0
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "9999")
+        assert listen_stream_bounds()[1] == 300.0
     def test_newer_protocol_version_headers_are_accepted(self, test_client):
         """Anthropic's Toolbox scanner sent MCP-Protocol-Version 2026-07-28 and the
         pinned SDK answered 400; a newer revision maps to the latest supported."""
