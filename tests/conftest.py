@@ -36,3 +36,12 @@ def isolate_usage_event_store(tmp_path: Path):
     configure_global_store(store)
     yield store
     configure_global_store(None)
+
+
+@pytest.fixture(autouse=True)
+def bounded_listen_stream(monkeypatch):
+    """Keep the stateless listen-stream shim short so GET /openai/mcp/ tests finish."""
+    from src import mcp_transport_compat
+
+    monkeypatch.setattr(mcp_transport_compat, "LISTEN_STREAM_MAX_SECONDS", 0.05)
+    monkeypatch.setattr(mcp_transport_compat, "LISTEN_STREAM_PING_SECONDS", 0.01)
