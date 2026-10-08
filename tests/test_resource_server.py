@@ -740,6 +740,42 @@ class TestPublicListingSurfaces:
         assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    def test_openai_connector_answers_session_less_requests(self, test_client):
+        """OpenAI's plugin discovery posts tools/list and resources/list without an
+        initialize handshake or session id; the stateful transport answered 400
+        "Missing session ID" and the dashboard kept asking to reconnect."""
+        headers = {"Accept": "application/json, text/event-stream"}
+        tools = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        assert tools.status_code == 200, tools.text
+        assert "search_pairs" in tools.text
+        resources = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}},
+        )
+        assert resources.status_code == 200, resources.text
+        assert "blocksize://openai-info" in resources.text
+        initialize = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "stateless-probe", "version": "1"},
+                },
+            },
+        )
+        assert initialize.status_code == 200
+        assert "mcp-session-id" not in initialize.headers
+
     def test_openai_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/openai/mcp", follow_redirects=False)
         assert response.status_code != 404

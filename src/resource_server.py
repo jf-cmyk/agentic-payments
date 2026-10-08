@@ -363,7 +363,9 @@ RELEASE_BUILD = _load_release_build()
 PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp, quickstart_url=QUICKSTART_URL)
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
-OPENAI_MCP_HTTP_APP = openai_mcp.http_app(path="/", transport="streamable-http")
+OPENAI_MCP_HTTP_APP = openai_mcp.http_app(
+    path="/", transport="streamable-http", stateless_http=True
+)
 OBSERVABILITY = (
     UsageEventStore(settings.server.observability_db_path)
     if settings.server.observability_enabled
