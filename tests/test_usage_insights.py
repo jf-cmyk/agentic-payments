@@ -128,6 +128,25 @@ def test_copied_example_paths_do_not_count_as_ticker_demand(tmp_path):
     assert tickers["top3_share"] == 1.0
 
 
+def test_rate_limited_requests_are_listed_by_endpoint(tmp_path):
+    store = UsageEventStore(tmp_path / "usage.db")
+    for _ in range(5):
+        _call(store, "/mcp/server", None, ua="node", ip="4.4.4.4", status=429, surface="public_mcp")
+    _call(store, "/v1/search", "btc", ua="node", ip="4.4.4.4", status=429)
+    _call(store, "/v1/search", "btc", ua="node", ip="4.4.4.4", status=200)
+    # Monitors never count.
+    _call(store, "/v1/search", "btc", ua="TridentStatus/1.0", ip="9.9.9.9", status=429)
+
+    health = _build(store)["health"]
+    assert health["status"]["rate_limited"] == 6
+    assert health["top_rate_limited"] == [
+        {"endpoint": "/mcp/server", "count": 5},
+        {"endpoint": "/v1/search", "count": 1},
+    ]
+    # 429s are not mixed into the client/server error table.
+    assert all(row["status_code"] != 429 for row in health["top_errors"])
+
+
 def test_calls_are_split_by_avenue_and_ticker_with_monitors_apart(tmp_path):
     store = UsageEventStore(tmp_path / "usage.db")
     for _ in range(3):
