@@ -61,13 +61,12 @@ _bundle = create_authenticated_market_data_mcp(
         "Read-only Blocksize Capital live market data for ChatGPT and OpenAI "
         "Responses API clients across crypto VWAP, supported equity bid/ask, FX, "
         "metals, AMM state prices, VWAP windows, market briefs, pre-trade checks, "
-        "price receipts, macro snapshots, and trader indicators. OAuth users receive "
-        f"a free starter allowance of {allowance_label()} live-data credits every "
-        "calendar month, and each tool costs the same number of credits as its x402 "
-        "price at $0.001 per credit; production usage can continue through "
-        "direct x402 or a Blocksize authenticated account plan. All tools are "
-        "read-only: they never place trades, move funds, sign "
-        "wallet messages, or submit x402 payment proofs."
+        "price receipts, macro snapshots, and trader indicators. Signed-in users "
+        f"draw on a monthly allowance of {allowance_label()} live-data credits; "
+        "each tool reports its credit cost and the remaining balance, and "
+        "get_credit_balance shows the allowance and reset date. All tools are "
+        "read-only: they never place trades, move funds, sign wallet messages, "
+        "or make payments. Cite the provider timestamp with every value."
     ),
     auth_provider=openai_auth.build_openai_auth_provider(),
     resolve_identity=_resolve_identity,
