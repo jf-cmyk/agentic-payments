@@ -740,6 +740,30 @@ class TestPublicListingSurfaces:
         assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    def test_openai_listen_stream_is_served_on_the_stateless_connector(self, test_client, monkeypatch):
+        """OpenAI's platform opens the listen GET and reads 405 as "unavailable"."""
+        from src import mcp_transport_compat
+
+        assert any(
+            layer.cls is mcp_transport_compat.ListenStreamShim
+            for layer in resource_server.OPENAI_MCP_HTTP_APP.user_middleware
+        )
+
+        # The fixture client carries the observability bearer by default; clear it.
+        anonymous = test_client.get(
+            "/openai/mcp/", headers={"Accept": "text/event-stream", "Authorization": ""}
+        )
+        assert anonymous.status_code == 405
+
+        response = test_client.get(
+            "/openai/mcp/",
+            headers={"Accept": "text/event-stream", "Authorization": "Bearer scanner-token"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["x-mcp-listen-stream"] == "stateless"
+        assert response.text.startswith(": stream open")
+        assert ": ping" in response.text
     def test_newer_protocol_version_headers_are_accepted(self, test_client):
         """Anthropic's Toolbox scanner sent MCP-Protocol-Version 2026-07-28 and the
         pinned SDK answered 400; a newer revision maps to the latest supported."""
