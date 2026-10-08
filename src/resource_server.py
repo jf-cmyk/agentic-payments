@@ -113,6 +113,7 @@ from src.marketplace_performance import (
 )
 from src import claude_data_retention
 from src.connector_sign_in import SignInHintMiddleware
+from src.mcp_transport_compat import ProtocolVersionCompat
 from src.mcp_transport_diagnostics import BadRequestDiagnostics
 from src import usage_event_rollup
 from src import signup_alerts
@@ -3077,7 +3078,10 @@ for _connector_key, _connector_app, _connector_url in (
     # A transport 400 (parse, validation or protocol-version rejection) logs
     # what the client sent, so a directory scanner's failures are diagnosable.
     _connector_app.add_middleware(BadRequestDiagnostics, surface=f"{_connector_key}_mcp")
+    # Directory scanners may speak a protocol revision newer than the pinned SDK.
+    _connector_app.add_middleware(ProtocolVersionCompat, surface=f"{_connector_key}_mcp")
 PUBLIC_MCP_HTTP_APP.add_middleware(BadRequestDiagnostics, surface="public_mcp")
+PUBLIC_MCP_HTTP_APP.add_middleware(ProtocolVersionCompat, surface="public_mcp")
 app.add_route(
     "/anthropic/mcp",
     _SlashlessMountEndpoint(ANTHROPIC_MCP_HTTP_APP, "/anthropic/mcp"),
