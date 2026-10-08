@@ -383,6 +383,13 @@ class ServerSettings(BaseSettings):
     discovery_rate_limit_enabled: bool = Field(True, alias="DISCOVERY_RATE_LIMIT_ENABLED")
     discovery_rate_limit_per_minute: int = Field(60, alias="DISCOVERY_RATE_LIMIT_PER_MINUTE")
     discovery_rate_limit_per_day: int = Field(1000, alias="DISCOVERY_RATE_LIMIT_PER_DAY")
+    # The public MCP transport spends several HTTP requests per tool call
+    # (initialize, initialized, tools/list, tools/call) and directory proxies
+    # such as Smithery or Glama share one egress IP, so it gets its own budget.
+    discovery_rate_limit_mcp_per_minute: int = Field(
+        240, alias="DISCOVERY_RATE_LIMIT_MCP_PER_MINUTE"
+    )
+    discovery_rate_limit_mcp_per_day: int = Field(5000, alias="DISCOVERY_RATE_LIMIT_MCP_PER_DAY")
     # Free live showcase: one real, attributed price an agent can inspect before
     # paying. Bounded to an allowlist and served from a short cache so it can
     # never become a free production feed.

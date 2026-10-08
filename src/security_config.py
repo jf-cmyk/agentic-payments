@@ -157,6 +157,8 @@ def trusted_identity_configuration_status() -> dict[str, Any]:
         settings.server.discovery_rate_limit_enabled
         and settings.server.discovery_rate_limit_per_minute > 0
         and settings.server.discovery_rate_limit_per_day > 0
+        and settings.server.discovery_rate_limit_mcp_per_minute > 0
+        and settings.server.discovery_rate_limit_mcp_per_day > 0
     )
     production_requirements_met = (
         not unverified_credits

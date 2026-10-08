@@ -3828,42 +3828,72 @@ def _client_ip(request: Request) -> str:
     return _request_client_ip(request)
 
 
+def _is_public_mcp_transport_path(path: str) -> bool:
+    remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
+    return path == remote_mcp_path or path.startswith(f"{remote_mcp_path}/")
+
+
 def _is_discovery_rate_limited_path(path: str) -> bool:
     """Limit public discovery calls without throttling docs, manifests, or paid routes."""
-    remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
     for discovery_path in DISCOVERY_RATE_LIMIT_PATHS:
         if discovery_path.endswith("/"):
             if path.startswith(discovery_path):
                 return True
         elif path == discovery_path:
             return True
-    return path == remote_mcp_path or path.startswith(f"{remote_mcp_path}/")
+    return _is_public_mcp_transport_path(path)
+
+
+def _is_priced_request(request: Request) -> bool:
+    """True when the route carries an x402 price; paid traffic is never discovery."""
+    try:
+        return _get_price_for_request(request) is not None
+    except ValueError:
+        return False
 
 
 def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
-    """Return a 429 response when public discovery traffic exceeds fair-use limits."""
+    """Return a 429 response when public discovery traffic exceeds fair-use limits.
+
+    The public MCP transport has its own budget: one tool call is several HTTP
+    requests, and directory proxies forward many users from one IP. Priced
+    routes under a discovery prefix (the RWA benchmark) are never throttled.
+    """
     if not settings.server.discovery_rate_limit_enabled:
         return None
 
     path = request.url.path
     if not _is_discovery_rate_limited_path(path):
         return None
+    if _is_priced_request(request):
+        return None
+
+    if _is_public_mcp_transport_path(path):
+        scope = "discovery-mcp"
+        per_minute = settings.server.discovery_rate_limit_mcp_per_minute
+        per_day = settings.server.discovery_rate_limit_mcp_per_day
+        limited_traffic = "Public MCP transport traffic"
+    else:
+        scope = "discovery"
+        per_minute = settings.server.discovery_rate_limit_per_minute
+        per_day = settings.server.discovery_rate_limit_per_day
+        limited_traffic = "Free discovery traffic"
 
     client_ip = _client_ip(request)
     manager = getattr(request.app.state, "credits", None)
     try:
         if isinstance(manager, CreditManager):
             allowed, retry_after, limit_window = manager.check_rate_limit(
-                scope="discovery",
+                scope=scope,
                 key=client_ip,
-                per_minute=settings.server.discovery_rate_limit_per_minute,
-                per_day=settings.server.discovery_rate_limit_per_day,
+                per_minute=per_minute,
+                per_day=per_day,
             )
         else:
             allowed, retry_after, limit_window = _DISCOVERY_RATE_LIMITER.check(
-                f"discovery:{client_ip}",
-                per_minute=settings.server.discovery_rate_limit_per_minute,
-                per_day=settings.server.discovery_rate_limit_per_day,
+                f"{scope}:{client_ip}",
+                per_minute=per_minute,
+                per_day=per_day,
             )
     except sqlite3.Error:
         logger.exception("Persistent discovery rate limiter is unavailable")
@@ -3879,7 +3909,8 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
 
     retry_after = retry_after or 60
     logger.warning(
-        "Discovery rate limit exceeded for %s on %s (%s limit)",
+        "%s rate limit exceeded for %s on %s (%s limit)",
+        scope,
         client_ip,
         path,
         limit_window,
@@ -3888,19 +3919,18 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
         status_code=429,
         headers={
             "Retry-After": str(retry_after),
-            "X-RateLimit-Policy": (
-                f"{settings.server.discovery_rate_limit_per_minute}/minute; "
-                f"{settings.server.discovery_rate_limit_per_day}/day"
-            ),
+            "X-RateLimit-Policy": f"{per_minute}/minute; {per_day}/day",
+            "X-RateLimit-Scope": scope,
         },
         content={
             "error": "Too Many Requests",
             "message": (
-                "Free discovery traffic is temporarily rate limited. "
+                f"{limited_traffic} is temporarily rate limited. "
                 "Please retry later or use paid data routes for production traffic."
             ),
             "retry_after_seconds": retry_after,
             "limit_window": limit_window,
+            "limit_scope": scope,
         },
     )
 
