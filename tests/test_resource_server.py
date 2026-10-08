@@ -740,6 +740,28 @@ class TestPublicListingSurfaces:
         assert response.status_code not in {307, 308}
         assert "PAYMENT-REQUIRED" not in response.headers
 
+    def test_transport_400s_log_what_the_client_sent_without_headers(self, test_client, caplog):
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer super-secret-token",
+            "MCP-Protocol-Version": "2099-01-01",
+        }
+        with caplog.at_level("WARNING", logger="src.mcp_transport_diagnostics"):
+            malformed = test_client.post("/openai/mcp/", headers=headers, content=b"{not json")
+            assert malformed.status_code == 400
+            unsupported = test_client.post(
+                "/openai/mcp/",
+                headers=headers,
+                json={"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}},
+            )
+        assert unsupported.status_code == 400
+        text = caplog.text
+        assert "rpc_method=unparseable" in text
+        assert "rpc_method=tools/list" in text
+        assert "header_version=2099-01-01" in text
+        assert "super-secret-token" not in text
+
     def test_openai_connector_answers_session_less_requests(self, test_client):
         """OpenAI's plugin discovery posts tools/list and resources/list without an
         initialize handshake or session id; the stateful transport answered 400

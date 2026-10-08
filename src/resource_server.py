@@ -113,6 +113,7 @@ from src.marketplace_performance import (
 )
 from src import claude_data_retention
 from src.connector_sign_in import SignInHintMiddleware
+from src.mcp_transport_diagnostics import BadRequestDiagnostics
 from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
@@ -3073,6 +3074,10 @@ for _connector_key, _connector_app, _connector_url in (
         base_url=PUBLIC_BASE_URL,
         allowance_label=free_tier.allowance_label,
     )
+    # A transport 400 (parse, validation or protocol-version rejection) logs
+    # what the client sent, so a directory scanner's failures are diagnosable.
+    _connector_app.add_middleware(BadRequestDiagnostics, surface=f"{_connector_key}_mcp")
+PUBLIC_MCP_HTTP_APP.add_middleware(BadRequestDiagnostics, surface="public_mcp")
 app.add_route(
     "/anthropic/mcp",
     _SlashlessMountEndpoint(ANTHROPIC_MCP_HTTP_APP, "/anthropic/mcp"),
