@@ -764,13 +764,56 @@ class TestPublicListingSurfaces:
         assert response.headers["x-mcp-listen-stream"] == "stateless"
         assert response.text.startswith(": stream open")
         assert ": ping" in response.text
+    def test_newer_protocol_version_headers_are_accepted(self, test_client):
+        """Anthropic's Toolbox scanner sent MCP-Protocol-Version 2026-07-28 and the
+        pinned SDK answered 400; a newer revision maps to the latest supported."""
+        from src.mcp_transport_compat import compatible_protocol_version
+
+        assert compatible_protocol_version("2026-07-28") == "2025-11-25"
+        assert compatible_protocol_version("2025-06-18") is None
+        assert compatible_protocol_version("2024-01-01") is None
+        assert compatible_protocol_version(None) is None
+
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": "2026-07-28",
+        }
+        tools = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        assert tools.status_code == 200, tools.text
+        unknown = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 3, "method": "server/discover", "params": {}},
+        )
+        # An unknown method is a JSON-RPC error inside a 200, not a transport rejection.
+        assert unknown.status_code == 200
+        assert '"error"' in unknown.text and '"id":3' in unknown.text
+        public = test_client.post(
+            "/mcp/server/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2026-07-28",
+                    "capabilities": {},
+                    "clientInfo": {"name": "future-client", "version": "1"},
+                },
+            },
+        )
+        assert public.status_code == 200, public.text
 
     def test_transport_400s_log_what_the_client_sent_without_headers(self, test_client, caplog):
         headers = {
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
             "Authorization": "Bearer super-secret-token",
-            "MCP-Protocol-Version": "2099-01-01",
+            "MCP-Protocol-Version": "2023-01-01",
         }
         with caplog.at_level("WARNING", logger="src.mcp_transport_diagnostics"):
             malformed = test_client.post("/openai/mcp/", headers=headers, content=b"{not json")
@@ -784,7 +827,7 @@ class TestPublicListingSurfaces:
         text = caplog.text
         assert "rpc_method=unparseable" in text
         assert "rpc_method=tools/list" in text
-        assert "header_version=2099-01-01" in text
+        assert "header_version=2023-01-01" in text
         assert "super-secret-token" not in text
 
     def test_openai_connector_answers_session_less_requests(self, test_client):
