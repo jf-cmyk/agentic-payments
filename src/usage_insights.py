@@ -283,6 +283,7 @@ class _Window:
         self.http_requests = 0
         self.status: Counter[str] = Counter()
         self.error_endpoints: Counter[tuple[str, int]] = Counter()
+        self.rate_limited_endpoints: Counter[str] = Counter()
         self.daily_channel_calls: dict[str, Counter[str]] = defaultdict(Counter)
         self.daily_users: dict[str, set[str]] = defaultdict(set)
         self.ticker_calls: dict[str, Counter[str]] = defaultdict(Counter)
@@ -539,6 +540,8 @@ class UsageInsights:
                 window.status[bucket] += count
                 if bucket in {"client_error", "server_error"}:
                     window.error_endpoints[(endpoint[:80], int(row["status_code"]))] += count
+                elif bucket == "rate_limited":
+                    window.rate_limited_endpoints[endpoint[:80]] += count
             if ip_hash and not is_monitor:
                 window.users.add(ip_hash)
                 window.user_days[ip_hash].add(day)
@@ -897,6 +900,10 @@ class UsageInsights:
                 {"endpoint": endpoint, "status_code": status, "count": count}
                 for (endpoint, status), count in current.error_endpoints.most_common(10)
             ],
+            "top_rate_limited": [
+                {"endpoint": endpoint, "count": count}
+                for endpoint, count in current.rate_limited_endpoints.most_common(5)
+            ],
         }
 
     @staticmethod
@@ -1072,10 +1079,14 @@ def build_assessment(result: dict[str, Any]) -> list[dict[str, Any]]:
             "Add redirects or helpful error bodies for the most common wrong paths and "
             "methods, and accept the Accept headers MCP clients actually send.")
     if http_calls >= MIN_SAMPLE and status["rate_limited"] / http_calls > 0.02:
+        limited = ", ".join(f"{row['endpoint']} ({row['count']})"
+                            for row in result["health"]["top_rate_limited"][:3])
         add("P2", "Reliability", "Rate limiting rejects real traffic",
-            f"{_pct(status['rate_limited'] / http_calls)} of non-monitor HTTP requests get 429.",
-            "Check whether the limited clients are monitors; raise discovery limits "
-            "for identified agents.")
+            f"{_pct(status['rate_limited'] / http_calls)} of non-monitor HTTP requests get 429"
+            + (f"; most on {limited}." if limited else "."),
+            "The public MCP transport has its own budget (DISCOVERY_RATE_LIMIT_MCP_*) and "
+            "priced routes are never throttled; if the limited endpoint is a discovery "
+            "path, raise DISCOVERY_RATE_LIMIT_PER_MINUTE or exclude the proxy.")
     server_rate = kpis["server_error_rate"]["value"]
     if server_rate is not None and http_calls >= MIN_SAMPLE and server_rate > 0.01:
         add("P0", "Reliability", "Server errors above 1%",

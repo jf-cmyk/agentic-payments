@@ -1010,8 +1010,114 @@ def _facilitator_probe_max_age_seconds() -> float:
     return min(900.0, max(30.0, configured))
 
 
+def _facilitator_fee_payer_grace_seconds() -> float:
+    """How long a Solana fee payer advertised by the facilitator stays acceptable.
+
+    The facilitator may rotate its fee payer between two readiness probes; a
+    proof signed against the previous challenge must still verify.
+    """
+    try:
+        configured = float(os.environ.get("X402_FACILITATOR_FEE_PAYER_GRACE_SECONDS", "1800"))
+    except ValueError:
+        configured = 1800.0
+    return min(7200.0, max(60.0, configured))
+
+
+def _facilitator_probe_grace_seconds() -> float:
+    """How long the last good capability snapshot keeps payments open after a failed probe."""
+    try:
+        configured = float(os.environ.get("X402_FACILITATOR_PROBE_GRACE_SECONDS", "600"))
+    except ValueError:
+        configured = 600.0
+    return min(3600.0, max(0.0, configured))
+
+
+FACILITATOR_PROBE_ATTEMPTS = 3
+FACILITATOR_PROBE_RETRY_DELAY_SECONDS = 0.5
+_RECENT_SOLANA_FEE_PAYERS: dict[str, float] = {}
+
+
+def _remember_solana_fee_payer(fee_payer: str, *, now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    _RECENT_SOLANA_FEE_PAYERS[fee_payer] = current
+    cutoff = current - _facilitator_fee_payer_grace_seconds()
+    for stale in [key for key, seen in _RECENT_SOLANA_FEE_PAYERS.items() if seen < cutoff]:
+        _RECENT_SOLANA_FEE_PAYERS.pop(stale, None)
+
+
+def _recent_solana_fee_payers(*, now: float | None = None) -> list[str]:
+    current = time.time() if now is None else now
+    cutoff = current - _facilitator_fee_payer_grace_seconds()
+    return [key for key, seen in _RECENT_SOLANA_FEE_PAYERS.items() if seen >= cutoff]
+
+
+def _accepts_with_recent_fee_payers(accepts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add Solana requirement variants for fee payers advertised within the grace window.
+
+    The 402 challenge advertises only the current fee payer; verification also
+    accepts a proof bound to a fee payer the facilitator advertised recently.
+    """
+    recent = _recent_solana_fee_payers()
+    if not recent:
+        return accepts
+    extended = list(accepts)
+    seen = {json.dumps(item, sort_keys=True, default=str) for item in accepts}
+    for requirement in accepts:
+        if _network_kind(str(requirement.get("network") or "")) != "solana":
+            continue
+        for fee_payer in recent:
+            variant = {**requirement, "extra": {**dict(requirement.get("extra") or {}), "feePayer": fee_payer}}
+            key = json.dumps(variant, sort_keys=True, default=str)
+            if key not in seen:
+                seen.add(key)
+                extended.append(variant)
+    return extended
+
+
+async def _refresh_facilitator_support(app: FastAPI) -> dict[str, Any]:
+    """Probe the facilitator; on a failed probe keep the last good snapshot for a grace period.
+
+    One transient probe failure used to take every paid route offline for up
+    to a minute. A snapshot that was good within the grace window keeps
+    serving, marked degraded, so readiness and challenges stay up while the
+    facilitator recovers.
+    """
+    result = await _probe_facilitator_support()
+    if result.get("available") is True:
+        app.state.facilitator_support_last_good = result
+        return result
+    last_good = getattr(app.state, "facilitator_support_last_good", None)
+    if (
+        result.get("required") is True
+        and isinstance(last_good, dict)
+        and last_good.get("configuration_fingerprint") == result.get("configuration_fingerprint")
+    ):
+        try:
+            good_age = time.time() - float(last_good.get("checked_at") or 0)
+        except (TypeError, ValueError):
+            good_age = float("inf")
+        if good_age <= _facilitator_probe_max_age_seconds() + _facilitator_probe_grace_seconds():
+            logger.warning(
+                "facilitator probe failed (%s); serving the snapshot from %.0fs ago during the grace period",
+                result.get("reason"),
+                good_age,
+            )
+            return {
+                **last_good,
+                "checked_at": result.get("checked_at"),
+                "degraded": True,
+                "last_probe_reason": result.get("reason"),
+                "last_good_checked_at": last_good.get("checked_at"),
+            }
+    return result
+
+
 async def _probe_facilitator_support() -> dict[str, Any]:
-    """Fetch a safe capability snapshot when payments are deployment-critical."""
+    """Fetch a safe capability snapshot when payments are deployment-critical.
+
+    The ``/supported`` call is retried on transient failures so one dropped
+    request does not mark the facilitator unavailable.
+    """
     fingerprint = _facilitator_configuration_fingerprint()
     if not _facilitator_support_required():
         return {
@@ -1043,18 +1149,19 @@ async def _probe_facilitator_support() -> dict[str, Any]:
             "configuration_fingerprint": fingerprint,
         }
 
-    try:
-        result = await asyncio.wait_for(
-            adapter.supported(),
-            timeout=_facilitator_probe_timeout_seconds(),
-        )
-    except (TimeoutError, asyncio.TimeoutError):
-        result = {
-            "checked": True,
-            "available": False,
-            "reason": "timeout",
-            "kinds": [],
-        }
+    result: dict[str, Any] = {"checked": True, "available": False, "reason": "timeout", "kinds": []}
+    for attempt in range(1, FACILITATOR_PROBE_ATTEMPTS + 1):
+        try:
+            result = await asyncio.wait_for(
+                adapter.supported(),
+                timeout=_facilitator_probe_timeout_seconds(),
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            result = {"checked": True, "available": False, "reason": "timeout", "kinds": []}
+        if result.get("available") is True or result.get("reason") == "x402_sdk_unavailable":
+            break
+        if attempt < FACILITATOR_PROBE_ATTEMPTS:
+            await asyncio.sleep(FACILITATOR_PROBE_RETRY_DELAY_SECONDS * (1 if attempt == 1 else 3))
     result["required"] = True
     result["checked_at"] = time.time()
     result["configuration_fingerprint"] = fingerprint
@@ -1068,6 +1175,7 @@ async def _probe_facilitator_support() -> dict[str, Any]:
                 fee_payer = (kind.get("extra") or {}).get("feePayer")
                 if isinstance(fee_payer, str) and fee_payer:
                     settings.x402.solana_fee_payer = fee_payer
+                    _remember_solana_fee_payer(fee_payer)
                     break
     return result
 
@@ -1118,6 +1226,8 @@ def _facilitator_support_readiness(
         "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
         "max_age_seconds": _facilitator_probe_max_age_seconds(),
         "reason": reason,
+        "degraded": snapshot.get("degraded") is True,
+        "last_probe_reason": snapshot.get("last_probe_reason"),
     }
 
 
@@ -1126,7 +1236,7 @@ async def _run_facilitator_support_probe_loop(app: FastAPI) -> None:
     interval = max(15.0, _facilitator_probe_max_age_seconds() / 3)
     while True:
         await asyncio.sleep(interval)
-        app.state.facilitator_support = await _probe_facilitator_support()
+        app.state.facilitator_support = await _refresh_facilitator_support(app)
 
 
 def _hosted_environment() -> bool:
@@ -1355,7 +1465,8 @@ async def lifespan(app: FastAPI):
         )
         for prefix in connector_prefixes
     }
-    app.state.facilitator_support = await _probe_facilitator_support()
+    app.state.facilitator_support_last_good = None
+    app.state.facilitator_support = await _refresh_facilitator_support(app)
     app.state.facilitator_support_task = None
     if (
         app.state.facilitator_support.get("required")
@@ -3828,42 +3939,72 @@ def _client_ip(request: Request) -> str:
     return _request_client_ip(request)
 
 
+def _is_public_mcp_transport_path(path: str) -> bool:
+    remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
+    return path == remote_mcp_path or path.startswith(f"{remote_mcp_path}/")
+
+
 def _is_discovery_rate_limited_path(path: str) -> bool:
     """Limit public discovery calls without throttling docs, manifests, or paid routes."""
-    remote_mcp_path = REMOTE_MCP_PATH.rstrip("/")
     for discovery_path in DISCOVERY_RATE_LIMIT_PATHS:
         if discovery_path.endswith("/"):
             if path.startswith(discovery_path):
                 return True
         elif path == discovery_path:
             return True
-    return path == remote_mcp_path or path.startswith(f"{remote_mcp_path}/")
+    return _is_public_mcp_transport_path(path)
+
+
+def _is_priced_request(request: Request) -> bool:
+    """True when the route carries an x402 price; paid traffic is never discovery."""
+    try:
+        return _get_price_for_request(request) is not None
+    except ValueError:
+        return False
 
 
 def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
-    """Return a 429 response when public discovery traffic exceeds fair-use limits."""
+    """Return a 429 response when public discovery traffic exceeds fair-use limits.
+
+    The public MCP transport has its own budget: one tool call is several HTTP
+    requests, and directory proxies forward many users from one IP. Priced
+    routes under a discovery prefix (the RWA benchmark) are never throttled.
+    """
     if not settings.server.discovery_rate_limit_enabled:
         return None
 
     path = request.url.path
     if not _is_discovery_rate_limited_path(path):
         return None
+    if _is_priced_request(request):
+        return None
+
+    if _is_public_mcp_transport_path(path):
+        scope = "discovery-mcp"
+        per_minute = settings.server.discovery_rate_limit_mcp_per_minute
+        per_day = settings.server.discovery_rate_limit_mcp_per_day
+        limited_traffic = "Public MCP transport traffic"
+    else:
+        scope = "discovery"
+        per_minute = settings.server.discovery_rate_limit_per_minute
+        per_day = settings.server.discovery_rate_limit_per_day
+        limited_traffic = "Free discovery traffic"
 
     client_ip = _client_ip(request)
     manager = getattr(request.app.state, "credits", None)
     try:
         if isinstance(manager, CreditManager):
             allowed, retry_after, limit_window = manager.check_rate_limit(
-                scope="discovery",
+                scope=scope,
                 key=client_ip,
-                per_minute=settings.server.discovery_rate_limit_per_minute,
-                per_day=settings.server.discovery_rate_limit_per_day,
+                per_minute=per_minute,
+                per_day=per_day,
             )
         else:
             allowed, retry_after, limit_window = _DISCOVERY_RATE_LIMITER.check(
-                f"discovery:{client_ip}",
-                per_minute=settings.server.discovery_rate_limit_per_minute,
-                per_day=settings.server.discovery_rate_limit_per_day,
+                f"{scope}:{client_ip}",
+                per_minute=per_minute,
+                per_day=per_day,
             )
     except sqlite3.Error:
         logger.exception("Persistent discovery rate limiter is unavailable")
@@ -3879,7 +4020,8 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
 
     retry_after = retry_after or 60
     logger.warning(
-        "Discovery rate limit exceeded for %s on %s (%s limit)",
+        "%s rate limit exceeded for %s on %s (%s limit)",
+        scope,
         client_ip,
         path,
         limit_window,
@@ -3888,19 +4030,18 @@ def _discovery_rate_limit_response(request: Request) -> JSONResponse | None:
         status_code=429,
         headers={
             "Retry-After": str(retry_after),
-            "X-RateLimit-Policy": (
-                f"{settings.server.discovery_rate_limit_per_minute}/minute; "
-                f"{settings.server.discovery_rate_limit_per_day}/day"
-            ),
+            "X-RateLimit-Policy": f"{per_minute}/minute; {per_day}/day",
+            "X-RateLimit-Scope": scope,
         },
         content={
             "error": "Too Many Requests",
             "message": (
-                "Free discovery traffic is temporarily rate limited. "
+                f"{limited_traffic} is temporarily rate limited. "
                 "Please retry later or use paid data routes for production traffic."
             ),
             "retry_after_seconds": retry_after,
             "limit_window": limit_window,
+            "limit_scope": scope,
         },
     )
 
@@ -5518,7 +5659,9 @@ async def _verify_payment(
     official_error = "Payment payload is not a valid bound x402 v2 signature"
     parse_errors: list[str] = []
     if resource_url:
-        accepts = _x402_v2_accepts(payment_requirements, resource_url)
+        accepts = _accepts_with_recent_fee_payers(
+            _x402_v2_accepts(payment_requirements, resource_url)
+        )
         for requirement in accepts:
             try:
                 parsed = parse_payment_signature(
@@ -5587,7 +5730,11 @@ async def _verify_payment(
             verification = await facilitator.verify(parsed, requirement)
             if verification.get("isValid") is not True:
                 reason = str(verification.get("invalidReason") or "payment_invalid")
-                return {"valid": False, "reason": reason}
+                failure: dict[str, Any] = {"valid": False, "reason": reason}
+                if verification.get("facilitatorErrorKind"):
+                    failure["facilitator_error_kind"] = str(verification["facilitatorErrorKind"])
+                    failure["facilitator_attempts"] = verification.get("attempts")
+                return failure
             network = str(requirement["network"])
             reserved = _reserve_payment_use(
                 parsed.payment_id,
@@ -6124,9 +6271,15 @@ async def x402_payment_middleware(request: Request, call_next):
             request,
             JSONResponse(
                 status_code=503,
+                headers={"Retry-After": "15", "Cache-Control": "no-store"},
                 content={
                     "error": "Payment Configuration Unavailable",
                     "message": "No operational payment rail is currently configured.",
+                    "retry_after_seconds": 15,
+                    "retry": (
+                        "Nothing was charged. Fetch a fresh challenge after the delay; "
+                        "the payment facilitator is being re-checked."
+                    ),
                 },
             ),
         )
@@ -6273,6 +6426,9 @@ async def x402_payment_middleware(request: Request, call_next):
             failure_metadata: dict[str, Any] = {"attempt_id": attempt_id}
             if verification.get("parse_errors"):
                 failure_metadata["parse_errors"] = verification["parse_errors"]
+            if verification.get("facilitator_error_kind"):
+                failure_metadata["facilitator_error_kind"] = verification["facilitator_error_kind"]
+                failure_metadata["facilitator_attempts"] = verification.get("facilitator_attempts")
             _record_product_event(
                 "payment_failed",
                 request,
@@ -6597,9 +6753,15 @@ async def x402_payment_middleware(request: Request, call_next):
                 request,
                 JSONResponse(
                     status_code=503,
+                    headers={"Retry-After": "60", "Cache-Control": "no-store"},
                     content={
                         "error": "Payment Settlement Outcome Unknown",
                         "message": "The remote settlement outcome is unknown; this proof is quarantined from automatic retry pending reconciliation.",
+                        "retry_after_seconds": 60,
+                        "retry": (
+                            "Do not resend this PAYMENT-SIGNATURE. After the delay, fetch a "
+                            "fresh challenge and sign a new payment if the data is still needed."
+                        ),
                     },
                 ),
             )
