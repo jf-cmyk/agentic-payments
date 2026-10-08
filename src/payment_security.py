@@ -55,6 +55,23 @@ logger = logging.getLogger(__name__)
 # Settlement is never retried automatically.
 VERIFY_RETRY_DELAY_SECONDS = 0.5
 VERIFY_ATTEMPTS = 3
+# A facilitator 429 may say how long to wait; honour it up to this cap.
+VERIFY_RETRY_AFTER_CAP_SECONDS = 5.0
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Return a facilitator's Retry-After in seconds when it sent one, capped."""
+    response = getattr(exc, "response", None)
+    header = getattr(getattr(response, "headers", None), "get", lambda _k: None)("retry-after")
+    if not header:
+        return None
+    try:
+        value = float(str(header).strip())
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return min(VERIFY_RETRY_AFTER_CAP_SECONDS, value)
 
 
 def facilitator_error_kind(exc: BaseException) -> str:
@@ -1010,12 +1027,16 @@ class FacilitatorAdapter:
                     payment.accepted.get("network"),
                 )
                 if attempt < VERIFY_ATTEMPTS and _is_transient_facilitator_error(kind):
-                    await asyncio.sleep(VERIFY_RETRY_DELAY_SECONDS * (1 if attempt == 1 else 3))
+                    delay = VERIFY_RETRY_DELAY_SECONDS * (1 if attempt == 1 else 3)
+                    if kind == "http_429":
+                        delay = _retry_after_seconds(exc) or delay
+                    await asyncio.sleep(delay)
                     continue
                 return {
                     "isValid": False,
                     "invalidReason": "facilitator_unavailable",
                     "facilitatorErrorKind": kind,
+                    "attempts": attempt,
                 }
         return _sanitize_verify_response(
             response,

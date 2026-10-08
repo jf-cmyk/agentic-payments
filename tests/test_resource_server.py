@@ -1798,6 +1798,110 @@ class TestPaymentGate:
         assert payment_wallet["operational_rails"] == 0
         assert "fee_payer_missing" in payment_wallet["rails"]["solana"]["blockers"]
 
+    def test_proofs_bound_to_a_recently_advertised_fee_payer_still_verify(self, monkeypatch):
+        """The facilitator may rotate its Solana fee payer between two probes."""
+        monkeypatch.setattr(resource_server, "_RECENT_SOLANA_FEE_PAYERS", {})
+        resource_server._remember_solana_fee_payer("FeePayerOld111111111111111111111111111111111", now=1_000.0)
+        resource_server._remember_solana_fee_payer("FeePayerNew111111111111111111111111111111111", now=1_600.0)
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1_700.0)
+
+        accepts = [
+            {
+                "scheme": "exact",
+                "network": settings.x402.solana_network,
+                "amount": "2000",
+                "asset": "asset",
+                "payTo": "wallet",
+                "maxTimeoutSeconds": 30,
+                "extra": {"feePayer": "FeePayerNew111111111111111111111111111111111", "resource": "https://r"},
+            },
+            {
+                "scheme": "exact",
+                "network": settings.x402.base_network,
+                "amount": "2000",
+                "asset": "0xasset",
+                "payTo": "0xwallet",
+                "maxTimeoutSeconds": 60,
+                "extra": {"name": "USD Coin", "version": "2", "resource": "https://r"},
+            },
+        ]
+        extended = resource_server._accepts_with_recent_fee_payers(accepts)
+
+        fee_payers = [item["extra"].get("feePayer") for item in extended if "feePayer" in item["extra"]]
+        assert fee_payers == [
+            "FeePayerNew111111111111111111111111111111111",
+            "FeePayerOld111111111111111111111111111111111",
+        ]
+        # The Base requirement is untouched and the advertised list stays first.
+        assert extended[:2] == accepts
+        # Beyond the grace window the old fee payer is forgotten.
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1_000.0 + 1800.0 + 1.0)
+        assert resource_server._recent_solana_fee_payers() == [
+            "FeePayerNew111111111111111111111111111111111"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_failed_probe_keeps_the_last_good_snapshot_during_the_grace_period(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        fingerprint = resource_server._facilitator_configuration_fingerprint()
+        good = {
+            "checked": True,
+            "available": True,
+            "required": True,
+            "reason": None,
+            "kinds": [{"x402Version": 2, "scheme": "exact", "network": settings.x402.base_network}],
+            "checked_at": 1_000.0,
+            "configuration_fingerprint": fingerprint,
+        }
+        failed = {
+            "checked": True,
+            "available": False,
+            "required": True,
+            "reason": "facilitator_unavailable",
+            "kinds": [],
+            "checked_at": 1_100.0,
+            "configuration_fingerprint": fingerprint,
+        }
+        fake_app = SimpleNamespace(state=SimpleNamespace(facilitator_support_last_good=good))
+
+        async def probe_failed():
+            return failed
+
+        monkeypatch.setattr(resource_server, "_probe_facilitator_support", probe_failed)
+        monkeypatch.setattr(resource_server, "_facilitator_support_required", lambda: True)
+        monkeypatch.setattr(resource_server, "_facilitator_configuration_fingerprint", lambda: fingerprint)
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1_100.0)
+
+        served = await resource_server._refresh_facilitator_support(fake_app)
+        assert served["available"] is True
+        assert served["degraded"] is True
+        assert served["last_probe_reason"] == "facilitator_unavailable"
+        assert served["kinds"] == good["kinds"]
+        readiness = resource_server._facilitator_support_readiness(served)
+        assert readiness["ready"] is True
+        assert readiness["degraded"] is True
+
+        # Past max age plus grace, the failure is reported as is.
+        monkeypatch.setattr(resource_server.time, "time", lambda: 1_000.0 + 180.0 + 600.0 + 1.0)
+        failed["checked_at"] = 1_781.0
+        served_late = await resource_server._refresh_facilitator_support(fake_app)
+        assert served_late["available"] is False
+        assert "degraded" not in served_late
+
+    def test_payment_configuration_unavailable_tells_the_buyer_when_to_retry(
+        self, test_client, monkeypatch
+    ):
+        monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
+        monkeypatch.setattr(settings.x402, "evm_wallet_address", "")
+        response = test_client.get("/v1/vwap/btc-usd")
+        assert response.status_code == 503
+        assert response.headers["Retry-After"] == "15"
+        assert response.json()["retry_after_seconds"] == 15
+        assert "fresh challenge" in response.json()["retry"]
+
     def test_readiness_requires_exact_facilitator_network_intersection(
         self,
         test_client,
