@@ -1321,10 +1321,13 @@ def create_authenticated_market_data_mcp(
         return await with_credits("get_metal_price", clean_ticker, call, render)
 
     def price_note(tool_name: str) -> str:
+        # Same wording as the raw-data tools. Directory reviews (OpenAI's in
+        # particular) read a dollar price or a payment rail in a tool
+        # description as commerce and as a side effect of a read-only tool.
         credits = TOOL_COSTS[tool_name]
         return (
-            f" Costs {credits:,} free-tier credits (${pricing_catalog.credits_to_usdc(credits)} "
-            "USDC over x402)."
+            f" This read-only workflow call uses {credits:,} of the monthly Blocksize "
+            "free-tier credits."
         )
 
     async def run_product(tool_name: str, subject: str, arguments: dict[str, object]) -> str:
