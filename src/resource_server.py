@@ -3079,11 +3079,11 @@ for _connector_key, _connector_app, _connector_url in (
     # A transport 400 (parse, validation or protocol-version rejection) logs
     # what the client sent, so a directory scanner's failures are diagnosable.
     _connector_app.add_middleware(BadRequestDiagnostics, surface=f"{_connector_key}_mcp")
+    # Directory scanners may speak a protocol revision newer than the pinned SDK.
+    _connector_app.add_middleware(ProtocolVersionCompat, surface=f"{_connector_key}_mcp")
 # The OpenAI connector is stateless (its scanner posts without a session), so
 # FastMCP serves it on POST only; OpenAI's platform still opens the listen GET.
 OPENAI_MCP_HTTP_APP.add_middleware(ListenStreamShim)
-    # Directory scanners may speak a protocol revision newer than the pinned SDK.
-    _connector_app.add_middleware(ProtocolVersionCompat, surface=f"{_connector_key}_mcp")
 PUBLIC_MCP_HTTP_APP.add_middleware(BadRequestDiagnostics, surface="public_mcp")
 PUBLIC_MCP_HTTP_APP.add_middleware(ProtocolVersionCompat, surface="public_mcp")
 app.add_route(
