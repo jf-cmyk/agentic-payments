@@ -977,7 +977,7 @@ class TestPublicListingSurfaces:
         assert tools.headers["content-type"].startswith("application/json")
         assert int(tools.headers["content-length"]) == len(tools.content)
         names = [tool["name"] for tool in tools.json()["result"]["tools"]]
-        assert len(names) == 18 and names[0] == "search_pairs" and names[-1] == "get_trader_alpha_pack"
+        assert len(names) == 10 and names[0] == "search_pairs" and names[-1] == "get_vwap_24h"
         # The signed-in connectors keep the SDK's event-stream answers.
         anthropic = test_client.post(
             "/anthropic/mcp/",

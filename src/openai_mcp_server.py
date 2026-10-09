@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from src import openai_auth
 from src.authenticated_mcp_server import (
     TOOL_COSTS as SHARED_TOOL_COSTS,
@@ -18,7 +20,9 @@ from src.free_tier import allowance_label
 TOOL_COSTS = SHARED_TOOL_COSTS
 
 __all__ = [
+    "OPENAI_REVIEW_TOOLS",
     "TOOL_COSTS",
+    "openai_tool_allowlist",
     "openai_get_bid_ask",
     "openai_get_credit_balance",
     "openai_get_fx_rate",
@@ -29,6 +33,36 @@ __all__ = [
     "openai_mcp",
     "openai_search_pairs",
 ]
+
+# OpenAI's plugin dashboard stores only the first ten tools of a scan and
+# never marks discovery complete (4 scans on 8 and 9 October 2026, OpenAI
+# support confirms a platform-side persistence bug). Their workaround is to
+# expose at most ten tools until review completes. This is that set; the
+# Anthropic and Cursor connectors keep all tools. OPENAI_CONNECTOR_TOOLS=all
+# restores every tool, a comma-separated list selects others.
+OPENAI_REVIEW_TOOLS: tuple[str, ...] = (
+    "search_pairs",
+    "list_instruments",
+    "get_credit_balance",
+    "get_vwap",
+    "get_bid_ask",
+    "get_fx_rate",
+    "get_metal_price",
+    "get_state_price",
+    "get_vwap_30m",
+    "get_vwap_24h",
+)
+
+
+def openai_tool_allowlist(raw: str | None) -> frozenset[str] | None:
+    """Return the tools the OpenAI connector exposes, or None for all of them."""
+    value = (raw or "").strip()
+    if not value:
+        return frozenset(OPENAI_REVIEW_TOOLS)
+    if value.lower() == "all":
+        return None
+    return frozenset(part.strip() for part in value.split(",") if part.strip())
+
 
 _client: BlocksizeClient | None = None
 _entitlements: EntitlementManager | None = None
@@ -78,6 +112,15 @@ _bundle = create_authenticated_market_data_mcp(
 )
 
 openai_mcp = _bundle.mcp
+
+_allowed = openai_tool_allowlist(os.environ.get("OPENAI_CONNECTOR_TOOLS"))
+if _allowed is not None:
+    for _name in (
+        "search_pairs", "list_instruments", "get_credit_balance", "get_vwap",
+        "get_bid_ask", "get_fx_rate", "get_metal_price", *_bundle.products,
+    ):
+        if _name not in _allowed:
+            openai_mcp.remove_tool(_name)
 openai_search_pairs = _bundle.search_pairs
 openai_list_instruments = _bundle.list_instruments
 openai_get_credit_balance = _bundle.get_credit_balance
