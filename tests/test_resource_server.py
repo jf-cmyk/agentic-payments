@@ -964,6 +964,38 @@ class TestPublicListingSurfaces:
         assert initialize.status_code == 200
         assert "mcp-session-id" not in initialize.headers
 
+    def test_openai_connector_answers_with_json_not_an_event_stream(self, test_client):
+        """OpenAI's scanner recorded only the first ten tools from a chunked
+        event-stream tools/list; the stateless app answers one JSON object."""
+        headers = {"Accept": "application/json, text/event-stream"}
+        tools = test_client.post(
+            "/openai/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        assert tools.status_code == 200, tools.text
+        assert tools.headers["content-type"].startswith("application/json")
+        assert int(tools.headers["content-length"]) == len(tools.content)
+        names = [tool["name"] for tool in tools.json()["result"]["tools"]]
+        assert len(names) == 18 and names[0] == "search_pairs" and names[-1] == "get_trader_alpha_pack"
+        # The signed-in connectors keep the SDK's event-stream answers.
+        anthropic = test_client.post(
+            "/anthropic/mcp/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "stream-check", "version": "1"},
+                },
+            },
+        )
+        assert anthropic.status_code == 200, anthropic.text
+        assert anthropic.headers["content-type"].startswith("text/event-stream")
+
     def test_openai_mcp_endpoint_exists(self, test_client):
         response = test_client.get("/openai/mcp", follow_redirects=False)
         assert response.status_code != 404

@@ -366,8 +366,11 @@ RELEASE_BUILD = _load_release_build()
 PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp)
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
+# OpenAI's plugin scanner persisted only the first ten of eighteen tools from
+# a 14.7 KB chunked event-stream answer to tools/list; a stateless server has
+# no request-scoped notifications to stream, so answer with one JSON object.
 OPENAI_MCP_HTTP_APP = openai_mcp.http_app(
-    path="/", transport="streamable-http", stateless_http=True
+    path="/", transport="streamable-http", stateless_http=True, json_response=True
 )
 OBSERVABILITY = (
     UsageEventStore(settings.server.observability_db_path)
