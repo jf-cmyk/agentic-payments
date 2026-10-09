@@ -783,6 +783,15 @@ class TestPublicListingSurfaces:
         assert response.headers["x-mcp-listen-stream"] == "stateless"
         assert response.text.startswith(": stream open")
         assert ": ping" in response.text
+        from src.mcp_transport_compat import listen_stream_bounds
+
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "2")
+        assert listen_stream_bounds()[1] == 2.0
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "not-a-number")
+        assert listen_stream_bounds()[1] == 2.0
+        monkeypatch.setenv("OPENAI_LISTEN_STREAM_MAX_SECONDS", "9999")
+        assert listen_stream_bounds()[1] == 300.0
+
     def test_server_discover_is_answered_on_every_mcp_app(self, test_client):
         """OpenAI's plugin scanner and Claude Code open with server/discover (MCP
         2026-07-28) and fall back to initialize only when it fails. The pinned
