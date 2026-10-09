@@ -5,6 +5,8 @@ The pinned FastMCP answers every unauthenticated request with
 expired, even when no token was sent. The WWW-Authenticate header (which OAuth
 clients need for discovery) is kept untouched; only the JSON body gains a
 ``sign_in`` block and, when no bearer token was sent, an honest description.
+The rewrite applies to the MCP endpoint only; the OAuth routes mounted beside
+it keep their own error bodies.
 """
 from __future__ import annotations
 
@@ -72,6 +74,14 @@ class SignInHintMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        # Only the MCP endpoint takes a bearer token. A 401 from the OAuth
+        # routes mounted beside it (/token answers invalid_client, for one)
+        # must keep its own error description, or the client's failure reads
+        # as "no bearer token was sent".
+        relative = scope.get("path", "/")[len(scope.get("root_path", "")):]
+        if relative.rstrip("/") != "":
             await self.app(scope, receive, send)
             return
         token_sent = bool(Headers(scope=scope).get("authorization"))
