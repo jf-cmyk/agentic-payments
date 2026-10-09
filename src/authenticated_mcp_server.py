@@ -201,6 +201,41 @@ class AuthenticatedMCPBundle:
     products: dict[str, Callable[..., Awaitable[str]]]
 
 
+
+def nullable_without_anyof(schema: dict) -> None:
+    """Rewrite ``anyOf: [X, {"type": "null"}]`` into ``X`` with ``type: [t, "null"]`` in place.
+
+    Pydantic renders an optional parameter as ``anyOf`` with a null branch and
+    ``"default": null``. OpenAI's plugin scanner names ``anyOf`` for nullable
+    values as a compatibility risk and asks for a type list instead; the eight
+    tools it never recorded were the ones carrying such parameters. Applied to
+    every tool schema after registration; nested objects are handled too.
+    """
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return
+    for name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        branches = prop.get("anyOf")
+        if isinstance(branches, list) and len(branches) == 2:
+            null = [b for b in branches if isinstance(b, dict) and b.get("type") == "null"]
+            other = [b for b in branches if isinstance(b, dict) and b.get("type") != "null"]
+            if len(null) == 1 and len(other) == 1 and isinstance(other[0].get("type"), str):
+                rewritten = {k: v for k, v in prop.items() if k != "anyOf"}
+                rewritten.update({k: v for k, v in other[0].items() if k != "type"})
+                rewritten["type"] = [other[0]["type"], "null"]
+                prop = rewritten
+                properties[name] = prop
+        if prop.get("default", object()) is None:
+            del prop["default"]
+        if prop.get("type") == "object" or "properties" in prop:
+            nullable_without_anyof(prop)
+        items = prop.get("items")
+        if isinstance(items, dict):
+            nullable_without_anyof(items)
+
+
 ClientGetter = Callable[[], Awaitable[BlocksizeClient]]
 EntitlementGetter = Callable[[], EntitlementManager]
 IdentityResolver = Callable[[], ConnectorIdentity | None]
@@ -1602,6 +1637,15 @@ def create_authenticated_market_data_mcp(
             },
             indent=2,
         )
+
+    # OpenAI's scanner rejects anyOf-nullable parameters; advertise type lists.
+    # The decorator returns the plain function; the registered FunctionTool
+    # objects live in the local provider's component map (fastmcp 3.2.4), and
+    # tests/test_openai_tool_schemas.py fails if an upgrade moves them.
+    for registered in vars(mcp.local_provider).get("_components", {}).values():
+        parameters = getattr(registered, "parameters", None)
+        if isinstance(parameters, dict):
+            nullable_without_anyof(parameters)
 
     return AuthenticatedMCPBundle(
         mcp=mcp,
