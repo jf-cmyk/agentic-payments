@@ -51,7 +51,7 @@ from src.observability import UsageEventStore, configure_global_store
 from src.config import settings
 from src.pricing_catalog import product_usdc
 from src.credit_manager import STARTER_CREDIT_ALLOWANCE, CreditManager
-from src.public_metadata import GLAMA_MAINTAINER_EMAIL, QUICKSTART_URL
+from src.public_metadata import GLAMA_MAINTAINER_EMAIL
 from src.rwa_store import RWAObservationStore
 
 RWA_TEST_OPERATOR_TOKEN = "rwa-test-operator-token-0123456789abcdef"
@@ -313,19 +313,12 @@ def test_client(monkeypatch, tmp_path):
         yield client
 
 
-def test_only_public_mcp_has_idle_cleanup(test_client):
+def test_public_mcp_is_stateless_and_connectors_keep_their_own_managers(test_client):
     from fastmcp.server.http import StreamableHTTPASGIApp
 
-    public_manager = resource_server.PUBLIC_MCP_HTTP_APP.state.public_session_manager
-    assert public_manager.session_idle_timeout == 1800
-    for connector in (
-        resource_server.ANTHROPIC_MCP_HTTP_APP,
-        resource_server.CURSOR_MCP_HTTP_APP,
-        resource_server.OPENAI_MCP_HTTP_APP,
-    ):
-        # These mounts have their own managers; the public policy cannot leak.
+    def manager_of(mounted):
         managers = []
-        for route in connector.routes:
+        for route in mounted.routes:
             endpoint = getattr(route, "endpoint", None)
             while endpoint is not None:
                 if isinstance(endpoint, StreamableHTTPASGIApp):
@@ -333,8 +326,16 @@ def test_only_public_mcp_has_idle_cleanup(test_client):
                     break
                 endpoint = getattr(endpoint, "app", None)
         assert len(managers) == 1
-        assert managers[0] is not public_manager
-        assert managers[0].session_idle_timeout is None
+        return managers[0]
+
+    assert manager_of(resource_server.PUBLIC_MCP_HTTP_APP).stateless is True
+    assert manager_of(resource_server.OPENAI_MCP_HTTP_APP).stateless is True
+    for connector in (
+        resource_server.ANTHROPIC_MCP_HTTP_APP,
+        resource_server.CURSOR_MCP_HTTP_APP,
+    ):
+        # The signed-in connectors keep sessions; the public policy cannot leak.
+        assert manager_of(connector).stateless is False
 
 
 def test_registry_links_target_stable_latest_api():
@@ -564,10 +565,11 @@ class TestPublicListingSurfaces:
 
     def test_public_remote_mcp_endpoint_exists(self, test_client):
         # TestClient sends Accept: */*, which the pinned SDK would refuse with 406.
+        # The public server is stateless, so the listen GET is an empty stream.
         response = test_client.get("/mcp/server")
-        assert response.status_code == 400
-        assert response.json()["error"]["data"]["error_code"] == "MCP_SESSION_REQUIRED"
-        assert response.json()["error"]["data"]["quickstart"] == QUICKSTART_URL
+        assert response.status_code == 200
+        assert response.headers["x-mcp-listen-stream"] == "stateless"
+        assert response.text.startswith(": stream open")
 
     def test_public_mcp_initialize_works_with_a_wildcard_accept(self, test_client):
         response = test_client.post(
@@ -585,7 +587,24 @@ class TestPublicListingSurfaces:
             },
         )
         assert response.status_code == 200, response.text
-        assert "mcp-session-id" in response.headers
+        assert "mcp-session-id" not in response.headers
+
+    def test_public_mcp_serves_session_less_clients(self, test_client):
+        """Several clients a minute post tools/list without initializing; the
+        stateful transport answered 400 "Missing session ID"."""
+        tools = test_client.post(
+            "/mcp/server/",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        assert tools.status_code == 200, tools.text
+        assert "search_pairs" in tools.text or "list_instruments" in tools.text
+        initialized = test_client.post(
+            "/mcp/server/",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+        )
+        assert initialized.status_code == 202
 
     def test_connector_mounts_carry_the_sign_in_hint(self):
         from src.connector_sign_in import SignInHintMiddleware
