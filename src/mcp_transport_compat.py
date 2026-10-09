@@ -78,12 +78,15 @@ class ListenStreamShim:
     "MCP configuration unavailable". A stateless server has no
     server-initiated messages, so the shim holds an empty event stream open
     with keep-alive comments until the client goes away or the bound ends.
-    Requests without a bearer token fall through to the route (405), so the
-    shim never answers an unauthenticated probe.
+    On an authenticated connector, requests without a bearer token fall
+    through to the route (405), so the shim never answers an unauthenticated
+    probe; the public discovery server has no tokens and passes
+    ``require_token=False``.
     """
 
-    def __init__(self, app) -> None:
+    def __init__(self, app, *, require_token: bool = True) -> None:
         self.app = app
+        self.require_token = require_token
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] != "GET":
@@ -95,7 +98,7 @@ class ListenStreamShim:
             name == b"authorization" and value.strip()
             for name, value in scope.get("headers") or []
         )
-        if relative.rstrip("/") != "" or not has_token:
+        if relative.rstrip("/") != "" or (self.require_token and not has_token):
             await self.app(scope, receive, send)
             return
         import asyncio
