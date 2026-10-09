@@ -113,9 +113,9 @@ from src.marketplace_performance import (
 )
 from src import claude_data_retention
 from src.connector_sign_in import SignInHintMiddleware
-from src.mcp_transport_compat import ListenStreamShim
+from src.mcp_transport_compat import DiscoverShim, ListenStreamShim
 from src.mcp_transport_compat import ProtocolVersionCompat
-from src.mcp_transport_diagnostics import BadRequestDiagnostics
+from src.mcp_transport_diagnostics import BadRequestDiagnostics, TokenEndpointDiagnostics
 from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
@@ -363,7 +363,7 @@ def _load_release_build() -> dict[str, Any]:
 
 
 RELEASE_BUILD = _load_release_build()
-PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp, quickstart_url=QUICKSTART_URL)
+PUBLIC_MCP_HTTP_APP = create_public_http_app(public_mcp)
 ANTHROPIC_MCP_HTTP_APP = anthropic_mcp.http_app(path="/", transport="streamable-http")
 CURSOR_MCP_HTTP_APP = cursor_mcp.http_app(path="/", transport="streamable-http")
 OPENAI_MCP_HTTP_APP = openai_mcp.http_app(
@@ -3062,10 +3062,10 @@ app.add_route(
     include_in_schema=False,
 )
 app.mount(REMOTE_MCP_PATH, PUBLIC_MCP_HTTP_APP, name="public-mcp")
-for _connector_key, _connector_app, _connector_url in (
-    ("anthropic", ANTHROPIC_MCP_HTTP_APP, _anthropic_mcp_url),
-    ("cursor", CURSOR_MCP_HTTP_APP, _cursor_mcp_url),
-    ("openai", OPENAI_MCP_HTTP_APP, _openai_mcp_url),
+for _connector_key, _connector_app, _connector_url, _connector_server in (
+    ("anthropic", ANTHROPIC_MCP_HTTP_APP, _anthropic_mcp_url, anthropic_mcp),
+    ("cursor", CURSOR_MCP_HTTP_APP, _cursor_mcp_url, cursor_mcp),
+    ("openai", OPENAI_MCP_HTTP_APP, _openai_mcp_url, openai_mcp),
 ):
     # An unauthenticated call gets a sign-in hint in the 401 body; the
     # WWW-Authenticate header the OAuth client needs stays untouched.
@@ -3079,13 +3079,25 @@ for _connector_key, _connector_app, _connector_url in (
     # A transport 400 (parse, validation or protocol-version rejection) logs
     # what the client sent, so a directory scanner's failures are diagnosable.
     _connector_app.add_middleware(BadRequestDiagnostics, surface=f"{_connector_key}_mcp")
+    # A failed token grant logs its grant type, client-id prefix and error code.
+    _connector_app.add_middleware(TokenEndpointDiagnostics, surface=f"{_connector_key}_mcp")
     # Directory scanners may speak a protocol revision newer than the pinned SDK.
     _connector_app.add_middleware(ProtocolVersionCompat, surface=f"{_connector_key}_mcp")
+    # Clients on the 2026-07-28 revision open with server/discover; the pinned
+    # SDK has no such method. Only the stateless OpenAI app can advertise that
+    # revision, since modern clients never initialize.
+    _connector_app.add_middleware(
+        DiscoverShim,
+        server=_connector_server,
+        surface=f"{_connector_key}_mcp",
+        modern=_connector_key == "openai",
+    )
 # The OpenAI connector is stateless (its scanner posts without a session), so
 # FastMCP serves it on POST only; OpenAI's platform still opens the listen GET.
 OPENAI_MCP_HTTP_APP.add_middleware(ListenStreamShim)
 PUBLIC_MCP_HTTP_APP.add_middleware(BadRequestDiagnostics, surface="public_mcp")
 PUBLIC_MCP_HTTP_APP.add_middleware(ProtocolVersionCompat, surface="public_mcp")
+PUBLIC_MCP_HTTP_APP.add_middleware(DiscoverShim, server=public_mcp, surface="public_mcp")
 app.add_route(
     "/anthropic/mcp",
     _SlashlessMountEndpoint(ANTHROPIC_MCP_HTTP_APP, "/anthropic/mcp"),
