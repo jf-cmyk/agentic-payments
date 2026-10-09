@@ -69,6 +69,24 @@ LISTEN_STREAM_PING_SECONDS = 15.0
 LISTEN_STREAM_MAX_SECONDS = 300.0
 
 
+def listen_stream_bounds() -> tuple[float, float]:
+    """Return (ping interval, maximum lifetime) for the stateless listen stream.
+
+    OpenAI's platform reads the listen GET as part of loading a connector's
+    details and waits for the response to finish, so a long-lived stream
+    stalls its dashboard. The default closes the empty stream after two
+    seconds; ``OPENAI_LISTEN_STREAM_MAX_SECONDS`` raises or lowers it.
+    """
+    import os
+
+    try:
+        max_seconds = float(os.environ.get("OPENAI_LISTEN_STREAM_MAX_SECONDS", "2"))
+    except ValueError:
+        max_seconds = 2.0
+    max_seconds = min(LISTEN_STREAM_MAX_SECONDS, max(0.0, max_seconds))
+    return min(LISTEN_STREAM_PING_SECONDS, max(0.01, max_seconds / 2)), max_seconds
+
+
 class ListenStreamShim:
     """Answer the streamable-HTTP listen GET on a stateless MCP app.
 
@@ -112,11 +130,12 @@ class ListenStreamShim:
             }
         )
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + LISTEN_STREAM_MAX_SECONDS
+        ping_seconds, max_seconds = listen_stream_bounds()
+        deadline = loop.time() + max_seconds
         try:
             await send({"type": "http.response.body", "body": b": stream open\n\n", "more_body": True})
             while loop.time() < deadline:
-                await asyncio.sleep(min(LISTEN_STREAM_PING_SECONDS, max(0.0, deadline - loop.time())))
+                await asyncio.sleep(min(ping_seconds, max(0.0, deadline - loop.time())))
                 if loop.time() >= deadline:
                     break
                 await send({"type": "http.response.body", "body": b": ping\n\n", "more_body": True})
