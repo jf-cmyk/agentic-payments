@@ -5,8 +5,9 @@ import json
 import pytest
 from fastmcp import Client
 
+from src.anthropic_mcp_server import anthropic_mcp
 from src.authenticated_mcp_server import nullable_without_anyof
-from src.openai_mcp_server import openai_mcp
+from src.openai_mcp_server import OPENAI_REVIEW_TOOLS, openai_mcp, openai_tool_allowlist
 
 OPENAI_INSTRUCTIONS_MAX = 512
 
@@ -47,9 +48,30 @@ def test_nullable_without_anyof_rewrites_in_place():
     assert props["choice"] == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
 
 
+def test_openai_tool_allowlist_defaults_to_the_review_set():
+    assert openai_tool_allowlist(None) == frozenset(OPENAI_REVIEW_TOOLS)
+    assert openai_tool_allowlist("  ") == frozenset(OPENAI_REVIEW_TOOLS)
+    assert openai_tool_allowlist("all") is None and openai_tool_allowlist("ALL") is None
+    assert openai_tool_allowlist("get_vwap, get_market_brief,") == frozenset({"get_vwap", "get_market_brief"})
+    assert len(OPENAI_REVIEW_TOOLS) == 10
+
+
 @pytest.mark.asyncio
-async def test_openai_tools_advertise_no_anyof_and_no_null_defaults():
+async def test_openai_connector_exposes_only_the_review_tools_in_order():
+    """OpenAI's dashboard persists the first ten tools of a scan and nothing
+    else; until that is fixed the connector serves exactly those ten."""
     async with Client(openai_mcp) as client:
+        names = [tool.name for tool in await client.list_tools()]
+    assert names == list(OPENAI_REVIEW_TOOLS)
+    async with Client(anthropic_mcp) as client:
+        assert len(await client.list_tools()) == 18
+
+
+@pytest.mark.asyncio
+async def test_bundle_tools_advertise_no_anyof_and_no_null_defaults():
+    """The schema rewrite applies to the shared bundle; checked on the
+    Anthropic connector, which still exposes all 18 tools."""
+    async with Client(anthropic_mcp) as client:
         tools = {tool.name: tool for tool in await client.list_tools()}
     assert len(tools) == 18
     for name, tool in tools.items():
