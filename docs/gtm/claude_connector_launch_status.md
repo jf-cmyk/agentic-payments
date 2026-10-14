@@ -106,7 +106,8 @@ Sign-up:        open self sign-up through Clerk with an email code
 ```
 
 No reviewer credentials were supplied. The reviewer creates their own account
-during the OAuth flow.
+during the OAuth flow and receives the standard free-tier allowance of 30,000
+live-data credits per calendar month.
 
 ## Reviewer Test Instructions (as submitted)
 

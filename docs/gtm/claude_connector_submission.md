@@ -220,8 +220,9 @@ Suggested promotional prompt/screenshot pairs:
 
 No reviewer account was pre-created. Sign-up is open: the reviewer creates their
 own Blocksize account during the OAuth flow with an email code from Clerk and
-receives the standard free-tier allowance. Keep Clerk Device Trust off while the
-review is open so that flow stays a single email-code step.
+receives the standard free-tier allowance of 30,000 live-data credits per
+calendar month. Keep Clerk Device Trust off while the review is open so that
+flow stays a single email-code step.
 
 ## Pre-Submission QA
 
