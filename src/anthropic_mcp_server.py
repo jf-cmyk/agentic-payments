@@ -10,7 +10,7 @@ from src.authenticated_mcp_server import (
 from src.blocksize_client import BlocksizeClient
 from src.entitlement_manager import EntitlementManager, connector_entitlement_manager
 from src.free_tier import allowance_label
-from src.mcp_server import READ_ONLY_TOOL_ANNOTATIONS
+from src.mcp_server import READ_ONLY_TOOL_ANNOTATIONS, read_only_annotations
 
 TOOL_COSTS = SHARED_TOOL_COSTS
 
@@ -26,6 +26,7 @@ __all__ = [
     "anthropic_list_instruments",
     "anthropic_mcp",
     "anthropic_search_pairs",
+    "read_only_annotations",
 ]
 
 _client: BlocksizeClient | None = None

@@ -15,7 +15,7 @@ from src.mcp_server import (
     DISCOVERY_INSTRUMENT_DEFAULT_LIMIT,
     InstrumentPageLimit,
     InstrumentPageOffset,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    read_only_annotations,
     fetch as fetch_catalog,
     get_pricing_info as get_local_pricing_info,
     list_instruments as list_local_instruments,
@@ -227,7 +227,7 @@ def _free_tier_claim() -> dict[str, object] | None:
             "available services, and pricing tier; "
         "it is free, read-only, and never returns live prices or starts payment."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Instrument Search"),
 )
 async def public_search_pairs(
     query: InstrumentSearchQuery,
@@ -250,7 +250,7 @@ async def public_search_pairs(
         "read-only catalog metadata; it does not fetch live prices, create accounts, "
         "or start x402 payment."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Instrument List"),
 )
 async def public_list_instruments(
     service: InstrumentService = "vwap",
@@ -273,7 +273,7 @@ async def public_list_instruments(
         "starter-credit costs, supported USDC settlement networks, and the account-plan "
         "contact path. This is free read-only metadata; it does not initiate payment."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Pricing Information"),
 )
 async def public_get_pricing_info() -> str:
     """Return pricing guidance for public discovery clients."""
@@ -297,7 +297,7 @@ async def public_get_pricing_info() -> str:
         "agent-native workflow products, including starter-credit positioning, credit costs, suggested paid "
         "prices, endpoint templates, and upgrade path. This is free and read-only."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Product Catalog"),
 )
 async def public_get_product_catalog() -> str:
     """Return product catalog guidance for agents and listing surfaces."""
@@ -313,7 +313,7 @@ async def public_get_product_catalog() -> str:
         "volume, team size, recurring use, and SLA needs. This is free and does not "
         "collect contact details, create an entitlement, or start a purchase."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Account Plan Recommender"),
 )
 async def public_recommend_account_plan(
     expected_monthly_live_calls: ExpectedMonthlyLiveCalls,
@@ -369,7 +369,7 @@ async def public_recommend_account_plan(
         "example body for a premium Blocksize workflow. This is free and "
         "read-only; it does not fetch live data, charge credits, or start x402."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Premium Workflow Endpoint Builder"),
 )
 async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
     """Return the paid HTTP endpoint and example body for a premium workflow."""
@@ -574,7 +574,7 @@ async def public_get_workflow_endpoint(product: PremiumWorkflowProduct) -> str:
         "Returns method, URL, service notes, pricing docs, and next steps; it is "
         "read-only and does not fetch prices, charge a wallet, or submit payment."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Live Data Endpoint Builder"),
 )
 async def public_get_market_data_endpoint(
     service: LiveMarketDataService,
@@ -664,7 +664,7 @@ async def public_get_market_data_endpoint(
         "free read-only search returns document and instrument ids for fetch; it "
         "does not return live prices or start payment."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Catalog Search"),
 )
 async def public_search(query: CatalogSearchQuery) -> str:
     """Search docs and catalog entries in a document-oriented shape."""
@@ -683,7 +683,7 @@ async def public_search(query: CatalogSearchQuery) -> str:
         "free, read-only content retrieval with no account, credential, payment, "
         "or live-price side effects."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Catalog Fetch"),
 )
 async def public_fetch(id: CatalogFetchId) -> str:
     """Fetch one documentation or instrument payload."""
