@@ -1,8 +1,12 @@
 # Claude Connectors Directory Submission Packet
 
-Prepared: 2026-05-13
+Prepared: 2026-05-13. Updated: 2026-10-14.
 
-Current launch status and copy-ready submission answers now live in
+**Submitted on 2026-10-14 via https://claude.ai/directory/manage. Status: in
+review.** Portal name "Blocksize - Blockchain Market Data", slug
+`blocksize-blockchain-market-data`. The submission record, the final portal
+copy, the reviewer test instructions and the rules that apply while the review
+is open live in
 [claude_connector_launch_status.md](claude_connector_launch_status.md).
 
 The complementary Claude Code/Cowork plugin packet lives in
@@ -12,7 +16,7 @@ as a separate plugin directory entry.
 
 ## Goal
 
-Submit Blocksize Market Data as a Claude remote MCP connector while keeping the
+Get Blocksize Market Data listed as a Claude remote MCP connector while keeping the
 Claude-facing surface compliant with Anthropic's current directory posture:
 read-only tools, OAuth for user identity, no wallet/payment execution, clear
 support/privacy docs, and reviewer-ready examples.
@@ -47,16 +51,16 @@ Practical requirements for this repo:
 
 ## Submission Positioning
 
-Name:
+Name (as submitted):
 
 ```text
-Blocksize Market Data
+Blocksize - Blockchain Market Data
 ```
 
-Tagline:
+One-liner (as submitted):
 
 ```text
-Read-only real-time crypto, supported equity ticker, FX, and metals market data for Claude.
+Read-only real-time crypto, equity ticker, FX and metals market data for Claude: VWAP, bid/ask, AMM state prices, market briefs, pre-trade checks and trader indicators.
 ```
 
 Remote MCP URL:
@@ -96,10 +100,12 @@ https://mcp.blocksize.info
 https://blocksize.info
 ```
 
-Auth type:
+Auth type (as detected by the portal):
 
 ```text
-OAuth 2.0 with Dynamic Client Registration or Client ID Metadata Document support.
+Always required. OAuth 2.0 with Client ID Metadata Document (the server also
+supports Dynamic Client Registration), PKCE S256, scopes email and profile.
+Open self sign-up through Clerk with an email code.
 ```
 
 Transport:
@@ -117,21 +123,41 @@ mutation, payment setting changes, or funds movement.
 
 ## Tool Inventory
 
-All tools are read-only and use `READ_ONLY_TOOL_ANNOTATIONS`.
+All 18 tools in `src/authenticated_mcp_server.py` are read-only, use
+`READ_ONLY_TOOL_ANNOTATIONS` and carry their title inside the annotations (PR
+#106). Credits are the listed free-tier price per call; raw crypto tools charge 4
+credits for long-tail pairs and `get_bid_ask` charges 8 for equity tickers.
 
-| Tool | Human name | Requires auth | Notes |
-| --- | --- | --- | --- |
-| `search_pairs` | Instrument Search | No | Metadata only. |
-| `list_instruments` | Instrument List | No | Metadata only. |
-| `get_credit_balance` | Credit Balance | Yes | Shows server-side daily data credits. |
-| `get_vwap` | Crypto VWAP Snapshot | Yes | Uses daily credits. |
-| `get_bid_ask` | Crypto Bid Ask Snapshot | Yes | Uses daily credits. |
-| `get_fx_rate` | FX Snapshot | Yes | Uses daily credits. |
-| `get_metal_price` | Metal Snapshot | Yes | Uses daily credits. |
+| Tool | Title | Credits | Requires auth | Notes |
+| --- | --- | ---: | --- | --- |
+| `search_pairs` | Instrument Search | 0 | No | Metadata only. |
+| `list_instruments` | Instrument List | 0 | No | Metadata only. |
+| `get_credit_balance` | Credit Balance | 0 | Yes | Remaining free-tier live-data credits. |
+| `get_vwap` | Crypto VWAP Snapshot | 2 | Yes | Latest crypto VWAP for one pair. |
+| `get_bid_ask` | Bid Ask Snapshot | 2 | Yes | Crypto pair or supported equity ticker. |
+| `get_fx_rate` | FX Snapshot | 5 | Yes | Bid, ask and mid rate for one FX pair. |
+| `get_metal_price` | Metal Snapshot | 5 | Yes | Spot price for one metal ticker. |
+| `get_state_price` | AMM State Price | 2 | Yes | Pool-derived state price; use MSOLUSD. |
+| `get_vwap_30m` | 30-Minute VWAP | 2 | Yes | 30-minute closing VWAP. |
+| `get_vwap_24h` | 24-Hour VWAP | 2 | Yes | Fixed 24-hour VWAP. |
+| `run_pre_trade_check` | Pre-Trade Sanity Check | 100 | Yes | Pass or caution verdict; never trades. |
+| `get_market_brief` | Market Brief | 250 | Yes | Up to 8 instruments with provenance receipt. |
+| `create_price_receipt` | Price Receipt | 250 | Yes | One price with an audit-grade receipt. |
+| `get_token_quality` | Token Quality Indicator | 500 | Yes | Market-quality score for one token. |
+| `get_state_divergence` | State Divergence Indicator | 500 | Yes | AMM state versus VWAP, in basis points. |
+| `get_macro_snapshot` | Macro Snapshot | 1000 | Yes | Up to 12 instruments in one call. |
+| `get_solana_token_brief` | Solana Token Brief | 1000 | Yes | Signal brief for up to 10 Solana tokens. |
+| `get_trader_alpha_pack` | Trader Alpha Pack | 2500 | Yes | Combined trader signal package, up to 12 symbols. |
+
+Free-tier pacing matters for a review run: the free tier admits a call above 60
+credits only after an idle 60-second window, so the seven workflow and indicator
+tools between 100 and 1000 credits run one per idle minute, and
+`get_trader_alpha_pack` needs a fresh UTC day because of the 4,000-credit daily
+soft cap.
 
 ## Review Prompt Examples
 
-Use these in the submission form:
+Prompts submitted as review examples:
 
 ```text
 Search Blocksize for BTC market data instruments.
@@ -192,16 +218,10 @@ Suggested promotional prompt/screenshot pairs:
 
 ## Reviewer Test Account
 
-Create a Blocksize reviewer account before submission:
-
-```text
-Email: claude-reviewer@blocksize-capital.com
-Monthly free-tier credits: 30,000 (standard allowance) or higher
-Sample access: BTCUSD VWAP, BTCUSD bid/ask, EURUSD FX, XAUUSD metal price
-```
-
-Credentials should be supplied only through Anthropic's private review form, not
-committed to this repo.
+No reviewer account was pre-created. Sign-up is open: the reviewer creates their
+own Blocksize account during the OAuth flow with an email code from Clerk and
+receives the standard free-tier allowance. Keep Clerk Device Trust off while the
+review is open so that flow stays a single email-code step.
 
 ## Pre-Submission QA
 
@@ -228,6 +248,10 @@ OAuth/manual checks:
 6. Confirm invalid input, such as `../bad`, returns `INVALID_SYMBOL` and does not
    spend credits.
 
+Result on 2026-10-14: 17 of 18 tools ran from Claude and returned correct
+results. `get_trader_alpha_pack` only returned `FREE_TIER_DAILY_CAP_REACHED`
+and is not yet verified end to end; rerun it on a fresh UTC day.
+
 ## Open Submission Risks
 
 The main policy risk is brand adjacency to x402 and crypto payment flows. The
@@ -247,17 +271,20 @@ mitigation is product separation:
   - `ANTHROPIC_ENABLE_BETA_TOKENS=false`
   - `ANTHROPIC_MCP_PUBLIC_URL=https://mcp.blocksize.info/anthropic/mcp`
   - `ROOT_OAUTH_CONNECTOR=anthropic`
-- [ ] Confirm Clerk OAuth app callback allowlist:
+- [x] Confirm Clerk OAuth app callback allowlist:
   - `https://mcp.blocksize.info/anthropic/mcp/auth/callback`
 - [x] Confirm persistent entitlement storage path/volume for the main service.
 - [x] Confirm standalone Claude beta service uses OAuth and persistent
   entitlement storage.
 - [x] Prepare optional Claude Code/Cowork plugin package:
   - `claude-plugin/blocksize-market-data`
-- [ ] Create reviewer account and sample data access.
-- [ ] Run MCP Inspector against the production URL.
-- [ ] Test as a Claude custom connector.
-- [ ] Capture 3-5 real Claude.ai response-area PNG screenshots after connecting
-      the MCP, or leave screenshot upload blank and use the promotional link.
-- [ ] Fill out Anthropic's MCP directory submission form.
+- [x] Reviewer access: open self sign-up through Clerk (no pre-created account).
+- [x] Test as a Claude custom connector (17 of 18 tools verified on 2026-10-14).
+- [x] Add the tool title inside tool annotations (PR #106, commit `10d45c4`).
+- [x] Submit through https://claude.ai/directory/manage on 2026-10-14.
+- [ ] Verify `get_trader_alpha_pack` end to end on a fresh UTC day.
+- [ ] Await Anthropic's decision; keep Device Trust, free-tier limits, public
+      URLs and tool names unchanged until then.
+- [ ] After the decision: fix the `get_bid_ask` description (`AAPLXUSD` versus
+      the live `AAPLUSD` symbol) and re-enable Clerk Device Trust.
 - [ ] Optional: validate and submit the plugin through Claude's plugin form.
