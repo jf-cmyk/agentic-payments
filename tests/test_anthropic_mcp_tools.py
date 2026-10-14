@@ -58,6 +58,23 @@ def test_anthropic_tools_use_directory_safe_annotations():
 
 
 @pytest.mark.asyncio
+async def test_every_anthropic_tool_carries_its_title_inside_annotations():
+    """The Anthropic connector directory reads annotations.title for the listing
+    and flags tools that only set the spec-level tool.title."""
+    tools = await server.anthropic_mcp.list_tools()
+
+    assert tools
+    for tool in tools:
+        assert tool.title, tool.name
+        annotations = tool.annotations.model_dump(mode="json", by_alias=True, exclude_none=True)
+        assert annotations["title"] == tool.title, tool.name
+        assert annotations["readOnlyHint"] is True, tool.name
+        assert annotations["destructiveHint"] is False, tool.name
+        assert annotations["idempotentHint"] is True, tool.name
+        assert annotations["openWorldHint"] is True, tool.name
+
+
+@pytest.mark.asyncio
 async def test_live_tool_requires_identity():
     result = await server.anthropic_get_vwap("btc-usd")
     parsed = json.loads(result)

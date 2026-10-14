@@ -104,6 +104,18 @@ READ_ONLY_TOOL_ANNOTATIONS = {
     "idempotentHint": True,
     "openWorldHint": True,
 }
+
+
+def read_only_annotations(title: str) -> dict:
+    """Read-only tool annotations carrying the tool title.
+
+    The MCP spec puts the display name in ``tool.title``, but the Anthropic
+    connector directory also reads ``annotations.title`` and flags tools
+    that omit it. Pass the same title the ``@mcp.tool(title=...)`` call uses.
+    """
+    return {**READ_ONLY_TOOL_ANNOTATIONS, "title": title}
+
+
 DISCOVERY_INSTRUMENT_DEFAULT_LIMIT = 100
 DISCOVERY_INSTRUMENT_MAX_LIMIT = 500
 DISCOVERY_SEARCH_DEFAULT_LIMIT = 50
@@ -244,7 +256,7 @@ def _instrument_fetch_payload(pair_info) -> dict[str, object]:
         "trading pair. Returns a single paid snapshot only; use search_pairs "
         "first if you do not know the exact symbol."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Crypto VWAP Snapshot"),
 )
 async def get_vwap(pair: str) -> str:
     """
@@ -294,7 +306,7 @@ async def get_vwap(pair: str) -> str:
         "bid/ask symbol, including crypto pairs and supported equity tickers. "
         "Returns a single paid snapshot only; it does not stream quotes."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Bid Ask Snapshot"),
 )
 async def get_bid_ask(pair: str) -> str:
     """
@@ -342,7 +354,7 @@ async def get_bid_ask(pair: str) -> str:
         "Use this when you need the latest bid, ask, and mid rate for one FX pair. "
         "Returns a single paid snapshot only."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("FX Snapshot"),
 )
 async def get_fx_rate(pair: str) -> str:
     """
@@ -385,7 +397,7 @@ async def get_fx_rate(pair: str) -> str:
         "Use this when you need the latest spot price for one supported metal ticker. "
         "Returns a single paid snapshot only."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Metal Snapshot"),
 )
 async def get_metal_price(ticker: str) -> str:
     """
@@ -432,7 +444,7 @@ async def get_metal_price(ticker: str) -> str:
         "Use this to discover valid crypto, equity/stock ticker, FX, or metal symbols before "
         "calling paid market data tools. This is free and does not return live prices."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Instrument Search"),
 )
 async def search_pairs(
     query: str,
@@ -535,7 +547,7 @@ async def search_pairs(
         "Use this to list all supported instruments for one Blocksize service. "
         "This is free and is best for capability discovery, not live market data."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Instrument List"),
 )
 async def list_instruments(
     service: str = "vwap",
@@ -632,7 +644,7 @@ async def list_instruments(
         "authenticated-connector-only free allowance and credit costs, settlement "
         "networks, subscription plans, and the Enterprise contact-sales path."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Pricing Information"),
 )
 async def get_pricing_info() -> str:
     """
@@ -758,7 +770,7 @@ async def get_pricing_info() -> str:
         "Blocksize documentation and free instrument metadata. This does not "
         "return paid live market data."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Catalog Search"),
 )
 async def search(query: str) -> str:
     """
@@ -827,7 +839,7 @@ async def search(query: str) -> str:
         "or instrument guide returned by search. This does not execute paid "
         "market data requests."
     ),
-    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    annotations=read_only_annotations("Catalog Fetch"),
 )
 async def fetch(id: str) -> str:
     """

@@ -28,7 +28,7 @@ from src.mcp_server import (
     DISCOVERY_SEARCH_DEFAULT_LIMIT,
     InstrumentPageLimit,
     InstrumentPageOffset,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    read_only_annotations,
     build_catalog_snapshot_metadata,
 )
 from src.models import (
@@ -1002,7 +1002,7 @@ def create_authenticated_market_data_mcp(
             "Search supported Blocksize crypto, equity/stock ticker, FX, and metal "
             "instruments by symbol or asset name. This returns metadata only, not live prices."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Instrument Search"),
     )
     async def search_pairs(
         query: InstrumentSearchQuery,
@@ -1093,7 +1093,7 @@ def create_authenticated_market_data_mcp(
             "shared bid/ask coverage, including supported equity tickers. This "
             "returns metadata only, not live prices."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Instrument List"),
     )
     async def list_instruments(
         service: InstrumentService = "vwap",
@@ -1172,7 +1172,7 @@ def create_authenticated_market_data_mcp(
             "Show the authenticated user's remaining Blocksize free-tier live-data "
             "credits for the current month."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Credit Balance"),
     )
     async def get_credit_balance() -> str:
         if economic_writes_locked():
@@ -1255,7 +1255,7 @@ def create_authenticated_market_data_mcp(
             "Get the latest institutional crypto VWAP for one trading pair. "
             "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Crypto VWAP Snapshot"),
     )
     async def get_vwap(pair: PairValue) -> str:
         try:
@@ -1283,7 +1283,7 @@ def create_authenticated_market_data_mcp(
             "catalog-confirmed equity symbol such as AAPLXUSD for Apple/USD. This read-only live data call uses "
             "the monthly Blocksize free-tier credits."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Bid Ask Snapshot"),
     )
     async def get_bid_ask(pair: PairValue) -> str:
         try:
@@ -1310,7 +1310,7 @@ def create_authenticated_market_data_mcp(
             "Get the latest bid, ask, and mid rate for one FX pair. "
             "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("FX Snapshot"),
     )
     async def get_fx_rate(pair: PairValue) -> str:
         try:
@@ -1336,7 +1336,7 @@ def create_authenticated_market_data_mcp(
             "Get the latest spot price for one supported metal ticker. "
             "This read-only live data call uses the monthly Blocksize free-tier credits."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Metal Snapshot"),
     )
     async def get_metal_price(ticker: PairValue) -> str:
         try:
@@ -1403,7 +1403,7 @@ def create_authenticated_market_data_mcp(
             "MSOLUSD. Uses the monthly Blocksize free-tier credits at the pair's crypto "
             "tier price: 2 credits for top-250 assets, 4 for long-tail pairs."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("AMM State Price"),
     )
     async def get_state_price(pair: PairValue) -> str:
         return await raw_window("get_state_price", pair)
@@ -1416,7 +1416,7 @@ def create_authenticated_market_data_mcp(
             "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
             "assets, 4 for long-tail pairs."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("30-Minute VWAP"),
     )
     async def get_vwap_30m(pair: PairValue) -> str:
         return await raw_window("get_vwap_30m", pair)
@@ -1429,7 +1429,7 @@ def create_authenticated_market_data_mcp(
             "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
             "assets, 4 for long-tail pairs."
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("24-Hour VWAP"),
     )
     async def get_vwap_24h(pair: PairValue) -> str:
         return await raw_window("get_vwap_24h", pair)
@@ -1442,7 +1442,7 @@ def create_authenticated_market_data_mcp(
             "metals, and tokenized equities: live values, freshness, spread, quality "
             "flags, and a provenance receipt." + price_note("get_market_brief")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Market Brief"),
     )
     async def get_market_brief(symbols: SymbolList) -> str:
         try:
@@ -1459,7 +1459,7 @@ def create_authenticated_market_data_mcp(
             "an optional reference price, with a pass or caution verdict. It never "
             "places a trade." + price_note("run_pre_trade_check")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Pre-Trade Sanity Check"),
     )
     async def run_pre_trade_check(
         symbol: PairValue,
@@ -1500,7 +1500,7 @@ def create_authenticated_market_data_mcp(
             "response hashes, source endpoints, and a public lookup URL."
             + price_note("create_price_receipt")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Price Receipt"),
     )
     async def create_price_receipt(
         symbol: PairValue,
@@ -1525,7 +1525,7 @@ def create_authenticated_market_data_mcp(
             "Snapshot up to 12 instruments across crypto, FX, and metals in one call. "
             "Defaults to BTCUSD, ETHUSD, EURUSD, and XAUUSD." + price_note("get_macro_snapshot")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Macro Snapshot"),
     )
     async def get_macro_snapshot(symbols: SymbolList | None = None) -> str:
         try:
@@ -1542,7 +1542,7 @@ def create_authenticated_market_data_mcp(
             "Score one crypto token's market quality from live price, bid/ask, state, and "
             "VWAP-window feeds." + price_note("get_token_quality")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Token Quality Indicator"),
     )
     async def get_token_quality(symbol: PairValue) -> str:
         try:
@@ -1558,7 +1558,7 @@ def create_authenticated_market_data_mcp(
             "Measure how far one token's AMM state price diverges from its market VWAP, "
             "in basis points." + price_note("get_state_divergence")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("State Divergence Indicator"),
     )
     async def get_state_divergence(symbol: PairValue) -> str:
         try:
@@ -1574,7 +1574,7 @@ def create_authenticated_market_data_mcp(
             "Build a Solana-oriented signal brief for up to 10 tokens. Defaults to SOLUSD."
             + price_note("get_solana_token_brief")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Solana Token Brief"),
     )
     async def get_solana_token_brief(symbols: SymbolList | None = None) -> str:
         try:
@@ -1592,7 +1592,7 @@ def create_authenticated_market_data_mcp(
             "signal package for up to 12 symbols. Defaults to BTCUSD, ETHUSD, and SOLUSD."
             + price_note("get_trader_alpha_pack")
         ),
-        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+        annotations=read_only_annotations("Trader Alpha Pack"),
     )
     async def get_trader_alpha_pack(symbols: SymbolList | None = None) -> str:
         try:
