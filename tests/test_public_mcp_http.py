@@ -47,8 +47,9 @@ async def test_public_app_runs_stateless():
     app = create_public_http_app(server())
     async with app.lifespan(app):
         manager = manager_for(app)
+        # mcp 1.30 gives every manager a default idle timeout; stateless mode
+        # tracks no sessions and never applies it.
         assert manager.stateless is True
-        assert manager.session_idle_timeout is None
 
 
 @pytest.mark.asyncio
