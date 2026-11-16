@@ -6,7 +6,7 @@ authenticated, read-only MCP live-data server.
 ## What It Does
 
 - Searches Blocksize instruments and product metadata.
-- Finds pricing, workflow documentation, and exact paid HTTP routes.
+- Finds workflow documentation and exact HTTP integration routes.
 - Distinguishes discovery results, generated routes, and live observations.
 - Preserves timestamps, provenance, units, and freshness metadata when the
   connected surface returns them.
@@ -25,11 +25,11 @@ The bundled MCP server is:
 https://mcp.blocksize.info/openai/mcp/
 ```
 
-After OAuth authentication, the connector exposes instrument discovery, credit
+After OAuth authentication, the connector exposes instrument discovery, usage
 status, live VWAP, VWAP-window, state-price, bid/ask, FX, and metal tools, and
 workflow and trader-indicator tools such as market briefs, pre-trade checks,
-and price receipts. Eligible users receive the starter allowance reported by
-the server. Routes not exposed as live MCP tools
+and price receipts. The server reports the signed-in account's usage balance.
+Routes not exposed as live MCP tools
 continue to use the public endpoint builder and are clearly labeled as routes
 rather than observations.
 
@@ -40,7 +40,7 @@ messages, submit payment proofs, or provide investment advice.
 
 ## Install Locally Now
 
-The public repository mirrors do not yet contain this `0.7.1` plugin and its
+The public repository mirrors do not yet contain this `0.7.2` plugin and its
 marketplace manifest. Do not use a remote marketplace URL for the current local
 release candidate.
 
@@ -55,7 +55,7 @@ codex plugin add blocksize-market-data@blocksize-plugins
 The deterministic local archive is:
 
 ```text
-deliverables/blocksize-market-data-openai-plugin-0.7.1.zip
+deliverables/blocksize-market-data-openai-plugin-0.7.2.zip
 ```
 
 That archive contains the plugin, not a standalone marketplace. To test the
@@ -63,7 +63,7 @@ ZIP, extract it under a dedicated local marketplace root as
 `plugins/blocksize-market-data`, add a local marketplace entry whose
 `source.path` is `./plugins/blocksize-market-data`, then add that root with
 `codex plugin marketplace add /absolute/path/to/local-marketplace`. Verify its
-SHA-256 against `deliverables/agent-skill-release-0.7.1.json` first; the current
+SHA-256 against `deliverables/agent-skill-release-0.7.2.json` first; the current
 archive is an unsigned local build.
 
 ## Future Remote Install Gate
