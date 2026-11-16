@@ -14,7 +14,7 @@ Report these fields in order:
 5. Observation timestamp and source/provenance when returned.
 6. `freshness`: `fresh`, `stale`, `unknown`, or `invalid_future`, evaluated
    against the user's stated requirement. Never infer freshness from request time.
-7. Remaining credits or paid-route access boundary only when returned or relevant.
+7. Remaining usage balance or route access boundary only when returned or relevant.
 
 Do not label catalog metadata or an integration route as an observation. Do not
 label an observation `current` or `verified` when timestamp, provenance, or the
@@ -25,7 +25,7 @@ freshness test is missing.
 Use one row per requested instrument with consistent columns. Keep failed,
 unsupported, stale, and ambiguous instruments in the result with an explicit
 status instead of dropping them. Do not compare unlike measurements without
-labeling the difference. Before more than 10 credit-spending calls, obtain the
+labeling the difference. Before more than 10 balance-drawing calls, obtain the
 user's confirmation.
 
 ## Route-only result
@@ -34,8 +34,8 @@ Label the result `Integration route`, not `Market data`. Include:
 
 - HTTP method and exact `https://mcp.blocksize.info/` URL.
 - Service and normalized symbol.
-- Published price or credit cost only when the tool returns it.
-- Required x402 or connector-credit boundary.
+- Per-call usage only when the tool returns it.
+- The access boundary the tool returned.
 - A direct statement that no live observation was retrieved.
 
 Never follow a different host, initiate payment, or submit a payment proof.
@@ -43,16 +43,17 @@ Never follow a different host, initiate payment, or submit a payment proof.
 ## Error handling
 
 - `AUTH_REQUIRED`: use the host's connector sign-in; never request a token.
-- `DAILY_CREDIT_LIMIT_REACHED`: stop and report the exhausted monthly allowance
-  and the upgrade CTA from `details.upgrade` (free trial and pricing paths).
+- `DAILY_CREDIT_LIMIT_REACHED`: stop and report the exhausted monthly limit.
+  Relay any account information the response carries only as an
+  informational link, never as a recommendation.
 - `FREE_TIER_RATE_LIMITED`: stop; report `details.retry_after_seconds` and do
   not retry in a loop.
 - `FREE_TIER_DAILY_CAP_REACHED`, `FREE_TIER_AT_CAPACITY`: stop; the cap resets
-  at the next UTC day; report the upgrade CTA.
+  at the next UTC day.
 - `FREE_TIER_SUSPENDED`, `FREE_TIER_DISABLED`, `FREE_TIER_INELIGIBLE`,
   `FREE_TIER_SCOPE_EXCLUDED`: stop and report the access boundary verbatim;
   never work around it with another identity or host.
-- `CREDIT_LEDGER_UNAVAILABLE`: stop without estimating or spending credits.
+- `CREDIT_LEDGER_UNAVAILABLE`: stop without estimating or drawing on the balance.
 - `CREDIT_FINALIZATION_FAILED`: stop and do not retry automatically.
 - `INVALID_SYMBOL`: resolve the exact instrument again or ask the user.
 - `BLOCKSIZE_API_ERROR` or `INTERNAL_ERROR`: preserve the failed instrument and

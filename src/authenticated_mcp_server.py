@@ -186,6 +186,11 @@ FREE_TIER_INELIGIBLE_MESSAGES = {
 }
 
 
+# The plans page a commerce-neutral connector may link to: informational, with
+# no checkout on it and no campaign tracking in the link.
+PLAN_INFORMATION_URL = "https://blocksize.info/crypto-market-data/pricing/"
+
+
 @dataclass(frozen=True)
 class AuthenticatedMCPBundle:
     mcp: FastMCP
@@ -251,8 +256,53 @@ def create_authenticated_market_data_mcp(
     get_entitlements: EntitlementGetter,
     client_label: str,
     resource_uri: str,
+    commerce_neutral: bool = False,
 ) -> AuthenticatedMCPBundle:
-    """Create a read-only authenticated market-data MCP server."""
+    """Create a read-only authenticated market-data MCP server.
+
+    ``commerce_neutral`` is for directories that bar pricing, subscription and
+    promotion wording and any upgrade prompt inside the plugin (OpenAI's
+    plugin guidelines). Tool descriptions then name no free tier or tier
+    price, and tool results carry no trial or plan call to action: a reached
+    limit is explained and links only to the informational plans page. The
+    OpenAI connector sets it; the other connectors keep their behaviour.
+    """
+    upgrade_keys = ("upgrade", "upgrade_path", "upgrade_recommendation")
+    plan_information_note = f"Plan information: {PLAN_INFORMATION_URL}"
+
+    def limit_note() -> str:
+        return plan_information_note if commerce_neutral else free_tier.upgrade_path_text()
+
+    def without_upgrade(payload: dict[str, object]) -> dict[str, object]:
+        if not commerce_neutral:
+            return payload
+        return {key: value for key, value in payload.items() if key not in upgrade_keys}
+
+    if commerce_neutral:
+        balance_description = (
+            "Show the signed-in account's Blocksize usage balance for the current "
+            "month: limit, credits used, credits remaining and reset date."
+        )
+        snapshot_usage = (
+            "This read-only live data call draws on the signed-in account's "
+            "monthly usage balance."
+        )
+        window_usage = (
+            "Draws on the signed-in account's monthly usage balance: 2 credits for "
+            "top-250 assets, 4 for long-tail pairs."
+        )
+    else:
+        balance_description = (
+            "Show the authenticated user's remaining Blocksize free-tier live-data "
+            "credits for the current month."
+        )
+        snapshot_usage = (
+            "This read-only live data call uses the monthly Blocksize free-tier credits."
+        )
+        window_usage = (
+            "Uses the monthly Blocksize free-tier credits at the pair's crypto "
+            "tier price: 2 credits for top-250 assets, 4 for long-tail pairs."
+        )
     mcp = FastMCP(
         mcp_name,
         version=APP_VERSION,
@@ -262,6 +312,15 @@ def create_authenticated_market_data_mcp(
     observability_surface = f"{client_label.lower()}_mcp"
 
     def error_payload(error_code: str, message: str, details: str | None = None) -> str:
+        if commerce_neutral:
+            message = message.replace(" Signed x402 payment still works.", "")
+            if details:
+                try:
+                    parsed = json.loads(details)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    details = json.dumps(without_upgrade(parsed))
         return json.dumps(
             ErrorResponse(
                 error_code=error_code,
@@ -311,7 +370,7 @@ def create_authenticated_market_data_mcp(
             distinct_instruments_30d=breadth,
             source=observability_surface,
         )
-        if recommendation is not None:
+        if recommendation is not None and not commerce_neutral:
             payload["upgrade_recommendation"] = recommendation
             payload["upgrade"] = {
                 "plan_id": recommendation["recommended_plan_id"],
@@ -369,6 +428,8 @@ def create_authenticated_market_data_mcp(
         trigger: str,
     ) -> None:
         """Count one CTA impression per identity, trigger, and UTC day."""
+        if commerce_neutral:
+            return  # no call to action is shown on this connector
         record_usage_event_once(
             "upgrade_cta_shown",
             fingerprint(f"cta:{identity.ledger_subject}:{free_tier.today_utc()}:{trigger}"),
@@ -578,7 +639,7 @@ def create_authenticated_market_data_mcp(
             )
             return error_payload(
                 code,
-                f"{message} {free_tier.upgrade_path_text()}",
+                f"{message} {limit_note()}",
                 json.dumps({**details, "attribution": free_tier.attribution_payload()}),
             )
 
@@ -617,11 +678,16 @@ def create_authenticated_market_data_mcp(
             grant_key = eligibility.grant_key
             service = await resolve_service()
             if not free_tier.service_in_free_scope(service):
+                scope_details = free_tier.scope_excluded_payload(service)
+                if commerce_neutral:
+                    scope_details["reason"] = (
+                        "This data package is not included in this account's access."
+                    )
                 return gate_failure(
                     "FREE_TIER_SCOPE_EXCLUDED",
                     f"'{subject}' ({service}) is outside the current free-tier scope. No credit was used.",
                     "free_scope_excluded",
-                    free_tier.scope_excluded_payload(service),
+                    scope_details,
                 )
 
         # One price list: the service, and for raw data the symbol's tier, set
@@ -679,7 +745,7 @@ def create_authenticated_market_data_mcp(
                 )
                 return error_payload(
                     code,
-                    f"{message} {free_tier.upgrade_path_text()}",
+                    f"{message} {limit_note()}",
                     json.dumps(
                         denial_payload(
                             decision,
@@ -774,7 +840,7 @@ def create_authenticated_market_data_mcp(
                 )
             return error_payload(
                 code,
-                f"{message} {free_tier.upgrade_path_text()}",
+                f"{message} {limit_note()}",
                 json.dumps(
                     credit_payload(
                         status,
@@ -983,7 +1049,7 @@ def create_authenticated_market_data_mcp(
             f"{PUBLIC_BASE_URL}{recommendation['ctas']['primary']['path']} | "
             f"{recommendation['ctas']['secondary']['label']} "
             f"{PUBLIC_BASE_URL}{recommendation['ctas']['secondary']['path']}"
-            if recommendation is not None
+            if recommendation is not None and not commerce_neutral
             else ""
         )
         return (
@@ -1168,10 +1234,7 @@ def create_authenticated_market_data_mcp(
     @mcp.tool(
         name="get_credit_balance",
         title="Credit Balance",
-        description=(
-            "Show the authenticated user's remaining Blocksize free-tier live-data "
-            "credits for the current month."
-        ),
+        description=balance_description,
         annotations=read_only_annotations("Credit Balance"),
     )
     async def get_credit_balance() -> str:
@@ -1253,7 +1316,7 @@ def create_authenticated_market_data_mcp(
         title="Crypto VWAP Snapshot",
         description=(
             "Get the latest institutional crypto VWAP for one trading pair. "
-            "This read-only live data call uses the monthly Blocksize free-tier credits."
+            f"{snapshot_usage}"
         ),
         annotations=read_only_annotations("Crypto VWAP Snapshot"),
     )
@@ -1280,8 +1343,8 @@ def create_authenticated_market_data_mcp(
         title="Bid Ask Snapshot",
         description=(
             "Get the latest bid, ask, and spread for one crypto pair or supported "
-            "catalog-confirmed equity symbol such as AAPLXUSD for Apple/USD. This read-only live data call uses "
-            "the monthly Blocksize free-tier credits."
+            "catalog-confirmed equity symbol such as AAPLXUSD for Apple/USD. "
+            f"{snapshot_usage}"
         ),
         annotations=read_only_annotations("Bid Ask Snapshot"),
     )
@@ -1308,7 +1371,7 @@ def create_authenticated_market_data_mcp(
         title="FX Snapshot",
         description=(
             "Get the latest bid, ask, and mid rate for one FX pair. "
-            "This read-only live data call uses the monthly Blocksize free-tier credits."
+            f"{snapshot_usage}"
         ),
         annotations=read_only_annotations("FX Snapshot"),
     )
@@ -1334,7 +1397,7 @@ def create_authenticated_market_data_mcp(
         title="Metal Snapshot",
         description=(
             "Get the latest spot price for one supported metal ticker. "
-            "This read-only live data call uses the monthly Blocksize free-tier credits."
+            f"{snapshot_usage}"
         ),
         annotations=read_only_annotations("Metal Snapshot"),
     )
@@ -1360,6 +1423,11 @@ def create_authenticated_market_data_mcp(
         # particular) read a dollar price or a payment rail in a tool
         # description as commerce and as a side effect of a read-only tool.
         credits = TOOL_COSTS[tool_name]
+        if commerce_neutral:
+            return (
+                f" This read-only workflow call draws {credits:,} credits from the "
+                "signed-in account's monthly usage balance."
+            )
         return (
             f" This read-only workflow call uses {credits:,} of the monthly Blocksize "
             "free-tier credits."
@@ -1400,8 +1468,8 @@ def create_authenticated_market_data_mcp(
         title="AMM State Price",
         description=(
             "Get the pool-derived AMM state price for one covered crypto pair, such as "
-            "MSOLUSD. Uses the monthly Blocksize free-tier credits at the pair's crypto "
-            "tier price: 2 credits for top-250 assets, 4 for long-tail pairs."
+            "MSOLUSD. "
+            f"{window_usage}"
         ),
         annotations=read_only_annotations("AMM State Price"),
     )
@@ -1412,9 +1480,8 @@ def create_authenticated_market_data_mcp(
         name="get_vwap_30m",
         title="30-Minute VWAP",
         description=(
-            "Get the 30-minute closing VWAP for one crypto pair. Uses the monthly Blocksize "
-            "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
-            "assets, 4 for long-tail pairs."
+            "Get the 30-minute closing VWAP for one crypto pair. "
+            f"{window_usage}"
         ),
         annotations=read_only_annotations("30-Minute VWAP"),
     )
@@ -1425,9 +1492,8 @@ def create_authenticated_market_data_mcp(
         name="get_vwap_24h",
         title="24-Hour VWAP",
         description=(
-            "Get the fixed 24-hour VWAP for one crypto pair. Uses the monthly Blocksize "
-            "free-tier credits at the pair's crypto tier price: 2 credits for top-250 "
-            "assets, 4 for long-tail pairs."
+            "Get the fixed 24-hour VWAP for one crypto pair. "
+            f"{window_usage}"
         ),
         annotations=read_only_annotations("24-Hour VWAP"),
     )

@@ -88,10 +88,22 @@ def _html_code_inventory(path: Path, element_id: str) -> list[str]:
 
 
 def test_agent_skill_content_is_synchronized_across_hosts() -> None:
+    # The Claude and Cursor copies stay byte-identical. The OpenAI copy carries
+    # the same workflow with usage wording that names no free tier, plan, trial
+    # or payment rail (OpenAI review feedback, November 2026); its structure is
+    # held to the Claude copy heading by heading.
     for relative_file in SHARED_SKILL_FILES:
-        expected = (OPENAI_SKILL / relative_file).read_bytes()
-        assert (CLAUDE_SKILL / relative_file).read_bytes() == expected
+        expected = (CLAUDE_SKILL / relative_file).read_bytes()
         assert (CURSOR_SKILL / relative_file).read_bytes() == expected
+
+        def headings(path: Path) -> list[str]:
+            return [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("#")
+            ]
+
+        assert headings(OPENAI_SKILL / relative_file) == headings(CLAUDE_SKILL / relative_file)
 
 
 def test_public_tool_inventories_match_fastmcp_contract() -> None:
@@ -170,7 +182,7 @@ def test_openai_plugin_uses_distinct_live_and_public_mcp_identities() -> None:
     )
     dependency = skill_metadata["dependencies"]["tools"][0]
 
-    assert manifest["version"] == "0.7.1"
+    assert manifest["version"] == "0.7.2"
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert bundled_mcp == {
@@ -183,6 +195,28 @@ def test_openai_plugin_uses_distinct_live_and_public_mcp_identities() -> None:
     assert dependency["url"] == "https://mcp.blocksize.info/mcp/server/"
     assert dependency["value"] not in bundled_mcp
     assert "verified" not in skill_metadata["interface"]["default_prompt"].lower()
+
+
+def test_openai_plugin_package_carries_no_pricing_or_promotion_wording() -> None:
+    """OpenAI review feedback (November 2026): no pricing, subscription offers or
+    promotions in the listing. Tool names and error codes are identifiers, not copy."""
+    commercial = re.compile(
+        r"free[- ]tier|free trial|/go/|x402|subscription|upgrade|pricing(?!_info)|"
+        r"\$\d|discount|promo|30,000|allowance|starter credits|\bpaid\b|evaluation licen[cs]e",
+        re.IGNORECASE,
+    )
+    spec = next(
+        spec for spec in build_agent_skill_packages.package_specs() if spec.label == "openai"
+    )
+    failures: dict[str, list[str]] = {}
+    for member in spec.members:
+        path = OPENAI_ROOT / member
+        if path.suffix.lower() not in {".json", ".md", ".yaml", ".yml"}:
+            continue
+        matches = commercial.findall(path.read_text(encoding="utf-8"))
+        if matches:
+            failures[member] = matches
+    assert failures == {}
 
 
 def test_openai_repo_marketplace_resolves_to_the_plugin() -> None:
@@ -250,7 +284,7 @@ def test_plugin_install_guidance_does_not_claim_stale_remote_availability() -> N
         assert CANONICAL_REPOSITORY in text
 
     assert "codex plugin marketplace add /absolute/path/to/agentic-payments" in openai_readme
-    assert "blocksize-market-data-openai-plugin-0.7.1.zip" in openai_readme
+    assert "blocksize-market-data-openai-plugin-0.7.2.zip" in openai_readme
     assert "Future Remote Install Gate" in openai_readme
     assert "claude --plugin-dir /absolute/path/to/claude-plugin/blocksize-market-data" in (
         claude_setup
@@ -356,7 +390,7 @@ def test_package_builder_is_reproducible_and_allowlisted(tmp_path: Path) -> None
 
 def test_versioned_release_artifacts_match_reproducible_build(tmp_path: Path) -> None:
     build_agent_skill_packages.build_all(tmp_path)
-    release_version = "0.7.1"
+    release_version = "0.7.2"
 
     for spec in build_agent_skill_packages.package_specs():
         assert (ROOT / "deliverables" / spec.filename).read_bytes() == (

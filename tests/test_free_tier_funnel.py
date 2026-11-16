@@ -268,3 +268,56 @@ def test_health_reports_free_tier_deploy_status_and_legacy_env(dashboard_client,
         f"ANTHROPIC_DAILY_CREDITS is set but ignored; the free allowance is FREE_TIER_MONTHLY_CREDITS={settings.free_tier.monthly_credits}"
     ]
     assert "salt" not in str(health).lower().replace("email_hash_salt_configured", "")
+
+
+@pytest.mark.asyncio
+async def test_openai_connector_shows_no_upgrade_prompt(tmp_path, monkeypatch, isolate_usage_event_store):
+    """OpenAI's plugin guidelines forbid promoting upgrades or plans inside a plugin.
+    The OpenAI connector explains a reached limit and links only to the
+    informational plans page; the other connectors keep the funnel above."""
+    from src import openai_mcp_server as openai
+    from src.authenticated_mcp_server import PLAN_INFORMATION_URL
+
+    monkeypatch.setattr(settings.free_tier, "enabled", True)
+    monkeypatch.setattr(settings.free_tier, "monthly_credits", 10)
+    monkeypatch.setattr(settings.free_tier, "per_minute_credits", 0)
+    monkeypatch.setattr(settings.free_tier, "daily_soft_cap_credits", 0)
+    monkeypatch.setattr(settings.free_tier, "global_daily_cap_credits", 0)
+    monkeypatch.setattr(settings.free_tier, "abuse_fast_drain_ratio", 1.01)
+    monkeypatch.setattr(settings.free_tier, "abuse_sweep_distinct_symbols", 1_000)
+    client = AsyncMock()
+    client.get_vwap_latest = AsyncMock(
+        side_effect=lambda pair: VWAPData(
+            pair=pair,
+            vwap=1.0,
+            timestamp=datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc),
+            currency="USD",
+        )
+    )
+    openai._client = client
+    openai._entitlements = EntitlementManager(tmp_path / "openai.db", default_daily_credits=10)
+    identity = ConnectorIdentity(
+        user_id="o1", email="one@example.org", source="test", principal_id="test:o1"
+    )
+    monkeypatch.setattr(openai.openai_auth, "resolve_openai_identity", lambda: identity)
+    try:
+        results = [await openai.openai_get_vwap(f"S{index}USD") for index in range(10)]
+        balance_text = await openai.openai_get_credit_balance()
+        exhausted_text = await openai.openai_get_vwap("BTCUSD")
+    finally:
+        openai._client = None
+        openai._entitlements = None
+
+    for text in (*results, balance_text, exhausted_text):
+        lowered = text.lower()
+        for banned in ("upgrade", "free trial", "/go/", "x402", "see plans", "eur "):
+            assert banned not in lowered, banned
+    assert "Credits remaining this month: 0/10" in results[9]
+    balance = json.loads(balance_text)["credits"]
+    assert balance["credits_remaining"] == 0
+    exhausted = json.loads(exhausted_text)
+    assert exhausted["error_code"] == "DAILY_CREDIT_LIMIT_REACHED"
+    assert PLAN_INFORMATION_URL in exhausted["message"]
+    assert not [
+        event for event in _events(isolate_usage_event_store) if event["event"] == "upgrade_cta_shown"
+    ]

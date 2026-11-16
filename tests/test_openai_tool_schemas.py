@@ -94,3 +94,21 @@ def test_openai_instructions_fit_the_scanner_window():
     assert "get_credit_balance" in instructions
     assert "Cite the provider timestamp" in instructions
     assert "trades" in instructions
+
+
+def test_openai_metadata_carries_no_pricing_or_promotion_wording():
+    """OpenAI's plugin guidelines bar pricing, subscription and promotion wording
+    from listing and model-readable metadata (review feedback, November 2026)."""
+    import asyncio
+    import re
+
+    commercial = re.compile(
+        r"free|tier price|\$|x402|subscri|trial|pricing|upgrade|allowance|discount|promo",
+        re.IGNORECASE,
+    )
+    assert commercial.search(openai_mcp.instructions) is None
+    for tool in asyncio.run(openai_mcp.list_tools()):
+        assert commercial.search(tool.description) is None, tool.name
+    # The Anthropic and Cursor connectors keep their existing wording.
+    anthropic = {tool.name: tool for tool in asyncio.run(anthropic_mcp.list_tools())}
+    assert "free-tier" in anthropic["get_vwap"].description

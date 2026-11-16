@@ -15,7 +15,6 @@ from src.entitlement_manager import (
     EntitlementManager,
     connector_entitlement_manager,
 )
-from src.free_tier import allowance_label
 
 TOOL_COSTS = SHARED_TOOL_COSTS
 
@@ -97,9 +96,9 @@ _bundle = create_authenticated_market_data_mcp(
         "Read-only Blocksize Capital live market data: crypto VWAP, equity "
         "bid/ask, FX, metals, AMM state prices, VWAP windows, market briefs, "
         "pre-trade checks, price receipts, macro snapshots and trader indicators. "
-        f"Signed-in users get {allowance_label()} live-data credits a month; each "
-        "tool reports its credit cost and the remaining balance, and "
-        "get_credit_balance shows the allowance and reset date. Nothing here "
+        "Each tool reports what it draws from the signed-in account's monthly "
+        "usage balance, and get_credit_balance shows the limit, the remaining "
+        "balance and the reset date. Nothing here "
         "trades, moves funds or signs wallet messages. Cite the provider "
         "timestamp with every value."
     ),
@@ -109,6 +108,10 @@ _bundle = create_authenticated_market_data_mcp(
     get_entitlements=_get_entitlements,
     client_label="OpenAI",
     resource_uri="blocksize://openai-info",
+    # OpenAI's plugin guidelines bar pricing, subscription and promotion wording
+    # in metadata, and upgrade prompts in tool results (review feedback of
+    # November 2026).
+    commerce_neutral=True,
 )
 
 openai_mcp = _bundle.mcp

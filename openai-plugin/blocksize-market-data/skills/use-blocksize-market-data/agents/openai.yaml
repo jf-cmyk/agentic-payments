@@ -6,7 +6,7 @@ dependencies:
   tools:
     - type: "mcp"
       value: "blocksize-market-data-public"
-      description: "Public read-only Blocksize catalog discovery and paid endpoint construction"
+      description: "Public read-only Blocksize catalog discovery and endpoint construction"
       transport: "streamable_http"
       url: "https://mcp.blocksize.info/mcp/server/"
 policy:
