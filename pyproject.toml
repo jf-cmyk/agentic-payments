@@ -33,8 +33,8 @@ dependencies = [
     # Exact advisory-fixed versions for transitive packages in the production
     # payment/runtime graph (audited 2026-08-21).
     "cryptography==50.0.0",
-    "joserfc==1.6.8",
-    "mcp==1.28.1",
+    "joserfc==1.7.6",
+    "mcp==1.30.0",
     "pyjwt==2.15.0",
     "python-multipart==0.0.31",
     "starlette==1.3.1",
