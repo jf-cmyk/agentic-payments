@@ -477,21 +477,28 @@ class UsageEventStore:
             },
         }
 
-    def events_since(self, since_iso: str, *, limit: int = 200000) -> list[dict[str, Any]]:
-        """Return events at or after ``since_iso`` (ISO text, UTC), oldest first."""
+    def events_since(
+        self, since_iso: str, *, limit: int = 200000, event: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return events at or after ``since_iso`` (ISO text, UTC), oldest first.
+
+        ``event`` restricts the rows to one event name.
+        """
+        event_clause = "AND event = ?" if event else ""
+        params = (since_iso, event, limit) if event else (since_iso, limit)
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, event, surface, endpoint, method, status_code,
                        latency_ms, user_agent, referrer, wallet_hash, subject,
                        asset_class, price_usdc, network, reason, tool_name,
                        metadata_json
                 FROM usage_events
-                WHERE timestamp >= ?
+                WHERE timestamp >= ? {event_clause}
                 ORDER BY timestamp ASC, id ASC
                 LIMIT ?
                 """,
-                (since_iso, limit),
+                params,
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
