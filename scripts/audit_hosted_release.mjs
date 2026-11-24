@@ -14,6 +14,7 @@ if (!Number.isSafeInteger(auditTimeoutMs) || auditTimeoutMs < 30_000 || auditTim
 const auditDeadline = AbortSignal.timeout(auditTimeoutMs);
 const expectedTools = [
   "fetch",
+  "get_live_sample",
   "get_market_data_endpoint",
   "get_pricing_info",
   "get_product_catalog",
