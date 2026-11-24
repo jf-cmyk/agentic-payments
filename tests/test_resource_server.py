@@ -1950,6 +1950,16 @@ class TestPaymentGate:
         )
         assert event["metadata"]["selection_source"] == "raw_data_preview"
 
+    def test_monitor_402_records_no_upgrade_prompt(self, test_client, observability_store):
+        probe = {"User-Agent": "x402station/0.1 (+https://x402station.io) uptime-probe"}
+        assert test_client.get("/v1/vwap/BTCUSD", headers=probe).status_code == 402
+        assert test_client.get("/v1/vwap/ETHUSD").status_code == 402
+        events = observability_store.recent_events(limit=40)
+        prompts = [e["subject"] for e in events if e["event"] == "upgrade_cta_shown"]
+        required = [e for e in events if e["event"] == "payment_required"]
+        assert len(required) == 2
+        assert len(prompts) == 1
+
     def test_unusable_solana_rail_is_not_advertised(self, test_client, monkeypatch):
         monkeypatch.setattr(settings.x402, "solana_fee_payer", "")
 

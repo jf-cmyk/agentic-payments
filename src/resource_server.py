@@ -131,7 +131,7 @@ from src.observability import (
     surface_for_path,
 )
 from src.usage_dashboard_page import usage_dashboard_html
-from src.usage_insights import UsageInsights
+from src.usage_insights import UsageInsights, is_monitor_user_agent
 from src.public_metadata import (
     AGENT_FRAMEWORK_INTEGRATIONS_URL,
     AGENT_MANUAL_URL,
@@ -6355,17 +6355,19 @@ async def x402_payment_middleware(request: Request, call_next):
         accepted_network_names = ", ".join(
             str(item["name"]) for item in accepted_networks
         )
-        _record_product_event(
-            "upgrade_cta_shown",
-            request,
-            price_usdc=price,
-            metadata={
-                "plan_id": "developer",
-                "trigger": "payment_required",
-                "primary_destination": "free-trial",
-                "secondary_destination": "pricing",
-            },
-        )
+        # Uptime probes never read the prompt; counting them buried real impressions.
+        if not is_monitor_user_agent(request.headers.get("user-agent")):
+            _record_product_event(
+                "upgrade_cta_shown",
+                request,
+                price_usdc=price,
+                metadata={
+                    "plan_id": "developer",
+                    "trigger": "payment_required",
+                    "primary_destination": "free-trial",
+                    "secondary_destination": "pricing",
+                },
+            )
         _record_product_event(
             "payment_required",
             request,
