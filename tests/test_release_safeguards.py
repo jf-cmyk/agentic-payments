@@ -3549,6 +3549,7 @@ def test_hosted_audit_executes_every_oauth_route_with_the_expected_method() -> N
     expected_manifest = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
     expected_tools = [
         "fetch",
+        "get_live_sample",
         "get_market_data_endpoint",
         "get_pricing_info",
         "get_product_catalog",

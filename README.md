@@ -87,6 +87,7 @@ The remote MCP server is meant for directory listings and fast evaluation in Cha
 
 It exposes only read-only discovery tools:
 
+- `get_live_sample` (one real, free price for an allowlisted symbol such as BTCUSD)
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
@@ -97,7 +98,7 @@ It exposes only read-only discovery tools:
 - `search`
 - `fetch`
 
-This public surface does not execute paid live market data calls directly.
+This public surface does not execute paid live market data calls directly. The free `get_live_sample` returns one allowlisted price so agents can check quality first.
 
 ### 2. Paid HTTP market data API
 

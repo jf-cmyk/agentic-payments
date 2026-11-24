@@ -17,6 +17,7 @@ Blocksize Capital provides:
 
 The public MCP server is read-only and exposes:
 
+- `get_live_sample` (one real, free price for an allowlisted symbol such as BTCUSD)
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`

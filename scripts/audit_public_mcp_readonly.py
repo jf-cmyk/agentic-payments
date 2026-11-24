@@ -12,6 +12,7 @@ import httpx
 
 PROTOCOL_VERSION = "2025-03-26"
 TOOL_CALLS: dict[str, dict[str, Any]] = {
+    "get_live_sample": {},
     "search_pairs": {"query": "BTC", "asset_class": "crypto"},
     "list_instruments": {"service": "vwap"},
     "get_pricing_info": {},
