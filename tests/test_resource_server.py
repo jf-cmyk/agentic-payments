@@ -1899,6 +1899,13 @@ class TestPaymentGate:
         assert resource_server._payment_failure_code(
             f"{official}: Legacy x402 payment payloads are disabled"
         ) == "PAYMENT_X402_VERSION_UNSUPPORTED"
+        for detail in (
+            "Payment envelope fields do not match the supported schema (unexpected network, scheme)",
+            "x402 v2 payload is missing resource metadata (copy the challenge's resource object)",
+        ):
+            code = resource_server._payment_failure_code(f"{official}: {detail}")
+            assert code == "PAYMENT_PAYLOAD_SCHEMA_INVALID"
+            assert "x402 v2 envelope" in resource_server._payment_failure_diagnosis(code)
 
     def test_paid_packages_have_complete_selection_attribution(
         self,

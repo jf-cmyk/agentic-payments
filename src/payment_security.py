@@ -135,6 +135,7 @@ CDP_FACILITATOR_PATH = "/platform/v2/x402"
 _ATOMIC_AMOUNT_RE = re.compile(r"^[1-9][0-9]*$")
 _HTTP_METHOD_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+_FIELD_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
 _EVM_PUBLIC_ID_RE = re.compile(r"^0x[0-9A-Fa-f]{40}$")
 _EVM_TRANSACTION_RE = re.compile(r"^0x[0-9A-Fa-f]{64}$")
 _SOLANA_PUBLIC_ID_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -307,6 +308,18 @@ def compute_request_binding(
     return hashlib.sha256(_canonical_json(binding)).hexdigest()
 
 
+def _base64_hint(header_value: str) -> str:
+    """Name the usual wrong encoding so a buyer can fix it without guessing."""
+    value = header_value.strip()
+    if value.startswith("{"):
+        return " (it is raw JSON; base64-encode the JSON payment payload)"
+    if "-" in value or "_" in value:
+        return " (it uses base64url characters - or _; use standard base64)"
+    if re.fullmatch(r"(0x)?[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{43,88}", value):
+        return " (it looks like a transaction hash or signature; send the payment payload instead)"
+    return ""
+
+
 def _decode_payment_header(header_value: str) -> dict[str, Any]:
     if not isinstance(header_value, str) or not header_value:
         raise PaymentSecurityError("PAYMENT-SIGNATURE is missing")
@@ -315,7 +328,9 @@ def _decode_payment_header(header_value: str) -> dict[str, Any]:
     try:
         decoded = base64.b64decode(header_value, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise PaymentSecurityError("PAYMENT-SIGNATURE is not valid base64") from exc
+        raise PaymentSecurityError(
+            f"PAYMENT-SIGNATURE is not valid base64{_base64_hint(header_value)}"
+        ) from exc
     if not decoded or len(decoded) > MAX_PAYMENT_JSON_BYTES:
         raise PaymentSecurityError("Decoded payment payload is empty or too large")
     try:
@@ -348,7 +363,16 @@ def _require_exact_keys(
     unknown = keys - allowed
     missing = required - keys
     if unknown or missing:
-        raise PaymentSecurityError(f"{label} fields do not match the supported schema")
+        parts = []
+        if missing:
+            parts.append("missing " + ", ".join(sorted(missing)))
+        if unknown:
+            # Payer-supplied names: only short plain identifiers are echoed back.
+            named = sorted(k for k in unknown if isinstance(k, str) and _FIELD_NAME_RE.fullmatch(k))[:4]
+            parts.append("unexpected " + (", ".join(named) if named else f"{len(unknown)} field(s)"))
+        raise PaymentSecurityError(
+            f"{label} fields do not match the supported schema ({'; '.join(parts)})"
+        )
 
 
 def _validate_payment_envelope_shape(decoded: Mapping[str, Any]) -> None:
@@ -360,7 +384,10 @@ def _validate_payment_envelope_shape(decoded: Mapping[str, Any]) -> None:
     )
     resource = decoded.get("resource")
     if not isinstance(resource, Mapping):
-        raise PaymentSecurityError("x402 v2 payload is missing resource metadata")
+        raise PaymentSecurityError(
+            "x402 v2 payload is missing resource metadata "
+            "(copy the challenge's resource object, whose url is the URL you called)"
+        )
     _require_exact_keys(
         resource,
         allowed=_RESOURCE_KEYS,
@@ -574,12 +601,13 @@ def parse_payment_signature(
     """
 
     decoded = _decode_payment_header(header_value)
-    _validate_payment_envelope_shape(decoded)
+    # Version first: a v1 payload otherwise fails the v2 field check with a vaguer reason.
     version = decoded.get("x402Version")
     if isinstance(version, bool) or not isinstance(version, int):
         raise PaymentSecurityError("x402Version must be the integer 2")
     if version != 2:
         raise PaymentSecurityError("Legacy x402 payment payloads are disabled")
+    _validate_payment_envelope_shape(decoded)
 
     _invoke_sdk_parser(decoded)
     accepted = decoded.get("accepted")

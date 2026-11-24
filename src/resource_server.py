@@ -3747,6 +3747,9 @@ async def _x402_landing_fields(request: Request, price: Decimal) -> dict[str, An
 def _payment_failure_code(reason: str) -> str:
     """Map facilitator/parser prose to a stable client recovery code."""
     normalized = reason.lower()
+    # Before the keyword checks: these messages name fields such as "network".
+    if "supported schema" in normalized or "missing resource metadata" in normalized:
+        return "PAYMENT_PAYLOAD_SCHEMA_INVALID"
     if "legacy x402" in normalized or "x402version" in normalized:
         return "PAYMENT_X402_VERSION_UNSUPPORTED"
     if "resource" in normalized and "does not match" in normalized:
@@ -3778,7 +3781,17 @@ PAYMENT_FAILURE_DIAGNOSIS = {
         "x402 v2 client for Solana or Base, from a payer funded with USDC on that "
         "network, inside the challenge's validity window."
     ),
-    "PAYMENT_X402_VERSION_UNSUPPORTED": "Only x402 version 2 payment payloads are accepted.",
+    "PAYMENT_X402_VERSION_UNSUPPORTED": (
+        "Only x402 version 2 payment payloads are accepted. Upgrade to an x402 v2 client "
+        "and send its payload in the PAYMENT-SIGNATURE header; buyer_examples in "
+        "purchase_handoff show one."
+    ),
+    "PAYMENT_PAYLOAD_SCHEMA_INVALID": (
+        "The decoded payload must be the x402 v2 envelope: x402Version 2, resource "
+        "(the challenge's resource object, url = the URL you called), accepted (one "
+        "`accepts` entry copied unchanged) and payload (the signed authorization or "
+        "transaction). parse_errors names the missing or unexpected fields."
+    ),
     "PAYMENT_SIGNATURE_NOT_BASE64": (
         "PAYMENT-SIGNATURE must be the base64-encoded JSON payment payload an x402 "
         "client produces, not a transaction hash or raw JSON."
