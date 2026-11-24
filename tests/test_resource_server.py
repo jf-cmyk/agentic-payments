@@ -8149,6 +8149,24 @@ def test_public_mcp_discovery_results_point_to_free_live_data(test_client):
     assert "next_step" in fetched
 
 
+def test_cursor_install_links_install_the_signed_in_cursor_connector(test_client):
+    import base64
+    import html
+    import json as _json
+    import re
+    from urllib.parse import parse_qs, urlparse
+
+    pages = [test_client.get("/claude-connector").text, test_client.get("/quickstart/remote-mcp").text]
+    for page in pages:
+        href = html.unescape(re.search(r'href="(cursor://[^"]+)"', page).group(1))
+        parsed = urlparse(href)
+        assert parsed.netloc == "anysphere.cursor-deeplink" and parsed.path == "/mcp/install"
+        query = parse_qs(parsed.query)
+        assert query["name"] == ["blocksize-market-data"]
+        config = _json.loads(base64.b64decode(query["config"][0]))
+        assert config == {"url": "https://mcp.blocksize.info/cursor/mcp/"}
+
+
 def test_growth_funnel_reports_first_call_to_paid_per_client():
     started_at = datetime.now(timezone.utc) - timedelta(days=2)
 

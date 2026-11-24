@@ -156,6 +156,10 @@ every product costs the same number of credits in a connector as its x402 price
 | Macro snapshot, Solana token brief | 1,000 | $1.00 |
 | Trader alpha pack | 2,500 | $2.50 |
 
+One-click Cursor install of the signed-in connector: open
+https://mcp.blocksize.info/claude-connector#install-cursor (GitHub does not render
+`cursor://` install links).
+
 ### 3. Anthropic-safe MCP beta
 
 The Anthropic-safe MCP surface is mounted at `/anthropic/mcp/` and exposes
