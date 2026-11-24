@@ -391,3 +391,10 @@ def test_attribution_from_params_keeps_only_bounded_labels(params, expected):
     from src.observability import attribution_from_params
 
     assert attribution_from_params(params) == expected
+
+
+def test_mcp_registry_listing_url_is_its_own_avenue():
+    from src.usage_insights import CHANNEL_LABELS, channel_for
+
+    assert channel_for(surface="public_mcp", user_agent="node", utm_source="mcp-registry") == "mcp_registry"
+    assert CHANNEL_LABELS["mcp_registry"] == "MCP Registry"
