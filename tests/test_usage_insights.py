@@ -147,6 +147,43 @@ def test_rate_limited_requests_are_listed_by_endpoint(tmp_path):
     assert all(row["status_code"] != 429 for row in health["top_errors"])
 
 
+def test_signin_funnel_counts_oauth_steps_per_connector(tmp_path):
+    store = UsageEventStore(tmp_path / "usage.db")
+    steps = [
+        ("/.well-known/oauth-protected-resource/anthropic/mcp/", 200, "anthropic_mcp"),
+        ("/anthropic/mcp", 401, "anthropic_mcp"),
+        ("/anthropic/mcp/register", 201, "anthropic_mcp"),
+        ("/anthropic/mcp/authorize", 302, "anthropic_mcp"),
+        ("/anthropic/mcp/authorize", 302, "anthropic_mcp"),
+        ("/anthropic/mcp/auth/callback", 302, "anthropic_mcp"),
+        ("/anthropic/mcp/token", 200, "anthropic_mcp"),
+        ("/cursor/mcp/token", 400, "cursor_mcp"),
+        ("/anthropic/mcp", 200, "anthropic_mcp"),  # signed-in transport is not a step
+        ("/mcp/server", 401, "public_mcp"),
+    ]
+    for path, status, surface in steps:
+        _call(store, path, None, ua="Claude-User", ip="5.5.5.5", status=status, surface=surface)
+
+    funnel = _build(store)["signin_funnel"]
+    assert funnel["connectors"]["anthropic"] == {
+        "metadata": 1, "unauthorized": 1, "register": 1, "authorize": 2,
+        "callback": 1, "token_ok": 1, "token_failed": 0,
+    }
+    assert funnel["connectors"]["cursor"]["token_failed"] == 1
+    assert sum(funnel["connectors"]["openai"].values()) == 0
+    assert len(funnel["by_day"]) == 1 and funnel["by_day"][0]["authorize"] == 2
+
+
+def test_connector_signin_routes_keep_their_own_endpoint_label():
+    from src.resource_server import _endpoint_label
+
+    assert _endpoint_label("/anthropic/mcp/authorize") == "/anthropic/mcp/authorize"
+    assert _endpoint_label("/cursor/mcp/auth/callback") == "/cursor/mcp/auth/callback"
+    assert _endpoint_label("/openai/mcp/token") == "/openai/mcp/token"
+    assert _endpoint_label("/anthropic/mcp/") == "/anthropic/mcp"
+    assert _endpoint_label("/anthropic/mcp/agent/identity") == "/anthropic/mcp"
+
+
 def test_calls_are_split_by_avenue_and_ticker_with_monitors_apart(tmp_path):
     store = UsageEventStore(tmp_path / "usage.db")
     for _ in range(3):

@@ -120,6 +120,7 @@ from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
     attribution_from_params,
+    CONNECTOR_SIGNIN_STEPS,
     PRODUCT_ROUTE_IDS,
     UsageEventStore,
     configure_global_store,
@@ -1847,12 +1848,11 @@ def _endpoint_label(path: str) -> str:
         return "/v1/credits/balance/{wallet}"
     if path == "/mcp/server" or path.startswith("/mcp/server/"):
         return "/mcp/server"
-    if path == "/anthropic/mcp" or path.startswith("/anthropic/mcp/"):
-        return "/anthropic/mcp"
-    if path == "/cursor/mcp" or path.startswith("/cursor/mcp/"):
-        return "/cursor/mcp"
-    if path == "/openai/mcp" or path.startswith("/openai/mcp/"):
-        return "/openai/mcp"
+    for prefix in ("/anthropic/mcp", "/cursor/mcp", "/openai/mcp"):
+        if path == prefix or path.startswith(prefix + "/"):
+            # Sign-in steps keep their own label so the dashboard can show the funnel.
+            step = path[len(prefix):].strip("/")
+            return f"{prefix}/{step}" if step in CONNECTOR_SIGNIN_STEPS else prefix
     return path
 
 

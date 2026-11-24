@@ -237,6 +237,42 @@ def _referrer_host(referrer: str | None) -> str:
         return ""
 
 
+SIGNIN_CONNECTORS = ("anthropic", "cursor", "openai")
+SIGNIN_STEPS = (
+    ("metadata", "Read sign-in metadata"),
+    ("unauthorized", "MCP call without token (401)"),
+    ("register", "Registered client"),
+    ("authorize", "Opened sign-in"),
+    ("callback", "Returned from Clerk"),
+    ("token_ok", "Token issued or refreshed"),
+    ("token_failed", "Token refused"),
+)
+
+
+def signin_step(endpoint: str, status_code: int) -> tuple[str, str] | None:
+    """Map one connector request to (connector, sign-in step), or None."""
+    metadata_prefix = "/.well-known/oauth-protected-resource/"
+    if endpoint.startswith(metadata_prefix):
+        connector = endpoint[len(metadata_prefix):].split("/", 1)[0]
+        return (connector, "metadata") if connector in SIGNIN_CONNECTORS else None
+    parts = endpoint.strip("/").split("/", 2)
+    if len(parts) < 2 or parts[0] not in SIGNIN_CONNECTORS or parts[1] != "mcp":
+        return None
+    connector, rest = parts[0], (parts[2] if len(parts) == 3 else "")
+    ok = 0 < status_code < 400
+    if rest == "" and status_code == 401:
+        return connector, "unauthorized"
+    if rest == "register" and ok:
+        return connector, "register"
+    if rest == "authorize" and ok:
+        return connector, "authorize"
+    if rest == "auth/callback" and ok:
+        return connector, "callback"
+    if rest == "token":
+        return connector, "token_ok" if ok else "token_failed"
+    return None
+
+
 def _parse_ts(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -362,6 +398,7 @@ class UsageInsights:
                 (previous_start.isoformat(),),
             ).fetchall()
             p95_latency = self._p95_latency(conn, current_start_iso)
+            signin_funnel = self._signin_funnel(conn, current_start_iso)
 
         # Claude connector events are deleted after RETENTION_DAYS. When the
         # previous window reaches past that, compare like for like: leave those
@@ -461,6 +498,7 @@ class UsageInsights:
             "activity": activity,
             "paid": paid,
             "health": health,
+            "signin_funnel": signin_funnel,
             "user_agents": [
                 {
                     "user_agent": ua or "(none)",
@@ -910,6 +948,45 @@ class UsageInsights:
         }
 
     @staticmethod
+    def _signin_funnel(conn: sqlite3.Connection, since_iso: str) -> dict[str, Any]:
+        """Count each connector's OAuth sign-in steps per day, from HTTP request events."""
+        rows = conn.execute(
+            f"""
+            SELECT substr(timestamp, 1, 10) AS day, endpoint, status_code, COUNT(*) AS n
+            FROM usage_events
+            WHERE timestamp >= ? AND event = 'http_request'
+              AND (endpoint LIKE '/.well-known/oauth-protected-resource/%'
+                   OR endpoint LIKE '/%/mcp/%'
+                   OR (endpoint IN ('/anthropic/mcp', '/cursor/mcp', '/openai/mcp')
+                       AND status_code = 401))
+              AND {NOT_SYNTHETIC_SQL}
+            GROUP BY day, endpoint, status_code
+            """,
+            (since_iso,),
+        ).fetchall()
+        totals: dict[str, Counter[str]] = {c: Counter() for c in SIGNIN_CONNECTORS}
+        by_day: dict[str, Counter[str]] = defaultdict(Counter)
+        for row in rows:
+            step = signin_step(row["endpoint"] or "", int(row["status_code"] or 0))
+            if step is None:
+                continue
+            connector, name = step
+            totals[connector][name] += row["n"]
+            by_day[row["day"]][name] += row["n"]
+        return {
+            "steps": [name for name, _ in SIGNIN_STEPS],
+            "step_labels": dict(SIGNIN_STEPS),
+            "connectors": {
+                connector: {name: counts[name] for name, _ in SIGNIN_STEPS}
+                for connector, counts in totals.items()
+            },
+            "by_day": [
+                {"date": day, **{name: by_day[day][name] for name, _ in SIGNIN_STEPS}}
+                for day in sorted(by_day)
+            ],
+        }
+
+    @staticmethod
     def _paid(pay: dict[str, Any]) -> dict[str, Any]:
         by_network: Counter[str] = Counter(row["network"] for row in pay["rows"])
         by_ticker: Counter[str] = Counter(row["ticker"] for row in pay["rows"])
@@ -932,6 +1009,11 @@ class UsageInsights:
 
 
 DEFINITIONS = {
+    "sign-in funnel": (
+        "Requests per OAuth step on the Claude, Cursor and OpenAI connectors. Clients "
+        "re-read metadata and refresh tokens, so steps count requests, not people; "
+        "'Opened sign-in' to 'Returned from Clerk' is the closest view of sign-in drop-off."
+    ),
     "call": (
         "One request to the HTTP API under /v1, or one MCP tool call on any "
         "connector. MCP transport requests (initialize, list tools) are not calls."
