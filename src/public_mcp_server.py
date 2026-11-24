@@ -152,7 +152,11 @@ public_mcp = FastMCP(
         f"{PUBLIC_DESCRIPTION} This connector is read-only and free to inspect. "
         "It never starts blockchain payments, stores credentials, or fetches paid "
         "live prices directly; agents use the returned HTTPS URLs with the "
-        "x402-protected HTTP API when they are ready to purchase live data."
+        "x402-protected HTTP API when they are ready to purchase live data. "
+        "Start with search_pairs (for example 'gold' or 'BTC') to find an instrument, "
+        "then get_market_data_endpoint for its exact paid URL and price. For live "
+        "prices inside Claude or Cursor without a wallet, use the signed-in Blocksize "
+        "connector: https://mcp.blocksize.info/claude-connector"
     ),
 )
 

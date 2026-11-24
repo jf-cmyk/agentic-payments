@@ -215,3 +215,20 @@ def test_fully_correlated_finalized_payment_counts_once(tmp_path):
     assert stats["overview"]["active_paying_wallets"] == 1
     assert stats["overview"]["active_verified_principals"] == 1
     assert stats["reliability"]["charged_delivery_successes"] == 1
+
+
+def test_refunded_connector_tool_error_is_not_an_open_charged_failure(tmp_path):
+    store = UsageEventStore(tmp_path / "usage.db")
+    for charge, refund in (("charge-1", "refunded"), ("charge-2", "pending_recovery")):
+        meta = {"attempt_id": f"attempt-{charge}", "charge_id": charge}
+        store.record("mcp_credit_drawdown_success", surface="anthropic_mcp",
+                     tool_name="get_vwap", subject="BTCUSD", metadata={**meta, "credits_spent": 1})
+        store.record("mcp_tool_error", surface="anthropic_mcp", tool_name="get_vwap",
+                     subject="BTCUSD", reason="blocksize_api_error",
+                     metadata={**meta, "refund_status": refund})
+
+    reliability = store.summarize(days=1)["reliability"]
+
+    assert reliability["charged_delivery_failures"] == 1
+    assert reliability["refunded_delivery_failures"] == 1
+    assert reliability["post_credit_failure_rate"] == 0.5

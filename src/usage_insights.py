@@ -44,6 +44,7 @@ CHANNELS: list[tuple[str, str]] = [
     ("pay_sh", "Pay.sh"),
     ("smithery", "Smithery"),
     ("glama", "Glama"),
+    ("mcp_registry", "MCP Registry"),
     ("monitor", "Monitors & probes"),
     ("other", "Other / unknown"),
 ]
@@ -175,6 +176,8 @@ def channel_for(
         return "smithery"
     if "glama" in haystack:
         return "glama"
+    if "mcp-registry" in haystack:
+        return "mcp_registry"
     if any(marker in haystack for marker in ("pay.sh", "pay-sh", "paysh", "pay-skills")):
         return "pay_sh"
     if surface in MCP_SURFACES:
@@ -1019,17 +1022,17 @@ def build_assessment(result: dict[str, Any]) -> list[dict[str, Any]]:
     if monitor_share is not None and total_calls >= MIN_SAMPLE and monitor_share > 0.3:
         add("P1", "Measurement", "Monitors make up a large share of traffic",
             f"{_pct(monitor_share)} of calls come from probes, verifiers and crawlers.",
-            "Keep them out of demand KPIs (done here), and serve known directory probes "
-            "a cached, cheap response so they stop costing upstream quota.")
+            "Keep them out of demand KPIs (done here). They cost no upstream quota on "
+            "priced routes (the 402 sample is static) and no longer count as prompt impressions.")
 
     generic_share = _rate(channels["other"]["calls"] + channels["x402_http"]["calls"]
                           + channels["direct_mcp"]["calls"], total_calls - channels["monitor"]["calls"])
-    directory_calls = sum(channels[c]["calls"] for c in ("smithery", "glama", "pay_sh"))
+    directory_calls = sum(channels[c]["calls"] for c in ("smithery", "glama", "pay_sh", "mcp_registry"))
     if generic_share is not None and organic_calls >= MIN_SAMPLE and generic_share > 0.8:
         add("P1", "Attribution", "Directory attribution is missing for most calls",
             f"{_pct(generic_share)} of non-monitor calls arrive as plain x402 HTTP or "
             f"direct MCP traffic with no directory marker; only {directory_calls:,} "
-            "calls identify Smithery, Glama or Pay.sh.",
+            "calls identify Smithery, Glama, Pay.sh or the MCP Registry.",
             "Publish a distinct endpoint URL per listing (for example "
             "/mcp/server?utm_source=smithery and /v1/...?utm_source=paysh) so every "
             "call carries its avenue, and ask directories for their gateway user agents.")

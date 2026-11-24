@@ -482,6 +482,7 @@ async def send_digest(store, *, hours: int = 24, now: datetime | None = None, po
 
 NUDGE_AFTER_HOURS = 48
 NUDGE_WINDOW_HOURS = 24
+CHECKIN_AFTER_HOURS = 7 * 24
 LIFECYCLE_THRESHOLDS = (80, 100)
 
 
@@ -568,6 +569,36 @@ def build_nudge_email(user: dict[str, Any]) -> dict[str, str]:
     return {"subject": "Your Blocksize credits are waiting", "text": text, "html": body_html}
 
 
+def build_checkin_email(user: dict[str, Any]) -> dict[str, str]:
+    """One week after signup, for users who fetched live data: ask, then show the paid routes."""
+    first = str(user.get("name", "")).split(" ")[0] if user.get("name") not in (None, "not given") else ""
+    greeting = f"Hi {first}," if first else "Hi,"
+    trial, pricing = _campaign_links("free-tier-checkin")
+    pay_per_call = f"{PUBLIC_BASE}/quickstart/first-price"
+    question = (
+        "You have been fetching live market data through the Blocksize connector for a week. "
+        "What are you using it for, and is anything missing? Reply to this email; we read "
+        "every message."
+    )
+    routes = (
+        "When the data becomes part of a workflow, there are two ways to go beyond the free "
+        "evaluation credits: a subscription with more feeds, history and production use, from "
+        "EUR 49 per month with a free trial, or pay per call from your own agent in USDC on "
+        "Solana or Base, with no account."
+    )
+    text = (
+        f"{greeting}\n\n{question}\n\n{routes}\n\n"
+        f"Free trial: {trial}\nCompare plans: {pricing}\nPay per call: {pay_per_call}\n"
+        + _footer_text()
+    )
+    body_html = (
+        f"<p>{html.escape(greeting)}</p><p>{html.escape(question)}</p><p>{html.escape(routes)}</p>"
+        f"<p><a href='{pay_per_call}'>Pay per call quickstart</a></p>"
+        + _footer_html(trial, pricing)
+    )
+    return {"subject": "How is Blocksize data working for you?", "text": text, "html": body_html}
+
+
 def user_emails_enabled() -> bool:
     return bool(user_email_sender()) and email_configured() and signup_store.enabled()
 
@@ -613,33 +644,68 @@ def notify_threshold_background(grant_hash: str | None, pct: int, snapshot: dict
     loop.create_task(run())
 
 
-async def send_nudges(store, *, now: datetime | None = None, post=None) -> int:
-    """Email signups that are two days old and have never made a live call."""
+async def _send_lifecycle(
+    store,
+    *,
+    after_hours: int,
+    activated: bool,
+    milestone: str,
+    reason: str,
+    campaign: str,
+    build,
+    now: datetime | None,
+    post,
+) -> int:
+    """Email each signup that is ``after_hours`` old, once, by whether it made a live call."""
     if not user_emails_enabled() or store is None:
         return 0
     current = now or datetime.now(UTC)
-    newest = current - timedelta(hours=NUDGE_AFTER_HOURS)
+    newest = current - timedelta(hours=after_hours)
     oldest = newest - timedelta(hours=NUDGE_WINDOW_HOURS)
+    due = [
+        signup
+        for signup in signup_store.signups_since(oldest.isoformat())
+        if str(signup.get("created_at") or "") <= newest.isoformat()
+        and "@" in str(signup.get("email", ""))
+    ]
+    if not due:
+        return 0
+    first_created = min(str(signup.get("created_at") or "") for signup in due)
+    live = {
+        str((event.get("metadata") or {}).get("grant_hash") or "")
+        for event in store.events_since(first_created, event="free_tier_grant_created")
+    }
     sent = 0
-    for signup in signup_store.signups_since(oldest.isoformat()):
-        created = str(signup.get("created_at") or "")
-        if created > newest.isoformat() or "@" not in str(signup.get("email", "")):
-            continue
+    for signup in due:
         grant_hash = str(signup.get("grant_hash") or "")
-        activity = store.events_since(created)
-        if any(str(e.get("event")) == "free_tier_grant_created"
-               and str((e.get("metadata") or {}).get("grant_hash") or "") == grant_hash for e in activity):
+        if (grant_hash in live) != activated:
             continue
-        if not store.claim_milestone("user_email_nudge", grant_hash):
+        if not store.claim_milestone(milestone, grant_hash):
             continue
         try:
-            await send_email(build_nudge_email(signup), to=str(signup["email"]),
+            await send_email(build(signup), to=str(signup["email"]),
                              sender=user_email_sender(), reply_to=alert_recipient(), post=post)
         except SignupAlertError:
-            store.release_milestone("user_email_nudge", grant_hash)
-            logger.warning("nudge email failed; will retry on the next run")
+            store.release_milestone(milestone, grant_hash)
+            logger.warning("%s email failed; will retry on the next run", reason)
             continue
-        record_usage_event("user_email_sent", surface="email", reason="nudge",
-                           metadata={"grant_hash": grant_hash, "campaign": "free-tier-nudge"})
+        record_usage_event("user_email_sent", surface="email", reason=reason,
+                           metadata={"grant_hash": grant_hash, "campaign": campaign})
         sent += 1
     return sent
+
+
+async def send_nudges(store, *, now: datetime | None = None, post=None) -> int:
+    """Email signups that are two days old and have never made a live call."""
+    return await _send_lifecycle(
+        store, after_hours=NUDGE_AFTER_HOURS, activated=False, milestone="user_email_nudge",
+        reason="nudge", campaign="free-tier-nudge", build=build_nudge_email, now=now, post=post,
+    )
+
+
+async def send_checkins(store, *, now: datetime | None = None, post=None) -> int:
+    """Email signups that are a week old and made a live call: a question and the paid routes."""
+    return await _send_lifecycle(
+        store, after_hours=CHECKIN_AFTER_HOURS, activated=True, milestone="user_email_checkin",
+        reason="checkin", campaign="free-tier-checkin", build=build_checkin_email, now=now, post=post,
+    )

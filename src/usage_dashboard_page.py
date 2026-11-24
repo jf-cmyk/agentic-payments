@@ -39,6 +39,7 @@ _PAGE = r"""<!doctype html>
       --ch-pay_sh: #008300;
       --ch-smithery: #4a3aa7;
       --ch-glama: #e34948;
+      --ch-mcp_registry: #0f8b8d;
       --ch-monitor: #898781;
       --ch-other: #c3c2b7;
       --series: #2a78d6;
@@ -69,6 +70,7 @@ _PAGE = r"""<!doctype html>
         --ch-pay_sh: #008300;
         --ch-smithery: #9085e9;
         --ch-glama: #e66767;
+        --ch-mcp_registry: #22a6a8;
         --ch-monitor: #6b6a65;
         --ch-other: #454541;
         --series: #3987e5;
@@ -95,6 +97,7 @@ _PAGE = r"""<!doctype html>
       --ch-pay_sh: #008300;
       --ch-smithery: #9085e9;
       --ch-glama: #e66767;
+      --ch-mcp_registry: #22a6a8;
       --ch-monitor: #6b6a65;
       --ch-other: #454541;
       --series: #3987e5;

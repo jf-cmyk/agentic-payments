@@ -123,3 +123,25 @@ def test_failed_send_releases_the_milestone_for_retry(lifecycle_env, monkeypatch
     # The failed attempt did not consume the once-per-month claim.
     assert asyncio.run(signup_alerts.notify_threshold(store, h, 80, snap)) == "sent"
     assert len(attempts) == 2
+
+
+def test_checkin_goes_only_to_week_old_signups_that_made_a_live_call(lifecycle_env, mail):
+    store = lifecycle_env
+    now = datetime(2026, 11, 24, 7, 0, tzinfo=UTC)
+    week_old = (now - timedelta(hours=7 * 24 + 6)).isoformat()
+    active = _signup("active@example.com", week_old)
+    _signup("idle@example.com", week_old)
+    _signup("recent@example.com", (now - timedelta(hours=60)).isoformat())
+    store.record("free_tier_grant_created", surface="claude_mcp", metadata={"grant_hash": active})
+    with store._connect() as conn:  # the grant happened after signup, not now
+        conn.execute("UPDATE usage_events SET timestamp = ?", ((now - timedelta(days=6)).isoformat(),))
+
+    assert asyncio.run(signup_alerts.send_checkins(store, now=now)) == 1
+    assert [m["to"] for m in mail] == [["active@example.com"]]
+    assert mail[0]["subject"] == "How is Blocksize data working for you?"
+    assert "utm_campaign=free-tier-checkin" in mail[0]["text"]
+    assert "/quickstart/first-price" in mail[0]["text"]
+    assert asyncio.run(signup_alerts.send_checkins(store, now=now)) == 0
+    # The nudge still reaches only the two-day-old idle signup, not the idle week-old one.
+    assert asyncio.run(signup_alerts.send_nudges(store, now=now)) == 1
+    assert mail[-1]["to"] == ["recent@example.com"]

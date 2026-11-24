@@ -1099,3 +1099,49 @@ async def test_facilitator_verify_honours_a_capped_retry_after_on_429(monkeypatc
 
     assert result["isValid"] is True
     assert sleeps == [2.0, payment_security.VERIFY_RETRY_AFTER_CAP_SECONDS]
+
+
+def test_schema_rejection_names_missing_and_unexpected_fields():
+    payload = _payload()
+    del payload["accepted"]
+    payload["paymentRequirements"] = {}
+    payload["bad key!"] = 1
+    with pytest.raises(PaymentSecurityError) as exc:
+        _parse(payload)
+    message = str(exc.value)
+    assert "missing accepted" in message
+    assert "unexpected paymentRequirements" in message
+    assert "bad key" not in message
+
+
+def test_v1_payload_is_reported_as_legacy_not_as_schema_mismatch():
+    v1 = {"x402Version": 1, "scheme": "exact", "network": "base", "payload": {}}
+    with pytest.raises(PaymentSecurityError, match="Legacy x402"):
+        _parse(v1)
+
+
+def test_missing_resource_says_what_to_copy():
+    payload = _payload()
+    del payload["resource"]
+    with pytest.raises(PaymentSecurityError, match="missing resource metadata.*URL you called"):
+        _parse(payload)
+
+
+@pytest.mark.parametrize(
+    ("header", "hint"),
+    [
+        ('{"x402Version": 2}', "raw JSON"),
+        ("eyJ4NDAyVmVyc2lvbiI6Mn0-_", "base64url"),
+        ("0x" + "ab" * 32, "transaction hash"),
+        ("not base64 at all!", ""),
+    ],
+)
+def test_base64_rejection_names_the_wrong_encoding(header, hint):
+    with pytest.raises(PaymentSecurityError, match="not valid base64") as exc:
+        parse_payment_signature(
+            header,
+            accepted_requirement=_requirement(),
+            method="GET",
+            resource_url=RESOURCE_URL,
+        )
+    assert hint in str(exc.value)

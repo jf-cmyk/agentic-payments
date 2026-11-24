@@ -477,21 +477,28 @@ class UsageEventStore:
             },
         }
 
-    def events_since(self, since_iso: str, *, limit: int = 200000) -> list[dict[str, Any]]:
-        """Return events at or after ``since_iso`` (ISO text, UTC), oldest first."""
+    def events_since(
+        self, since_iso: str, *, limit: int = 200000, event: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return events at or after ``since_iso`` (ISO text, UTC), oldest first.
+
+        ``event`` restricts the rows to one event name.
+        """
+        event_clause = "AND event = ?" if event else ""
+        params = (since_iso, event, limit) if event else (since_iso, limit)
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT timestamp, event, surface, endpoint, method, status_code,
                        latency_ms, user_agent, referrer, wallet_hash, subject,
                        asset_class, price_usdc, network, reason, tool_name,
                        metadata_json
                 FROM usage_events
-                WHERE timestamp >= ?
+                WHERE timestamp >= ? {event_clause}
                 ORDER BY timestamp ASC, id ASC
                 LIMIT ?
                 """,
-                (since_iso, limit),
+                params,
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
@@ -1164,15 +1171,29 @@ class UsageEventStore:
         refunded_http_delivery_failure_events = [
             event for event in events if event.get("event") == "refunded_delivery_failed"
         ]
-        refunded_http_delivery_failures = len(refunded_http_delivery_failure_events)
-        charged_delivery_failures = len(correlation["valid_failure_event_ids"])
-        charged_delivery_successes = len(correlation["valid_delivery_event_ids"])
-        charged_delivery_attempts = charged_delivery_successes + charged_delivery_failures
-        charged_delivery_failure_events = [
+        failed_charge_events = [
             event
             for event in events
             if id(event) in correlation["valid_failure_event_ids"]
         ]
+        # A connector tool error that already returned its credits is recovered, not open.
+        refunded_mcp_failure_events = [
+            event
+            for event in failed_charge_events
+            if event.get("event") == "mcp_tool_error"
+            and cls._metadata(event).get("refund_status") == "refunded"
+        ]
+        refunded_http_delivery_failure_events += refunded_mcp_failure_events
+        refunded_http_delivery_failures = len(refunded_http_delivery_failure_events)
+        refunded_ids = {id(event) for event in refunded_mcp_failure_events}
+        charged_delivery_failure_events = [
+            event for event in failed_charge_events if id(event) not in refunded_ids
+        ]
+        charged_delivery_failures = len(charged_delivery_failure_events)
+        charged_delivery_successes = len(correlation["valid_delivery_event_ids"])
+        charged_delivery_attempts = (
+            charged_delivery_successes + len(failed_charge_events)
+        )
         recent_cutoff = datetime.now(UTC) - timedelta(hours=24)
         charged_delivery_failures_last_24h = sum(
             1
@@ -1218,7 +1239,7 @@ class UsageEventStore:
             ),
             "definitions": {
                 "server_error_rate": "HTTP 5xx responses divided by all HTTP requests.",
-                "post_credit_failure_rate": "Correlated unrecovered charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries; refunded HTTP failures are reported separately.",
+                "post_credit_failure_rate": "Correlated unrecovered charged HTTP or MCP delivery failures divided by successful plus failed charged deliveries; refunded HTTP and connector failures are reported separately.",
                 "charged_delivery_failures_last_24h": "Correlated unrecovered charged HTTP or MCP delivery failures observed during the trailing 24 hours.",
                 "client_protocol_responses": "HTTP 400, 404, 405, 406, 416 and 422 responses; visible for diagnosis but excluded from the server-error KPI.",
             },
