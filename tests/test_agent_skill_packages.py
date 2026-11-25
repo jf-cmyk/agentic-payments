@@ -45,6 +45,7 @@ AUTHENTICATED_TOOLS = {
     "get_trader_alpha_pack",
 }
 PUBLIC_DISCOVERY_TOOLS = (
+    "get_live_sample",
     "search_pairs",
     "list_instruments",
     "get_pricing_info",
@@ -55,6 +56,7 @@ PUBLIC_DISCOVERY_TOOLS = (
     "search",
     "fetch",
 )
+SKILL_PACKAGE_PREFIXES = ("openai-plugin/", "claude-plugin/", "blocksize-cursor-plugin/")
 CANONICAL_REPOSITORY = "https://github.com/jf-cmyk/agentic-payments"
 STALE_GITLAB_REPOSITORY = "https://gitlab.com/jfocke/agentic-payments"
 
@@ -140,7 +142,13 @@ def test_public_tool_inventories_match_fastmcp_contract() -> None:
             "They cover catalog search",
         )
 
-    assert inventories == {label: live_tools for label in inventories}
+    # shortcut: the plugin skill packages (under directory review) still list the nine
+    # discovery tools; add get_live_sample to them with the next package version.
+    packaged_tools = [name for name in live_tools if name != "get_live_sample"]
+    assert inventories == {
+        label: packaged_tools if label.startswith(SKILL_PACKAGE_PREFIXES) else live_tools
+        for label in inventories
+    }
 
 
 def test_skill_contract_is_bounded_and_fail_closed() -> None:

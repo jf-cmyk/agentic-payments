@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlencode
 
@@ -26,6 +27,22 @@ def normalise_showcase_symbol(value: str) -> str | None:
     """Return the upstream-safe symbol, or None when it cannot be a symbol."""
     clean = value.strip().replace("-", "").replace("/", "").replace("_", "").upper()
     return clean if _SYMBOL_RE.fullmatch(clean) else None
+
+
+_fetcher: Callable[[str | None, Any], Awaitable[dict[str, Any]]] | None = None
+
+
+def register_fetcher(fetcher: Callable[[str | None, Any], Awaitable[dict[str, Any]]]) -> None:
+    """Called by the resource server so MCP surfaces reuse the HTTP showcase logic."""
+    global _fetcher
+    _fetcher = fetcher
+
+
+async def fetch_showcase(symbol: str | None, request: Any = None) -> dict[str, Any]:
+    """Return the showcase payload; raises when no server registered a fetcher."""
+    if _fetcher is None:
+        raise RuntimeError("The live showcase is not available in this process.")
+    return await _fetcher(symbol, request)
 
 
 def showcase_enabled() -> bool:

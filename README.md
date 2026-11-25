@@ -87,6 +87,7 @@ The remote MCP server is meant for directory listings and fast evaluation in Cha
 
 It exposes only read-only discovery tools:
 
+- `get_live_sample` (one real, free price for an allowlisted symbol such as BTCUSD)
 - `search_pairs`
 - `list_instruments`
 - `get_pricing_info`
@@ -97,7 +98,7 @@ It exposes only read-only discovery tools:
 - `search`
 - `fetch`
 
-This public surface does not execute paid live market data calls directly.
+This public surface does not execute paid live market data calls directly. The free `get_live_sample` returns one allowlisted price so agents can check quality first.
 
 ### 2. Paid HTTP market data API
 
@@ -154,6 +155,10 @@ every product costs the same number of credits in a connector as its x402 price
 | Token quality, state divergence | 500 | $0.50 |
 | Macro snapshot, Solana token brief | 1,000 | $1.00 |
 | Trader alpha pack | 2,500 | $2.50 |
+
+One-click Cursor install of the signed-in connector: open
+https://mcp.blocksize.info/claude-connector#install-cursor (GitHub does not render
+`cursor://` install links).
 
 ### 3. Anthropic-safe MCP beta
 

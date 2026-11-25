@@ -259,6 +259,13 @@ _PAGE = r"""<!doctype html>
     <div class="table-wrap"><table id="avenue-table"></table></div>
   </section>
 
+  <section class="card" aria-labelledby="h-signin">
+    <h2 id="h-signin">Connector sign-in funnel</h2>
+    <p class="sub">OAuth requests per step. They count requests, not people: clients re-read metadata and refresh tokens.</p>
+    <div class="table-wrap"><table id="signin-table"></table></div>
+    <div class="table-wrap row-gap"><table id="signin-days"></table></div>
+  </section>
+
   <section class="card" aria-labelledby="h-tickers">
     <h2 id="h-tickers">Tickers called</h2>
     <p class="sub" id="ticker-sub">Live-data requests per ticker, excluding monitors, with monitor volume in gray.</p>
@@ -754,6 +761,16 @@ _PAGE = r"""<!doctype html>
       h.top_errors.map((r) => [el("span", { class: "ua" }, r.endpoint), String(r.status_code), fmtInt(r.count)]), "No errors.");
   }
 
+  function renderSignin(data) {
+    const f = data.signin_funnel;
+    if (!f) return;
+    const heads = [{ label: "Connector" }, ...f.steps.map((s) => ({ label: f.step_labels[s], num: true }))];
+    table($("signin-table"), heads,
+      Object.entries(f.connectors).map(([c, counts]) => [c, ...f.steps.map((s) => fmtInt(counts[s]))]));
+    table($("signin-days"), [{ label: "Day (all connectors)" }, ...heads.slice(1)],
+      f.by_day.slice(-14).reverse().map((d) => [d.date, ...f.steps.map((s) => fmtInt(d[s]))]));
+  }
+
   function renderPlan(data) {
     const node = clear($("plan"));
     for (const horizon of ["Now", "Next", "Later"]) {
@@ -777,7 +794,7 @@ _PAGE = r"""<!doctype html>
   function render(data) {
     const generated = new Date(data.generated_at);
     $("status-line").textContent = `Last ${data.window_days} days · updated ${generated.toLocaleString()} · test traffic excluded`;
-    renderKpis(data); renderRetention(data); renderIssues(data); renderActivity(data); renderAvenues(data); renderTickers(data);
+    renderKpis(data); renderRetention(data); renderIssues(data); renderActivity(data); renderAvenues(data); renderSignin(data); renderTickers(data);
     renderUsers(data); renderSearch(data); renderPaid(data); renderHealth(data); renderPlan(data);
     renderUserAgents(data); renderDefs(data);
   }

@@ -153,7 +153,8 @@ public_mcp = FastMCP(
         "It never starts blockchain payments, stores credentials, or fetches paid "
         "live prices directly; agents use the returned HTTPS URLs with the "
         "x402-protected HTTP API when they are ready to purchase live data. "
-        "Start with search_pairs (for example 'gold' or 'BTC') to find an instrument, "
+        "Call get_live_sample first for one real, free BTC price with provenance. "
+        "Then use search_pairs (for example 'gold' or 'BTC') to find an instrument, "
         "then get_market_data_endpoint for its exact paid URL and price. For live "
         "prices inside Claude or Cursor without a wallet, use the signed-in Blocksize "
         "connector: https://mcp.blocksize.info/claude-connector"
@@ -222,6 +223,65 @@ def _free_tier_claim() -> dict[str, object] | None:
     return claim
 
 
+def _next_step() -> dict[str, str] | None:
+    """Short pointer to free live data, appended to the most-used discovery results."""
+    step: dict[str, str] = {}
+    if live_showcase.showcase_enabled():
+        step["free_live_sample"] = "Call get_live_sample for one real, free price with provenance."
+    claim = _free_tier_claim()
+    if claim is not None:
+        step["free_live_data"] = (
+            f"{claim['positioning']}: ask the user to add the free signed-in connector "
+            f"{PUBLIC_BASE_URL}/claude-connector (Claude) or {PUBLIC_BASE_URL}/cursor/mcp/ "
+            "(Cursor) and sign in with a verified email."
+        )
+    return step or None
+
+
+def _with_next_step_json(payload: str) -> str:
+    """Add next_step to a JSON object result; leave anything else untouched."""
+    step = _next_step()
+    if step is None:
+        return payload
+    try:
+        data = json.loads(payload)
+    except ValueError:
+        return payload
+    if not isinstance(data, dict):
+        return payload
+    data["next_step"] = step
+    return json.dumps(data, indent=2)
+
+
+@public_mcp.tool(
+    name="get_live_sample",
+    title="Free Live Price Sample",
+    description=(
+        "Return one real, free live price (multi-venue VWAP, bid/ask spread, freshness "
+        "and a recomputable provenance digest) for an allowlisted symbol such as BTCUSD, "
+        "so you can check Blocksize data quality before signing in or paying. Read-only; "
+        "no account, wallet, or payment."
+    ),
+    annotations=read_only_annotations("Free Live Price Sample"),
+)
+async def public_get_live_sample(symbol: str | None = None) -> str:
+    """Serve the free live showcase on the public MCP surface."""
+    _record_public_mcp_usage("get_live_sample", subject=(symbol or "").strip().upper() or None)
+    try:
+        request = get_http_request()
+    except Exception:  # noqa: BLE001 - outside HTTP (stdio, tests) there is no request
+        request = None
+    try:
+        sample = await live_showcase.fetch_showcase(symbol, request)
+    except Exception as exc:  # noqa: BLE001 - HTTPException detail or upstream error
+        detail = getattr(exc, "detail", None) or str(exc)
+        return json.dumps(
+            {"status": "unavailable", "error": detail, "next_step": _next_step()}, indent=2
+        )
+    sample["next_step"] = {**sample.get("next_step", {}), **(_next_step() or {})}
+    return json.dumps(sample, indent=2, default=str)
+
+
 @public_mcp.tool(
     name="search_pairs",
     title="Instrument Search",
@@ -243,7 +303,11 @@ async def public_search_pairs(
         subject=query,
         asset_class=asset_class,
     )
-    return await search_local_pairs(query, asset_class)
+    result = await search_local_pairs(query, asset_class)
+    step = _next_step()
+    if step is None:
+        return result
+    return result + "\n\nNext step: " + " ".join(step.values())
 
 
 @public_mcp.tool(
@@ -676,7 +740,7 @@ async def public_search(query: CatalogSearchQuery) -> str:
         "search",
         subject=query,
     )
-    return await search_catalog(query)
+    return _with_next_step_json(await search_catalog(query))
 
 
 @public_mcp.tool(
@@ -695,7 +759,7 @@ async def public_fetch(id: CatalogFetchId) -> str:
         "fetch",
         subject=id,
     )
-    return await fetch_catalog(id)
+    return _with_next_step_json(await fetch_catalog(id))
 
 
 @public_mcp.resource("blocksize://public-info")

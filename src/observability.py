@@ -44,6 +44,8 @@ PUBLIC_MCP_ENDPOINTS = frozenset({"/mcp/server"})
 AUTHENTICATED_MCP_ENDPOINTS = frozenset(
     {"/anthropic/mcp", "/cursor/mcp", "/openai/mcp"}
 )
+# OAuth sign-in routes under each connector mount, labelled separately from transport.
+CONNECTOR_SIGNIN_STEPS = frozenset({"register", "authorize", "consent", "auth/callback", "token"})
 # Campaign labels that listings and docs may append to a URL. They are kept on
 # HTTP and MCP events so each avenue (Smithery, Glama, the MCP Registry, docs)
 # can be told apart without relying on referrers that agents never send.

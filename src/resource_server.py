@@ -120,6 +120,7 @@ from src import usage_event_rollup
 from src import signup_alerts
 from src.observability import (
     attribution_from_params,
+    CONNECTOR_SIGNIN_STEPS,
     PRODUCT_ROUTE_IDS,
     UsageEventStore,
     configure_global_store,
@@ -1847,12 +1848,11 @@ def _endpoint_label(path: str) -> str:
         return "/v1/credits/balance/{wallet}"
     if path == "/mcp/server" or path.startswith("/mcp/server/"):
         return "/mcp/server"
-    if path == "/anthropic/mcp" or path.startswith("/anthropic/mcp/"):
-        return "/anthropic/mcp"
-    if path == "/cursor/mcp" or path.startswith("/cursor/mcp/"):
-        return "/cursor/mcp"
-    if path == "/openai/mcp" or path.startswith("/openai/mcp/"):
-        return "/openai/mcp"
+    for prefix in ("/anthropic/mcp", "/cursor/mcp", "/openai/mcp"):
+        if path == prefix or path.startswith(prefix + "/"):
+            # Sign-in steps keep their own label so the dashboard can show the funnel.
+            step = path[len(prefix):].strip("/")
+            return f"{prefix}/{step}" if step in CONNECTOR_SIGNIN_STEPS else prefix
     return path
 
 
@@ -7947,6 +7947,13 @@ async def live_showcase_price(
     It is bounded to an allowlist, briefly cached, and rate limited like every
     other free discovery route, so it cannot become a free production feed.
     """
+    return await _live_showcase_payload(request.app, symbol, request)
+
+
+async def _live_showcase_payload(
+    owner: Any, symbol: str | None, request: Request | None
+) -> dict[str, Any]:
+    """Build the showcase response; shared by the HTTP route and the public MCP tool."""
     allowed = live_showcase.allowed_showcase_symbols()
     if not settings.server.showcase_live_enabled or not allowed:
         raise HTTPException(
@@ -7981,10 +7988,10 @@ async def live_showcase_price(
         )
 
     ttl_seconds = max(0, int(settings.server.showcase_live_cache_seconds))
-    cache = getattr(request.app.state, "live_showcase_cache", None)
+    cache = getattr(owner.state, "live_showcase_cache", None)
     if not isinstance(cache, dict):
         cache = {}
-        request.app.state.live_showcase_cache = cache
+        owner.state.live_showcase_cache = cache
     now = time.monotonic()
     cached = cache.get(clean)
     served_from_cache = (
@@ -7993,7 +8000,7 @@ async def live_showcase_price(
     if served_from_cache:
         vwap_data, bidask_data, bidask_error = cached[1]
     else:
-        client: BlocksizeClient = request.app.state.blocksize
+        client: BlocksizeClient = owner.state.blocksize
         try:
             vwap_data = await client.get_vwap_latest(clean)
         except BlocksizeAPIError as e:
@@ -8039,15 +8046,16 @@ async def live_showcase_price(
             "utm_campaign": "showcase_to_paid",
         }
     )
-    _record_product_event(
-        "live_showcase_viewed",
-        request,
-        metadata={
-            "showcase_symbol": clean,
-            "served_from_cache": served_from_cache,
-            "bidask_included": bidask_data is not None,
-        },
-    )
+    if request is not None:
+        _record_product_event(
+            "live_showcase_viewed",
+            request,
+            metadata={
+                "showcase_symbol": clean,
+                "served_from_cache": served_from_cache,
+                "bidask_included": bidask_data is not None,
+            },
+        )
     return {
         "status": "ok",
         "showcase": True,
@@ -8109,6 +8117,11 @@ async def live_showcase_price(
             "endpoint_builder": "get_market_data_endpoint on the public remote MCP server",
         },
     }
+
+
+live_showcase.register_fetcher(
+    lambda symbol, request: _live_showcase_payload(app, symbol, request)
+)
 
 
 @app.get("/v1/samples/macro-snapshot")

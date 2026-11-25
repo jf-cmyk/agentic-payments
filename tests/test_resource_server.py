@@ -8095,6 +8095,78 @@ def test_live_showcase_survives_missing_bidask(test_client):
     assert "bidask unavailable" in body["quality"]["bidask_status"]
 
 
+def _public_mcp_call(test_client, name, arguments):
+    import json as _json
+
+    response = test_client.post(
+        "/mcp/server/",
+        headers={"Accept": "application/json, text/event-stream", "User-Agent": "claude-user/1.0"},
+        json={
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        },
+    )
+    assert response.status_code == 200, response.text
+    text = response.text
+    if text.startswith("event:") or "data:" in text.split("\n", 1)[0]:
+        text = next(line[5:] for line in text.splitlines() if line.startswith("data:"))
+    result = _json.loads(text)["result"]
+    return _json.loads(result["content"][0]["text"]), result
+
+
+def test_public_mcp_live_sample_serves_the_showcase(observability_store, test_client):
+    mock_client = _showcase_mock_client()
+    app.state.blocksize = mock_client
+    app.state.live_showcase_cache = {}
+
+    body, result = _public_mcp_call(test_client, "get_live_sample", {})
+
+    assert result.get("isError") is not True
+    assert body["live_data"] is True and body["free"] is True
+    assert body["data"]["vwap"]["vwap"] == 65012.3
+    # The showcase's paid URL stays; the free connector pointer is added.
+    assert "selection_source=live_showcase" in body["next_step"]["paid_url"]
+    assert "/claude-connector" in body["next_step"]["free_live_data"]
+
+    refused, _ = _public_mcp_call(test_client, "get_live_sample", {"symbol": "ETHUSD"})
+    assert refused["status"] == "unavailable"
+    assert refused["error"]["error_code"] == "SHOWCASE_SYMBOL_NOT_ALLOWED"
+    assert mock_client.get_vwap_latest.await_count == 1
+
+    stats = observability_store.summarize(days=1)
+    assert stats["event_counts"]["live_showcase_viewed"] == 1
+    assert stats["mcp_tool_mix"]["public_mcp:get_live_sample"] == 2
+
+
+def test_public_mcp_discovery_results_point_to_free_live_data(test_client):
+    search, _ = _public_mcp_call(test_client, "search", {"query": "pricing"})
+    assert search["results"]
+    assert "get_live_sample" in search["next_step"]["free_live_sample"]
+    assert "/claude-connector" in search["next_step"]["free_live_data"]
+
+    fetched, _ = _public_mcp_call(test_client, "fetch", {"id": "doc:pricing"})
+    assert fetched["id"] == "doc:pricing"
+    assert "next_step" in fetched
+
+
+def test_cursor_install_links_install_the_signed_in_cursor_connector(test_client):
+    import base64
+    import html
+    import json as _json
+    import re
+    from urllib.parse import parse_qs, urlparse
+
+    pages = [test_client.get("/claude-connector").text, test_client.get("/quickstart/remote-mcp").text]
+    for page in pages:
+        href = html.unescape(re.search(r'href="(cursor://[^"]+)"', page).group(1))
+        parsed = urlparse(href)
+        assert parsed.netloc == "anysphere.cursor-deeplink" and parsed.path == "/mcp/install"
+        query = parse_qs(parsed.query)
+        assert query["name"] == ["blocksize-market-data"]
+        config = _json.loads(base64.b64decode(query["config"][0]))
+        assert config == {"url": "https://mcp.blocksize.info/cursor/mcp/"}
+
+
 def test_growth_funnel_reports_first_call_to_paid_per_client():
     started_at = datetime.now(timezone.utc) - timedelta(days=2)
 
